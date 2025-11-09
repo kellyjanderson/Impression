@@ -104,19 +104,44 @@ def export(
         "-o",
         help="Path to the STL file that will be produced.",
     ),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Allow replacing an existing STL."),
+    ascii: bool = typer.Option(False, "--ascii", help="Write ASCII STL instead of binary."),
 ) -> None:
     """
-    Placeholder command that will eventually traverse the canonical geometry graph
-    and emit STL/STEP/AMF outputs.
+    Convert the provided model into a merged mesh and save it as an STL file.
     """
 
     if not model.exists():
         raise typer.BadParameter(f"Model path {model} does not exist.")
 
+    if output.exists() and not overwrite:
+        raise typer.BadParameter(
+            f"Output path {output} already exists. Re-run with --overwrite to replace it."
+        )
+
+    try:
+        _, initial_scene = _scene_factory_from_module(model)
+    except ModelBuildError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    previewer = PyVistaPreviewer(console=console)
+    try:
+        datasets = previewer.collect_datasets(initial_scene)
+        merged = previewer.combine_to_polydata(datasets)
+    except PreviewBackendError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        merged.save(str(output), binary=not ascii)
+    except Exception as exc:  # pragma: no cover - PyVista I/O failure
+        raise typer.BadParameter(f"Failed to export STL: {exc}") from exc
+
+    mode = "ASCII" if ascii else "binary"
     console.print(
         Panel(
-            f"Export pipeline is not implemented yet.\nWould have read [green]{model}[/green] "
-            f"and produced [magenta]{output}[/magenta].",
-            title="Export stub",
+            f"Wrote {mode} STL to [green]{output}[/green].",
+            title="Export complete",
+            border_style="green",
         )
     )

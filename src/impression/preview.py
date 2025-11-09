@@ -15,6 +15,37 @@ class PreviewBackendError(RuntimeError):
     """Raised when a preview backend cannot run."""
 
 
+def _collect_datasets_from_scene(scene: object, pv_module) -> List[object]:
+    datasets: List[object] = []
+
+    def visit(item: object) -> None:
+        if item is None:
+            return
+
+        if isinstance(item, pv_module.MultiBlock):
+            for block in item:
+                visit(block)
+            return
+
+        if isinstance(item, pv_module.DataSet):
+            datasets.append(item)
+            return
+
+        if isinstance(item, (list, tuple, set)):
+            for value in item:
+                visit(value)
+            return
+
+        raise PreviewBackendError(
+            "Model build() must return PyVista datasets (e.g., pv.Cube(), pv.Sphere(), or a list of them)."
+        )
+
+    visit(scene)
+    if not datasets:
+        raise PreviewBackendError("Scene did not produce any PyVista datasets.")
+    return datasets
+
+
 class PyVistaPreviewer:
     """Render scenes using PyVista and provide optional hot reload support."""
 
@@ -31,7 +62,7 @@ class PyVistaPreviewer:
         target_fps: int,
     ) -> None:
         pv = self._ensure_backend()
-        datasets = self._collect_datasets(initial_scene)
+        datasets = self.collect_datasets(initial_scene)
         plotter = pv.Plotter(window_size=(1280, 800))
         self._configure_plotter(plotter)
         self._apply_scene(plotter, datasets)
@@ -101,36 +132,34 @@ class PyVistaPreviewer:
             self._pv = pv
         return self._pv
 
-    def _collect_datasets(self, scene: object) -> List[object]:
+    def collect_datasets(self, scene: object) -> List[object]:
+        """Return all PyVista datasets contained within a scene object."""
+
         pv = self._ensure_backend()
-        datasets: List[object] = []
+        return _collect_datasets_from_scene(scene, pv)
 
-        def visit(item: object) -> None:
-            if item is None:
-                return
+    def combine_to_polydata(self, datasets: Iterable[object]):
+        """Return a single PolyData mesh representing the collection."""
 
-            if isinstance(item, pv.MultiBlock):
-                for block in item:
-                    visit(block)
-                return
-
-            if isinstance(item, pv.DataSet):
-                datasets.append(item)
-                return
-
-            if isinstance(item, (list, tuple, set)):
-                for value in item:
-                    visit(value)
-                return
-
-            raise PreviewBackendError(
-                "Model build() must return PyVista datasets (e.g., pv.Cube(), pv.Sphere(), or a list of them)."
-            )
-
-        visit(scene)
+        pv = self._ensure_backend()
+        datasets = list(datasets)
         if not datasets:
-            raise PreviewBackendError("Scene did not produce any PyVista datasets.")
-        return datasets
+            raise PreviewBackendError("Cannot merge an empty dataset collection.")
+
+        if len(datasets) == 1:
+            merged = datasets[0].copy()
+        else:
+            block = pv.MultiBlock()
+            for mesh in datasets:
+                block.append(mesh)
+            merged = block.combine()
+
+        poly = merged.extract_geometry()
+        if hasattr(poly, "clean"):
+            poly = poly.clean()
+        if hasattr(poly, "triangulate"):
+            poly = poly.triangulate()
+        return poly
 
     def _configure_plotter(self, plotter) -> None:
         plotter.set_background("#090c10", top="#1b2333")

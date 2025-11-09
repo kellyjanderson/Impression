@@ -36,3 +36,11 @@ impression preview examples/hello_cube.py
 ```
 
 The PyVista window supports orbit, pan, and zoom out of the box. Files are watched by default, so saving changes triggers a hot reload in the same window (disable with `--no-watch` if you just want a single render).
+
+## Export workflow
+
+```bash
+impression export examples/hello_cube.py --output artifacts/hello.stl --overwrite
+```
+
+The exporter loads the same `build()` entry point, merges all returned PyVista datasets, and writes a watertight STL in binary format (use `--ascii` for text output). Existing files are protected unless `--overwrite` is specified.
