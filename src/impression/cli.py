@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
-import time
 from dataclasses import dataclass
 from types import ModuleType
+import sys
+from typing import Callable, Tuple
 
 import typer
 from rich.console import Console
 from rich.panel import Panel
+
+from impression.preview import PyVistaPreviewer, PreviewBackendError
 
 console = Console()
 app = typer.Typer(help="Experiment with parametric models and preview pipelines.")
@@ -21,25 +24,35 @@ class PreviewOptions:
 
 
 def _load_module(path: pathlib.Path) -> ModuleType:
-    spec = importlib.util.spec_from_file_location("impression_user_model", path)
+    module_name = "impression_user_model"
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+
+    spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
         raise typer.BadParameter(f"Unable to import model at {path}")
 
     module = importlib.util.module_from_spec(spec)
+    # Register module so features relying on sys.modules (e.g., dataclasses) work.
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def _render_stub(module: ModuleType) -> None:
-    header = f"Preview stub for `{module.__name__}`"
-    body = (
-        "[bold yellow]Preview pipeline is not wired up yet.[/bold yellow]\n\n"
-        "Expected next steps:\n"
-        " • integrate pygfx/pyvista backend for orbit controls\n"
-        " • wire file watching so edits auto-refresh the scene\n"
-        " • surface camera + transform controls via CLI flags\n"
-    )
-    console.print(Panel(body, title=header))
+class ModelBuildError(RuntimeError):
+    """Raised when a model module cannot provide a usable scene."""
+
+
+def _scene_factory_from_module(model_path: pathlib.Path) -> Tuple[Callable[[], object], object]:
+    def factory() -> object:
+        module = _load_module(model_path)
+        builder = getattr(module, "build", None)
+        if builder is None or not callable(builder):
+            raise ModelBuildError(f"{model_path} must define a callable build() function.")
+        return builder()
+
+    initial_scene = factory()
+    return factory, initial_scene
 
 
 @app.command()
@@ -49,36 +62,37 @@ def preview(
     target_fps: int = typer.Option(60, min=1, max=240, help="Preview framerate budget."),
 ) -> None:
     """
-    Load and preview a model module. For now the renderer is stubbed, but the command
-    exercises the dynamic import path and upcoming watchflow pieces.
+    Load a model module, build PyVista datasets, and open an interactive preview window.
     """
 
     if not model.exists():
         raise typer.BadParameter(f"Model path {model} does not exist.")
 
     opts = PreviewOptions(watch=watch, target_fps=target_fps)
-    module = _load_module(model)
+
+    try:
+        scene_factory, initial_scene = _scene_factory_from_module(model)
+    except ModelBuildError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - surfaced to CLI users
+        raise typer.BadParameter(f"Model execution failed: {exc}") from exc
 
     console.rule("Impression Preview")
-    console.print(f"Loading model from [green]{model}[/green]")
-    _render_stub(module)
+    console.print(f"Using model [green]{model}[/green]")
+    if opts.watch:
+        console.print("[cyan]Watching for changes — save to hot reload, close the window to stop.[/cyan]")
 
-    if not opts.watch:
-        return
-
-    console.print("\n[cyan]Watching for changes (Ctrl+C to stop)...[/cyan]")
+    previewer = PyVistaPreviewer(console=console)
     try:
-        last_mtime = model.stat().st_mtime
-        while True:
-            time.sleep(max(1 / opts.target_fps, 0.01))
-            current_mtime = model.stat().st_mtime
-            if current_mtime != last_mtime:
-                last_mtime = current_mtime
-                module = _load_module(model)
-                console.print(f"\n[green]Reloaded {model}[/green]")
-                _render_stub(module)
-    except KeyboardInterrupt:
-        console.print("\n[red]Stopped watching.[/red]")
+        previewer.show(
+            scene_factory=scene_factory,
+            initial_scene=initial_scene,
+            model_path=model,
+            watch_files=opts.watch,
+            target_fps=opts.target_fps,
+        )
+    except PreviewBackendError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 @app.command()

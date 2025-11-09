@@ -24,4 +24,15 @@ pip install -e .
 impression --help
 ```
 
-The CLI scaffolding currently stubs preview behavior; future iterations will integrate real-time renderers and file watchers for live editing.
+The CLI now opens a PyVista window for interactive previewing; the renderer backend will evolve as we integrate additional geometric kernels.
+
+## Preview workflow
+
+1. Define a `build()` function in your model module that returns one or more [PyVista](https://docs.pyvista.org/) datasets (e.g., `pv.Cube()`, `pv.Sphere()`, or a list of meshes).
+2. Run the previewer:
+
+```bash
+impression preview examples/hello_cube.py
+```
+
+The PyVista window supports orbit, pan, and zoom out of the box. Files are watched by default, so saving changes triggers a hot reload in the same window (disable with `--no-watch` if you just want a single render).

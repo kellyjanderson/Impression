@@ -13,6 +13,8 @@ authors = [{ name = "Impression contributors" }]
 dependencies = [
     "typer>=0.9.0",
     "rich>=13.7.0",
+    "pyvista>=0.43.0",
+    "watchfiles>=0.21.0",
 ]
 
 [project.scripts]
