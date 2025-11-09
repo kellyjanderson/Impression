@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "impression"
+version = "0.1.0"
+description = "Parametric modeling playground with real-time preview and STL export goals."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Impression contributors" }]
+dependencies = [
+    "typer>=0.9.0",
+    "rich>=13.7.0",
+]
+
+[project.scripts]
+impression = "impression.cli:app"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
