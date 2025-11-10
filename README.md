@@ -7,6 +7,7 @@ Impression is an experimental parametric 3D modeling platform for rapid spatial 
 - Command-line preview tool that can hot-reload model definitions.
 - Modular architecture that lets us experiment with popular geometric kernels and renderers (e.g., Manifold, PyVista, pygfx).
 - Foundation for exporting watertight meshes to STL and other CAD-friendly formats.
+- CAD-backed modeling experiments powered by build123d/OpenCascade.
 
 ## Roadmap highlights
 
@@ -33,6 +34,7 @@ The CLI now opens a PyVista window for interactive previewing; the renderer back
 
 ```bash
 impression preview examples/hello_cube.py
+impression preview examples/half_pipe.py
 ```
 
 The PyVista window supports orbit, pan, and zoom out of the box. Files are watched by default, so saving changes triggers a hot reload in the same window (disable with `--no-watch` if you just want a single render).
@@ -41,6 +43,7 @@ The PyVista window supports orbit, pan, and zoom out of the box. Files are watch
 
 ```bash
 impression export examples/hello_cube.py --output artifacts/hello.stl --overwrite
+impression export examples/half_pipe.py --output artifacts/half_pipe.stl --overwrite
 ```
 
 The exporter loads the same `build()` entry point, merges all returned PyVista datasets, and writes a watertight STL in binary format (use `--ascii` for text output). Existing files are protected unless `--overwrite` is specified.
