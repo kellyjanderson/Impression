@@ -6,13 +6,15 @@ Imported from `impression.modeling`:
 from impression.modeling import boolean_union, boolean_difference, boolean_intersection
 ```
 
+Booleans are color-aware: each source mesh can carry per-object color and the resulting faces inherit the color of the geometry they originated from (difference faces pick up the cutter color, intersections respect the nearest source, etc.).
+
 All helpers currently operate on PyVista `PolyData` meshes. Inputs are triangulated/cleaned automatically.
 
 ## boolean_union(meshes, tolerance=1e-5)
 - Combine two or more meshes into a single body.
 - `meshes`: iterable of `pv.DataSet`.
 - `tolerance`: geometric tolerance passed to PyVista booleans.
-- Example: `docs/examples/csg/union_example.py`
+- Example: `docs/examples/csg/union_example.py` (blue box + orange cylinder demonstrates color inheritance)
 - Preview: `impression preview docs/examples/csg/union_example.py`
 
 ```python
@@ -28,7 +30,7 @@ def build():
 
 ## boolean_difference(base, cutters, tolerance=1e-5)
 - Subtract one or more cutter meshes from `base`.
-- Example: `docs/examples/csg/difference_example.py`
+- Example: `docs/examples/csg/difference_example.py` (cut plane adopts cutter color)
 - Preview: `impression preview docs/examples/csg/difference_example.py`
 
 ```python

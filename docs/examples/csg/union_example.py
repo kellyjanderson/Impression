@@ -8,8 +8,8 @@ from impression.modeling import boolean_union, make_box, make_cylinder
 
 
 def build():
-    box = make_box(size=(2, 2, 1))
-    cyl = make_cylinder(radius=0.6, height=1.5)
+    box = make_box(size=(2, 2, 1), color=(0.35, 0.55, 0.95))
+    cyl = make_cylinder(radius=0.6, height=1.5, color=(1.0, 0.6, 0.2))
     return boolean_union([box, cyl])
 
 
