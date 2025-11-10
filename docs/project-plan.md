@@ -11,6 +11,9 @@ This document tracks the near-term roadmap for Impression’s modeling toolkit. 
   - [ ] Curate a lightweight library of reusable shapes (fasteners, brackets, gears) under permissive licenses; expose helper loaders (`load_shape("gear_m12")`).
   - [x] Full RGBA color pipeline: assign per-object colors, ensure booleans handle color inheritance (new cut surfaces adopt the subtracting object’s color).
   - [ ] Future: per-face/per-vertex colors for documentation callouts.
+- [ ] **Custom primitive tessellation**
+  - Generate core primitives (box, cylinder, torus, etc.) via our own tessellation pipeline to ensure STL exports and previews are perfectly aligned.
+  - Investigate caching of generated templates for performance.
 - **CSG Operations**
   - Wrapper helpers for `union`, `difference`, `intersection` that expose tolerance controls and auto-clean options.
   - Optional provenance tracking (node graph) so regenerations only recompute affected nodes.
