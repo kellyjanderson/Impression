@@ -63,12 +63,13 @@ class PyVistaPreviewer:
         watch_files: bool,
         target_fps: int,
         screenshot_path: Path | None = None,
+        show_edges: bool = True,
     ) -> None:
         pv = self._ensure_backend()
         datasets = self.collect_datasets(initial_scene)
         plotter = pv.Plotter(window_size=(1280, 800))
         self._configure_plotter(plotter)
-        self._apply_scene(plotter, datasets)
+        self._apply_scene(plotter, datasets, show_edges=show_edges)
 
         if screenshot_path is not None:
             screenshot_path.parent.mkdir(parents=True, exist_ok=True)
@@ -176,7 +177,7 @@ class PyVistaPreviewer:
         plotter.add_axes(interactive=True)
         plotter.show_bounds(grid="front", color="#5a677d")
 
-    def _apply_scene(self, plotter, datasets: Iterable[object]) -> None:
+    def _apply_scene(self, plotter, datasets: Iterable[object], show_edges: bool) -> None:
         color_cycle = ["#6ab0ff", "#f58f7c", "#9cdcfe", "#fadb5f", "#9ae6b4", "#d4b5ff"]
         plotter.clear()
         plotter.show_bounds(grid="front", color="#5a677d")
@@ -195,7 +196,7 @@ class PyVistaPreviewer:
             plotter.add_mesh(
                 mesh,
                 name=f"mesh-{index}",
-                show_edges=True,
+                show_edges=show_edges,
                 color=color,
                 opacity=opacity,
                 smooth_shading=True,
