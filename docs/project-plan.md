@@ -7,6 +7,10 @@ This document tracks the near-term roadmap for Impression’s modeling toolkit. 
 - **Primitives**
   - Uniform API (`make_box`, `make_cylinder`, etc.) with backend selection (`mesh` vs `cad`).
   - Consistent parameter names (center, dimensions, orientation) and metadata tagging (assign IDs/names to faces/edges as soon as they are created).
+- **Shape library + color support**
+  - Curate a lightweight library of reusable shapes (fasteners, brackets, gears) under permissive licenses; expose helper loaders (`load_shape("gear_m12")`).
+  - Full RGBA color pipeline: assign per-object colors, ensure booleans handle color inheritance (new cut surfaces adopt the subtracting object’s color).
+  - Future: per-face/per-vertex colors for documentation callouts.
 - **CSG Operations**
   - Wrapper helpers for `union`, `difference`, `intersection` that expose tolerance controls and auto-clean options.
   - Optional provenance tracking (node graph) so regenerations only recompute affected nodes.
@@ -68,5 +72,5 @@ This document tracks the near-term roadmap for Impression’s modeling toolkit. 
   - Provide utilities for lines, planes, arrows, and dimension markers that exist as thin geometry for drafting-like overlays.
   - Allow writers to place these references on any plane/section to document assemblies without leaving Impression.
 - **Image rendering**
-  - Embed raster images (screenshots, scanned drawings) as textured planes or billboards for hybrid documentation.
-  - Long-term: export “technical sheets” that mix text, images, 2D overlays, and 3D previews for documentation handoffs.
+  - **Image import (future):** allow referencing external imagery as textured planes for contextual documentation.
+  - **Image export (near-term):** render high-resolution images from scenes (orthographic/perspective) with overlays for technical documentation. Batch rendering hooks for versioned snapshots.
