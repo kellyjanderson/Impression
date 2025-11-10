@@ -4,11 +4,13 @@ import queue
 import threading
 from pathlib import Path
 from typing import Callable, Iterable, List
+
+import numpy as np
 from rich.console import Console
 from rich.panel import Panel
 from watchfiles import Change, watch
 
-from impression.modeling._color import get_mesh_color
+from impression.modeling._color import COLOR_CELL_DATA, get_mesh_color
 
 SceneFactory = Callable[[], object]
 
@@ -184,6 +186,21 @@ class PyVistaPreviewer:
         plotter.add_axes(interactive=True)
 
         for index, mesh in enumerate(datasets):
+            cell_colors = mesh.cell_data.get(COLOR_CELL_DATA)
+            if cell_colors is not None and len(cell_colors) == mesh.n_cells:
+                scalars = np.asarray(cell_colors)
+                rgba_mode = scalars.shape[1] >= 4
+                plotter.add_mesh(
+                    mesh,
+                    name=f"mesh-{index}",
+                    show_edges=show_edges,
+                    scalars=scalars,
+                    rgba=rgba_mode,
+                    smooth_shading=True,
+                    specular=0.2,
+                )
+                continue
+
             color_info = get_mesh_color(mesh)
             if color_info:
                 rgb, alpha = color_info

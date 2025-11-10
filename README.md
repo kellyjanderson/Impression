@@ -9,6 +9,7 @@ Impression is an experimental parametric 3D modeling platform for rapid spatial 
 - Foundation for exporting watertight meshes to STL and other CAD-friendly formats.
 - Mesh primitives, CSG helpers, and path abstractions exposed via `impression.modeling`.
 - Documentation index: `docs/index.md` lists available features and runnable examples.
+- CLI manual: `docs/cli.md` describes `impression preview` / `export` options and usage.
 
 ## Roadmap highlights
 

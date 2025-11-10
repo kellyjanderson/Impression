@@ -6,11 +6,12 @@ import numpy as np
 import pyvista as pv
 
 COLOR_FIELD = "__impression_color__"
+COLOR_CELL_DATA = "__impression_cell_color__"
 
 
 def set_mesh_color(mesh: pv.PolyData, color: Sequence[float] | str) -> pv.PolyData:
     rgb, alpha = _normalize_color(color)
-    data = np.array(list(rgb) + [alpha], dtype=float)[np.newaxis, :]
+    data = np.array([*rgb, alpha], dtype=float)[np.newaxis, :]
     mesh.field_data[COLOR_FIELD] = data
     return mesh
 
@@ -29,14 +30,30 @@ def get_mesh_color(mesh: pv.DataObject) -> Optional[Tuple[Tuple[float, float, fl
     return rgb, alpha
 
 
+def get_mesh_rgba(mesh: pv.DataObject) -> Tuple[float, float, float, float]:
+    info = get_mesh_color(mesh)
+    if info is None:
+        return (0.8, 0.8, 0.8, 1.0)
+    rgb, alpha = info
+    return (rgb[0], rgb[1], rgb[2], alpha)
+
+
 def transfer_mesh_color(target: pv.PolyData, source: pv.DataObject) -> pv.PolyData:
     info = get_mesh_color(source)
     if info is None:
         return target
     rgb, alpha = info
-    data = np.array(list(rgb) + [alpha], dtype=float)[np.newaxis, :]
+    data = np.array([*rgb, alpha], dtype=float)[np.newaxis, :]
     target.field_data[COLOR_FIELD] = data
     return target
+
+
+def set_cell_colors(mesh: pv.PolyData, rgba: np.ndarray) -> None:
+    if mesh.n_cells == 0:
+        return
+    if rgba.shape[0] != mesh.n_cells:
+        raise ValueError("rgba array must match number of cells")
+    mesh.cell_data[COLOR_CELL_DATA] = rgba.astype(float)
 
 
 def _normalize_color(color: Sequence[float] | str) -> Tuple[Tuple[float, float, float], float]:
