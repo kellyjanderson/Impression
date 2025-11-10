@@ -7,6 +7,7 @@ Impression is an experimental parametric 3D modeling platform for rapid spatial 
 - Command-line preview tool that can hot-reload model definitions.
 - Modular architecture that lets us experiment with popular geometric kernels and renderers (e.g., Manifold, PyVista, pygfx).
 - Foundation for exporting watertight meshes to STL and other CAD-friendly formats.
+- Mesh primitives, CSG helpers, and path abstractions exposed via `impression.modeling`.
 
 ## Roadmap highlights
 
@@ -33,6 +34,16 @@ The CLI now opens a PyVista window for interactive previewing; the renderer back
 
 ```bash
 impression preview examples/hello_cube.py
+
+# programmatic modeling with primitives/CSG/paths
+python - <<'PY'
+from impression.modeling import make_box, make_cylinder, boolean_union, Path
+box = make_box(size=(2, 2, 1))
+post = make_cylinder(radius=0.4, height=2.0)
+result = boolean_union([box, post])
+path = Path.from_points([(0, 0, 0), (4, 0, 0), (4, 2, 0)], closed=False)
+print("cells:", result.n_cells, "path length:", path.length())
+PY
 ```
 
 The PyVista window supports orbit, pan, and zoom out of the box. Files are watched by default, so saving changes triggers a hot reload in the same window (disable with `--no-watch` if you just want a single render).

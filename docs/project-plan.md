@@ -47,3 +47,14 @@ This document tracks the near-term roadmap for Impression’s modeling toolkit. 
 - Constraint-aware sketches for CAD workflows (equality, tangency, concentricity) to keep parametric edits stable.
 - Validation hooks (minimum thickness, watertight checks) after heavy operations.
 - Future format support: STEP/IGES export for CAD pipelines alongside STL for mesh workflows.
+
+## Appendix: Gravitational Modeling
+
+- **Concept overview**
+  - Anchors (points or closed paths) remain fixed while interior surface vertices respond to gravitational or anti-gravitational primitives.
+  - Surface is represented as a triangulated mesh; edges exceeding a maximum length trigger refinement so the mesh can stretch smoothly.
+  - Force model combines attraction/repulsion from sources with internal tension (mass-spring) to keep the surface cohesive.
+- **Prototype goals**
+  - Implement a small solver that: initializes a mesh between anchors, applies forces iteratively, remeshes as needed, and outputs a PyVista surface.
+  - Allow both positive (pull) and negative (push) sources; long-term, support animated sources for morphing effects.
+  - Expose parameters for max triangle size, damping, and convergence tolerance.
