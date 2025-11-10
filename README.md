@@ -42,6 +42,9 @@ impression preview docs/examples/primitives/color_dual_example.py
 # text primitive demo
 impression preview docs/examples/text/text_basic.py
 
+# drafting helpers
+impression preview docs/examples/drafting/line_plane_example.py
+
 # programmatic modeling with primitives/CSG/paths
 python - <<'PY'
 from impression.modeling import make_box, make_cylinder, boolean_union, Path

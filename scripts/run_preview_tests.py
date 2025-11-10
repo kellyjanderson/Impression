@@ -48,6 +48,14 @@ CASES = [
         "module": "docs/examples/text/text_basic.py",
     },
     {
+        "name": "drafting-line-plane",
+        "module": "docs/examples/drafting/line_plane_example.py",
+    },
+    {
+        "name": "drafting-dimension",
+        "module": "docs/examples/drafting/dimension_example.py",
+    },
+    {
         "name": "primitive-torus",
         "module": "docs/examples/primitives/torus_example.py",
     },
