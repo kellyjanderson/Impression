@@ -78,7 +78,7 @@ This document tracks the near-term roadmap for Impression’s modeling toolkit. 
 - [x] **Text rendering**
   - Support vector-based text primitives that can be extruded or engraved, enabling technical annotations directly in scenes.
   - Plan for both mesh-only text (triangulated glyphs) and CAD text (OCC-based fonts) with consistent styling controls.
-- [ ] **2.5D (2D objects in 3D space)**
+- [x] **2.5D (2D objects in 3D space)**
   - Provide utilities for lines, planes, arrows, and dimension markers that exist as thin geometry for drafting-like overlays.
   - Allow writers to place these references on any plane/section to document assemblies without leaving Impression.
 - [ ] **Image rendering**
