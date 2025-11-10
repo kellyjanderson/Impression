@@ -60,6 +60,9 @@ def preview(
     model: pathlib.Path = typer.Argument(..., help="Path to a Python module that defines a model scene."),
     watch: bool = typer.Option(True, help="Watch the model file for changes and hot-reload."),
     target_fps: int = typer.Option(60, min=1, max=240, help="Preview framerate budget."),
+    screenshot: pathlib.Path | None = typer.Option(
+        None, "--screenshot", help="Optional path to save a screenshot of the preview."
+    ),
 ) -> None:
     """
     Load a model module, build PyVista datasets, and open an interactive preview window.
@@ -90,6 +93,7 @@ def preview(
             model_path=model,
             watch_files=opts.watch,
             target_fps=opts.target_fps,
+            screenshot_path=screenshot,
         )
     except PreviewBackendError as exc:
         raise typer.BadParameter(str(exc)) from exc

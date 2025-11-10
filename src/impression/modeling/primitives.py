@@ -80,15 +80,16 @@ def make_torus(
 
     _ensure_backend(backend)
     direction = _normalize(direction)
-    mesh = pv.Torus(
+    base = pv.ParametricTorus(
         ringradius=major_radius,
         crosssectionradius=minor_radius,
-        direction=direction,
-        center=center,
-        ntheta=n_theta,
-        nphi=n_phi,
-    )
-    return mesh.triangulate()
+        u_resolution=n_theta,
+        v_resolution=n_phi,
+    ).triangulate()
+
+    aligned = _orient_mesh(base, direction)
+    aligned.translate(center, inplace=True)
+    return aligned
 
 
 def _normalize(vector: Sequence[float]) -> Tuple[float, float, float]:
@@ -98,3 +99,27 @@ def _normalize(vector: Sequence[float]) -> Tuple[float, float, float]:
         raise ValueError("Direction vector must be non-zero.")
     arr = arr / norm
     return float(arr[0]), float(arr[1]), float(arr[2])
+
+
+def _orient_mesh(mesh: pv.PolyData, direction: Sequence[float]) -> pv.PolyData:
+    target = np.asarray(direction, dtype=float)
+    target_norm = np.linalg.norm(target)
+    if target_norm == 0:
+        raise ValueError("Direction vector must be non-zero.")
+    target = target / target_norm
+    default = np.array([0.0, 0.0, 1.0])
+    if np.allclose(target, default):
+        return mesh.copy()
+    axis = np.cross(default, target)
+    axis_norm = np.linalg.norm(axis)
+    if axis_norm == 0:
+        # opposite direction; rotate 180 around X
+        axis = np.array([1.0, 0.0, 0.0])
+        angle_deg = 180.0
+    else:
+        axis = axis / axis_norm
+        angle_rad = np.arccos(np.clip(np.dot(default, target), -1.0, 1.0))
+        angle_deg = np.degrees(angle_rad)
+    rotated = mesh.copy()
+    rotated.rotate_vector(axis, angle_deg, point=(0.0, 0.0, 0.0), inplace=True)
+    return rotated

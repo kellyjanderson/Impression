@@ -60,12 +60,19 @@ class PyVistaPreviewer:
         model_path: Path,
         watch_files: bool,
         target_fps: int,
+        screenshot_path: Path | None = None,
     ) -> None:
         pv = self._ensure_backend()
         datasets = self.collect_datasets(initial_scene)
         plotter = pv.Plotter(window_size=(1280, 800))
         self._configure_plotter(plotter)
         self._apply_scene(plotter, datasets)
+
+        if screenshot_path is not None:
+            screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+            plotter.show(title="Impression Preview", auto_close=True, screenshot=str(screenshot_path))
+            plotter.close()
+            return
 
         if not watch_files:
             plotter.show(title="Impression Preview")

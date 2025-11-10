@@ -45,6 +45,9 @@ result = boolean_union([box, post])
 path = Path.from_points([(0, 0, 0), (4, 0, 0), (4, 2, 0)], closed=False)
 print("cells:", result.n_cells, "path length:", path.length())
 PY
+
+# preview test suite (saves screenshots/results under dist/preview-tests)
+scripts/run_preview_tests.py
 ```
 
 The PyVista window supports orbit, pan, and zoom out of the box. Files are watched by default, so saving changes triggers a hot reload in the same window (disable with `--no-watch` if you just want a single render).
