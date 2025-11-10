@@ -17,6 +17,15 @@ from impression.modeling import make_box, make_cylinder, make_sphere, make_torus
 - **Example:** `docs/examples/primitives/box_example.py`
 - **Preview:** `impression preview docs/examples/primitives/box_example.py`
 
+```python
+from impression.modeling import make_box
+
+def build():
+    return make_box(size=(2.0, 1.0, 0.5), center=(0.0, 0.0, 0.25))
+```
+
+![Box primitive](../assets/previews/primitive-box.png)
+
 ## Cylinder
 
 - **Function:** `make_cylinder(radius=0.5, height=1.0, center=(0,0,0), direction=(0,0,1), resolution=128)`
@@ -27,12 +36,30 @@ from impression.modeling import make_box, make_cylinder, make_sphere, make_torus
 - **Example:** `docs/examples/primitives/cylinder_example.py`
 - **Preview:** `impression preview docs/examples/primitives/cylinder_example.py`
 
+```python
+from impression.modeling import make_cylinder
+
+def build():
+    return make_cylinder(radius=0.6, height=1.5, center=(0, 0, 0.75))
+```
+
+![Cylinder primitive](../assets/previews/primitive-cylinder.png)
+
 ## Sphere
 
 - **Function:** `make_sphere(radius=0.5, center=(0,0,0), theta_resolution=64, phi_resolution=64)`
 - **Options:** radius, center, longitudinal (`theta_resolution`) and latitudinal (`phi_resolution`) segment counts.
 - **Example:** `docs/examples/primitives/sphere_example.py`
 - **Preview:** `impression preview docs/examples/primitives/sphere_example.py`
+
+```python
+from impression.modeling import make_sphere
+
+def build():
+    return make_sphere(radius=0.75, center=(0.5, 0.5, 0.75))
+```
+
+![Sphere primitive](../assets/previews/primitive-sphere.png)
 
 ## Torus
 
@@ -44,3 +71,12 @@ from impression.modeling import make_box, make_cylinder, make_sphere, make_torus
   - `n_theta` / `n_phi`: angular resolutions.
 - **Example:** `docs/examples/primitives/torus_example.py`
 - **Preview:** `impression preview docs/examples/primitives/torus_example.py`
+
+```python
+from impression.modeling import make_torus
+
+def build():
+    return make_torus(major_radius=1.25, minor_radius=0.35, center=(0, 0, 0))
+```
+
+![Torus primitive](../assets/previews/primitive-torus.png)

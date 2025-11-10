@@ -83,8 +83,8 @@ def make_torus(
     base = pv.ParametricTorus(
         ringradius=major_radius,
         crosssectionradius=minor_radius,
-        u_resolution=n_theta,
-        v_resolution=n_phi,
+        u_res=n_theta,
+        v_res=n_phi,
     ).triangulate()
 
     aligned = _orient_mesh(base, direction)
