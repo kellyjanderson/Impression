@@ -44,6 +44,10 @@ CASES = [
         "module": "docs/examples/primitives/color_transparency_example.py",
     },
     {
+        "name": "text-basic",
+        "module": "docs/examples/text/text_basic.py",
+    },
+    {
         "name": "primitive-torus",
         "module": "docs/examples/primitives/torus_example.py",
     },

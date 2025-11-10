@@ -14,6 +14,7 @@ Impression is a parametric modeling toolkit that mixes Python, PyVista rendering
   - [Primitives](modeling/primitives.md) — boxes, cylinders, spheres, torus utilities, code snippets, and rendered examples.
   - [CSG Helpers](modeling/csg.md) — union/difference/intersection helpers with CLI-ready sample modules.
   - [Paths](modeling/paths.md) — polyline/spline utilities for sweeps and visualization.
+  - [Text](modeling/text.md) — extruded or flat glyphs with full color support.
 
 Every example module defines `build()` so it works with the CLI out of the box. Common commands:
 
