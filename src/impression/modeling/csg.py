@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from functools import reduce
 from typing import Iterable, Literal
 
 import pyvista as pv
+
+from ._color import get_mesh_color, set_mesh_color
 
 
 BooleanBackend = Literal["mesh"]
@@ -27,9 +28,14 @@ def boolean_union(
     except StopIteration:
         raise ValueError("boolean_union requires at least one mesh.")
 
+    base_color = get_mesh_color(result)
     for mesh in iterator:
         result = result.boolean_union(_check_mesh(mesh), tolerance=tolerance)
-    return result.clean()
+    result = result.clean()
+    if base_color:
+        rgb, alpha = base_color
+        set_mesh_color(result, (*rgb, alpha))
+    return result
 
 
 def boolean_difference(
@@ -42,7 +48,12 @@ def boolean_difference(
     result = _check_mesh(base)
     for mesh in cutters:
         result = result.boolean_difference(_check_mesh(mesh), tolerance=tolerance)
-    return result.clean()
+    result = result.clean()
+    base_color = get_mesh_color(base)
+    if base_color:
+        rgb, alpha = base_color
+        set_mesh_color(result, (*rgb, alpha))
+    return result
 
 
 def boolean_intersection(
@@ -57,9 +68,14 @@ def boolean_intersection(
     except StopIteration:
         raise ValueError("boolean_intersection requires at least one mesh.")
 
+    base_color = get_mesh_color(result)
     for mesh in iterator:
         result = result.boolean_intersection(_check_mesh(mesh), tolerance=tolerance)
-    return result.clean()
+    result = result.clean()
+    if base_color:
+        rgb, alpha = base_color
+        set_mesh_color(result, (*rgb, alpha))
+    return result
 
 
 def _ensure_backend(backend: BooleanBackend) -> None:

@@ -36,6 +36,9 @@ The CLI now opens a PyVista window for interactive previewing; the renderer back
 ```bash
 impression preview examples/hello_cube.py
 
+# color-aware example
+impression preview docs/examples/primitives/color_dual_example.py
+
 # programmatic modeling with primitives/CSG/paths
 python - <<'PY'
 from impression.modeling import make_box, make_cylinder, boolean_union, Path

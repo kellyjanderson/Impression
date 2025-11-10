@@ -36,6 +36,14 @@ CASES = [
         "module": "docs/examples/primitives/prism_example.py",
     },
     {
+        "name": "primitive-color-dual",
+        "module": "docs/examples/primitives/color_dual_example.py",
+    },
+    {
+        "name": "primitive-color-transparency",
+        "module": "docs/examples/primitives/color_transparency_example.py",
+    },
+    {
         "name": "primitive-torus",
         "module": "docs/examples/primitives/torus_example.py",
     },

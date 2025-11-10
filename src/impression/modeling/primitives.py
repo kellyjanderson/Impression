@@ -6,6 +6,8 @@ from typing import Literal, Sequence, Tuple
 import numpy as np
 import pyvista as pv
 
+from ._color import set_mesh_color
+
 Backend = Literal["mesh"]
 
 
@@ -18,6 +20,7 @@ def make_box(
     size: Sequence[float] = (1.0, 1.0, 1.0),
     center: Sequence[float] = (0.0, 0.0, 0.0),
     backend: Backend = "mesh",
+    color: Sequence[float] | str | None = None,
 ) -> pv.PolyData:
     """Axis-aligned box specified by size (dx, dy, dz) and center."""
 
@@ -26,7 +29,10 @@ def make_box(
     cx, cy, cz = center
     hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
     bounds = (cx - hx, cx + hx, cy - hy, cy + hy, cz - hz, cz + hz)
-    return pv.Box(bounds=bounds)
+    mesh = pv.Box(bounds=bounds)
+    if color is not None:
+        set_mesh_color(mesh, color)
+    return mesh
 
 
 def make_cylinder(
@@ -36,6 +42,7 @@ def make_cylinder(
     direction: Sequence[float] = (0.0, 0.0, 1.0),
     resolution: int = 128,
     backend: Backend = "mesh",
+    color: Sequence[float] | str | None = None,
 ) -> pv.PolyData:
     """Right circular cylinder aligned with `direction`."""
 
@@ -48,7 +55,10 @@ def make_cylinder(
         height=height,
         resolution=resolution,
     )
-    return mesh.triangulate()
+    mesh = mesh.triangulate()
+    if color is not None:
+        set_mesh_color(mesh, color)
+    return mesh
 
 
 def make_sphere(
@@ -57,14 +67,18 @@ def make_sphere(
     theta_resolution: int = 64,
     phi_resolution: int = 64,
     backend: Backend = "mesh",
+    color: Sequence[float] | str | None = None,
 ) -> pv.PolyData:
     _ensure_backend(backend)
-    return pv.Sphere(
+    mesh = pv.Sphere(
         radius=radius,
         center=center,
         theta_resolution=theta_resolution,
         phi_resolution=phi_resolution,
     )
+    if color is not None:
+        set_mesh_color(mesh, color)
+    return mesh
 
 
 def make_torus(
@@ -75,6 +89,7 @@ def make_torus(
     n_theta: int = 64,
     n_phi: int = 32,
     backend: Backend = "mesh",
+    color: Sequence[float] | str | None = None,
 ) -> pv.PolyData:
     """Generate a torus (donut) with given major/minor radii."""
 
@@ -89,6 +104,8 @@ def make_torus(
 
     aligned = _orient_mesh(base, direction)
     aligned.translate(center, inplace=True)
+    if color is not None:
+        set_mesh_color(aligned, color)
     return aligned
 
 
@@ -100,6 +117,7 @@ def make_cone(
     direction: Sequence[float] = (0.0, 0.0, 1.0),
     resolution: int = 64,
     backend: Backend = "mesh",
+    color: Sequence[float] | str | None = None,
 ) -> pv.PolyData:
     """Circular frustum. Set top_diameter=0 for a classic cone."""
 
@@ -112,6 +130,8 @@ def make_cone(
     mesh = _circular_frustum_mesh(bottom_radius, top_radius, height, resolution)
     mesh = _orient_mesh(mesh, direction)
     mesh.translate(center, inplace=True)
+    if color is not None:
+        set_mesh_color(mesh, color)
     return mesh
 
 
@@ -122,6 +142,7 @@ def make_prism(
     center: Sequence[float] = (0.0, 0.0, 0.0),
     direction: Sequence[float] = (0.0, 0.0, 1.0),
     backend: Backend = "mesh",
+    color: Sequence[float] | str | None = None,
 ) -> pv.PolyData:
     """
     Rectangular frustum (pyramid/prism). Set top_size=(0,0) for a pyramid, or None to match base.
@@ -133,6 +154,8 @@ def make_prism(
     mesh = _rectangular_frustum_mesh(tuple(base_size), tuple(top_size), height)
     mesh = _orient_mesh(mesh, direction)
     mesh.translate(center, inplace=True)
+    if color is not None:
+        set_mesh_color(mesh, color)
     return mesh
 
 
