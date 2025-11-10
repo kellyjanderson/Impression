@@ -8,6 +8,7 @@ Impression is an experimental parametric 3D modeling platform for rapid spatial 
 - Modular architecture that lets us experiment with popular geometric kernels and renderers (e.g., Manifold, PyVista, pygfx).
 - Foundation for exporting watertight meshes to STL and other CAD-friendly formats.
 - Mesh primitives, CSG helpers, and path abstractions exposed via `impression.modeling`.
+- Documentation index: `docs/index.md` lists available features and runnable examples.
 
 ## Roadmap highlights
 
