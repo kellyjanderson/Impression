@@ -58,3 +58,15 @@ This document tracks the near-term roadmap for Impression’s modeling toolkit. 
   - Implement a small solver that: initializes a mesh between anchors, applies forces iteratively, remeshes as needed, and outputs a PyVista surface.
   - Allow both positive (pull) and negative (push) sources; long-term, support animated sources for morphing effects.
   - Expose parameters for max triangle size, damping, and convergence tolerance.
+
+## Appendix: Documentation & Presentation Features
+
+- **Text rendering**
+  - Support vector-based text primitives that can be extruded or engraved, enabling technical annotations directly in scenes.
+  - Plan for both mesh-only text (triangulated glyphs) and CAD text (OCC-based fonts) with consistent styling controls.
+- **2.5D (2D objects in 3D space)**
+  - Provide utilities for lines, planes, arrows, and dimension markers that exist as thin geometry for drafting-like overlays.
+  - Allow writers to place these references on any plane/section to document assemblies without leaving Impression.
+- **Image rendering**
+  - Embed raster images (screenshots, scanned drawings) as textured planes or billboards for hybrid documentation.
+  - Long-term: export “technical sheets” that mix text, images, 2D overlays, and 3D previews for documentation handoffs.
