@@ -44,3 +44,4 @@ impression export examples/hello_cube.py --output artifacts/hello.stl --overwrit
 ```
 
 The exporter loads the same `build()` entry point, merges all returned PyVista datasets, and writes a watertight STL in binary format (use `--ascii` for text output). Existing files are protected unless `--overwrite` is specified.
+- Strategic roadmap: see `docs/project-plan.md` for primitives, CSG, CAD integration, and helper utilities (e.g., auto-rounding sharp faces).
