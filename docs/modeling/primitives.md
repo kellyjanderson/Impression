@@ -8,6 +8,11 @@ from impression.modeling import make_box, make_cylinder, make_sphere, make_torus
 
 > Rendering note: the CLI preview (`impression preview`) or `docs/examples/...` scripts can be used to visualize outputs on a desktop environment.
 
+**Color support:** every `make_*` function accepts an optional `color` argument (RGB/RGBA tuple in 0–1 or a named/hex color string). Colors are stored with the mesh so previews and future exports respect object colors.
+
+- **Example (two colored cubes):** `docs/examples/primitives/color_dual_example.py`
+- **Example (translucent shell):** `docs/examples/primitives/color_transparency_example.py`
+
 ## Box
 
 - **Function:** `make_box(size=(dx, dy, dz), center=(0, 0, 0))`
@@ -80,3 +85,35 @@ def build():
 ```
 
 ![Torus primitive](../assets/previews/primitive-torus.png)
+
+## Cone / Circular Frustum
+
+- **Function:** `make_cone(bottom_diameter=1.0, top_diameter=0.0, height=1.0, ...)`
+- Supports classic cones (`top_diameter=0`) or truncated frustums.
+- **Example:** `docs/examples/primitives/cone_example.py`
+- **Preview:** `impression preview docs/examples/primitives/cone_example.py`
+
+```python
+from impression.modeling import make_cone
+
+def build():
+    return make_cone(bottom_diameter=1.5, top_diameter=0.4, height=2.0)
+```
+
+![Cone primitive](../assets/previews/primitive-cone.png)
+
+## Prism / Pyramid
+
+- **Function:** `make_prism(base_size=(dx, dy), top_size=None, height=1.0, ...)`
+- `top_size=None` → straight prism, `top_size=(0,0)` → pyramid.
+- **Example:** `docs/examples/primitives/prism_example.py`
+- **Preview:** `impression preview docs/examples/primitives/prism_example.py`
+
+```python
+from impression.modeling import make_prism
+
+def build():
+    return make_prism(base_size=(1.5, 1.0), top_size=(0.3, 0.6), height=1.8)
+```
+
+![Prism primitive](../assets/previews/primitive-prism.png)

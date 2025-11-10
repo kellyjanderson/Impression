@@ -8,6 +8,8 @@ from rich.console import Console
 from rich.panel import Panel
 from watchfiles import Change, watch
 
+from impression.modeling._color import get_mesh_color
+
 SceneFactory = Callable[[], object]
 
 
@@ -181,12 +183,21 @@ class PyVistaPreviewer:
         plotter.add_axes(interactive=True)
 
         for index, mesh in enumerate(datasets):
-            color = color_cycle[index % len(color_cycle)]
+            color_info = get_mesh_color(mesh)
+            if color_info:
+                rgb, alpha = color_info
+                color = rgb
+                opacity = alpha
+            else:
+                color = color_cycle[index % len(color_cycle)]
+                opacity = 1.0
+
             plotter.add_mesh(
                 mesh,
                 name=f"mesh-{index}",
                 show_edges=True,
                 color=color,
+                opacity=opacity,
                 smooth_shading=True,
                 specular=0.2,
             )

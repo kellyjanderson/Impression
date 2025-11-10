@@ -28,6 +28,22 @@ CASES = [
         "module": "docs/examples/primitives/sphere_example.py",
     },
     {
+        "name": "primitive-cone",
+        "module": "docs/examples/primitives/cone_example.py",
+    },
+    {
+        "name": "primitive-prism",
+        "module": "docs/examples/primitives/prism_example.py",
+    },
+    {
+        "name": "primitive-color-dual",
+        "module": "docs/examples/primitives/color_dual_example.py",
+    },
+    {
+        "name": "primitive-color-transparency",
+        "module": "docs/examples/primitives/color_transparency_example.py",
+    },
+    {
         "name": "primitive-torus",
         "module": "docs/examples/primitives/torus_example.py",
     },
