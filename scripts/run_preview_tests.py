@@ -105,6 +105,7 @@ def run_case(case: dict) -> dict:
         "stdout": proc.stdout.strip(),
         "stderr": proc.stderr.strip(),
         "screenshot": str(screenshot.relative_to(PROJECT_ROOT)),
+        "screenshot_exists": screenshot.exists(),
     }
 
 
@@ -116,9 +117,19 @@ def main() -> int:
         "cases": results,
     }
     RESULTS_FILE.write_text(json.dumps(payload, indent=2))
-    failures = [case for case in results if case["returncode"] != 0]
+    failures = [
+        case
+        for case in results
+        if case["returncode"] != 0 or not case.get("screenshot_exists", False)
+    ]
     for case in failures:
-        print(f"[FAIL] {case['name']} ({case['module']})", file=sys.stderr)
+        reasons = []
+        if case["returncode"] != 0:
+            reasons.append(f"returncode={case['returncode']}")
+        if not case.get("screenshot_exists", False):
+            reasons.append("missing screenshot")
+        reason_text = ", ".join(reasons)
+        print(f"[FAIL] {case['name']} ({case['module']}) [{reason_text}]", file=sys.stderr)
     print(f"Wrote results to {RESULTS_FILE}")
     return 1 if failures else 0
 

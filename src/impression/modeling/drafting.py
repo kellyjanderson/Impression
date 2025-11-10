@@ -34,16 +34,14 @@ def make_line(
     )
     top = base + np.array((0, 0, length))
     points = np.vstack([base, top])
-    faces = np.array(
-        [
-            [4, 0, 1, 2, 3],
-            [4, 4, 5, 6, 7],
-            [4, 0, 1, 5, 4],
-            [4, 1, 2, 6, 5],
-            [4, 2, 3, 7, 6],
-            [4, 3, 0, 4, 7],
-        ]
-    )
+    faces = _faces([
+        [4, 0, 1, 2, 3],
+        [4, 4, 5, 6, 7],
+        [4, 0, 1, 5, 4],
+        [4, 1, 2, 6, 5],
+        [4, 2, 3, 7, 6],
+        [4, 3, 0, 4, 7],
+    ])
     mesh = pv.PolyData(points, faces)
     mesh = _orient_mesh(mesh, _normalize(direction))
     mesh.translate(start, inplace=True)
@@ -68,7 +66,7 @@ def make_plane(
             (-half_x, half_y, 0.0),
         ]
     )
-    faces = np.array([[4, 0, 1, 2, 3]])
+    faces = _faces([[4, 0, 1, 2, 3]])
     mesh = pv.PolyData(points, faces)
     mesh = _orient_mesh(mesh, normal)
     mesh.translate(center, inplace=True)
@@ -105,15 +103,13 @@ def make_arrow(
             (0, 0, head_height),
         ]
     )
-    faces = np.array(
-        [
-            [4, 0, 1, 2, 3],
-            [3, 0, 1, 4],
-            [3, 1, 2, 4],
-            [3, 2, 3, 4],
-            [3, 3, 0, 4],
-        ]
-    )
+    faces = _faces([
+        [4, 0, 1, 2, 3],
+        [3, 0, 1, 4],
+        [3, 1, 2, 4],
+        [3, 2, 3, 4],
+        [3, 3, 0, 4],
+    ])
     head = pv.PolyData(base, faces)
     head = _orient_mesh(head, direction / length)
     head.translate(start + direction * (shaft_length / length), inplace=True)
@@ -159,3 +155,7 @@ def make_dimension(
         set_mesh_color(text_mesh, color)
     meshes.append(text_mesh)
     return meshes
+
+
+def _faces(face_list: list[list[int]]) -> np.ndarray:
+    return np.hstack([np.asarray(face, dtype=int) for face in face_list])
