@@ -4,13 +4,13 @@ This document tracks the near-term roadmap for Impression’s modeling toolkit. 
 
 ## Modeling Core
 
-- **Primitives**
-  - Uniform API (`make_box`, `make_cylinder`, etc.) with backend selection (`mesh` vs `cad`).
-  - Consistent parameter names (center, dimensions, orientation) and metadata tagging (assign IDs/names to faces/edges as soon as they are created).
-- **Shape library + color support**
-  - Curate a lightweight library of reusable shapes (fasteners, brackets, gears) under permissive licenses; expose helper loaders (`load_shape("gear_m12")`).
-  - Full RGBA color pipeline: assign per-object colors, ensure booleans handle color inheritance (new cut surfaces adopt the subtracting object’s color).
-  - Future: per-face/per-vertex colors for documentation callouts.
+- [ ] **Primitives**
+  - [ ] Uniform API (`make_box`, `make_cylinder`, etc.) with backend selection (`mesh` vs `cad`).
+  - [x] Consistent parameter names (center, dimensions, orientation) and metadata tagging (assign IDs/names to faces/edges as soon as they are created).
+- [ ] **Shape library + color support**
+  - [ ] Curate a lightweight library of reusable shapes (fasteners, brackets, gears) under permissive licenses; expose helper loaders (`load_shape("gear_m12")`).
+  - [x] Full RGBA color pipeline: assign per-object colors, ensure booleans handle color inheritance (new cut surfaces adopt the subtracting object’s color).
+  - [ ] Future: per-face/per-vertex colors for documentation callouts.
 - **CSG Operations**
   - Wrapper helpers for `union`, `difference`, `intersection` that expose tolerance controls and auto-clean options.
   - Optional provenance tracking (node graph) so regenerations only recompute affected nodes.
