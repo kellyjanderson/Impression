@@ -17,43 +17,47 @@ This document tracks the near-term roadmap for Impression’s modeling toolkit. 
 
 ## Advanced Modeling
 
-- **Skinning & Lofting**
+- [ ] **Skinning & Lofting**
   - `loft(profiles, path=None)` helper that uses build123d loft when available and falls back to PyVista mesh-based approximations.
   - Support closed paths, ruled vs smooth, and per-profile parameter overrides.
-- **Splines & Paths**
+- [ ] **Splines & Paths**
   - Canonical `Path` abstraction (polyline, Bezier, spline) that sweep, pipe, and array modifiers consume.
   - Extrude/sweep along path, including twist/scale controls.
-- **Blobs / NURBS**
+- [ ] **Blobs / NURBS**
   - Implicit “blob” builder (metaballs via OpenVDB or marching cubes) with auto-conversion to PolyData.
   - NURBS surface helper leveraging OCC BSplines for precise surfacing.
 
 ## Advanced High-Level Modeling
 
-- **Chamfers / Fillets**
+- [ ] **Chamfers / Fillets**
   - Selection system: tag faces/edges on creation, expose selectors (by name, normal, area, adjacency, custom lambda).
   - Build123d-backed `fillet/chamfer` operations with fallback mesh bevel approximations where exact CAD isn’t available.
   - `round(face_selector, radius)` helper that evaluates face orientation and applies the requested fillet.
-- **Auto-Round Helper**
+- [ ] **Auto-Round Helper**
   - `round_sharp_edges(radius)` routine that scans for faces whose adjacent dihedral angles exceed 89° and applies fillets automatically. (Still needs investigation to ensure it captures intent without over-rounding.)
 
 ## Tooling & Glue
 
-- **Backends & Scene Graph**
+- [ ] **Backends & Scene Graph**
   - Unified scene representation that can hold PyVista meshes, build123d solids, or implicit blobs, so preview/export pipelines remain backend agnostic.
-- **Parameter Management**
+- [ ] **Parameter Management**
   - Config-driven parameter overrides (YAML/JSON) and CLI flags to sweep model variants.
-- **Caching & Tessellation**
+- [ ] **Caching & Tessellation**
   - Cache CAD tessellations keyed by parameter/tolerance to speed up preview/export in iterative workflows.
-- **IDE Integration**
+- [ ] **IDE Integration**
   - VS Code extension that wraps `impression preview` in a panel, streams logs, and offers STL exports from the editor.
   - Add commands for “Preview current model”, “Export STL”, and quick links to docs/examples.
 
 ## Additional Nuances
 
-- Units & tolerances: settle on default units (likely millimeters) and surface tolerances for booleans/meshing.
-- Constraint-aware sketches for CAD workflows (equality, tangency, concentricity) to keep parametric edits stable.
-- Validation hooks (minimum thickness, watertight checks) after heavy operations.
-- Future format support: STEP/IGES export for CAD pipelines alongside STL for mesh workflows.
+- [ ] Units & tolerances: settle on default units (likely millimeters) and surface tolerances for booleans/meshing.
+- [ ] Constraint-aware sketches for CAD workflows (equality, tangency, concentricity) to keep parametric edits stable.
+- [ ] Validation hooks (minimum thickness, watertight checks) after heavy operations.
+- [ ] Future format support: STEP/IGES export for CAD pipelines alongside STL for mesh workflows.
+
+## Testing & QA
+
+- [ ] STL regression tests verifying watertightness/manifoldness for exported meshes.
 
 ## Appendix: Gravitational Modeling
 
@@ -68,12 +72,12 @@ This document tracks the near-term roadmap for Impression’s modeling toolkit. 
 
 ## Appendix: Documentation & Presentation Features
 
-- **Text rendering**
+- [ ] **Text rendering**
   - Support vector-based text primitives that can be extruded or engraved, enabling technical annotations directly in scenes.
   - Plan for both mesh-only text (triangulated glyphs) and CAD text (OCC-based fonts) with consistent styling controls.
-- **2.5D (2D objects in 3D space)**
+- [ ] **2.5D (2D objects in 3D space)**
   - Provide utilities for lines, planes, arrows, and dimension markers that exist as thin geometry for drafting-like overlays.
   - Allow writers to place these references on any plane/section to document assemblies without leaving Impression.
-- **Image rendering**
+- [ ] **Image rendering**
   - **Image import (future):** allow referencing external imagery as textured planes for contextual documentation.
   - **Image export (near-term):** render high-resolution images from scenes (orthographic/perspective) with overlays for technical documentation. Batch rendering hooks for versioned snapshots.
