@@ -24,11 +24,8 @@ def make_text(
     if not content:
         raise ValueError("content must be a non-empty string")
 
-    extrude = depth > 0
-    kwargs: dict = {}
-    if extrude:
-        kwargs["depth"] = depth
-    text = pv.Text3D(content, extrude=extrude, conn=True, **kwargs)
+    depth_value = depth if depth > 0 else None
+    text = pv.Text3D(content, depth=depth_value)
 
     if font_size != 1.0:
         text.scale(font_size, inplace=True)
