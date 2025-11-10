@@ -18,3 +18,5 @@ from impression.modeling import Path
 - `to_spline(n_samples=200)` — converts to a smooth PyVista spline.
 
 Example file: `docs/examples/paths/path_example.py`
+
+- Preview: `impression preview docs/examples/paths/path_example.py`

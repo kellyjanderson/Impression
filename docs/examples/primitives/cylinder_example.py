@@ -1,4 +1,4 @@
-"""Cylinder primitive demo."""
+"""Cylinder primitive demo usable with `impression preview`."""
 
 from __future__ import annotations
 
@@ -6,9 +6,14 @@ from pathlib import Path
 
 from impression.modeling import make_cylinder
 
-OUTPUT = Path("dist")
-OUTPUT.mkdir(exist_ok=True)
 
-cylinder = make_cylinder(radius=0.6, height=1.5, center=(0, 0, 0.75))
-cylinder.save(OUTPUT / "cylinder_example.stl")
-print("Saved cylinder_example.stl with", cylinder.n_cells, "cells")
+def build():
+    return make_cylinder(radius=0.6, height=1.5, center=(0, 0, 0.75))
+
+
+if __name__ == "__main__":
+    OUTPUT = Path("dist")
+    OUTPUT.mkdir(exist_ok=True)
+    mesh = build()
+    mesh.save(OUTPUT / "cylinder_example.stl")
+    print("Saved cylinder_example.stl with", mesh.n_cells, "cells")

@@ -15,6 +15,7 @@ from impression.modeling import make_box, make_cylinder, make_sphere, make_torus
   - `size`: tuple specifying side lengths along X/Y/Z.
   - `center`: world-space center of the box.
 - **Example:** `docs/examples/primitives/box_example.py`
+- **Preview:** `impression preview docs/examples/primitives/box_example.py`
 
 ## Cylinder
 
@@ -24,12 +25,14 @@ from impression.modeling import make_box, make_cylinder, make_sphere, make_torus
   - `direction`: normalized axis vector.
   - `resolution`: number of segments around the circumference.
 - **Example:** `docs/examples/primitives/cylinder_example.py`
+- **Preview:** `impression preview docs/examples/primitives/cylinder_example.py`
 
 ## Sphere
 
 - **Function:** `make_sphere(radius=0.5, center=(0,0,0), theta_resolution=64, phi_resolution=64)`
 - **Options:** radius, center, longitudinal (`theta_resolution`) and latitudinal (`phi_resolution`) segment counts.
 - **Example:** `docs/examples/primitives/sphere_example.py`
+- **Preview:** `impression preview docs/examples/primitives/sphere_example.py`
 
 ## Torus
 
@@ -40,3 +43,4 @@ from impression.modeling import make_box, make_cylinder, make_sphere, make_torus
   - `direction`: orientation axis.
   - `n_theta` / `n_phi`: angular resolutions.
 - **Example:** `docs/examples/primitives/torus_example.py`
+- **Preview:** `impression preview docs/examples/primitives/torus_example.py`

@@ -6,9 +6,14 @@ from pathlib import Path
 
 from impression.modeling import make_sphere
 
-OUTPUT = Path("dist")
-OUTPUT.mkdir(exist_ok=True)
 
-sphere = make_sphere(radius=0.75, center=(0.5, 0.5, 0.75))
-sphere.save(OUTPUT / "sphere_example.stl")
-print("Saved sphere_example.stl with", sphere.n_cells, "cells")
+def build():
+    return make_sphere(radius=0.75, center=(0.5, 0.5, 0.75))
+
+
+if __name__ == "__main__":
+    OUTPUT = Path("dist")
+    OUTPUT.mkdir(exist_ok=True)
+    mesh = build()
+    mesh.save(OUTPUT / "sphere_example.stl")
+    print("Saved sphere_example.stl with", mesh.n_cells, "cells")
