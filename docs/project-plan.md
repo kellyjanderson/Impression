@@ -44,6 +44,9 @@ This document tracks the near-term roadmap for Impression’s modeling toolkit. 
   - Config-driven parameter overrides (YAML/JSON) and CLI flags to sweep model variants.
 - **Caching & Tessellation**
   - Cache CAD tessellations keyed by parameter/tolerance to speed up preview/export in iterative workflows.
+- **IDE Integration**
+  - VS Code extension that wraps `impression preview` in a panel, streams logs, and offers STL exports from the editor.
+  - Add commands for “Preview current model”, “Export STL”, and quick links to docs/examples.
 
 ## Additional Nuances
 
