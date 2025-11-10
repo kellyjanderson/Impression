@@ -46,6 +46,9 @@ impression preview docs/examples/text/text_basic.py
 # drafting helpers
 impression preview docs/examples/drafting/line_plane_example.py
 
+# Impression mark
+impression preview docs/examples/logo/impression_mark.py --hide-edges
+
 # programmatic modeling with primitives/CSG/paths
 python - <<'PY'
 from impression.modeling import make_box, make_cylinder, boolean_union, Path
