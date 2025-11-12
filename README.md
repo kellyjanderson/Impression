@@ -10,6 +10,7 @@ Impression is an experimental parametric 3D modeling platform for rapid spatial 
 - Mesh primitives, CSG helpers, and path abstractions exposed via `impression.modeling`.
 - Documentation index: `docs/index.md` lists available features and runnable examples.
 - CLI manual: `docs/cli.md` describes `impression preview` / `export` options and usage.
+- VS Code helper extension under `ide/vscode-extension/` for launching previews, exports, and regression tests from the editor.
 
 ## Roadmap highlights
 

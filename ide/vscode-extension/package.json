@@ -1,0 +1,44 @@
+{
+  "name": "impression-vscode",
+  "displayName": "Impression Toolkit",
+  "description": "VS Code helpers for Impression: launch previews, export STL, and run regression tests without leaving the editor.",
+  "version": "0.1.0",
+  "publisher": "impression",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:impression.previewModel",
+    "onCommand:impression.exportStl",
+    "onCommand:impression.runPreviewTests"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "impression.previewModel",
+        "title": "Impression: Preview Model",
+        "category": "Impression"
+      },
+      {
+        "command": "impression.exportStl",
+        "title": "Impression: Export STL",
+        "category": "Impression"
+      },
+      {
+        "command": "impression.runPreviewTests",
+        "title": "Impression: Run Preview Tests",
+        "category": "Impression"
+      }
+    ]
+  },
+  "main": "extension.js",
+  "scripts": {
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "vsce": "^2.15.0"
+  }
+}

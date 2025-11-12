@@ -18,6 +18,8 @@ Impression is a parametric modeling toolkit that mixes Python, PyVista rendering
   - [Drafting Helpers](modeling/drafting.md) — lines, planes, arrows, and dimensions for 2.5D annotations.
 - CLI Reference:
   - [Command-line usage](cli.md) — options, environment variables, and automation tips.
+- VS Code:
+  - [Integration](vscode.md) — extension commands, packaging, and installation steps.
 - Brand & Identity:
   - [Impression mark example](examples/logo/impression_mark.py)
 
