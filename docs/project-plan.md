@@ -60,7 +60,10 @@ This document tracks the near-term roadmap for Impression’s modeling toolkit. 
 
 ## Testing & QA
 
-- [ ] STL regression tests verifying watertightness/manifoldness for exported meshes.
+- [x] STL regression tests verifying watertightness/manifoldness for exported meshes (`scripts/run_stl_tests.py`).
+- [ ] Adopt a standard Python test framework (pytest vs unittest) for orchestrating CLI harnesses and future unit tests.
+  - pytest offers concise fixtures, better parameterization, and aligns with our preference; unittest is batteries-included but more verbose.
+  - Decision factors: integration with existing scripts (call via subprocess vs plugins), fixture complexity (e.g., temporary workspaces, font downloads), and ecosystem tooling (coverage, plugin availability).
 
 ## Appendix: Gravitational Modeling
 

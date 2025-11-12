@@ -8,6 +8,7 @@ import pyvista as pv
 
 from ._color import set_mesh_color
 from .primitives import _orient_mesh, _normalize
+from .text import make_text
 
 Axis = Literal["x", "y", "z"]
 
@@ -147,12 +148,15 @@ def make_dimension(
     if text is None:
         text = f"{length:.2f}"
     mid = (arrow_start + arrow_end) / 2.0
-    text_mesh = pv.Text3D(text, depth=0.0)
-    text_mesh.scale(0.1, inplace=True)
-    text_mesh = _orient_mesh(text_mesh, up)
-    text_mesh.translate(mid + up * 0.02, inplace=True)
-    if color is not None:
-        set_mesh_color(text_mesh, color)
+    text_mesh = make_text(
+        text,
+        depth=0.0,
+        center=mid + up * 0.02,
+        direction=up,
+        font_size=0.1,
+        justify="center",
+        color=color,
+    )
     meshes.append(text_mesh)
     return meshes
 

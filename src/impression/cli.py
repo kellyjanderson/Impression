@@ -63,7 +63,12 @@ def preview(
     screenshot: pathlib.Path | None = typer.Option(
         None, "--screenshot", help="Optional path to save a screenshot of the preview."
     ),
-    show_edges: bool = typer.Option(True, "--show-edges/--hide-edges", help="Toggle mesh edge rendering."),
+    show_edges: bool = typer.Option(False, "--show-edges/--hide-edges", help="Toggle triangle edge rendering."),
+    face_edges: bool = typer.Option(
+        False,
+        "--face-edges/--no-face-edges",
+        help="Overlay detected face edges (feature edges) for hard-outline visuals.",
+    ),
 ) -> None:
     """
     Load a model module, build PyVista datasets, and open an interactive preview window.
@@ -96,6 +101,7 @@ def preview(
             target_fps=opts.target_fps,
             screenshot_path=screenshot,
             show_edges=show_edges,
+            face_edges=face_edges,
         )
     except PreviewBackendError as exc:
         raise typer.BadParameter(str(exc)) from exc

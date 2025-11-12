@@ -4,34 +4,56 @@ from typing import Literal, Sequence, Tuple
 
 import numpy as np
 import pyvista as pv
+from build123d import BuildSketch, FontStyle, Text as BText, extrude
 
+from ..cad import shape_to_polydata
 from ._color import set_mesh_color
 
 Justify = Literal["left", "center", "right"]
+VARIATION_SELECTORS = {chr(code) for code in range(0xFE00, 0xFE0F + 1)}
+VARIATION_SELECTORS.update(chr(code) for code in range(0xE0100, 0xE01EF + 1))
 
 
 def make_text(
     content: str,
     depth: float = 0.2,
     center: Sequence[float] = (0.0, 0.0, 0.0),
-    direction: Sequence[float] = (0.0, 0.0, 1.0),
+    direction: Sequence[float] = (0.0, -1.0, 0.0),
     font_size: float = 1.0,
     justify: Justify = "center",
+    font: str = "Arial",
+    font_path: str | None = None,
+    font_style: FontStyle | str | None = None,
+    tolerance: float = 0.05,
     color: Sequence[float] | str | None = None,
 ) -> pv.PolyData:
-    """Create a text mesh that can be previewed/exported like other primitives."""
+    """Create a text mesh by tessellating build123d geometry instead of PyVista primitives."""
 
+    content = _strip_variation_selectors(content)
     if not content:
-        raise ValueError("content must be a non-empty string")
+        raise ValueError("content must be a non-empty string after stripping variation selectors")
 
-    depth_value = depth if depth > 0 else None
-    text = pv.Text3D(content, depth=depth_value)
+    depth_value = max(depth, 0.0)
+    with BuildSketch() as sketch:
+        BText(
+            content,
+            font_size=font_size,
+            font=font,
+            font_path=font_path,
+            font_style=_coerce_font_style(font_style),
+        )
 
-    if font_size != 1.0:
-        text.scale(font_size, inplace=True)
+    if depth_value > 0:
+        shape = extrude(sketch.sketch, amount=depth_value)
+    else:
+        shape = sketch.sketch
+
+    text = shape_to_polydata(shape, tolerance=tolerance)
+    text.rotate_z(180.0, inplace=True)
+    text.rotate_x(90.0, inplace=True)
 
     text = _justify_and_center(text, justify)
-    text = _orient_mesh(text, direction)
+    text = _orient_mesh(text, direction, default=(0.0, 1.0, 0.0))
     text.translate(center, inplace=True)
 
     if color is not None:
@@ -60,27 +82,36 @@ def _justify_and_center(mesh: pv.PolyData, justify: Justify) -> pv.PolyData:
     return mesh
 
 
-def _orient_mesh(mesh: pv.PolyData, direction: Sequence[float]) -> pv.PolyData:
-    target = _normalize(direction)
-    default = np.array([0.0, 0.0, 1.0])
-    target_vec = np.array(target)
+def _orient_mesh(
+    mesh: pv.PolyData,
+    direction: Sequence[float],
+    default: Sequence[float] = (0.0, 0.0, 1.0),
+) -> pv.PolyData:
+    target_vec = np.array(_normalize(direction))
+    default_vec = np.array(_normalize(default))
 
-    if np.allclose(target_vec, default):
-        return mesh
+    if np.allclose(target_vec, default_vec):
+        return mesh.copy()
 
-    axis = np.cross(default, target_vec)
+    axis = np.cross(default_vec, target_vec)
     axis_norm = np.linalg.norm(axis)
-    if axis_norm == 0:
-        axis = np.array([1.0, 0.0, 0.0])
+    if axis_norm < 1e-8:
+        dot = np.dot(default_vec, target_vec)
+        if dot > 0:
+            return mesh.copy()
+        axis = np.cross(default_vec, np.array([1.0, 0.0, 0.0]))
+        if np.linalg.norm(axis) < 1e-8:
+            axis = np.cross(default_vec, np.array([0.0, 1.0, 0.0]))
+        axis = axis / np.linalg.norm(axis)
         angle_deg = 180.0
     else:
         axis = axis / axis_norm
-        angle_rad = np.arccos(np.clip(np.dot(default, target_vec), -1.0, 1.0))
+        angle_rad = np.arccos(np.clip(np.dot(default_vec, target_vec), -1.0, 1.0))
         angle_deg = np.degrees(angle_rad)
 
-    mesh = mesh.copy()
-    mesh.rotate_vector(axis, angle_deg, point=(0.0, 0.0, 0.0), inplace=True)
-    return mesh
+    rotated = mesh.copy()
+    rotated.rotate_vector(axis, angle_deg, point=(0.0, 0.0, 0.0), inplace=True)
+    return rotated
 
 
 def _normalize(vector: Sequence[float]) -> Tuple[float, float, float]:
@@ -90,3 +121,23 @@ def _normalize(vector: Sequence[float]) -> Tuple[float, float, float]:
         raise ValueError("Direction vector must be non-zero.")
     arr = arr / norm
     return float(arr[0]), float(arr[1]), float(arr[2])
+
+
+def _coerce_font_style(value: FontStyle | str | None) -> FontStyle:
+    if value is None:
+        return FontStyle.REGULAR
+    if isinstance(value, FontStyle):
+        return value
+    try:
+        normalized = value.replace("-", "_").replace(" ", "_").upper()
+        return FontStyle[normalized]
+    except KeyError as exc:  # pragma: no cover - defensive
+        valid = ", ".join(style.name for style in FontStyle)
+        raise ValueError(f"Unknown font style '{value}'. Valid options: {valid}.") from exc
+
+
+def _strip_variation_selectors(text: str) -> str:
+    if not text:
+        return text
+    stripped = "".join(ch for ch in text if ch not in VARIATION_SELECTORS)
+    return stripped or text

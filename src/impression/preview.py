@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import math
 from pathlib import Path
 from typing import Callable, Iterable, List
 
@@ -65,13 +66,20 @@ class PyVistaPreviewer:
         watch_files: bool,
         target_fps: int,
         screenshot_path: Path | None = None,
-        show_edges: bool = True,
+        show_edges: bool = False,
+        face_edges: bool = False,
     ) -> None:
         pv = self._ensure_backend()
         datasets = self.collect_datasets(initial_scene)
         plotter = pv.Plotter(window_size=(1280, 800))
         self._configure_plotter(plotter)
-        self._apply_scene(plotter, datasets, show_edges=show_edges)
+        self._apply_scene(
+            plotter,
+            datasets,
+            show_edges=show_edges,
+            face_edges=face_edges,
+            align_camera=True,
+        )
 
         if screenshot_path is not None:
             screenshot_path.parent.mkdir(parents=True, exist_ok=True)
@@ -113,7 +121,13 @@ class PyVistaPreviewer:
                 self.console.print(panel)
                 return
 
-            self._apply_scene(plotter, datasets)
+            self._apply_scene(
+                plotter,
+                datasets,
+                show_edges=show_edges,
+                face_edges=face_edges,
+                align_camera=True,
+            )
             plotter.render()
             self.console.print(f"[green]Reloaded {model_path}[/green]")
 
@@ -179,8 +193,18 @@ class PyVistaPreviewer:
         plotter.add_axes(interactive=True)
         plotter.show_bounds(grid="front", color="#5a677d")
 
-    def _apply_scene(self, plotter, datasets: Iterable[object], show_edges: bool) -> None:
+    def _apply_scene(
+        self,
+        plotter,
+        datasets: Iterable[object],
+        show_edges: bool,
+        face_edges: bool,
+        align_camera: bool = False,
+    ) -> None:
+        datasets = list(datasets)
         color_cycle = ["#6ab0ff", "#f58f7c", "#9cdcfe", "#fadb5f", "#9ae6b4", "#d4b5ff"]
+        edge_color = "#cdd7ff"
+        edge_angle = 60.0
         plotter.clear()
         plotter.show_bounds(grid="front", color="#5a677d")
         plotter.add_axes(interactive=True)
@@ -199,6 +223,8 @@ class PyVistaPreviewer:
                     smooth_shading=True,
                     specular=0.2,
                 )
+                if face_edges:
+                    self._add_feature_edges(plotter, mesh, edge_color, edge_angle, index)
                 continue
 
             color_info = get_mesh_color(mesh)
@@ -219,6 +245,58 @@ class PyVistaPreviewer:
                 smooth_shading=True,
                 specular=0.2,
             )
+            if face_edges:
+                self._add_feature_edges(plotter, mesh, edge_color, edge_angle, index)
+
+        if align_camera:
+            self._reset_camera(plotter, datasets)
+
+    def _add_feature_edges(self, plotter, mesh, color: str, angle: float, index: int) -> None:
+        if not hasattr(mesh, "extract_feature_edges"):
+            return
+        edges = mesh.extract_feature_edges(angle=angle)
+        if edges.n_cells == 0:
+            return
+        plotter.add_mesh(
+            edges,
+            name=f"mesh-{index}-edges",
+            color=color,
+            line_width=1.0,
+            render_lines_as_tubes=False,
+        )
+
+    def _reset_camera(self, plotter, datasets: Iterable[object]) -> None:
+        bounds = None
+        for mesh in datasets:
+            mesh_bounds = mesh.bounds
+            if bounds is None:
+                bounds = list(mesh_bounds)
+            else:
+                bounds[0] = min(bounds[0], mesh_bounds[0])
+                bounds[1] = max(bounds[1], mesh_bounds[1])
+                bounds[2] = min(bounds[2], mesh_bounds[2])
+                bounds[3] = max(bounds[3], mesh_bounds[3])
+                bounds[4] = min(bounds[4], mesh_bounds[4])
+                bounds[5] = max(bounds[5], mesh_bounds[5])
+
+        if bounds is None:
+            return
+
+        x_center = (bounds[0] + bounds[1]) / 2.0
+        y_center = (bounds[2] + bounds[3]) / 2.0
+        z_center = (bounds[4] + bounds[5]) / 2.0
+
+        diag = math.sqrt(
+            (bounds[1] - bounds[0]) ** 2
+            + (bounds[3] - bounds[2]) ** 2
+            + (bounds[5] - bounds[4]) ** 2
+        )
+        distance = max(diag, 1.0) * 1.2
+
+        camera_pos = (x_center, y_center + distance, z_center)
+        focal_point = (x_center, y_center, z_center)
+        view_up = (0.0, 0.0, 1.0)
+        plotter.camera_position = [camera_pos, focal_point, view_up]
 
     def _install_timer_callback(
         self,

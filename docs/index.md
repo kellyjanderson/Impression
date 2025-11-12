@@ -14,7 +14,7 @@ Impression is a parametric modeling toolkit that mixes Python, PyVista rendering
   - [Primitives](modeling/primitives.md) — boxes, cylinders, spheres, torus utilities, code snippets, and rendered examples.
   - [CSG Helpers](modeling/csg.md) — union/difference/intersection helpers with CLI-ready sample modules.
   - [Paths](modeling/paths.md) — polyline/spline utilities for sweeps and visualization.
-  - [Text](modeling/text.md) — extruded or flat glyphs with full color support.
+  - [Text](modeling/text.md) — extruded or flat glyphs (including emoji) with full color support.
   - [Drafting Helpers](modeling/drafting.md) — lines, planes, arrows, and dimensions for 2.5D annotations.
 - CLI Reference:
   - [Command-line usage](cli.md) — options, environment variables, and automation tips.
@@ -32,6 +32,12 @@ impression export docs/examples/csg/union_example.py --output dist/union.stl --o
 
 # automated preview test suite + screenshots under dist/preview-tests/
 scripts/run_preview_tests.py
+
+# STL export + watertight validation (writes to dist/stl-tests/)
+scripts/run_stl_tests.py
+
+# Focused text preview/STL regression
+scripts/text_suite.py
 ```
 
 Looking for future work or advanced concepts? Check the project plan and the appendix on gravitational modeling for upcoming experiments.

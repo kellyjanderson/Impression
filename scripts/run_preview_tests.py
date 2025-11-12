@@ -7,12 +7,15 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DIST_DIR = PROJECT_ROOT / "dist" / "preview-tests"
 RESULTS_FILE = DIST_DIR / "results.json"
+
+SUITE_NAME = "preview-tests"
 
 CASES = [
     {
@@ -48,6 +51,10 @@ CASES = [
         "module": "docs/examples/text/text_basic.py",
     },
     {
+        "name": "text-emoji",
+        "module": "docs/examples/text/text_emoji.py",
+    },
+    {
         "name": "drafting-line-plane",
         "module": "docs/examples/drafting/line_plane_example.py",
     },
@@ -78,7 +85,11 @@ CASES = [
 ]
 
 
-def run_case(case: dict) -> dict:
+def _isoformat(dt: datetime) -> str:
+    return dt.isoformat().replace("+00:00", "Z")
+
+
+def run_case(case: dict, verbose: bool = False) -> dict:
     screenshot = DIST_DIR / f"{case['name']}.png"
     screenshot.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -91,6 +102,10 @@ def run_case(case: dict) -> dict:
     ]
     env = os.environ.copy()
     env.setdefault("PYVISTA_OFF_SCREEN", "true")
+    started_at = datetime.now(UTC)
+    start_monotonic = time.perf_counter()
+    if verbose:
+        print(f"{case['name']} - {_isoformat(started_at)}")
     proc = subprocess.run(
         cmd,
         cwd=PROJECT_ROOT,
@@ -98,6 +113,13 @@ def run_case(case: dict) -> dict:
         capture_output=True,
         text=True,
     )
+    end_monotonic = time.perf_counter()
+    ended_at = datetime.now(UTC)
+    duration = end_monotonic - start_monotonic
+    if verbose:
+        status = "PASS" if proc.returncode == 0 else "FAIL"
+        print(f"{status} - {_isoformat(ended_at)} ({duration:.2f}s)")
+        print()
     return {
         "name": case["name"],
         "module": case["module"],
@@ -106,14 +128,25 @@ def run_case(case: dict) -> dict:
         "stderr": proc.stderr.strip(),
         "screenshot": str(screenshot.relative_to(PROJECT_ROOT)),
         "screenshot_exists": screenshot.exists(),
+        "started_at": _isoformat(started_at),
+        "ended_at": _isoformat(ended_at),
+        "duration_seconds": duration,
     }
 
 
 def main() -> int:
     DIST_DIR.mkdir(parents=True, exist_ok=True)
-    results = [run_case(case) for case in CASES]
+    suite_start = datetime.now(UTC)
+    print(f"Starting test suite {SUITE_NAME}")
+    print(f"time: {_isoformat(suite_start)}")
+    print("--")
+    results = [run_case(case, verbose=True) for case in CASES]
+    suite_end = datetime.now(UTC)
     payload = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "suite": SUITE_NAME,
+        "suite_started_at": _isoformat(suite_start),
+        "suite_ended_at": _isoformat(suite_end),
+        "timestamp": _isoformat(suite_end),
         "cases": results,
     }
     RESULTS_FILE.write_text(json.dumps(payload, indent=2))
@@ -130,6 +163,8 @@ def main() -> int:
             reasons.append("missing screenshot")
         reason_text = ", ".join(reasons)
         print(f"[FAIL] {case['name']} ({case['module']}) [{reason_text}]", file=sys.stderr)
+    status_text = "PASS" if not failures else "FAIL"
+    print(f"suite end - {_isoformat(suite_end)} ({status_text})")
     print(f"Wrote results to {RESULTS_FILE}")
     return 1 if failures else 0
 
