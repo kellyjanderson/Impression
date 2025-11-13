@@ -115,7 +115,13 @@ function getActiveEditorPath() {
 
 async function ensurePythonPath() {
   if (cachedPythonPath) {
-    return cachedPythonPath;
+    if (await fileExists(cachedPythonPath)) {
+      return cachedPythonPath;
+    }
+    cachedPythonPath = null;
+    if (extensionContext) {
+      extensionContext.globalState.update(PYTHON_STATE_KEY, undefined);
+    }
   }
 
   const resolved = await resolvePythonPath();
