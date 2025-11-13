@@ -13,4 +13,13 @@ The repository ships with a starter VS Code extension under `ide/vscode-extensio
 3. `npm run package` (produces `.vsix`)
 4. In VS Code run **Extensions: Install from VSIX...** and pick the generated file.
 
-After installation, open the Impression workspace. Each command opens an `Impression` terminal, so you can stop/re-run previews as needed. The extension simply leverages the existing CLI, so it works wherever the CLI already runs (including virtual environments).
+After installation, open the Impression workspace. Each command opens an `Impression` terminal, so you can stop/re-run previews as needed.
+
+## Interpreter detection & auto-install
+
+- The CLI writes `~/.impression/env` (via `IMPRESSION_PY`) the first time it runs. Source that
+  file in your shell (`source ~/.impression/env`) so the IDE knows which interpreter owns the CLI.
+- If the extension cannot find the CLI, it offers to clone the repository under `~/.impression-cli`,
+  create a virtual environment, and run `pip install -e .` automatically.
+- Declining the auto-install option opens the [Getting Started guide](../README.md#getting-started)
+  with manual clone/install instructions.

@@ -19,6 +19,26 @@ Impression is an experimental parametric 3D modeling platform for rapid spatial 
 3. **Declarative mode** – ingest declarative scene graphs (JSON/TOML) that map to the same geometry pipeline.
 4. **Exporters** – transform the canonical geometry representation into STL, AMF, and STEP variants.
 
+## Getting Started
+
+```bash
+git clone https://github.com/kellyjanderson/Impression.git
+cd Impression
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+After installation you can run `impression --help` from anywhere in that virtual environment.
+
+The CLI also writes `~/.impression/env` with an `IMPRESSION_PY` export that the VS Code
+extension (and other tooling) can source. Add the following line to your shell config if you
+haven't already:
+
+```bash
+source ~/.impression/env
+```
+
 ## Development
 
 ```bash
