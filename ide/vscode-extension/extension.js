@@ -11,11 +11,15 @@ const IMPRESSION_HOME = path.join(os.homedir(), '.impression');
 const ENV_FILE = path.join(IMPRESSION_HOME, 'env');
 const SOURCE_LINE = 'source ~/.impression/env # Impression\n';
 const RC_FILES = ['.zshrc', '.bashrc', '.bash_profile'];
+const PYTHON_STATE_KEY = 'impression.pythonPath';
 
 let cachedPythonPath = null;
 const installerChannel = vscode.window.createOutputChannel('Impression Installer');
+let extensionContext;
 
 function activate(context) {
+  extensionContext = context;
+  hydrateCachedPython();
   context.subscriptions.push(
     vscode.commands.registerCommand('impression.previewModel', () => previewModel()),
     vscode.commands.registerCommand('impression.exportStl', () => exportStl()),
@@ -116,7 +120,7 @@ async function ensurePythonPath() {
 
   const resolved = await resolvePythonPath();
   if (resolved) {
-    cachedPythonPath = resolved;
+    rememberPythonPath(resolved);
     return resolved;
   }
 
@@ -130,7 +134,7 @@ async function ensurePythonPath() {
   if (selection === 'Install Impression') {
     try {
       const python = await installImpression();
-      cachedPythonPath = python;
+      rememberPythonPath(python);
       vscode.window.showInformationMessage('Impression installed. You can now run previews.');
       return python;
     } catch (error) {
@@ -154,13 +158,17 @@ async function resolvePythonPath() {
 
   const fromEnvFile = await pythonFromEnvFile();
   if (fromEnvFile) {
-    process.env.IMPRESSION_PY = fromEnvFile;
     return fromEnvFile;
   }
 
   const shebangPython = await pythonFromShebang();
   if (shebangPython) {
     return shebangPython;
+  }
+
+  const stored = extensionContext?.globalState.get(PYTHON_STATE_KEY);
+  if (stored && (await fileExists(stored))) {
+    return stored;
   }
 
   return null;
@@ -221,7 +229,7 @@ async function installImpression() {
       await runCommand(pythonBin, ['-m', 'pip', 'install', '--upgrade', 'pip'], { cwd: INSTALL_FOLDER });
       await runCommand(pythonBin, ['-m', 'pip', 'install', '-e', '.'], { cwd: INSTALL_FOLDER });
       await updateShellIntegration(pythonBin);
-      process.env.IMPRESSION_PY = pythonBin;
+      rememberPythonPath(pythonBin);
       promptReloadNotice();
       return pythonBin;
     }
@@ -320,6 +328,27 @@ function promptReloadNotice() {
         vscode.commands.executeCommand('workbench.action.reloadWindow');
       }
     });
+}
+
+function hydrateCachedPython() {
+  const envPath = process.env.IMPRESSION_PY;
+  if (envPath) {
+    cachedPythonPath = envPath;
+    return;
+  }
+  const stored = extensionContext?.globalState.get(PYTHON_STATE_KEY);
+  if (stored) {
+    cachedPythonPath = stored;
+    process.env.IMPRESSION_PY = stored;
+  }
+}
+
+function rememberPythonPath(pythonPath) {
+  cachedPythonPath = pythonPath;
+  process.env.IMPRESSION_PY = pythonPath;
+  if (extensionContext) {
+    extensionContext.globalState.update(PYTHON_STATE_KEY, pythonPath);
+  }
 }
 
 function getWorkspaceFolder() {
