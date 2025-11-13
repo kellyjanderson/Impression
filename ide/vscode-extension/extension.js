@@ -26,7 +26,7 @@ function activate(context) {
 function deactivate() {}
 
 async function previewModel() {
-  const modelPath = await pickModelFile();
+  const modelPath = await resolveModelPath();
   if (!modelPath) {
     return;
   }
@@ -38,7 +38,7 @@ async function previewModel() {
 }
 
 async function exportStl() {
-  const modelPath = await pickModelFile();
+  const modelPath = await resolveModelPath();
   if (!modelPath) {
     return;
   }
@@ -86,6 +86,29 @@ function runInTerminal(command) {
   terminal.sendText(command);
 }
 
+async function resolveModelPath() {
+  const active = getActiveEditorPath();
+  if (active) {
+    return active;
+  }
+  return await pickModelFile();
+}
+
+function getActiveEditorPath() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    return null;
+  }
+  const document = editor.document;
+  if (document.isUntitled || document.uri.scheme !== 'file') {
+    return null;
+  }
+  if (document.languageId !== 'python' && !document.fileName.endsWith('.py')) {
+    return null;
+  }
+  return document.uri.fsPath;
+}
+
 async function ensurePythonPath() {
   if (cachedPythonPath) {
     return cachedPythonPath;
@@ -129,6 +152,12 @@ async function resolvePythonPath() {
     return fromEnv;
   }
 
+  const fromEnvFile = await pythonFromEnvFile();
+  if (fromEnvFile) {
+    process.env.IMPRESSION_PY = fromEnvFile;
+    return fromEnvFile;
+  }
+
   const shebangPython = await pythonFromShebang();
   if (shebangPython) {
     return shebangPython;
@@ -154,6 +183,21 @@ async function pythonFromShebang() {
     }
   } catch (error) {
     return null;
+  }
+  return null;
+}
+
+async function pythonFromEnvFile() {
+  try {
+    const contents = await fs.promises.readFile(ENV_FILE, 'utf8');
+    const match = contents.match(/IMPRESSION_PY="([^"]+)"/);
+    if (match && (await fileExists(match[1]))) {
+      return match[1];
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      installerChannel.appendLine(`Unable to read ${ENV_FILE}: ${error.message}`);
+    }
   }
   return null;
 }
