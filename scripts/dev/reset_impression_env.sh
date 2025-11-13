@@ -6,7 +6,9 @@ CLI_FOLDER="$HOME/.impression-cli"
 ENV_FILE="$IMPRESSION_HOME/env"
 LINE='source ~/.impression/env # Impression'
 
+echo "Removing auto-installed CLI folder ($CLI_FOLDER)"
 rm -rf "$CLI_FOLDER"
+echo "Removing env file ($ENV_FILE)"
 rm -f "$ENV_FILE"
 
 clean_rc() {
@@ -24,5 +26,27 @@ clean_rc "$HOME/.zshrc"
 clean_rc "$HOME/.bashrc"
 clean_rc "$HOME/.bash_profile"
 
-echo "Removed ~/.impression-cli and stripped shell configuration." \
-"Reinstall Impression or run scripts/dev/setup_dev_env.sh to recreate the environment."
+if [[ -n "${IMPRESSION_PY:-}" ]]; then
+  unset IMPRESSION_PY
+  echo "Unset IMPRESSION_PY for this shell session."
+else
+  echo "IMPRESSION_PY was not set in this shell session."
+fi
+
+GLOBAL_STORAGE_BASES=(
+  "$HOME/Library/Application Support/Code/User/globalStorage"
+  "$HOME/Library/Application Support/Code - Insiders/User/globalStorage"
+  "$HOME/.config/Code/User/globalStorage"
+  "$HOME/.config/VSCodium/User/globalStorage"
+)
+
+for base in "${GLOBAL_STORAGE_BASES[@]}"; do
+  storage="$base/impression.impression-vscode"
+  if [[ -d "$storage" ]]; then
+    rm -rf "$storage"
+    echo "Removed VS Code global storage at $storage"
+  fi
+done
+
+echo "Reset complete. Restart your terminals/VS Code to ensure IMPRESSION_PY is reloaded."
+echo "Reinstall Impression via scripts/dev/setup_dev_env.sh or the VS Code auto-install prompt."
