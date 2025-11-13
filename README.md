@@ -31,6 +31,14 @@ pip install -e .
 
 After installation you can run `impression --help` from anywhere in that virtual environment.
 
+The CLI also writes `~/.impression/env` with an `IMPRESSION_PY` export that the VS Code
+extension (and other tooling) can source. Add the following line to your shell config if you
+haven't already:
+
+```bash
+source ~/.impression/env
+```
+
 ## Development
 
 ```bash
