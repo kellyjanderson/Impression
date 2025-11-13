@@ -101,4 +101,21 @@ impression export examples/hello_cube.py --output artifacts/hello.stl --overwrit
 ```
 
 The exporter loads the same `build()` entry point, merges all returned PyVista datasets, and writes a watertight STL in binary format (use `--ascii` for text output). Existing files are protected unless `--overwrite` is specified.
-- Strategic roadmap: see `docs/project-plan.md` for primitives, CSG, CAD integration, and helper utilities (e.g., auto-rounding sharp faces).
+
+## Contributing
+
+We work via feature branches and pull requests. Open an issue or discussion before large changes, keep branches focused, and include documentation/preview updates with every feature. Helpful references:
+
+- `docs/index.md` — full documentation index.
+- `docs/project-plan.md` — detailed roadmap.
+- `docs/feature-pipeline.md` — current implementation order.
+- `scripts/dev/setup_dev_env.sh` — spin up a repo virtualenv and shell integration.
+- `scripts/dev/reset_impression_env.sh` — clean auto-installed artifacts and shell config.
+
+## Community & Inclusion
+
+Impression is a collaborative project. We expect respectful communication, inclusive language, and empathy for contributors of all backgrounds. Harassment or discrimination is not tolerated—be kind, credit others’ work, and help keep the documentation and code welcoming.
+
+## Strategic roadmap
+
+See `docs/project-plan.md` for primitives, CSG, CAD integration, and helper utilities (e.g., auto-rounding sharp faces).

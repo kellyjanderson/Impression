@@ -2,6 +2,8 @@
 
 This document tracks the near-term roadmap for Impression’s modeling toolkit. The goal is to provide a concise checklist we can revisit each sprint.
 
+Current execution order is captured in `docs/feature-pipeline.md` and should be reviewed each planning cycle.
+
 ## Modeling Core
 
 - [ ] **Primitives**
