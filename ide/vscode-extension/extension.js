@@ -125,43 +125,12 @@ async function resolvePythonPath() {
     return fromEnv;
   }
 
-  const workspacePython = await findWorkspacePython();
-  if (workspacePython && (await pythonHasImpression(workspacePython))) {
-    return workspacePython;
-  }
-
   const shebangPython = await pythonFromShebang();
   if (shebangPython) {
     return shebangPython;
   }
 
   return null;
-}
-
-async function findWorkspacePython() {
-  const folder = vscode.workspace.workspaceFolders?.[0];
-  if (!folder) {
-    return null;
-  }
-  const root = folder.uri.fsPath;
-  const candidates = process.platform === 'win32'
-    ? [path.join(root, '.venv', 'Scripts', 'python.exe')]
-    : [path.join(root, '.venv', 'bin', 'python')];
-  for (const candidate of candidates) {
-    if (await fileExists(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
-async function pythonHasImpression(pythonPath) {
-  try {
-    cp.execFileSync(pythonPath, ['-c', 'import impression'], { stdio: 'ignore' });
-    return true;
-  } catch (error) {
-    return false;
-  }
 }
 
 async function pythonFromShebang() {
