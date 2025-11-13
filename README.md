@@ -39,6 +39,14 @@ haven't already:
 source ~/.impression/env
 ```
 
+### Helper scripts
+
+- `scripts/dev/setup_dev_env.sh` – create/update the repo virtual environment, install the package,
+  and append the `source ~/.impression/env` line to your shell configuration files.
+- `scripts/dev/reset_impression_env.sh` – remove the auto-installed CLI (`~/.impression-cli`),
+  delete `~/.impression/env`, and strip the sourcing line from your shell rc files. Use this when you
+  want to start over.
+
 ## Development
 
 ```bash

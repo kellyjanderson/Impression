@@ -7,6 +7,10 @@ const cp = require('child_process');
 const REPO_URL = 'https://github.com/kellyjanderson/Impression.git';
 const DOCS_URL = 'https://github.com/kellyjanderson/Impression#getting-started';
 const INSTALL_FOLDER = path.join(os.homedir(), '.impression-cli');
+const IMPRESSION_HOME = path.join(os.homedir(), '.impression');
+const ENV_FILE = path.join(IMPRESSION_HOME, 'env');
+const SOURCE_LINE = 'source ~/.impression/env # Impression\n';
+const RC_FILES = ['.zshrc', '.bashrc', '.bash_profile'];
 
 let cachedPythonPath = null;
 const installerChannel = vscode.window.createOutputChannel('Impression Installer');
@@ -172,7 +176,9 @@ async function installImpression() {
       }
       await runCommand(pythonBin, ['-m', 'pip', 'install', '--upgrade', 'pip'], { cwd: INSTALL_FOLDER });
       await runCommand(pythonBin, ['-m', 'pip', 'install', '-e', '.'], { cwd: INSTALL_FOLDER });
+      await updateShellIntegration(pythonBin);
       process.env.IMPRESSION_PY = pythonBin;
+      promptReloadNotice();
       return pythonBin;
     }
   );
@@ -226,6 +232,50 @@ function runCommand(command, args = [], options = {}) {
       }
     });
   });
+}
+
+async function updateShellIntegration(pythonPath) {
+  try {
+    await fs.promises.mkdir(IMPRESSION_HOME, { recursive: true });
+    const exportLine = `export IMPRESSION_PY="${pythonPath}"\n`;
+    await fs.promises.writeFile(ENV_FILE, exportLine, 'utf8');
+    await ensureRcIncludesSource();
+  } catch (error) {
+    installerChannel.appendLine(`Failed to update ~/.impression/env: ${error.message}`);
+  }
+}
+
+async function ensureRcIncludesSource() {
+  await Promise.all(
+    RC_FILES.map(async (file) => {
+      const rcPath = path.join(os.homedir(), file);
+      try {
+        const content = await fs.promises.readFile(rcPath, 'utf8');
+        if (content.includes(SOURCE_LINE.trim())) {
+          return;
+        }
+        await fs.promises.appendFile(rcPath, `\n# Added by Impression\n${SOURCE_LINE}`);
+      } catch (error) {
+        if (error.code !== 'ENOENT') {
+          installerChannel.appendLine(`Skipping ${rcPath}: ${error.message}`);
+        }
+      }
+    })
+  );
+}
+
+function promptReloadNotice() {
+  vscode.window
+    .showInformationMessage(
+      'Impression installed. Reload VS Code to ensure the new interpreter is detected?',
+      'Reload Window',
+      'Later'
+    )
+    .then((selection) => {
+      if (selection === 'Reload Window') {
+        vscode.commands.executeCommand('workbench.action.reloadWindow');
+      }
+    });
 }
 
 function getWorkspaceFolder() {

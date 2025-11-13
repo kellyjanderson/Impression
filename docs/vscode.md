@@ -23,3 +23,5 @@ After installation, open the Impression workspace. Each command opens an `Impres
   create a virtual environment, and run `pip install -e .` automatically.
 - Declining the auto-install option opens the [Getting Started guide](../README.md#getting-started)
   with manual clone/install instructions.
+- You can also use `scripts/dev/setup_dev_env.sh` to configure a development environment and
+  ensure your shell sources `~/.impression/env`.
