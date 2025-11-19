@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import math
+import importlib
+import importlib.util
 from pathlib import Path
 from typing import Callable, Iterable, List
 
@@ -12,6 +15,59 @@ from rich.panel import Panel
 from watchfiles import Change, watch
 
 from impression.modeling._color import COLOR_CELL_DATA, get_mesh_color
+
+_VTK_PATCH_FLAG = "IMPRESSION_SKIP_VTK_PATCHES"
+_VTK_PATCH_RAN = False
+
+
+def _prepare_vtk_runtime() -> None:
+    global _VTK_PATCH_RAN
+    if _VTK_PATCH_RAN:
+        return
+    if os.environ.get(_VTK_PATCH_FLAG, "").lower() in {"1", "true", "yes"}:
+        _VTK_PATCH_RAN = True
+        return
+
+    os.environ.setdefault("VTK_PYTHON_ALLOW_DUPLICATE_LIBS", "1")
+    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
+
+    try:
+        spec = importlib.util.find_spec("vtkmodules")
+        if not spec or not spec.submodule_search_locations:
+            _VTK_PATCH_RAN = True
+            return
+        base_path = Path(next(iter(spec.submodule_search_locations)))
+        dylib_dir = base_path / ".dylibs"
+        if not dylib_dir.is_dir():
+            _VTK_PATCH_RAN = True
+            return
+    except Exception:
+        _VTK_PATCH_RAN = True
+        return
+
+    duplicates = [
+        "libvtkRenderingUI",
+        "libvtkRenderingOpenGL2",
+    ]
+    for base_name in duplicates:
+        canonical = dylib_dir / f"{base_name}.dylib"
+        numbered = sorted(dylib_dir.glob(f"{base_name}-*.dylib"))
+        if canonical.exists() and numbered:
+            disabled = canonical.with_suffix(canonical.suffix + ".disabled")
+            try:
+                canonical.rename(disabled)
+            except OSError:
+                try:
+                    canonical.unlink()
+                except OSError:
+                    pass
+
+    try:
+        importlib.import_module("vtkmodules.vtkRenderingOpenGL2")
+    except Exception:
+        pass
+
+    _VTK_PATCH_RAN = True
 
 SceneFactory = Callable[[], object]
 
@@ -114,13 +170,7 @@ class PyVistaPreviewer:
                 return
 
             self.console.print(f"[yellow]Reloading {model_path}…[/yellow]")
-            try:
-                datasets = self._collect_datasets(scene_factory())
-            except Exception as exc:  # pragma: no cover - surfaced via console
-                panel = Panel.fit(str(exc), title="Reload failed", style="red")
-                self.console.print(panel)
-                return
-
+            datasets = self.collect_datasets(scene_factory())
             self._apply_scene(
                 plotter,
                 datasets,
@@ -134,7 +184,14 @@ class PyVistaPreviewer:
         interval_seconds = max(1.0 / max(target_fps, 1), 0.05)
         callback_cleanup = None
         if watch_files:
-            callback_cleanup = self._install_timer_callback(plotter, process_queue, interval_seconds)
+            def guarded_process_queue() -> None:
+                try:
+                    process_queue()
+                except Exception as exc:  # pragma: no cover - surfaced via console
+                    panel = Panel.fit(str(exc), title="Reload failed", style="red")
+                    self.console.print(panel)
+
+            callback_cleanup = self._install_timer_callback(plotter, guarded_process_queue, interval_seconds)
 
         try:
             plotter.show(title="Impression Preview", auto_close=False)
@@ -148,6 +205,7 @@ class PyVistaPreviewer:
 
     def _ensure_backend(self):
         if self._pv is None:
+            _prepare_vtk_runtime()
             try:
                 import pyvista as pv
             except ImportError as exc:  # pragma: no cover - runtime dep

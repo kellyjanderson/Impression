@@ -20,7 +20,8 @@
       {
         "command": "impression.previewModel",
         "title": "Impression: Preview Model",
-        "category": "Impression"
+        "category": "Impression",
+        "icon": "$(run)"
       },
       {
         "command": "impression.exportStl",
@@ -32,7 +33,16 @@
         "title": "Impression: Run Preview Tests",
         "category": "Impression"
       }
-    ]
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "impression.previewModel",
+          "group": "navigation@10",
+          "when": "resourceExtname == .py"
+        }
+      ]
+    }
   },
   "main": "extension.js",
   "scripts": {

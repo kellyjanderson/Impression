@@ -7,11 +7,19 @@ const cp = require('child_process');
 const REPO_URL = 'https://github.com/kellyjanderson/Impression.git';
 const DOCS_URL = 'https://github.com/kellyjanderson/Impression#getting-started';
 const INSTALL_FOLDER = path.join(os.homedir(), '.impression-cli');
+const IMPRESSION_HOME = path.join(os.homedir(), '.impression');
+const ENV_FILE = path.join(IMPRESSION_HOME, 'env');
+const SOURCE_LINE = 'source ~/.impression/env # Impression\n';
+const RC_FILES = ['.zshrc', '.bashrc', '.bash_profile'];
+const PYTHON_STATE_KEY = 'impression.pythonPath';
 
 let cachedPythonPath = null;
 const installerChannel = vscode.window.createOutputChannel('Impression Installer');
+let extensionContext;
 
 function activate(context) {
+  extensionContext = context;
+  hydrateCachedPython();
   context.subscriptions.push(
     vscode.commands.registerCommand('impression.previewModel', () => previewModel()),
     vscode.commands.registerCommand('impression.exportStl', () => exportStl()),
@@ -22,7 +30,7 @@ function activate(context) {
 function deactivate() {}
 
 async function previewModel() {
-  const modelPath = await pickModelFile();
+  const modelPath = await resolveModelPath();
   if (!modelPath) {
     return;
   }
@@ -34,7 +42,7 @@ async function previewModel() {
 }
 
 async function exportStl() {
-  const modelPath = await pickModelFile();
+  const modelPath = await resolveModelPath();
   if (!modelPath) {
     return;
   }
@@ -82,14 +90,43 @@ function runInTerminal(command) {
   terminal.sendText(command);
 }
 
+async function resolveModelPath() {
+  const active = getActiveEditorPath();
+  if (active) {
+    return active;
+  }
+  return await pickModelFile();
+}
+
+function getActiveEditorPath() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    return null;
+  }
+  const document = editor.document;
+  if (document.isUntitled || document.uri.scheme !== 'file') {
+    return null;
+  }
+  if (document.languageId !== 'python' && !document.fileName.endsWith('.py')) {
+    return null;
+  }
+  return document.uri.fsPath;
+}
+
 async function ensurePythonPath() {
   if (cachedPythonPath) {
-    return cachedPythonPath;
+    if (await fileExists(cachedPythonPath)) {
+      return cachedPythonPath;
+    }
+    cachedPythonPath = null;
+    if (extensionContext) {
+      extensionContext.globalState.update(PYTHON_STATE_KEY, undefined);
+    }
   }
 
   const resolved = await resolvePythonPath();
   if (resolved) {
-    cachedPythonPath = resolved;
+    rememberPythonPath(resolved);
     return resolved;
   }
 
@@ -103,7 +140,7 @@ async function ensurePythonPath() {
   if (selection === 'Install Impression') {
     try {
       const python = await installImpression();
-      cachedPythonPath = python;
+      rememberPythonPath(python);
       vscode.window.showInformationMessage('Impression installed. You can now run previews.');
       return python;
     } catch (error) {
@@ -125,9 +162,9 @@ async function resolvePythonPath() {
     return fromEnv;
   }
 
-  const workspacePython = await findWorkspacePython();
-  if (workspacePython && (await pythonHasImpression(workspacePython))) {
-    return workspacePython;
+  const fromEnvFile = await pythonFromEnvFile();
+  if (fromEnvFile) {
+    return fromEnvFile;
   }
 
   const shebangPython = await pythonFromShebang();
@@ -135,33 +172,12 @@ async function resolvePythonPath() {
     return shebangPython;
   }
 
-  return null;
-}
+  const stored = extensionContext?.globalState.get(PYTHON_STATE_KEY);
+  if (stored && (await fileExists(stored))) {
+    return stored;
+  }
 
-async function findWorkspacePython() {
-  const folder = vscode.workspace.workspaceFolders?.[0];
-  if (!folder) {
-    return null;
-  }
-  const root = folder.uri.fsPath;
-  const candidates = process.platform === 'win32'
-    ? [path.join(root, '.venv', 'Scripts', 'python.exe')]
-    : [path.join(root, '.venv', 'bin', 'python')];
-  for (const candidate of candidates) {
-    if (await fileExists(candidate)) {
-      return candidate;
-    }
-  }
   return null;
-}
-
-async function pythonHasImpression(pythonPath) {
-  try {
-    cp.execFileSync(pythonPath, ['-c', 'import impression'], { stdio: 'ignore' });
-    return true;
-  } catch (error) {
-    return false;
-  }
 }
 
 async function pythonFromShebang() {
@@ -185,6 +201,21 @@ async function pythonFromShebang() {
   return null;
 }
 
+async function pythonFromEnvFile() {
+  try {
+    const contents = await fs.promises.readFile(ENV_FILE, 'utf8');
+    const match = contents.match(/IMPRESSION_PY="([^"]+)"/);
+    if (match && (await fileExists(match[1]))) {
+      return match[1];
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      installerChannel.appendLine(`Unable to read ${ENV_FILE}: ${error.message}`);
+    }
+  }
+  return null;
+}
+
 async function installImpression() {
   return vscode.window.withProgress(
     {
@@ -203,7 +234,9 @@ async function installImpression() {
       }
       await runCommand(pythonBin, ['-m', 'pip', 'install', '--upgrade', 'pip'], { cwd: INSTALL_FOLDER });
       await runCommand(pythonBin, ['-m', 'pip', 'install', '-e', '.'], { cwd: INSTALL_FOLDER });
-      process.env.IMPRESSION_PY = pythonBin;
+      await updateShellIntegration(pythonBin);
+      rememberPythonPath(pythonBin);
+      promptReloadNotice();
       return pythonBin;
     }
   );
@@ -257,6 +290,71 @@ function runCommand(command, args = [], options = {}) {
       }
     });
   });
+}
+
+async function updateShellIntegration(pythonPath) {
+  try {
+    await fs.promises.mkdir(IMPRESSION_HOME, { recursive: true });
+    const exportLine = `export IMPRESSION_PY="${pythonPath}"\n`;
+    await fs.promises.writeFile(ENV_FILE, exportLine, 'utf8');
+    await ensureRcIncludesSource();
+  } catch (error) {
+    installerChannel.appendLine(`Failed to update ~/.impression/env: ${error.message}`);
+  }
+}
+
+async function ensureRcIncludesSource() {
+  await Promise.all(
+    RC_FILES.map(async (file) => {
+      const rcPath = path.join(os.homedir(), file);
+      try {
+        const content = await fs.promises.readFile(rcPath, 'utf8');
+        if (content.includes(SOURCE_LINE.trim())) {
+          return;
+        }
+        await fs.promises.appendFile(rcPath, `\n# Added by Impression\n${SOURCE_LINE}`);
+      } catch (error) {
+        if (error.code !== 'ENOENT') {
+          installerChannel.appendLine(`Skipping ${rcPath}: ${error.message}`);
+        }
+      }
+    })
+  );
+}
+
+function promptReloadNotice() {
+  vscode.window
+    .showInformationMessage(
+      'Impression installed. Reload VS Code to ensure the new interpreter is detected?',
+      'Reload Window',
+      'Later'
+    )
+    .then((selection) => {
+      if (selection === 'Reload Window') {
+        vscode.commands.executeCommand('workbench.action.reloadWindow');
+      }
+    });
+}
+
+function hydrateCachedPython() {
+  const envPath = process.env.IMPRESSION_PY;
+  if (envPath) {
+    cachedPythonPath = envPath;
+    return;
+  }
+  const stored = extensionContext?.globalState.get(PYTHON_STATE_KEY);
+  if (stored) {
+    cachedPythonPath = stored;
+    process.env.IMPRESSION_PY = stored;
+  }
+}
+
+function rememberPythonPath(pythonPath) {
+  cachedPythonPath = pythonPath;
+  process.env.IMPRESSION_PY = pythonPath;
+  if (extensionContext) {
+    extensionContext.globalState.update(PYTHON_STATE_KEY, pythonPath);
+  }
 }
 
 function getWorkspaceFolder() {
