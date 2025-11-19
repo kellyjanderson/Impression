@@ -176,7 +176,7 @@ class PyVistaPreviewer:
                 datasets,
                 show_edges=show_edges,
                 face_edges=face_edges,
-                align_camera=True,
+                align_camera=False,
             )
             plotter.render()
             self.console.print(f"[green]Reloaded {model_path}[/green]")
