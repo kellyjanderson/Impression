@@ -53,15 +53,13 @@ def _prepare_vtk_runtime() -> None:
     for base_name in duplicates:
         canonical = dylib_dir / f"{base_name}.dylib"
         numbered = sorted(dylib_dir.glob(f"{base_name}-*.dylib"))
-        if canonical.exists() and numbered:
-            disabled = canonical.with_suffix(canonical.suffix + ".disabled")
+        if not canonical.exists() and numbered:
+            # If the canonical filename is missing but numbered variants exist,
+            # create a symlink so dlopen resolves the expected name.
             try:
-                canonical.rename(disabled)
+                canonical.symlink_to(numbered[-1].name)
             except OSError:
-                try:
-                    canonical.unlink()
-                except OSError:
-                    pass
+                pass
 
     try:
         importlib.import_module("vtkmodules.vtkRenderingOpenGL2")
