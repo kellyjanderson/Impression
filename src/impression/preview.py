@@ -14,6 +14,7 @@ from rich.console import Console
 from rich.panel import Panel
 from watchfiles import Change, watch
 
+from impression._config import UnitSettings, get_unit_settings
 from impression.modeling._color import COLOR_CELL_DATA, get_mesh_color
 
 _VTK_PATCH_FLAG = "IMPRESSION_SKIP_VTK_PATCHES"
@@ -110,9 +111,10 @@ def _collect_datasets_from_scene(scene: object, pv_module) -> List[object]:
 class PyVistaPreviewer:
     """Render scenes using PyVista and provide optional hot reload support."""
 
-    def __init__(self, console: Console):
+    def __init__(self, console: Console, unit_settings: UnitSettings | None = None):
         self.console = console
         self._pv = None
+        self._unit_settings = unit_settings or get_unit_settings()
 
     def show(
         self,
@@ -222,6 +224,18 @@ class PyVistaPreviewer:
         pv = self._ensure_backend()
         return _collect_datasets_from_scene(scene, pv)
 
+    @property
+    def unit_name(self) -> str:
+        return self._unit_settings.name
+
+    @property
+    def unit_label(self) -> str:
+        return self._unit_settings.label
+
+    @property
+    def unit_scale_to_mm(self) -> float:
+        return self._unit_settings.scale_to_mm
+
     def combine_to_polydata(self, datasets: Iterable[object]):
         """Return a single PolyData mesh representing the collection."""
 
@@ -249,7 +263,7 @@ class PyVistaPreviewer:
         plotter.set_background("#090c10", top="#1b2333")
         plotter.enable_eye_dome_lighting()
         plotter.add_axes(interactive=True)
-        plotter.show_bounds(grid="front", color="#5a677d")
+        self._show_bounds_with_units(plotter)
 
     def _apply_scene(
         self,
@@ -264,7 +278,7 @@ class PyVistaPreviewer:
         edge_color = "#cdd7ff"
         edge_angle = 60.0
         plotter.clear()
-        plotter.show_bounds(grid="front", color="#5a677d")
+        self._show_bounds_with_units(plotter)
         plotter.add_axes(interactive=True)
 
         for index, mesh in enumerate(datasets):
@@ -405,6 +419,17 @@ class PyVistaPreviewer:
                 pass
 
         return cleanup
+
+    def _show_bounds_with_units(self, plotter) -> None:
+        label = self._unit_settings.label
+        plotter.show_bounds(
+            grid="front",
+            color="#5a677d",
+            xlabel=f"X ({label})",
+            ylabel=f"Y ({label})",
+            zlabel=f"Z ({label})",
+        )
+
 
     def _watch_model_file(
         self,
