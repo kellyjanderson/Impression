@@ -42,10 +42,17 @@ def ensure_vtk_runtime() -> None:
     ]
     for base_name in duplicates:
         canonical = dylib_dir / f"{base_name}.dylib"
+        disabled = canonical.with_suffix(canonical.suffix + ".disabled")
         numbered = sorted(dylib_dir.glob(f"{base_name}-*.dylib"))
-        if not canonical.exists() and numbered:
-            # If the canonical filename is missing but numbered variants exist,
-            # create a symlink so dlopen resolves the expected name.
+        if canonical.exists():
+            continue
+        if disabled.exists():
+            try:
+                disabled.rename(canonical)
+                continue
+            except OSError:
+                pass
+        if numbered:
             try:
                 canonical.symlink_to(numbered[-1].name)
             except OSError:
