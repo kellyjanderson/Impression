@@ -67,6 +67,23 @@ def _scene_factory_from_module(model_path: pathlib.Path) -> Tuple[Callable[[], o
     return factory, initial_scene
 
 
+def _next_available_path(path: pathlib.Path) -> pathlib.Path:
+    """Return a non-conflicting path by appending ' (n)' before the suffix."""
+
+    if not path.exists():
+        return path
+
+    parent = path.parent
+    stem = path.stem
+    suffix = path.suffix
+    n = 1
+    while True:
+        candidate = parent / f"{stem} ({n}){suffix}"
+        if not candidate.exists():
+            return candidate
+        n += 1
+
+
 @app.command()
 def preview(
     model: pathlib.Path = typer.Argument(..., help="Path to a Python module that defines a model scene."),
@@ -139,10 +156,12 @@ def export(
     if not model.exists():
         raise typer.BadParameter(f"Model path {model} does not exist.")
 
-    if output.exists() and not overwrite:
-        raise typer.BadParameter(
-            f"Output path {output} already exists. Re-run with --overwrite to replace it."
-        )
+    final_output = output
+    if output.exists():
+        if not overwrite:
+            final_output = _next_available_path(output)
+            if final_output != output:
+                console.print(f"[yellow]Output {output} exists; writing to {final_output} instead.[/yellow]")
 
     try:
         _, initial_scene = _scene_factory_from_module(model)
@@ -157,9 +176,9 @@ def export(
     except PreviewBackendError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
-    output.parent.mkdir(parents=True, exist_ok=True)
+    final_output.parent.mkdir(parents=True, exist_ok=True)
     try:
-        merged.save(str(output), binary=not ascii)
+        merged.save(str(final_output), binary=not ascii)
     except Exception as exc:  # pragma: no cover - PyVista I/O failure
         raise typer.BadParameter(f"Failed to export STL: {exc}") from exc
 
@@ -167,7 +186,7 @@ def export(
     units_note = f"Units: {previewer.unit_name} ({previewer.unit_label})."
     console.print(
         Panel(
-            f"Wrote {mode} STL to [green]{output}[/green]. {units_note}",
+            f"Wrote {mode} STL to [green]{final_output}[/green]. {units_note}",
             title="Export complete",
             border_style="green",
         )

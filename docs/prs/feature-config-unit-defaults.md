@@ -8,6 +8,7 @@
 1. Document the config-driven units feature in the feature pipeline.
 2. Create `~/.impression/impression.cfg` automatically with a default `units` entry and guidance on valid values.
 3. Surface the configured units inside the CLI (preview/export) and label preview axes accordingly so users see which units are active end-to-end.
+4. During export, when overwrite is false and the target exists, write to a macOS-style incremented filename (e.g., `name (1).stl`) instead of failing.
 
 ## Testing
 - Manual: Not run (CLI + preview interactions require GUI runtime).
