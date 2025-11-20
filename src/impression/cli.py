@@ -23,6 +23,18 @@ class PreviewOptions:
     target_fps: int
 
 
+def _log_active_units(previewer: PyVistaPreviewer) -> None:
+    scale = previewer.unit_scale_to_mm
+    units = previewer.unit_name
+    label = previewer.unit_label
+    if abs(scale - 1.0) < 1e-9:
+        console.print(f"[magenta]Units: {units} ({label}).[/magenta]")
+    else:
+        console.print(
+            f"[magenta]Units: {units} ({label}); 1 {label} = {scale:.4g} mm.[/magenta]"
+        )
+
+
 def _load_module(path: pathlib.Path) -> ModuleType:
     module_name = "impression_user_model"
     if module_name in sys.modules:
@@ -92,6 +104,7 @@ def preview(
         console.print("[cyan]Watching for changes — save to hot reload, close the window to stop.[/cyan]")
 
     previewer = PyVistaPreviewer(console=console)
+    _log_active_units(previewer)
     try:
         previewer.show(
             scene_factory=scene_factory,
@@ -137,6 +150,7 @@ def export(
         raise typer.BadParameter(str(exc)) from exc
 
     previewer = PyVistaPreviewer(console=console)
+    _log_active_units(previewer)
     try:
         datasets = previewer.collect_datasets(initial_scene)
         merged = previewer.combine_to_polydata(datasets)
@@ -150,9 +164,10 @@ def export(
         raise typer.BadParameter(f"Failed to export STL: {exc}") from exc
 
     mode = "ASCII" if ascii else "binary"
+    units_note = f"Units: {previewer.unit_name} ({previewer.unit_label})."
     console.print(
         Panel(
-            f"Wrote {mode} STL to [green]{output}[/green].",
+            f"Wrote {mode} STL to [green]{output}[/green]. {units_note}",
             title="Export complete",
             border_style="green",
         )
