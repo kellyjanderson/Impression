@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from typing import Iterable, Literal
 
+from impression._vtk_runtime import ensure_vtk_runtime
+
+ensure_vtk_runtime()
+
 import numpy as np
 import pyvista as pv
 
