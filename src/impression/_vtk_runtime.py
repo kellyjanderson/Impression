@@ -43,18 +43,30 @@ def ensure_vtk_runtime() -> None:
     for base_name in duplicates:
         canonical = dylib_dir / f"{base_name}.dylib"
         disabled = canonical.with_suffix(canonical.suffix + ".disabled")
-        numbered = sorted(dylib_dir.glob(f"{base_name}-*.dylib"))
-        if canonical.exists():
-            continue
-        if disabled.exists():
+        numbered = sorted(dylib_dir.glob(f"{base_name}-*.dylib"), reverse=True)
+        primary = numbered[0] if numbered else None
+
+        # Restore any previously stashed original before altering links.
+        if canonical.is_symlink():
+            orig = canonical.with_suffix(canonical.suffix + ".orig")
+            if orig.exists():
+                try:
+                    canonical.unlink()
+                    orig.rename(canonical)
+                except OSError:
+                    pass
+
+        # Bring back a disabled canonical if present.
+        if not canonical.exists() and disabled.exists():
             try:
                 disabled.rename(canonical)
-                continue
             except OSError:
                 pass
-        if numbered:
+
+        # If we have a versioned library and no canonical, link to it.
+        if primary and not canonical.exists():
             try:
-                canonical.symlink_to(numbered[-1].name)
+                canonical.symlink_to(primary.name)
             except OSError:
                 pass
 
