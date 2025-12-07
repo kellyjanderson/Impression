@@ -5,7 +5,7 @@ import pathlib
 from dataclasses import dataclass
 from types import ModuleType
 import sys
-from typing import Callable, Tuple
+from typing import Callable
 
 import typer
 from rich.console import Console
@@ -55,7 +55,7 @@ class ModelBuildError(RuntimeError):
     """Raised when a model module cannot provide a usable scene."""
 
 
-def _scene_factory_from_module(model_path: pathlib.Path) -> Tuple[Callable[[], object], object]:
+def _scene_factory_from_module(model_path: pathlib.Path) -> Callable[[], object]:
     def factory() -> object:
         module = _load_module(model_path)
         builder = getattr(module, "build", None)
@@ -63,8 +63,7 @@ def _scene_factory_from_module(model_path: pathlib.Path) -> Tuple[Callable[[], o
             raise ModelBuildError(f"{model_path} must define a callable build() function.")
         return builder()
 
-    initial_scene = factory()
-    return factory, initial_scene
+    return factory
 
 
 def _next_available_path(path: pathlib.Path) -> pathlib.Path:
@@ -108,12 +107,16 @@ def preview(
 
     opts = PreviewOptions(watch=watch, target_fps=target_fps)
 
+    scene_factory = _scene_factory_from_module(model)
     try:
-        scene_factory, initial_scene = _scene_factory_from_module(model)
-    except ModelBuildError as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    except Exception as exc:  # pragma: no cover - surfaced to CLI users
-        raise typer.BadParameter(f"Model execution failed: {exc}") from exc
+        initial_scene = scene_factory()
+    except Exception as exc:
+        if opts.watch:
+            panel = Panel.fit(str(exc), title="Initial build failed — watching for changes", style="red")
+            console.print(panel)
+            initial_scene = None
+        else:
+            raise typer.BadParameter(f"Model execution failed: {exc}") from exc
 
     console.rule("Impression Preview")
     console.print(f"Using model [green]{model}[/green]")

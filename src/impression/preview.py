@@ -83,16 +83,27 @@ class PyVistaPreviewer:
         face_edges: bool = False,
     ) -> None:
         pv = self._ensure_backend()
-        datasets = self.collect_datasets(initial_scene)
+        datasets = []
+        if initial_scene is not None:
+            try:
+                datasets = self.collect_datasets(initial_scene)
+            except Exception as exc:
+                if watch_files:
+                    panel = Panel.fit(str(exc), title="Initial build failed — watching for changes", style="red")
+                    self.console.print(panel)
+                else:
+                    raise
+
         plotter = pv.Plotter(window_size=(1280, 800))
         self._configure_plotter(plotter)
-        self._apply_scene(
-            plotter,
-            datasets,
-            show_edges=show_edges,
-            face_edges=face_edges,
-            align_camera=True,
-        )
+        if datasets:
+            self._apply_scene(
+                plotter,
+                datasets,
+                show_edges=show_edges,
+                face_edges=face_edges,
+                align_camera=True,
+            )
 
         if screenshot_path is not None:
             screenshot_path.parent.mkdir(parents=True, exist_ok=True)
