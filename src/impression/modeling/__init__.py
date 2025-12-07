@@ -12,7 +12,7 @@ from .primitives import (
     make_torus,
 )
 from .text import make_text
-from .csg import boolean_union, boolean_difference, boolean_intersection
+from .csg import boolean_union, boolean_difference, boolean_intersection, union_meshes
 from .paths import Path
 from .group import MeshGroup, group
 
@@ -27,6 +27,7 @@ __all__ = [
     "boolean_union",
     "boolean_difference",
     "boolean_intersection",
+    "union_meshes",
     "Path",
     "MeshGroup",
     "group",

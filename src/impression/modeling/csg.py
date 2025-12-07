@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, Literal
+from typing import Iterable, Literal, Mapping, Union
 
 from impression.modeling.group import MeshGroup
 
@@ -24,15 +24,34 @@ def _check_mesh(mesh: pv.DataSet | MeshGroup) -> pv.PolyData:
         mesh = mesh.to_polydata()
     if not isinstance(mesh, pv.PolyData):
         mesh = mesh.cast_to_polydata()
-    mesh = mesh.triangulate().clean(inplace=False)
-    mesh = mesh.orient_faces(inplace=False)
-    mesh = mesh.compute_normals(
-        cell_normals=True,
-        point_normals=False,
-        auto_orient_normals=True,
-        consistent_normals=True,
-        inplace=False,
-    )
+    mesh = mesh.extract_geometry().triangulate()
+    mesh = mesh.clean(inplace=False)
+    if mesh.n_cells > 0 and hasattr(mesh, "orient_faces"):
+        mesh = mesh.orient_faces(inplace=False)
+    if mesh.n_cells > 0:
+        mesh = mesh.compute_normals(
+            cell_normals=True,
+            point_normals=False,
+            auto_orient_normals=True,
+            consistent_normals=True,
+            inplace=False,
+        )
+    return mesh
+
+
+def _finalize_mesh(mesh: pv.PolyData, tolerance: float) -> pv.PolyData:
+    mesh = mesh.extract_geometry().triangulate()
+    mesh = mesh.clean(tolerance=tolerance, inplace=False)
+    if mesh.n_cells > 0 and hasattr(mesh, "orient_faces"):
+        mesh = mesh.orient_faces(inplace=False)
+    if mesh.n_cells > 0:
+        mesh = mesh.compute_normals(
+            cell_normals=True,
+            point_normals=False,
+            auto_orient_normals=True,
+            consistent_normals=True,
+            inplace=False,
+        )
     return mesh
 
 
@@ -52,14 +71,7 @@ def boolean_union(
     result = sources[0]
     for mesh in sources[1:]:
         result = result.boolean_union(mesh, tolerance=tolerance)
-    result = result.clean(tolerance=tolerance)
-    result = result.compute_normals(
-        cell_normals=True,
-        point_normals=False,
-        auto_orient_normals=True,
-        consistent_normals=True,
-        inplace=False,
-    )
+    result = _finalize_mesh(result, tolerance)
     _assign_boolean_colors("union", result, sources)
     return result
 
@@ -75,14 +87,7 @@ def boolean_difference(
     result = sources[0]
     for mesh in sources[1:]:
         result = result.boolean_difference(mesh, tolerance=tolerance)
-    result = result.clean(tolerance=tolerance)
-    result = result.compute_normals(
-        cell_normals=True,
-        point_normals=False,
-        auto_orient_normals=True,
-        consistent_normals=True,
-        inplace=False,
-    )
+    result = _finalize_mesh(result, tolerance)
     _assign_boolean_colors("difference", result, sources)
     return result
 
@@ -101,14 +106,7 @@ def boolean_intersection(
 
     for mesh in sources[1:]:
         result = result.boolean_intersection(mesh, tolerance=tolerance)
-    result = result.clean(tolerance=tolerance)
-    result = result.compute_normals(
-        cell_normals=True,
-        point_normals=False,
-        auto_orient_normals=True,
-        consistent_normals=True,
-        inplace=False,
-    )
+    result = _finalize_mesh(result, tolerance)
     _assign_boolean_colors("intersection", result, sources)
     return result
 
@@ -161,3 +159,16 @@ def _implicit_distance(mesh: pv.PolyData, points: np.ndarray) -> np.ndarray:
     func.SetInput(mesh)
     distances = [func.EvaluateFunction(point) for point in points]
     return np.array(distances, dtype=float)
+
+
+
+def union_meshes(
+    meshes: Union[Iterable[pv.DataSet], Mapping[object, pv.DataSet]],
+    tolerance: float = 1e-4,
+    backend: BooleanBackend = "mesh",
+) -> pv.PolyData:
+    """Convenience wrapper around boolean_union that accepts an iterable or mapping."""
+
+    if isinstance(meshes, Mapping):
+        meshes = meshes.values()
+    return boolean_union(meshes, tolerance=tolerance, backend=backend)
