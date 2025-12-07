@@ -41,6 +41,7 @@ def make_cylinder(
     center: Sequence[float] = (0.0, 0.0, 0.0),
     direction: Sequence[float] = (0.0, 0.0, 1.0),
     resolution: int = 128,
+    capping: bool = True,
     backend: Backend = "mesh",
     color: Sequence[float] | str | None = None,
 ) -> pv.PolyData:
@@ -54,6 +55,7 @@ def make_cylinder(
         radius=radius,
         height=height,
         resolution=resolution,
+        capping=capping,
     )
     mesh = mesh.triangulate()
     if color is not None:
