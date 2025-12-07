@@ -14,6 +14,7 @@ from .primitives import (
 from .text import make_text
 from .csg import boolean_union, boolean_difference, boolean_intersection
 from .paths import Path
+from .group import MeshGroup, group
 
 __all__ = [
     "make_box",
@@ -27,6 +28,8 @@ __all__ = [
     "boolean_difference",
     "boolean_intersection",
     "Path",
+    "MeshGroup",
+    "group",
     "rotate",
     "translate",
 ]

@@ -21,6 +21,7 @@ def _check_mesh(mesh: pv.DataSet) -> pv.PolyData:
     if not isinstance(mesh, pv.PolyData):
         mesh = mesh.cast_to_polydata()
     mesh = mesh.triangulate().clean(inplace=False)
+    mesh = mesh.orient_faces(inplace=False)
     mesh = mesh.compute_normals(
         cell_normals=True,
         point_normals=False,
