@@ -7,11 +7,10 @@ import pyvista as pv
 
 
 def translate(mesh: pv.DataSet, offset: Sequence[float]) -> pv.DataSet:
-    """Return a translated copy of the mesh."""
+    """Translate the mesh in-place and return it."""
     vec = np.asarray(offset, dtype=float).reshape(3)
-    shifted = mesh.copy()
-    shifted.translate(vec, inplace=True)
-    return shifted
+    mesh.translate(vec, inplace=True)
+    return mesh
 
 
 def rotate(
@@ -20,7 +19,7 @@ def rotate(
     angle_deg: float,
     origin: Sequence[float] = (0.0, 0.0, 0.0),
 ) -> pv.DataSet:
-    """Return a rotated copy of the mesh around an arbitrary axis."""
+    """Rotate the mesh in-place around an arbitrary axis and return it."""
     axis_vec = np.asarray(axis, dtype=float).reshape(3)
     norm = np.linalg.norm(axis_vec)
     if norm == 0:
@@ -28,6 +27,5 @@ def rotate(
     axis_vec = axis_vec / norm
     center = np.asarray(origin, dtype=float).reshape(3)
 
-    rotated = mesh.copy()
-    rotated.rotate_vector(axis_vec, angle_deg, point=tuple(center), inplace=True)
-    return rotated
+    mesh.rotate_vector(axis_vec, angle_deg, point=tuple(center), inplace=True)
+    return mesh

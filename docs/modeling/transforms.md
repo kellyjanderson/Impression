@@ -7,7 +7,7 @@ Impression includes lightweight helpers to move and orient meshes after you crea
 - `translate(mesh, offset)` — returns a copy shifted by `(dx, dy, dz)`.
 - `rotate(mesh, axis, angle_deg, origin=(0,0,0))` — returns a copy rotated `angle_deg` degrees about an arbitrary axis that passes through `origin`.
 
-Both helpers accept any PyVista dataset and leave the input mesh unchanged.
+Both helpers mutate the mesh you pass in and return it; call .copy() first if you need to preserve an original.
 
 ## Example
 
@@ -17,8 +17,8 @@ from impression.modeling import make_box, translate, rotate
 
 def build():
     base = make_box(size=(0.8, 0.8, 0.4), center=(0.0, 0.0, 0.2), color="#5A7BFF")
-    shifted = translate(base, (1.2, 0.0, 0.0))
-    turned = rotate(base, axis=(0.0, 0.0, 1.0), angle_deg=45.0)
+    shifted = translate(base.copy(), (1.2, 0.0, 0.0))
+    turned = rotate(base.copy(), axis=(0.0, 0.0, 1.0), angle_deg=45.0)
     return [base, shifted, turned]
 ```
 
