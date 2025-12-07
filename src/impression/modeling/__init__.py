@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .transform import rotate, translate
 from .primitives import (
     make_box,
     make_cone,
@@ -26,4 +27,6 @@ __all__ = [
     "boolean_difference",
     "boolean_intersection",
     "Path",
+    "rotate",
+    "translate",
 ]

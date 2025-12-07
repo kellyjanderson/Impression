@@ -16,6 +16,7 @@ Impression is a parametric modeling toolkit that mixes Python, PyVista rendering
   - [Paths](modeling/paths.md) — polyline/spline utilities for sweeps and visualization.
   - [Text](modeling/text.md) — extruded or flat glyphs (including emoji) with full color support.
   - [Drafting Helpers](modeling/drafting.md) — lines, planes, arrows, and dimensions for 2.5D annotations.
+  - [Transforms](modeling/transforms.md) — rotate and translate meshes after creation.
 - CLI Reference:
   - [Command-line usage](cli.md) — options, environment variables, and automation tips.
 - VS Code:
