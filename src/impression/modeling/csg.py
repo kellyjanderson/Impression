@@ -71,6 +71,8 @@ def boolean_union(
     result = sources[0]
     for mesh in sources[1:]:
         result = result.boolean_union(mesh, tolerance=tolerance)
+        result = _finalize_mesh(result, tolerance)
+    # already finalized in-loop; ensure last pass still valid
     result = _finalize_mesh(result, tolerance)
     _assign_boolean_colors("union", result, sources)
     return result
@@ -87,6 +89,7 @@ def boolean_difference(
     result = sources[0]
     for mesh in sources[1:]:
         result = result.boolean_difference(mesh, tolerance=tolerance)
+        result = _finalize_mesh(result, tolerance)
     result = _finalize_mesh(result, tolerance)
     _assign_boolean_colors("difference", result, sources)
     return result
@@ -106,6 +109,7 @@ def boolean_intersection(
 
     for mesh in sources[1:]:
         result = result.boolean_intersection(mesh, tolerance=tolerance)
+        result = _finalize_mesh(result, tolerance)
     result = _finalize_mesh(result, tolerance)
     _assign_boolean_colors("intersection", result, sources)
     return result
