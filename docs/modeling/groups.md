@@ -8,7 +8,7 @@ Groups let you manipulate several meshes together without baking them into a sin
 - `MeshGroup.translate(offset)` — move all children
 - `MeshGroup.rotate(axis, angle_deg, origin=(0,0,0))` — rotate all children about an axis
 - `MeshGroup.scale((sx, sy, sz))` — scale all children
-- `MeshGroup.to_multiblock()` — returns a `pv.MultiBlock` (keeps child colors, ideal for preview)
+- `MeshGroup.to_multiblock()` — returns itself or a `pv.MultiBlock` (keeps child colors, ideal for preview)
 - `MeshGroup.to_polydata()` — merges and triangulates into one mesh (for export/CSG)
 
 All transforms are cumulative and non-destructive to the original meshes.
@@ -29,4 +29,5 @@ Preview it:
 ```bash
 impression preview docs/examples/groups/group_example.py
 ```
+You can return a `MeshGroup` directly from `build()`: the previewer will expand it.
 If you need a single mesh (e.g., for STL), call `grp.to_polydata()` and save it or pass it into your CSG helpers.

@@ -17,6 +17,7 @@ from watchfiles import Change, watch
 from impression._config import UnitSettings, get_unit_settings
 from impression._vtk_runtime import ensure_vtk_runtime
 from impression.modeling._color import COLOR_CELL_DATA, get_mesh_color
+from impression.modeling.group import MeshGroup
 
 
 
@@ -37,6 +38,10 @@ def _collect_datasets_from_scene(scene: object, pv_module) -> List[object]:
 
     def visit(item: object) -> None:
         if item is None:
+            return
+
+        if isinstance(item, MeshGroup):
+            visit(item.to_multiblock())
             return
 
         if isinstance(item, pv_module.MultiBlock):

@@ -14,7 +14,7 @@ def build():
     grp = group([box, cyl])
     grp.translate((0.5, 0.0, 0.2))
     grp.rotate(axis=(0, 0, 1), angle_deg=30)
-    return grp.to_multiblock()
+    return grp
 
 
 if __name__ == "__main__":

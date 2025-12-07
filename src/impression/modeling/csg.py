@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Iterable, Literal
 
+from impression.modeling.group import MeshGroup
+
 from impression._vtk_runtime import ensure_vtk_runtime
 
 ensure_vtk_runtime()
@@ -17,7 +19,9 @@ from ._color import get_mesh_color, get_mesh_rgba, set_cell_colors, set_mesh_col
 BooleanBackend = Literal["mesh"]
 
 
-def _check_mesh(mesh: pv.DataSet) -> pv.PolyData:
+def _check_mesh(mesh: pv.DataSet | MeshGroup) -> pv.PolyData:
+    if isinstance(mesh, MeshGroup):
+        mesh = mesh.to_polydata()
     if not isinstance(mesh, pv.PolyData):
         mesh = mesh.cast_to_polydata()
     mesh = mesh.triangulate().clean(inplace=False)
