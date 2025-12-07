@@ -6,6 +6,7 @@ import threading
 import math
 import importlib
 import importlib.util
+import traceback
 from pathlib import Path
 from typing import Callable, Iterable, List
 
@@ -31,6 +32,11 @@ SceneFactory = Callable[[], object]
 
 class PreviewBackendError(RuntimeError):
     """Raised when a preview backend cannot run."""
+
+
+def _format_exception(exc: BaseException) -> str:
+    """Return a formatted traceback string for display."""
+    return "".join(traceback.format_exception(exc))
 
 
 def _collect_datasets_from_scene(scene: object, pv_module) -> List[object]:
@@ -94,7 +100,7 @@ class PyVistaPreviewer:
                 datasets = self.collect_datasets(initial_scene)
             except Exception as exc:
                 if watch_files:
-                    panel = Panel.fit(str(exc), title="Initial build failed — watching for changes", style="red")
+                    panel = Panel.fit(_format_exception(exc), title="Initial build failed — watching for changes", style="red")
                     self.console.print(panel)
                 else:
                     raise
@@ -161,7 +167,7 @@ class PyVistaPreviewer:
                 try:
                     process_queue()
                 except Exception as exc:  # pragma: no cover - surfaced via console
-                    panel = Panel.fit(str(exc), title="Reload failed", style="red")
+                    panel = Panel.fit(_format_exception(exc), title="Reload failed", style="red")
                     self.console.print(panel)
 
             callback_cleanup = self._install_timer_callback(plotter, guarded_process_queue, interval_seconds)

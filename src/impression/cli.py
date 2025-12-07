@@ -112,7 +112,7 @@ def preview(
         initial_scene = scene_factory()
     except Exception as exc:
         if opts.watch:
-            panel = Panel.fit(str(exc), title="Initial build failed — watching for changes", style="red")
+            panel = Panel.fit(_format_exception(exc), title="Initial build failed — watching for changes", style="red")
             console.print(panel)
             initial_scene = None
         else:
