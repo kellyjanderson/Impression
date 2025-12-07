@@ -71,6 +71,10 @@ CASES = [
         "module": "docs/examples/csg/union_example.py",
     },
     {
+        "name": "csg-union-mapping",
+        "module": "docs/examples/csg/union_meshes_example.py",
+    },
+    {
         "name": "csg-difference",
         "module": "docs/examples/csg/difference_example.py",
     },

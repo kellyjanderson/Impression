@@ -5,6 +5,7 @@ import pathlib
 from dataclasses import dataclass
 from types import ModuleType
 import sys
+import traceback
 from typing import Callable
 
 import typer
@@ -53,6 +54,10 @@ def _load_module(path: pathlib.Path) -> ModuleType:
 
 class ModelBuildError(RuntimeError):
     """Raised when a model module cannot provide a usable scene."""
+
+
+def _format_exception(exc: BaseException) -> str:
+    return "".join(traceback.format_exception(exc))
 
 
 def _scene_factory_from_module(model_path: pathlib.Path) -> Callable[[], object]:

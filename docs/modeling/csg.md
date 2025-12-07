@@ -3,7 +3,7 @@
 Imported from `impression.modeling`:
 
 ```python
-from impression.modeling import boolean_union, boolean_difference, boolean_intersection
+from impression.modeling import boolean_union, boolean_difference, boolean_intersection, union_meshes
 ```
 
 Booleans are color-aware: each source mesh can carry per-object color and the resulting faces inherit the color of the geometry they originated from (difference faces pick up the cutter color, intersections respect the nearest source, etc.).
@@ -27,6 +27,19 @@ def build():
 ```
 
 ![Union CSG](../assets/previews/csg-union.png)
+
+You can also union a collection directly with `union_meshes`, which accepts either an iterable or a mapping (e.g., dict) of meshes:
+
+```python
+from impression.modeling import make_box, make_cylinder, union_meshes
+
+def build():
+    a = make_box(size=(2, 2, 1), color="#5A7BFF")
+    b = make_cylinder(radius=0.8, height=1.5, color="#FF7A18")
+    return union_meshes({"box": a, "cyl": b})
+```
+
+Example: `docs/examples/csg/union_meshes_example.py`
 
 ## boolean_difference(base, cutters, tolerance=1e-5)
 - Subtract one or more cutter meshes from `base`.

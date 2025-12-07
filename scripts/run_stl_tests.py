@@ -28,6 +28,10 @@ CASES = [
         "module": "docs/examples/csg/difference_example.py",
     },
     {
+        "name": "stl-csg-union-mapping",
+        "module": "docs/examples/csg/union_meshes_example.py",
+    },
+    {
         "name": "stl-text-emoji",
         "module": "docs/examples/text/text_emoji.py",
     },
