@@ -20,12 +20,20 @@ BooleanBackend = Literal["mesh"]
 def _check_mesh(mesh: pv.DataSet) -> pv.PolyData:
     if not isinstance(mesh, pv.PolyData):
         mesh = mesh.cast_to_polydata()
-    return mesh.triangulate().clean()
+    mesh = mesh.triangulate().clean(inplace=False)
+    mesh = mesh.compute_normals(
+        cell_normals=True,
+        point_normals=False,
+        auto_orient_normals=True,
+        inplace=False,
+        splitting=False,
+    )
+    return mesh
 
 
 def boolean_union(
     meshes: Iterable[pv.DataSet],
-    tolerance: float = 1e-5,
+    tolerance: float = 1e-4,
     backend: BooleanBackend = "mesh",
 ) -> pv.PolyData:
     _ensure_backend(backend)
@@ -39,7 +47,14 @@ def boolean_union(
     result = sources[0]
     for mesh in sources[1:]:
         result = result.boolean_union(mesh, tolerance=tolerance)
-    result = result.clean()
+    result = result.clean(tolerance=tolerance)
+    result = result.compute_normals(
+        cell_normals=True,
+        point_normals=False,
+        auto_orient_normals=True,
+        inplace=False,
+        splitting=False,
+    )
     _assign_boolean_colors("union", result, sources)
     return result
 
@@ -47,7 +62,7 @@ def boolean_union(
 def boolean_difference(
     base: pv.DataSet,
     cutters: Iterable[pv.DataSet],
-    tolerance: float = 1e-5,
+    tolerance: float = 1e-4,
     backend: BooleanBackend = "mesh",
 ) -> pv.PolyData:
     _ensure_backend(backend)
@@ -55,14 +70,21 @@ def boolean_difference(
     result = sources[0]
     for mesh in sources[1:]:
         result = result.boolean_difference(mesh, tolerance=tolerance)
-    result = result.clean()
+    result = result.clean(tolerance=tolerance)
+    result = result.compute_normals(
+        cell_normals=True,
+        point_normals=False,
+        auto_orient_normals=True,
+        inplace=False,
+        splitting=False,
+    )
     _assign_boolean_colors("difference", result, sources)
     return result
 
 
 def boolean_intersection(
     meshes: Iterable[pv.DataSet],
-    tolerance: float = 1e-5,
+    tolerance: float = 1e-4,
     backend: BooleanBackend = "mesh",
 ) -> pv.PolyData:
     _ensure_backend(backend)
@@ -74,7 +96,14 @@ def boolean_intersection(
 
     for mesh in sources[1:]:
         result = result.boolean_intersection(mesh, tolerance=tolerance)
-    result = result.clean()
+    result = result.clean(tolerance=tolerance)
+    result = result.compute_normals(
+        cell_normals=True,
+        point_normals=False,
+        auto_orient_normals=True,
+        inplace=False,
+        splitting=False,
+    )
     _assign_boolean_colors("intersection", result, sources)
     return result
 
