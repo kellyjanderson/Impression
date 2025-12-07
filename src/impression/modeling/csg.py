@@ -25,8 +25,8 @@ def _check_mesh(mesh: pv.DataSet) -> pv.PolyData:
         cell_normals=True,
         point_normals=False,
         auto_orient_normals=True,
+        consistent_normals=True,
         inplace=False,
-        splitting=False,
     )
     return mesh
 
@@ -52,8 +52,8 @@ def boolean_union(
         cell_normals=True,
         point_normals=False,
         auto_orient_normals=True,
+        consistent_normals=True,
         inplace=False,
-        splitting=False,
     )
     _assign_boolean_colors("union", result, sources)
     return result
@@ -75,8 +75,8 @@ def boolean_difference(
         cell_normals=True,
         point_normals=False,
         auto_orient_normals=True,
+        consistent_normals=True,
         inplace=False,
-        splitting=False,
     )
     _assign_boolean_colors("difference", result, sources)
     return result
@@ -101,8 +101,8 @@ def boolean_intersection(
         cell_normals=True,
         point_normals=False,
         auto_orient_normals=True,
+        consistent_normals=True,
         inplace=False,
-        splitting=False,
     )
     _assign_boolean_colors("intersection", result, sources)
     return result
