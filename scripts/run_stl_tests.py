@@ -32,6 +32,10 @@ CASES = [
         "module": "docs/examples/csg/union_meshes_example.py",
     },
     {
+        "name": "stl-csg-union-teeth",
+        "module": "docs/examples/csg/teeth_union_example.py",
+    },
+    {
         "name": "stl-text-emoji",
         "module": "docs/examples/text/text_emoji.py",
     },
