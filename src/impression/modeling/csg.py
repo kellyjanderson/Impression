@@ -70,8 +70,13 @@ def boolean_union(
     sources = [first] + [_check_mesh(mesh) for mesh in iterator]
     result = sources[0]
     for mesh in sources[1:]:
-        result = result.boolean_union(mesh, tolerance=tolerance)
-        result = _finalize_mesh(result, tolerance)
+        try:
+            candidate = result.boolean_union(mesh, tolerance=tolerance)
+            result = _finalize_mesh(candidate, tolerance)
+        except Exception:
+            # Fallback: append geometry and clean if VTK union fails (e.g., disjoint solids)
+            combined = pv.append_polydata([result, mesh])
+            result = _finalize_mesh(combined, tolerance)
     # already finalized in-loop; ensure last pass still valid
     result = _finalize_mesh(result, tolerance)
     _assign_boolean_colors("union", result, sources)
