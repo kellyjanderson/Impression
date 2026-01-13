@@ -15,6 +15,7 @@ dist/preview-tests/
 # IDE
 .idea/
 .vscode/
+.DS_Store
 
 # Node packages
 node_modules/
