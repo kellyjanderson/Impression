@@ -4,9 +4,8 @@ import os
 import queue
 import threading
 import math
-import importlib
-import importlib.util
 import traceback
+import sys
 from pathlib import Path
 from typing import Callable, Iterable, List
 
@@ -17,7 +16,8 @@ from watchfiles import Change, watch
 
 from impression._config import UnitSettings, get_unit_settings
 from impression._vtk_runtime import ensure_vtk_runtime
-from impression.modeling._color import COLOR_CELL_DATA, get_mesh_color
+from impression.mesh import Mesh, Polyline, analyze_mesh, combine_meshes, mesh_to_pyvista
+from impression.modeling._color import get_mesh_color
 from impression.modeling.group import MeshGroup
 
 
@@ -34,28 +34,35 @@ class PreviewBackendError(RuntimeError):
     """Raised when a preview backend cannot run."""
 
 
+def _pyvista_safe_mode() -> bool:
+    value = os.environ.get("IMPRESSION_PYVISTA_SAFE")
+    if value is None:
+        return False
+    return value.lower() not in {"0", "false", "no"}
+
+
 def _format_exception(exc: BaseException) -> str:
     """Return a formatted traceback string for display."""
     return "".join(traceback.format_exception(exc))
 
 
-def _collect_datasets_from_scene(scene: object, pv_module) -> List[object]:
-    datasets: List[object] = []
+def _collect_datasets_from_scene(scene: object) -> List[Mesh | Polyline]:
+    datasets: List[Mesh | Polyline] = []
 
     def visit(item: object) -> None:
         if item is None:
             return
 
         if isinstance(item, MeshGroup):
-            visit(item.to_multiblock())
+            for mesh in item.to_meshes():
+                visit(mesh)
             return
 
-        if isinstance(item, pv_module.MultiBlock):
-            for block in item:
-                visit(block)
+        if isinstance(item, Mesh):
+            datasets.append(item)
             return
 
-        if isinstance(item, pv_module.DataSet):
+        if isinstance(item, Polyline):
             datasets.append(item)
             return
 
@@ -65,12 +72,12 @@ def _collect_datasets_from_scene(scene: object, pv_module) -> List[object]:
             return
 
         raise PreviewBackendError(
-            "Model build() must return PyVista datasets (e.g., pv.Cube(), pv.Sphere(), or a list of them)."
+            "Model build() must return internal meshes (e.g., impression.modeling primitives or a list of them)."
         )
 
     visit(scene)
     if not datasets:
-        raise PreviewBackendError("Scene did not produce any PyVista datasets.")
+        raise PreviewBackendError("Scene did not produce any meshes.")
     return datasets
 
 
@@ -81,6 +88,7 @@ class PyVistaPreviewer:
         self.console = console
         self._pv = None
         self._unit_settings = unit_settings or get_unit_settings()
+        self._home_camera = None
 
     def show(
         self,
@@ -93,7 +101,6 @@ class PyVistaPreviewer:
         show_edges: bool = False,
         face_edges: bool = False,
     ) -> None:
-        pv = self._ensure_backend()
         datasets = []
         if initial_scene is not None:
             try:
@@ -105,6 +112,7 @@ class PyVistaPreviewer:
                 else:
                     raise
 
+        pv = self._ensure_backend()
         plotter = pv.Plotter(window_size=(1280, 800))
         self._configure_plotter(plotter)
         if datasets:
@@ -195,11 +203,12 @@ class PyVistaPreviewer:
             self._pv = pv
         return self._pv
 
-    def collect_datasets(self, scene: object) -> List[object]:
-        """Return all PyVista datasets contained within a scene object."""
+    def collect_datasets(self, scene: object) -> List[Mesh | Polyline]:
+        """Return all meshes contained within a scene object."""
 
-        pv = self._ensure_backend()
-        return _collect_datasets_from_scene(scene, pv)
+        datasets = _collect_datasets_from_scene(scene)
+        self._log_mesh_analysis(datasets)
+        return datasets
 
     @property
     def unit_name(self) -> str:
@@ -213,39 +222,29 @@ class PyVistaPreviewer:
     def unit_scale_to_mm(self) -> float:
         return self._unit_settings.scale_to_mm
 
-    def combine_to_polydata(self, datasets: Iterable[object]):
-        """Return a single PolyData mesh representing the collection."""
+    def combine_to_mesh(self, datasets: Iterable[Mesh | Polyline]) -> Mesh:
+        """Return a single Mesh representing the collection."""
 
-        pv = self._ensure_backend()
-        datasets = list(datasets)
+        datasets = [mesh for mesh in datasets if isinstance(mesh, Mesh)]
         if not datasets:
-            raise PreviewBackendError("Cannot merge an empty dataset collection.")
-
+            raise PreviewBackendError("Cannot merge an empty mesh collection.")
         if len(datasets) == 1:
-            merged = datasets[0].copy()
-        else:
-            block = pv.MultiBlock()
-            for mesh in datasets:
-                block.append(mesh)
-            merged = block.combine()
-
-        poly = merged.extract_geometry()
-        if hasattr(poly, "clean"):
-            poly = poly.clean()
-        if hasattr(poly, "triangulate"):
-            poly = poly.triangulate()
-        return poly
+            return datasets[0].copy()
+        return combine_meshes(datasets)
 
     def _configure_plotter(self, plotter) -> None:
         plotter.set_background("#090c10", top="#1b2333")
-        plotter.enable_eye_dome_lighting()
-        plotter.add_axes(interactive=True)
-        self._show_bounds_with_units(plotter)
+        safe_mode = _pyvista_safe_mode()
+        if not safe_mode:
+            plotter.enable_eye_dome_lighting()
+            plotter.add_axes(interactive=True)
+            self._show_bounds_with_units(plotter)
+            self._install_home_button(plotter)
 
     def _apply_scene(
         self,
         plotter,
-        datasets: Iterable[object],
+        datasets: Iterable[Mesh | Polyline],
         show_edges: bool,
         face_edges: bool,
         align_camera: bool = False,
@@ -255,25 +254,40 @@ class PyVistaPreviewer:
         edge_color = "#cdd7ff"
         edge_angle = 60.0
         plotter.clear()
-        self._show_bounds_with_units(plotter)
-        plotter.add_axes(interactive=True)
+        if not _pyvista_safe_mode():
+            self._show_bounds_with_units(plotter)
+            plotter.add_axes(interactive=True)
 
         for index, mesh in enumerate(datasets):
-            cell_colors = mesh.cell_data.get(COLOR_CELL_DATA)
-            if cell_colors is not None and len(cell_colors) == mesh.n_cells:
+            if isinstance(mesh, Polyline):
+                pv_mesh = self._polyline_to_pyvista(mesh)
+                plotter.add_mesh(
+                    pv_mesh,
+                    name=f"mesh-{index}",
+                    color=mesh.color or "#9aa6bf",
+                    line_width=2.0,
+                    render_lines_as_tubes=False,
+                )
+                continue
+
+            pv_mesh = mesh_to_pyvista(mesh)
+            cell_colors = mesh.face_colors
+            if cell_colors is not None and len(cell_colors) == mesh.n_faces:
                 scalars = np.asarray(cell_colors)
                 rgba_mode = scalars.shape[1] >= 4
+                rgb_mode = scalars.shape[1] == 3
                 plotter.add_mesh(
-                    mesh,
+                    pv_mesh,
                     name=f"mesh-{index}",
                     show_edges=show_edges,
                     scalars=scalars,
+                    rgb=rgb_mode,
                     rgba=rgba_mode,
                     smooth_shading=True,
                     specular=0.2,
                 )
                 if face_edges:
-                    self._add_feature_edges(plotter, mesh, edge_color, edge_angle, index)
+                    self._add_feature_edges(plotter, pv_mesh, edge_color, edge_angle, index)
                 continue
 
             color_info = get_mesh_color(mesh)
@@ -286,7 +300,7 @@ class PyVistaPreviewer:
                 opacity = 1.0
 
             plotter.add_mesh(
-                mesh,
+                pv_mesh,
                 name=f"mesh-{index}",
                 show_edges=show_edges,
                 color=color,
@@ -295,7 +309,7 @@ class PyVistaPreviewer:
                 specular=0.2,
             )
             if face_edges:
-                self._add_feature_edges(plotter, mesh, edge_color, edge_angle, index)
+                self._add_feature_edges(plotter, pv_mesh, edge_color, edge_angle, index)
 
         if align_camera:
             self._reset_camera(plotter, datasets)
@@ -314,10 +328,24 @@ class PyVistaPreviewer:
             render_lines_as_tubes=False,
         )
 
-    def _reset_camera(self, plotter, datasets: Iterable[object]) -> None:
+    def _reset_camera(self, plotter, datasets: Iterable[Mesh | Polyline]) -> None:
         bounds = None
         for mesh in datasets:
-            mesh_bounds = mesh.bounds
+            if isinstance(mesh, Polyline):
+                if mesh.points.size == 0:
+                    continue
+                mins = mesh.points.min(axis=0)
+                maxs = mesh.points.max(axis=0)
+                mesh_bounds = (
+                    float(mins[0]),
+                    float(maxs[0]),
+                    float(mins[1]),
+                    float(maxs[1]),
+                    float(mins[2]),
+                    float(maxs[2]),
+                )
+            else:
+                mesh_bounds = mesh.bounds
             if bounds is None:
                 bounds = list(mesh_bounds)
             else:
@@ -340,12 +368,41 @@ class PyVistaPreviewer:
             + (bounds[3] - bounds[2]) ** 2
             + (bounds[5] - bounds[4]) ** 2
         )
-        distance = max(diag, 1.0) * 1.2
+        distance = max(diag, 1.0) * 1.4
 
-        camera_pos = (x_center, y_center + distance, z_center)
+        camera_pos = (
+            x_center + distance * 0.6,
+            y_center + distance * 0.6,
+            z_center + distance * 0.5,
+        )
         focal_point = (x_center, y_center, z_center)
         view_up = (0.0, 0.0, 1.0)
         plotter.camera_position = [camera_pos, focal_point, view_up]
+        self._home_camera = plotter.camera_position
+
+    def _install_home_button(self, plotter) -> None:
+        """Add a simple 'home' button to reset the camera to the stored default."""
+
+        def go_home():
+            if self._home_camera is None:
+                return
+            plotter.camera_position = self._home_camera
+            plotter.reset_camera_clipping_range()
+            plotter.render()
+
+        try:
+            plotter.add_button_widget(
+                go_home,
+                position=(10, 10),
+                size=40,
+                color_on="white",
+                color_off="white",
+                style="modern",
+                tooltip="Reset view",
+            )
+        except Exception:
+            return
+
 
     def _install_timer_callback(
         self,
@@ -402,11 +459,32 @@ class PyVistaPreviewer:
         plotter.show_bounds(
             grid="front",
             color="#5a677d",
-            xlabel=f"X ({label})",
-            ylabel=f"Y ({label})",
-            zlabel=f"Z ({label})",
+            xtitle=f"X ({label})",
+            ytitle=f"Y ({label})",
+            ztitle=f"Z ({label})",
         )
 
+    def _log_mesh_analysis(self, datasets: Iterable[Mesh | Polyline]) -> None:
+        for index, mesh in enumerate(datasets):
+            if isinstance(mesh, Polyline):
+                continue
+            analysis = analyze_mesh(mesh)
+            issues = analysis.issues()
+            if not issues:
+                continue
+            issue_text = ", ".join(issues)
+            self.console.print(f"[yellow]Mesh {index} analysis: {issue_text}.[/yellow]")
+
+    def _polyline_to_pyvista(self, polyline: Polyline):
+        pv = self._ensure_backend()
+        pts = polyline.points
+        if polyline.closed and len(pts) > 1 and not np.allclose(pts[0], pts[-1]):
+            pts = np.vstack([pts, pts[0]])
+        n_pts = len(pts)
+        if n_pts == 0:
+            return pv.PolyData()
+        cells = np.hstack(([n_pts], np.arange(n_pts)))
+        return pv.PolyData(pts, cells, deep=True)
 
     def _watch_model_file(
         self,

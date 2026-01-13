@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-from typing import Literal, Sequence, Tuple
+from typing import Any, Literal, Sequence, Tuple, TYPE_CHECKING
 
 import numpy as np
-import pyvista as pv
-from build123d import BuildSketch, FontStyle, Text as BText, extrude
+
+from impression.mesh import Mesh
 
 from ..cad import shape_to_polydata
 from ._color import set_mesh_color
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from build123d import FontStyle as FontStyle
+else:
+    FontStyle = Any
 
 Justify = Literal["left", "center", "right"]
 VARIATION_SELECTORS = {chr(code) for code in range(0xFE00, 0xFE0F + 1)}
@@ -26,8 +31,15 @@ def make_text(
     font_style: FontStyle | str | None = None,
     tolerance: float = 0.05,
     color: Sequence[float] | str | None = None,
-) -> pv.PolyData:
+) -> Mesh:
     """Create a text mesh by tessellating build123d geometry instead of PyVista primitives."""
+
+    try:
+        from build123d import BuildSketch, FontStyle, Text as BText, extrude
+    except Exception as exc:  # pragma: no cover - runtime dependency
+        raise ImportError(
+            "Text support requires build123d. Install it or avoid make_text() during preview."
+        ) from exc
 
     content = _strip_variation_selectors(content)
     if not content:
@@ -40,7 +52,7 @@ def make_text(
             font_size=font_size,
             font=font,
             font_path=font_path,
-            font_style=_coerce_font_style(font_style),
+            font_style=_coerce_font_style(font_style, FontStyle),
         )
 
     if depth_value > 0:
@@ -49,8 +61,8 @@ def make_text(
         shape = sketch.sketch
 
     text = shape_to_polydata(shape, tolerance=tolerance)
-    text.rotate_z(180.0, inplace=True)
-    text.rotate_x(90.0, inplace=True)
+    text.rotate_vector((0.0, 0.0, 1.0), 180.0, inplace=True)
+    text.rotate_vector((1.0, 0.0, 0.0), 90.0, inplace=True)
 
     text = _justify_and_center(text, justify)
     text = _orient_mesh(text, direction, default=(0.0, 1.0, 0.0))
@@ -62,7 +74,7 @@ def make_text(
     return text
 
 
-def _justify_and_center(mesh: pv.PolyData, justify: Justify) -> pv.PolyData:
+def _justify_and_center(mesh: Mesh, justify: Justify) -> Mesh:
     bounds = mesh.bounds
     min_x, max_x, min_y, max_y, min_z, max_z = bounds
 
@@ -83,10 +95,10 @@ def _justify_and_center(mesh: pv.PolyData, justify: Justify) -> pv.PolyData:
 
 
 def _orient_mesh(
-    mesh: pv.PolyData,
+    mesh: Mesh,
     direction: Sequence[float],
     default: Sequence[float] = (0.0, 0.0, 1.0),
-) -> pv.PolyData:
+) -> Mesh:
     target_vec = np.array(_normalize(direction))
     default_vec = np.array(_normalize(default))
 
@@ -123,16 +135,16 @@ def _normalize(vector: Sequence[float]) -> Tuple[float, float, float]:
     return float(arr[0]), float(arr[1]), float(arr[2])
 
 
-def _coerce_font_style(value: FontStyle | str | None) -> FontStyle:
+def _coerce_font_style(value: object | str | None, font_style_cls: Any):
     if value is None:
-        return FontStyle.REGULAR
-    if isinstance(value, FontStyle):
+        return font_style_cls.REGULAR
+    if isinstance(value, font_style_cls):
         return value
     try:
         normalized = value.replace("-", "_").replace(" ", "_").upper()
-        return FontStyle[normalized]
+        return font_style_cls[normalized]
     except KeyError as exc:  # pragma: no cover - defensive
-        valid = ", ".join(style.name for style in FontStyle)
+        valid = ", ".join(style.name for style in font_style_cls)
         raise ValueError(f"Unknown font style '{value}'. Valid options: {valid}.") from exc
 
 

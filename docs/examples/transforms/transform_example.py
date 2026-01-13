@@ -18,9 +18,10 @@ def build():
 
 if __name__ == "__main__":
     import pyvista as pv
+    from impression.mesh import mesh_to_pyvista
 
     meshes = build()
     plotter = pv.Plotter()
     for i, m in enumerate(meshes):
-        plotter.add_mesh(m, show_edges=True, color=[0.6, 0.8, 1.0], name=f"mesh-{i}")
+        plotter.add_mesh(mesh_to_pyvista(m), show_edges=True, color=[0.6, 0.8, 1.0], name=f"mesh-{i}")
     plotter.show()

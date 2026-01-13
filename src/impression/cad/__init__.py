@@ -1,18 +1,19 @@
-"""CAD backend helpers (currently build123d) that return PyVista meshes."""
+"""CAD backend helpers (currently build123d) that return internal meshes."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 import numpy as np
-import pyvista as pv
+
+from impression.mesh import Mesh
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from build123d import Shape
 
 
-def shape_to_polydata(shape: "Shape", tolerance: float = 0.05) -> pv.PolyData:
-    """Convert a build123d shape into a cleaned ``pyvista.PolyData`` mesh.
+def shape_to_polydata(shape: "Shape", tolerance: float = 0.05) -> Mesh:
+    """Convert a build123d shape into a triangle mesh.
 
     Parameters
     ----------
@@ -35,8 +36,8 @@ def shape_to_polydata(shape: "Shape", tolerance: float = 0.05) -> pv.PolyData:
     points = np.asarray([[vec.X, vec.Y, vec.Z] for vec in vertices], dtype=float)
     face_chunks = [np.array([3, tri[0], tri[1], tri[2]], dtype=np.int64) for tri in triangles]
     faces = np.hstack(face_chunks)
-    mesh = pv.PolyData(points, faces)
-    return mesh.clean()
+    faces_arr = faces.reshape(-1, 4)[:, 1:]
+    return Mesh(points, faces_arr)
 
 
 __all__ = ["shape_to_polydata"]

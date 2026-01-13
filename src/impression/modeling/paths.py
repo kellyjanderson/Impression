@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from typing import Iterable, List, Sequence
 
 import numpy as np
-import pyvista as pv
+
+from impression.mesh import Polyline
 
 
 @dataclass
@@ -48,16 +49,13 @@ class Path:
                 sampled.append((1 - alpha) * p0 + alpha * p1)
         return np.asarray(sampled)
 
-    def to_polyline(self) -> pv.PolyData:
+    def to_polyline(self) -> Polyline:
         pts = self._effective_points()
-        n_pts = len(pts)
-        cells = np.hstack(([n_pts], np.arange(n_pts)))
-        return pv.PolyData(pts, cells)
+        return Polyline(pts, closed=self.closed)
 
-    def to_spline(self, n_samples: int = 200) -> pv.PolyData:
+    def to_spline(self, n_samples: int = 200) -> Polyline:
         pts = self.sample(n_samples)
-        spline = pv.Spline(pts, n_samples)
-        return spline
+        return Polyline(pts, closed=self.closed)
 
     def _effective_points(self) -> np.ndarray:
         pts = np.asarray(self.points)

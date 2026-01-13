@@ -4,7 +4,8 @@ import math
 from typing import Literal, Sequence
 
 import numpy as np
-import pyvista as pv
+
+from impression.mesh import Mesh, combine_meshes, triangulate_faces
 
 from ._color import set_mesh_color
 from .primitives import _orient_mesh, _normalize
@@ -18,7 +19,7 @@ def make_line(
     end: Sequence[float],
     thickness: float = 0.02,
     color: Sequence[float] | str | None = None,
-) -> pv.PolyData:
+) -> Mesh:
     direction = np.asarray(end, dtype=float) - np.asarray(start, dtype=float)
     length = np.linalg.norm(direction)
     if length == 0:
@@ -35,15 +36,15 @@ def make_line(
     )
     top = base + np.array((0, 0, length))
     points = np.vstack([base, top])
-    faces = _faces([
-        [4, 0, 1, 2, 3],
-        [4, 4, 5, 6, 7],
-        [4, 0, 1, 5, 4],
-        [4, 1, 2, 6, 5],
-        [4, 2, 3, 7, 6],
-        [4, 3, 0, 4, 7],
+    faces = triangulate_faces([
+        [0, 1, 2, 3],
+        [4, 5, 6, 7],
+        [0, 1, 5, 4],
+        [1, 2, 6, 5],
+        [2, 3, 7, 6],
+        [3, 0, 4, 7],
     ])
-    mesh = pv.PolyData(points, faces)
+    mesh = Mesh(points, faces)
     mesh = _orient_mesh(mesh, _normalize(direction))
     mesh.translate(start, inplace=True)
     if color is not None:
@@ -56,7 +57,7 @@ def make_plane(
     center: Sequence[float] = (0.0, 0.0, 0.0),
     normal: Sequence[float] = (0.0, 0.0, 1.0),
     color: Sequence[float] | str | None = None,
-) -> pv.PolyData:
+) -> Mesh:
     sx, sy = size
     half_x, half_y = sx / 2.0, sy / 2.0
     points = np.array(
@@ -67,8 +68,8 @@ def make_plane(
             (-half_x, half_y, 0.0),
         ]
     )
-    faces = _faces([[4, 0, 1, 2, 3]])
-    mesh = pv.PolyData(points, faces)
+    faces = triangulate_faces([[0, 1, 2, 3]])
+    mesh = Mesh(points, faces)
     mesh = _orient_mesh(mesh, normal)
     mesh.translate(center, inplace=True)
     if color is not None:
@@ -83,7 +84,7 @@ def make_arrow(
     head_length: float = 0.15,
     head_diameter: float = 0.12,
     color: Sequence[float] | str | None = None,
-) -> pv.PolyData:
+) -> Mesh:
     start = np.asarray(start, dtype=float)
     end = np.asarray(end, dtype=float)
     direction = end - start
@@ -104,19 +105,21 @@ def make_arrow(
             (0, 0, head_height),
         ]
     )
-    faces = _faces([
-        [4, 0, 1, 2, 3],
-        [3, 0, 1, 4],
-        [3, 1, 2, 4],
-        [3, 2, 3, 4],
-        [3, 3, 0, 4],
-    ])
-    head = pv.PolyData(base, faces)
+    faces = triangulate_faces(
+        [
+            [0, 1, 2, 3],
+            [0, 1, 4],
+            [1, 2, 4],
+            [2, 3, 4],
+            [3, 0, 4],
+        ]
+    )
+    head = Mesh(base, faces)
     head = _orient_mesh(head, direction / length)
     head.translate(start + direction * (shaft_length / length), inplace=True)
     if color is not None:
         set_mesh_color(head, color)
-    return shaft.merge(head)
+    return combine_meshes([shaft, head])
 
 
 def make_dimension(
@@ -125,7 +128,7 @@ def make_dimension(
     offset: float = 0.1,
     text: str | None = None,
     color: Sequence[float] | str | None = None,
-) -> list[pv.PolyData]:
+) -> list[Mesh]:
     start = np.asarray(start, dtype=float)
     end = np.asarray(end, dtype=float)
     direction = end - start
@@ -160,6 +163,3 @@ def make_dimension(
     meshes.append(text_mesh)
     return meshes
 
-
-def _faces(face_list: list[list[int]]) -> np.ndarray:
-    return np.hstack([np.asarray(face, dtype=int) for face in face_list])

@@ -48,7 +48,7 @@ Generate an STL from a model.
 
 ## WORKFLOW
 
-1. Write a module that defines `build()` and returns PyVista datasets.
+1. Write a module that defines `build()` and returns internal meshes.
 2. Preview: `impression preview path/to/module.py`
 3. Export: `impression export path/to/module.py --output artifacts/model.stl`
 4. Run screenshot regression tests: `scripts/run_preview_tests.py`

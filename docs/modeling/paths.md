@@ -14,8 +14,8 @@ from impression.modeling import Path
 
 - `length()` — total arc length.
 - `sample(n_points)` — evenly spaced samples along the path (NumPy array).
-- `to_polyline()` — returns a PyVista polyline for quick visualization.
-- `to_spline(n_samples=200)` — converts to a smooth PyVista spline.
+- `to_polyline()` — returns an internal polyline for quick visualization.
+- `to_spline(n_samples=200)` — returns a smooth polyline sampled along the path.
 
 Example file: `docs/examples/paths/path_example.py`
 

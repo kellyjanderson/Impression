@@ -19,6 +19,8 @@ def build():
 
 if __name__ == "__main__":
     import pyvista as pv
+    from impression.mesh import mesh_to_pyvista
 
     scene = build()
-    pv.plot(scene)
+    meshes = scene.to_meshes()
+    pv.plot([mesh_to_pyvista(mesh) for mesh in meshes])

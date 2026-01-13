@@ -11,4 +11,4 @@ def build():
 
 if __name__ == "__main__":
     mesh = build()
-    print("Cells:", mesh.n_cells)
+    print("Faces:", mesh.n_faces)

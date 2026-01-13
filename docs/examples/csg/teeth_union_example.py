@@ -9,6 +9,8 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+from impression.io import write_stl
+
 from impression.modeling import make_cylinder, union_meshes
 
 
@@ -36,5 +38,5 @@ if __name__ == "__main__":
     OUTPUT = Path("dist")
     OUTPUT.mkdir(exist_ok=True)
     mesh = build()
-    mesh.save(OUTPUT / "teeth_union_example.stl")
-    print("Saved teeth_union_example.stl with", mesh.n_cells, "cells")
+    write_stl(mesh, OUTPUT / "teeth_union_example.stl")
+    print("Saved teeth_union_example.stl with", mesh.n_faces, "faces")

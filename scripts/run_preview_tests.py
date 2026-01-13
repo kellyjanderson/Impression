@@ -18,78 +18,25 @@ RESULTS_FILE = DIST_DIR / "results.json"
 SUITE_NAME = "preview-tests"
 
 CASES = [
-    {
-        "name": "primitive-box",
-        "module": "docs/examples/primitives/box_example.py",
-    },
-    {
-        "name": "primitive-cylinder",
-        "module": "docs/examples/primitives/cylinder_example.py",
-    },
-    {
-        "name": "primitive-sphere",
-        "module": "docs/examples/primitives/sphere_example.py",
-    },
-    {
-        "name": "primitive-cone",
-        "module": "docs/examples/primitives/cone_example.py",
-    },
-    {
-        "name": "primitive-prism",
-        "module": "docs/examples/primitives/prism_example.py",
-    },
-    {
-        "name": "primitive-color-dual",
-        "module": "docs/examples/primitives/color_dual_example.py",
-    },
-    {
-        "name": "primitive-color-transparency",
-        "module": "docs/examples/primitives/color_transparency_example.py",
-    },
-    {
-        "name": "text-basic",
-        "module": "docs/examples/text/text_basic.py",
-    },
-    {
-        "name": "text-emoji",
-        "module": "docs/examples/text/text_emoji.py",
-    },
-    {
-        "name": "drafting-line-plane",
-        "module": "docs/examples/drafting/line_plane_example.py",
-    },
-    {
-        "name": "drafting-dimension",
-        "module": "docs/examples/drafting/dimension_example.py",
-    },
-    {
-        "name": "primitive-torus",
-        "module": "docs/examples/primitives/torus_example.py",
-    },
-    {
-        "name": "csg-union",
-        "module": "docs/examples/csg/union_example.py",
-    },
-    {
-        "name": "csg-union-mapping",
-        "module": "docs/examples/csg/union_meshes_example.py",
-    },
-    {
-        "name": "csg-union-teeth",
-        "module": "docs/examples/csg/teeth_union_example.py",
-    },
-    {
-        "name": "csg-difference",
-        "module": "docs/examples/csg/difference_example.py",
-    },
-    {
-        "name": "csg-intersection",
-        "module": "docs/examples/csg/intersection_example.py",
-    },
-    {
-        "name": "path-polyline",
-        "module": "docs/examples/paths/path_example.py",
-    },
+    {"name": "primitive-box", "module": "docs/examples/primitives/box_example.py"},
+    {"name": "primitive-cylinder", "module": "docs/examples/primitives/cylinder_example.py"},
+    {"name": "primitive-sphere", "module": "docs/examples/primitives/sphere_example.py"},
+    {"name": "primitive-cone", "module": "docs/examples/primitives/cone_example.py"},
+    {"name": "primitive-prism", "module": "docs/examples/primitives/prism_example.py"},
+    {"name": "primitive-color-dual", "module": "docs/examples/primitives/color_dual_example.py"},
+    {"name": "primitive-color-transparency", "module": "docs/examples/primitives/color_transparency_example.py"},
+    {"name": "text-basic", "module": "docs/examples/text/text_basic.py"},
+    {"name": "text-emoji", "module": "docs/examples/text/text_emoji.py"},
+    {"name": "drafting-line-plane", "module": "docs/examples/drafting/line_plane_example.py"},
+    {"name": "drafting-dimension", "module": "docs/examples/drafting/dimension_example.py"},
+    {"name": "primitive-torus", "module": "docs/examples/primitives/torus_example.py"},
+    {"name": "csg-union", "module": "docs/examples/csg/union_example.py"},
+    {"name": "csg-union-mapping", "module": "docs/examples/csg/union_meshes_example.py"},
+    {"name": "csg-tooth-parts", "module": "docs/examples/csg/tooth_parts_example.py"},
+    {"name": "csg-tooth", "module": "docs/examples/csg/tooth_example.py"},
+    {"name": "csg-union-teeth", "module": "docs/examples/csg/teeth_union_example.py"},
+    {"name": "csg-intersection", "module": "docs/examples/csg/intersection_example.py"},
+    {"name": "path-polyline", "module": "docs/examples/paths/path_example.py"},
 ]
 
 
@@ -100,12 +47,12 @@ def _isoformat(dt: datetime) -> str:
 def run_case(case: dict, verbose: bool = False) -> dict:
     screenshot = DIST_DIR / f"{case['name']}.png"
     screenshot.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        "impression",
-        "preview",
-        case["module"],
-        "--no-watch",
-        "--screenshot",
+    impression_cmd = [sys.executable, '-m', 'impression.cli']
+    cmd = impression_cmd + [
+        'preview',
+        case['module'],
+        '--no-watch',
+        '--screenshot',
         str(screenshot),
     ]
     env = os.environ.copy()

@@ -15,11 +15,11 @@ def build():
         ],
         closed=False,
     )
-    # Return a polyline so preview/export can render it.
+    # Return a polyline so preview can render it.
     return path.to_polyline()
 
 
 if __name__ == "__main__":
-    mesh = build()
-    print("Length:", round(Path.from_points(mesh.points).length(), 3))
-    print("PolyData cells:", mesh.n_cells)
+    polyline = build()
+    print("Length:", round(Path.from_points(polyline.points).length(), 3))
+    print("Points:", len(polyline.points))

@@ -12,6 +12,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from impression.io import write_stl
 from impression.preview import PyVistaPreviewer, PreviewBackendError
 
 console = Console()
@@ -172,7 +173,8 @@ def export(
                 console.print(f"[yellow]Output {output} exists; writing to {final_output} instead.[/yellow]")
 
     try:
-        _, initial_scene = _scene_factory_from_module(model)
+        scene_factory = _scene_factory_from_module(model)
+        initial_scene = scene_factory()
     except ModelBuildError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
@@ -180,14 +182,14 @@ def export(
     _log_active_units(previewer)
     try:
         datasets = previewer.collect_datasets(initial_scene)
-        merged = previewer.combine_to_polydata(datasets)
+        merged = previewer.combine_to_mesh(datasets)
     except PreviewBackendError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
     final_output.parent.mkdir(parents=True, exist_ok=True)
     try:
-        merged.save(str(final_output), binary=not ascii)
-    except Exception as exc:  # pragma: no cover - PyVista I/O failure
+        write_stl(merged, final_output, ascii=ascii)
+    except Exception as exc:  # pragma: no cover - STL I/O failure
         raise typer.BadParameter(f"Failed to export STL: {exc}") from exc
 
     mode = "ASCII" if ascii else "binary"

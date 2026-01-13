@@ -1,20 +1,21 @@
-"""Example Impression model that returns simple PyVista meshes."""
+"""Example Impression model that returns simple meshes."""
 
 from __future__ import annotations
 
-import pyvista as pv
+from impression.modeling import make_box, make_cylinder, rotate
 
 
 def build():
-    """Compose a cube with a chamfered corner to exercise the previewer."""
+    """Compose a cube and a cylinder to exercise the previewer."""
 
-    cube = pv.Cube(center=(0, 0, 0), x_length=12, y_length=12, z_length=12)
-    chamfer = pv.Cylinder(
+    cube = make_box(size=(12, 12, 12), center=(0, 0, 0))
+    chamfer = make_cylinder(
         center=(6, 6, 0),
         direction=(1, 1, 0),
         radius=4,
         height=14,
         resolution=64,
-    ).rotate_z(45, inplace=False)
+    )
+    rotate(chamfer, axis=(0, 0, 1), angle_deg=45)
 
     return [cube, chamfer]

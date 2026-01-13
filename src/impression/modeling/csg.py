@@ -2,182 +2,199 @@ from __future__ import annotations
 
 from typing import Iterable, Literal, Mapping, Union
 
-from impression.modeling.group import MeshGroup
-
-from impression._vtk_runtime import ensure_vtk_runtime
-
-ensure_vtk_runtime()
+import warnings
 
 import numpy as np
-import pyvista as pv
 
-from pyvista import _vtk
+from impression.mesh import Mesh, analyze_mesh
+from impression.modeling.group import MeshGroup
 
-from ._color import get_mesh_color, get_mesh_rgba, set_cell_colors, set_mesh_color
+from ._color import get_mesh_color, set_mesh_color
 
-
-BooleanBackend = Literal["mesh"]
-
-
-def _check_mesh(mesh: pv.DataSet | MeshGroup) -> pv.PolyData:
-    if isinstance(mesh, MeshGroup):
-        mesh = mesh.to_polydata()
-    if not isinstance(mesh, pv.PolyData):
-        mesh = mesh.cast_to_polydata()
-    mesh = mesh.extract_geometry().triangulate()
-    mesh = mesh.clean(inplace=False)
-    if mesh.n_cells > 0 and hasattr(mesh, "orient_faces"):
-        mesh = mesh.orient_faces(inplace=False)
-    if mesh.n_cells > 0:
-        mesh = mesh.compute_normals(
-            cell_normals=True,
-            point_normals=False,
-            auto_orient_normals=True,
-            consistent_normals=True,
-            inplace=False,
-        )
-    return mesh
+BooleanBackend = Literal["manifold"]
 
 
-def _finalize_mesh(mesh: pv.PolyData, tolerance: float) -> pv.PolyData:
-    mesh = mesh.extract_geometry().triangulate()
-    mesh = mesh.clean(tolerance=tolerance, inplace=False)
-    if mesh.n_cells > 0 and hasattr(mesh, "orient_faces"):
-        mesh = mesh.orient_faces(inplace=False)
-    if mesh.n_cells > 0:
-        mesh = mesh.compute_normals(
-            cell_normals=True,
-            point_normals=False,
-            auto_orient_normals=True,
-            consistent_normals=True,
-            inplace=False,
-        )
-    return mesh
-
-
-def boolean_union(
-    meshes: Iterable[pv.DataSet],
-    tolerance: float = 1e-4,
-    backend: BooleanBackend = "mesh",
-) -> pv.PolyData:
-    _ensure_backend(backend)
-    iterator = iter(meshes)
-    try:
-        first = _check_mesh(next(iterator))
-    except StopIteration:
-        raise ValueError("boolean_union requires at least one mesh.")
-
-    sources = [first] + [_check_mesh(mesh) for mesh in iterator]
-    result = sources[0]
-    for mesh in sources[1:]:
-        try:
-            candidate = result.boolean_union(mesh, tolerance=tolerance)
-            result = _finalize_mesh(candidate, tolerance)
-        except Exception:
-            # Fallback: append geometry and clean if VTK union fails (e.g., disjoint solids)
-            combined = pv.append_polydata([result, mesh])
-            result = _finalize_mesh(combined, tolerance)
-    # already finalized in-loop; ensure last pass still valid
-    result = _finalize_mesh(result, tolerance)
-    _assign_boolean_colors("union", result, sources)
-    return result
-
-
-def boolean_difference(
-    base: pv.DataSet,
-    cutters: Iterable[pv.DataSet],
-    tolerance: float = 1e-4,
-    backend: BooleanBackend = "mesh",
-) -> pv.PolyData:
-    _ensure_backend(backend)
-    sources = [_check_mesh(base)] + [_check_mesh(mesh) for mesh in cutters]
-    result = sources[0]
-    for mesh in sources[1:]:
-        result = result.boolean_difference(mesh, tolerance=tolerance)
-        result = _finalize_mesh(result, tolerance)
-    result = _finalize_mesh(result, tolerance)
-    _assign_boolean_colors("difference", result, sources)
-    return result
-
-
-def boolean_intersection(
-    meshes: Iterable[pv.DataSet],
-    tolerance: float = 1e-4,
-    backend: BooleanBackend = "mesh",
-) -> pv.PolyData:
-    _ensure_backend(backend)
-    sources = [_check_mesh(mesh) for mesh in meshes]
-    if not sources:
-        raise ValueError("boolean_intersection requires at least one mesh.")
-
-    result = sources[0]
-
-    for mesh in sources[1:]:
-        result = result.boolean_intersection(mesh, tolerance=tolerance)
-        result = _finalize_mesh(result, tolerance)
-    result = _finalize_mesh(result, tolerance)
-    _assign_boolean_colors("intersection", result, sources)
-    return result
+class BooleanOperationError(RuntimeError):
+    """Raised when a boolean operation cannot produce a valid solid."""
 
 
 def _ensure_backend(backend: BooleanBackend) -> None:
-    if backend != "mesh":
-        raise ValueError(f"Unsupported backend '{backend}'. Only 'mesh' is available at the moment.")
+    if backend != "manifold":
+        raise ValueError(f"Unsupported backend '{backend}'. Only 'manifold' is available right now.")
 
 
-def _assign_boolean_colors(mode: str, result: pv.PolyData, sources: list[pv.PolyData]) -> None:
-    if result.n_cells == 0 or not sources:
-        return
+def _load_manifold():
+    try:
+        from manifold3d import Manifold, Mesh as ManifoldMesh
+    except ImportError as exc:  # pragma: no cover - runtime dep
+        raise BooleanOperationError(
+            "manifold3d is required for boolean operations. Install it with `pip install manifold3d`."
+        ) from exc
+    return Manifold, ManifoldMesh
 
-    centers = result.cell_centers().points
-    if centers.size == 0:
-        return
 
-    implicit_distances = []
-    colors = []
+def _mesh_from_manifold(manifold_mesh) -> Mesh:
+    vertices = None
+    faces = None
+    for attr in ("vertices", "vert_properties", "verts"):
+        if hasattr(manifold_mesh, attr):
+            vertices = np.asarray(getattr(manifold_mesh, attr), dtype=float)
+            break
+    for attr in ("triangles", "tri_verts", "faces"):
+        if hasattr(manifold_mesh, attr):
+            faces = np.asarray(getattr(manifold_mesh, attr), dtype=int)
+            break
+    if vertices is None or faces is None:
+        raise BooleanOperationError("manifold3d returned an unexpected mesh format.")
+    if vertices.ndim != 2 or vertices.shape[1] < 3:
+        raise BooleanOperationError("manifold3d returned invalid vertex data.")
+    if vertices.shape[1] > 3:
+        vertices = vertices[:, :3]
+    if faces.ndim != 2 or faces.shape[1] != 3:
+        raise BooleanOperationError("manifold3d returned non-triangular faces.")
+    return Mesh(vertices, faces)
+
+
+def _manifold_from_mesh(mesh: Mesh):
+    Manifold, ManifoldMesh = _load_manifold()
+    vertices = np.asarray(mesh.vertices, dtype=float)
+    faces = np.asarray(mesh.faces, dtype=int)
+    try:
+        manifold_mesh = ManifoldMesh(vertices, faces)
+    except TypeError:
+        try:
+            manifold_mesh = ManifoldMesh(vertices=vertices, triangles=faces)
+        except TypeError as exc:  # pragma: no cover - defensive
+            raise BooleanOperationError("Unable to build manifold mesh from input data.") from exc
+    try:
+        return Manifold(manifold_mesh)
+    except Exception as exc:
+        raise BooleanOperationError("manifold3d failed to create a solid from the provided mesh.") from exc
+
+
+def _flatten_meshes(meshes: Iterable[Mesh | MeshGroup]) -> list[Mesh]:
+    flattened: list[Mesh] = []
+    for mesh in meshes:
+        if isinstance(mesh, MeshGroup):
+            flattened.extend(mesh.to_meshes())
+        elif isinstance(mesh, Mesh):
+            flattened.append(mesh)
+        else:
+            raise TypeError("Boolean operations require Mesh or MeshGroup inputs.")
+    return flattened
+
+
+def _check_mesh(mesh: Mesh) -> Mesh:
+    if mesh.faces.ndim != 2 or mesh.faces.shape[1] != 3:
+        raise ValueError("Mesh faces must be a (N, 3) triangle array.")
+    if mesh.n_faces == 0:
+        raise ValueError("Mesh has no faces.")
+    if mesh.faces.min() < 0 or mesh.faces.max() >= mesh.n_vertices:
+        raise ValueError("Mesh faces contain out-of-range vertex indices.")
+    analyze_mesh(mesh)
+    issues = mesh.analysis.issues() if mesh.analysis else []
+    if issues:
+        warnings.warn(
+            f"Mesh analysis warnings: {', '.join(issues)}",
+            RuntimeWarning,
+        )
+    return mesh
+
+
+def _combine_color(result: Mesh, sources: list[Mesh]) -> None:
     for mesh in sources:
-        rgba = get_mesh_rgba(mesh)
-        colors.append(np.array(rgba, dtype=float))
-        implicit = np.abs(_implicit_distance(mesh, centers))
-        implicit_distances.append(implicit)
-
-    implicit_distances = np.vstack(implicit_distances)
-    rgba_array = np.tile(colors[0], (result.n_cells, 1))
-    tol = max(result.length / 500.0, 1e-4)
-
-    if mode == "difference":
-        for idx in range(1, len(sources)):
-            dist = implicit_distances[idx]
-            mask = dist <= tol
-            if np.any(mask):
-                rgba_array[mask] = colors[idx]
-    elif mode in {"union", "intersection"}:
-        nearest = np.argmin(implicit_distances, axis=0)
-        for idx in range(len(sources)):
-            mask = nearest == idx
-            if np.any(mask):
-                rgba_array[mask] = colors[idx]
-
-    set_cell_colors(result, rgba_array)
-    # default mesh color remains first source
-    set_mesh_color(result, colors[0])
+        color = get_mesh_color(mesh)
+        if color is not None:
+            set_mesh_color(result, (*color[0], color[1]))
+            return
 
 
-def _implicit_distance(mesh: pv.PolyData, points: np.ndarray) -> np.ndarray:
-    func = _vtk.vtkImplicitPolyDataDistance()
-    func.SetInput(mesh)
-    distances = [func.EvaluateFunction(point) for point in points]
-    return np.array(distances, dtype=float)
+def _apply_boolean(
+    meshes: Iterable[Mesh],
+    operation: str,
+) -> Mesh:
+    meshes_list = [_check_mesh(mesh) for mesh in meshes]
+    if not meshes_list:
+        raise ValueError(f"boolean_{operation} requires at least one mesh.")
 
+    base = _manifold_from_mesh(meshes_list[0])
+    for mesh in meshes_list[1:]:
+        other = _manifold_from_mesh(mesh)
+        if hasattr(base, operation):
+            base = getattr(base, operation)(other)
+        elif operation == "union" and hasattr(base, "__add__"):
+            base = base + other
+        elif operation == "difference" and hasattr(base, "__sub__"):
+            base = base - other
+        elif operation == "intersection":
+            if hasattr(base, "__and__"):
+                base = base & other
+            elif hasattr(base, "__sub__"):
+                # Intersection = A - (A - B) when direct op is unavailable.
+                base = base - (base - other)
+            else:
+                raise BooleanOperationError(
+                    "manifold3d does not support intersection on this version."
+                )
+        else:
+            raise BooleanOperationError(f"manifold3d does not support '{operation}' on this version.")
+
+    if hasattr(base, "to_mesh"):
+        result_mesh = base.to_mesh()
+    elif hasattr(base, "mesh"):
+        result_mesh = base.mesh
+    else:
+        raise BooleanOperationError("manifold3d returned an unexpected result type.")
+
+    result = _mesh_from_manifold(result_mesh)
+    _combine_color(result, meshes_list)
+    return result
+
+
+def boolean_union(
+    meshes: Iterable[Mesh | MeshGroup],
+    tolerance: float = 1e-4,
+    backend: BooleanBackend = "manifold",
+) -> Mesh:
+    _ensure_backend(backend)
+    if tolerance <= 0:
+        raise ValueError("tolerance must be positive.")
+    return _apply_boolean(_flatten_meshes(meshes), "union")
+
+
+def boolean_difference(
+    base: Mesh | MeshGroup,
+    cutters: Iterable[Mesh | MeshGroup],
+    tolerance: float = 1e-4,
+    backend: BooleanBackend = "manifold",
+) -> Mesh:
+    _ensure_backend(backend)
+    if tolerance <= 0:
+        raise ValueError("tolerance must be positive.")
+    if isinstance(base, MeshGroup):
+        base_mesh = base.to_mesh()
+    else:
+        base_mesh = base
+    meshes = _flatten_meshes([base_mesh]) + _flatten_meshes(cutters)
+    return _apply_boolean(meshes, "difference")
+
+
+def boolean_intersection(
+    meshes: Iterable[Mesh | MeshGroup],
+    tolerance: float = 1e-4,
+    backend: BooleanBackend = "manifold",
+) -> Mesh:
+    _ensure_backend(backend)
+    if tolerance <= 0:
+        raise ValueError("tolerance must be positive.")
+    return _apply_boolean(_flatten_meshes(meshes), "intersection")
 
 
 def union_meshes(
-    meshes: Union[Iterable[pv.DataSet], Mapping[object, pv.DataSet]],
+    meshes: Union[Iterable[Mesh | MeshGroup], Mapping[object, Mesh | MeshGroup]],
     tolerance: float = 1e-4,
-    backend: BooleanBackend = "mesh",
-) -> pv.PolyData:
-    """Convenience wrapper around boolean_union that accepts an iterable or mapping."""
-
+    backend: BooleanBackend = "manifold",
+) -> Mesh:
     if isinstance(meshes, Mapping):
         meshes = meshes.values()
     return boolean_union(meshes, tolerance=tolerance, backend=backend)

@@ -1,0 +1,554 @@
+# Impression Reference for AI Agents (Complete, Structured)
+# All entries include descriptions, parameter details, and constraints.
+
+catalog:
+  description: >
+    Comprehensive, syntax-first reference for Impression. Coordinate frame: +Z up, +X right,
+    +Y toward camera. build() must return a solid PolyData or a MeshGroup. Use Impression
+    wrappers (not raw PyVista) to preserve metadata, normals, and colors.
+
+  primitives:
+    description: Solid geometry constructors (return manifold PolyData with optional per-cell color).
+    items:
+      - name: make_box
+        purpose: Create a solid, axis-aligned rectangular box.
+        parameters:
+          size:
+            type: tuple[float, float, float]
+            required: true
+            default: null
+            range: '> 0 for each axis'
+            description: Edge lengths along X, Y, Z.
+          center:
+            type: tuple[float, float, float]
+            required: true
+            default: null
+            description: Box centroid position (world coordinates; +Z up, +X right, +Y toward camera).
+          color:
+            type: rgba | css_color
+            required: false
+            default: null
+            description: Optional mesh and per-cell color; RGBA floats 0–1 or CSS/hex name.
+        returns:
+          type: PolyData
+          description: Manifold solid with per-cell color when provided.
+        notes:
+          - Use instead of PyVista primitives to preserve metadata.
+
+      - name: make_cylinder
+        purpose: Create a solid right circular cylinder aligned to +Z.
+        parameters:
+          radius:
+            type: float
+            required: true
+            default: null
+            range: '> 0'
+            description: Base radius.
+          height:
+            type: float
+            required: true
+            default: null
+            range: '> 0'
+            description: Cylinder height along +Z.
+          center:
+            type: tuple[float, float, float]
+            required: false
+            default: (0, 0, 0)
+            description: Geometric center of the cylinder.
+          resolution:
+            type: int
+            required: false
+            default: 64
+            range: '>= 8'
+            description: Number of azimuthal segments.
+          color:
+            type: rgba | css_color
+            required: false
+            default: null
+            description: Optional mesh/cell color.
+        returns:
+          type: PolyData
+          description: Manifold solid, oriented along +Z.
+
+      - name: make_sphere
+        purpose: Create a solid sphere.
+        parameters:
+          radius:
+            type: float
+            required: true
+            default: null
+            range: '> 0'
+            description: Sphere radius.
+          center:
+            type: tuple[float, float, float]
+            required: false
+            default: (0, 0, 0)
+            description: Sphere center.
+          theta_res:
+            type: int
+            required: false
+            default: 64
+            range: '>= 8'
+            description: Longitudinal subdivisions.
+          phi_res:
+            type: int
+            required: false
+            default: 64
+            range: '>= 8'
+            description: Latitudinal subdivisions.
+          color:
+            type: rgba | css_color
+            required: false
+            default: null
+            description: Optional mesh/cell color.
+        returns:
+          type: PolyData
+          description: Manifold solid sphere.
+
+      - name: make_cone
+        purpose: Create a solid cone/frustum with base orthogonal to the given direction.
+        parameters:
+          bottom_diameter:
+            type: float
+            required: false
+            default: 1.0
+            range: '> 0 unless radius provided'
+            description: Base diameter; overridden if radius is provided.
+          top_diameter:
+            type: float
+            required: false
+            default: 0.0
+            range: '>= 0'
+            description: Tip diameter (0 for a classic cone).
+          radius:
+            type: float
+            required: false
+            default: null
+            range: '> 0'
+            description: Alias for bottom_diameter/2; mutually exclusive with explicit bottom_diameter.
+          height:
+            type: float
+            required: true
+            default: null
+            range: '> 0'
+            description: Cone height along its axis.
+          center:
+            type: tuple[float, float, float]
+            required: false
+            default: (0, 0, 0)
+            description: Midpoint of the cone along its axis.
+          direction:
+            type: tuple[float, float, float]
+            required: false
+            default: (0, 0, 1)
+            description: Axis direction; normalized internally.
+          resolution:
+            type: int
+            required: false
+            default: 64
+            range: '>= 8'
+            description: Azimuthal segments.
+          color:
+            type: rgba | css_color
+            required: false
+            default: null
+            description: Optional mesh/cell color.
+        returns:
+          type: PolyData
+          description: Manifold solid cone/frustum.
+      - name: make_prism
+        purpose: Create a solid rectangular prism (alias of box) for naming symmetry.
+        parameters:
+          size:
+            type: tuple[float, float, float]
+            required: true
+            default: null
+            range: '> 0 for each axis'
+            description: Edge lengths.
+          center:
+            type: tuple[float, float, float]
+            required: true
+            default: null
+            description: Prism centroid.
+          color:
+            type: rgba | css_color
+            required: false
+            default: null
+            description: Optional mesh/cell color.
+        returns:
+          type: PolyData
+          description: Manifold solid prism.
+
+      - name: make_torus
+        purpose: Create a solid torus in the XY plane around Z.
+        parameters:
+          ring_radius:
+            type: float
+            required: true
+            default: null
+            range: '> 0'
+            description: Distance from origin to tube centerline.
+          tube_radius:
+            type: float
+            required: true
+            default: null
+            range: '> 0'
+            description: Tube thickness.
+          ring_resolution:
+            type: int
+            required: false
+            default: 128
+            range: '>= 16'
+            description: Samples around main ring.
+          tube_resolution:
+            type: int
+            required: false
+            default: 64
+            range: '>= 8'
+            description: Samples around tube cross-section.
+          color:
+            type: rgba | css_color
+            required: false
+            default: null
+            description: Optional mesh/cell color.
+        returns:
+          type: PolyData
+          description: Manifold solid torus.
+
+      - name: make_text
+        purpose: Create solid extruded text (build123d-backed), aligned XY, extruded +Z.
+        parameters:
+          text:
+            type: str
+            required: true
+            default: null
+            description: Text content (UTF-8; emoji depends on font availability).
+          size:
+            type: float
+            required: true
+            default: null
+            range: '> 0'
+            description: Nominal font height.
+          depth:
+            type: float
+            required: true
+            default: null
+            range: '> 0'
+            description: Extrusion depth along +Z.
+          font:
+            type: str
+            required: false
+            default: 'Arial'
+            description: Font family name (used if font_path is not provided).
+          font_path:
+            type: path
+            required: false
+            default: null
+            description: Explicit font file; overrides font name.
+          font_style:
+            type: str
+            required: false
+            default: null
+            description: Style name/enum if supported (e.g., Regular, Bold).
+          color:
+            type: rgba | css_color
+            required: false
+            default: null
+            description: Optional mesh/cell color.
+        returns:
+          type: PolyData
+          description: Manifold solid text extrusion with normals.
+
+  transforms:
+    description: In-place geometric transforms preserving metadata.
+    items:
+      - name: translate
+        purpose: Translate a mesh or MeshGroup in place.
+        parameters:
+          vector_xyz:
+            type: tuple[float, float, float]
+            required: true
+            default: null
+            description: Displacement (dx, dy, dz) in world coordinates.
+        returns:
+          type: PolyData | MeshGroup
+          description: Same object, translated.
+
+      - name: rotate
+        purpose: Rotate a mesh or MeshGroup in place about an arbitrary axis through origin.
+        parameters:
+          axis:
+            type: tuple[float, float, float]
+            required: true
+            default: (0, 0, 1)
+            description: Rotation axis; normalized internally.
+          angle_deg:
+            type: float
+            required: true
+            default: null
+            description: Rotation angle in degrees (right-hand rule).
+        returns:
+          type: PolyData | MeshGroup
+          description: Same object, rotated.
+
+  groups:
+    description: Grouping constructs.
+    items:
+      - name: MeshGroup
+        purpose: Lightweight container of meshes; behaves like a scene.
+        parameters:
+          meshes:
+            type: Iterable[PolyData]
+            required: true
+            default: null
+            description: Collection of meshes to group.
+        returns:
+          type: MeshGroup
+          description: Container accepted by preview/export/CSG; internally convertible as needed.
+
+  csg:
+    description: Boolean operations on solids; auto-triangulate/clean/orient/normal-compute; preserve colors; include fallback append on union failure.
+    items:
+      - name: boolean_union
+        purpose: Merge multiple solids into one.
+        parameters:
+          meshes:
+            type: Iterable[PolyData | MeshGroup]
+            required: true
+            default: null
+            description: Solids to union.
+          tolerance:
+            type: float
+            required: false
+            default: 1e-4
+            range: '> 0'
+            description: Tolerance passed to VTK boolean ops.
+          backend:
+            type: literal['mesh']
+            required: false
+            default: 'mesh'
+            description: Only mesh backend is supported.
+        returns:
+          type: PolyData
+          description: Manifold solid union; per-cell colors preserved.
+
+      - name: boolean_difference
+        purpose: Subtract cutters from base sequentially.
+        parameters:
+          base:
+            type: PolyData | MeshGroup
+            required: true
+            default: null
+            description: Solid to subtract from.
+          cutters:
+            type: Iterable[PolyData | MeshGroup]
+            required: true
+            default: null
+            description: Solids to subtract.
+          tolerance:
+            type: float
+            required: false
+            default: 1e-4
+            range: '> 0'
+            description: Tolerance passed to VTK boolean ops.
+          backend:
+            type: literal['mesh']
+            required: false
+            default: 'mesh'
+            description: Only mesh backend is supported.
+        returns:
+          type: PolyData
+          description: Manifold solid difference; per-cell colors preserved.
+
+      - name: boolean_intersection
+        purpose: Intersection of all solids.
+        parameters:
+          meshes:
+            type: Iterable[PolyData | MeshGroup]
+            required: true
+            default: null
+            description: Solids to intersect.
+          tolerance:
+            type: float
+            required: false
+            default: 1e-4
+            range: '> 0'
+            description: Tolerance passed to VTK boolean ops.
+          backend:
+            type: literal['mesh']
+            required: false
+            default: 'mesh'
+            description: Only mesh backend is supported.
+        returns:
+          type: PolyData
+          description: Manifold solid intersection; per-cell colors preserved.
+
+      - name: union_meshes
+        purpose: Convenience wrapper over boolean_union for iterable or mapping.
+        parameters:
+          meshes_or_mapping:
+            type: Iterable | Mapping[Any, PolyData | MeshGroup]
+            required: true
+            default: null
+            description: Solids to union; if mapping, values are used.
+          tolerance:
+            type: float
+            required: false
+            default: 1e-4
+            range: '> 0'
+            description: Tolerance passed to VTK boolean ops.
+          backend:
+            type: literal['mesh']
+            required: false
+            default: 'mesh'
+            description: Only mesh backend is supported.
+        returns:
+          type: PolyData
+          description: Manifold solid union; per-cell colors preserved.
+
+  colors:
+    description: Mesh color helpers.
+    items:
+      - name: set_mesh_color
+        purpose: Set mesh-wide and per-cell color.
+        parameters:
+          mesh:
+            type: PolyData | MeshGroup
+            required: true
+            default: null
+            description: Target mesh.
+          rgba_or_name:
+            type: rgba | css_color
+            required: true
+            default: null
+            description: Color as (r,g,b,a) floats in [0,1] or CSS/hex name.
+        returns:
+          type: PolyData | MeshGroup
+          description: Same object with color metadata set.
+
+      - name: get_mesh_color
+        purpose: Retrieve mesh color.
+        parameters:
+          mesh:
+            type: PolyData | MeshGroup
+            required: true
+            default: null
+            description: Target mesh.
+        returns:
+          type: rgba tuple
+          description: (r,g,b,a) floats in [0,1].
+
+      - name: get_mesh_rgba
+        purpose: Retrieve mesh color (RGBA).
+        parameters:
+          mesh:
+            type: PolyData | MeshGroup
+            required: true
+            default: null
+            description: Target mesh.
+        returns:
+          type: rgba tuple
+          description: (r,g,b,a) floats in [0,1].
+
+  drafting_paths:
+    description: Use provided path/spline/dimension/arrow/plane helpers in `impression.modeling` drafting modules to generate geometry with correct normals/metadata. Avoid raw PyVista polylines/annotations.
+
+  cli:
+    description: Command-line interface for preview/export.
+    items:
+      - name: preview
+        purpose: Preview model with hot reload.
+        parameters:
+          model:
+            type: path
+            required: true
+            default: null
+            description: Python module defining build().
+          watch:
+            type: bool
+            required: false
+            default: true
+            description: Watch file for changes and hot-reload.
+          target_fps:
+            type: int
+            required: false
+            default: 60
+            range: '1–240'
+            description: Framerate budget.
+          show_edges:
+            type: bool
+            required: false
+            default: false
+            description: Draw triangle edges.
+          face_edges:
+            type: bool
+            required: false
+            default: false
+            description: Draw face edges.
+        usage: "impression preview model.py [--no-watch] [--target-fps N] [--show-edges] [--face-edges]"
+
+      - name: export
+        purpose: Export model to STL.
+        parameters:
+          model:
+            type: path
+            required: true
+            default: null
+            description: Python module defining build().
+          output:
+            type: path
+            required: false
+            default: model.stl
+            description: Output STL path.
+          overwrite:
+            type: bool
+            required: false
+            default: false
+            description: Allow replacing existing file.
+          ascii:
+            type: bool
+            required: false
+            default: false
+            description: Write ASCII STL if true; binary otherwise.
+        usage: "impression export model.py -o output.stl [--overwrite] [--ascii]"
+
+  testing:
+    description: Test runners.
+    items:
+      - name: preview_tests
+        purpose: Run preview suite and generate screenshots.
+        command: scripts/run_preview_tests.py
+      - name: stl_tests
+        purpose: Run STL suite and validate/watertight checks.
+        command: scripts/run_stl_tests.py
+      - name: all_tests
+        purpose: Run all suites.
+        command: scripts/run_all_tests.py
+
+  pitfalls:
+    description: Common mistakes to avoid.
+    items:
+      - Do not use PyVista primitives or pv.Text3D; always use Impression wrappers.
+      - Do not return arrays/points/lines from build(); only solids or MeshGroup.
+      - Do not reimplement transforms/paths/CSG; use provided wrappers.
+      - Ensure boolean inputs are solids; adjust tolerance only when necessary.
+      - Keep coordinate frame in mind: +Z up, +X right, +Y toward camera.
+
+example:
+  description: Single consolidated example using multiple features.
+  code: |
+    from impression.modeling import (
+        make_box, make_cylinder, make_text,
+        translate, rotate, boolean_union, boolean_difference,
+    )
+    from impression.modeling.group import MeshGroup
+
+    def build():
+        base = make_box(size=(4, 2, 0.5), center=(0, 0, 0.25), color="#5A7BFF")
+        post = make_cylinder(radius=0.4, height=1.5, center=(0, 0, 0.75), color="orange")
+        label = make_text("Impression", size=0.6, depth=0.1, font="Arial", color="orange")
+        translate(label, (0, 0.1, 0.55))
+        union = boolean_union([base, post])
+        recess = make_box(size=(1.2, 0.6, 0.2), center=(0, 0, 0.35))
+        cut = boolean_difference(union, [recess])
+        return MeshGroup([cut, label])

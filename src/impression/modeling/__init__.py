@@ -11,7 +11,6 @@ from .primitives import (
     make_sphere,
     make_torus,
 )
-from .text import make_text
 from .csg import boolean_union, boolean_difference, boolean_intersection, union_meshes
 from .paths import Path
 from .group import MeshGroup, group
@@ -34,3 +33,11 @@ __all__ = [
     "rotate",
     "translate",
 ]
+
+
+def make_text(*args, **kwargs):
+    """Lazily import text support to avoid build123d/OCCT overhead during preview."""
+
+    from .text import make_text as _make_text
+
+    return _make_text(*args, **kwargs)

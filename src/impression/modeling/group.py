@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 from typing import Iterable, List, Sequence
 
 import numpy as np
-import pyvista as pv
+
+from impression.mesh import Mesh, combine_meshes
 
 
 def _normalize_axis(axis: Sequence[float]) -> np.ndarray:
@@ -48,10 +49,10 @@ def _rotation_matrix(axis: Sequence[float], angle_deg: float, origin: Sequence[f
 class MeshGroup:
     """Hold multiple meshes and apply shared transforms."""
 
-    meshes: List[pv.DataSet] = field(default_factory=list)
+    meshes: List[Mesh] = field(default_factory=list)
     _transform: np.ndarray = field(default_factory=lambda: np.eye(4))
 
-    def add(self, mesh: pv.DataSet) -> "MeshGroup":
+    def add(self, mesh: Mesh) -> "MeshGroup":
         self.meshes.append(mesh)
         return self
 
@@ -77,24 +78,17 @@ class MeshGroup:
         self._transform = self._transform @ mat
         return self
 
-    def _apply_transform(self, mesh: pv.DataSet) -> pv.DataSet:
-        transformed = mesh.copy()
-        transformed.transform(self._transform, inplace=True)
-        return transformed
+    def _apply_transform(self, mesh: Mesh) -> Mesh:
+        return mesh.transform(self._transform, inplace=False)
 
-    def to_multiblock(self) -> pv.MultiBlock:
-        block = pv.MultiBlock()
-        for mesh in self.meshes:
-            block.append(self._apply_transform(mesh))
-        return block
+    def to_meshes(self) -> list[Mesh]:
+        return [self._apply_transform(mesh) for mesh in self.meshes]
 
-    def to_polydata(self) -> pv.PolyData:
-        block = self.to_multiblock()
-        combined = block.combine().clean(inplace=False)
-        return combined.triangulate()
+    def to_mesh(self) -> Mesh:
+        return combine_meshes(self.to_meshes())
 
 
-def group(meshes: Iterable[pv.DataSet]) -> MeshGroup:
+def group(meshes: Iterable[Mesh]) -> MeshGroup:
     grp = MeshGroup()
     for m in meshes:
         grp.add(m)

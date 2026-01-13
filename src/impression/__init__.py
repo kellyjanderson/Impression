@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import subprocess
 from pathlib import Path
 
 from ._env import ensure_shell_env
@@ -29,30 +30,72 @@ def _restore_vtk_dylibs() -> None:
     except Exception:
         return
 
+    def has_symbol(path: Path, symbol: str) -> bool:
+        try:
+            output = subprocess.check_output(
+                ["nm", "-gU", str(path)],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            return False
+        return symbol in output
+
+    def pick_primary(base_name: str) -> Path | None:
+        canonical = dylib_dir / f"{base_name}.dylib"
+        orig = canonical.with_suffix(canonical.suffix + ".orig")
+        disabled = canonical.with_suffix(canonical.suffix + ".disabled")
+        numbered = sorted(dylib_dir.glob(f"{base_name}-*.dylib"), reverse=True)
+
+        candidates = []
+        if orig.exists():
+            candidates.append(orig)
+        if canonical.exists() and not canonical.is_symlink():
+            candidates.append(canonical)
+        candidates.extend(numbered)
+
+        if base_name == "libvtkRenderingUI":
+            for candidate in candidates:
+                if has_symbol(candidate, "vtkCocoaAutoreleasePool"):
+                    return candidate
+        if candidates:
+            return candidates[0]
+        if disabled.exists():
+            return disabled
+        return None
+
     for base in ("libvtkRenderingUI", "libvtkRenderingOpenGL2"):
         canonical = dylib_dir / f"{base}.dylib"
-        disabled = canonical.with_suffix(canonical.suffix + ".disabled")
         numbered = sorted(dylib_dir.glob(f"{base}-*.dylib"), reverse=True)
-        primary = numbered[0] if numbered else None
+        primary = pick_primary(base)
+        if primary is None:
+            continue
 
-        if canonical.is_symlink():
-            orig = canonical.with_suffix(canonical.suffix + ".orig")
-            if orig.exists():
-                try:
-                    canonical.unlink()
-                    orig.rename(canonical)
-                except OSError:
-                    pass
-
-        if not canonical.exists() and disabled.exists():
+        targets = [canonical] + numbered
+        for target in targets:
             try:
-                disabled.rename(canonical)
+                if target.exists() and not target.is_symlink():
+                    if target.resolve() == primary.resolve():
+                        continue
             except OSError:
                 pass
 
-        if primary and not canonical.exists():
+            if target.exists() and not target.is_symlink():
+                backup = target.with_suffix(target.suffix + ".orig")
+                try:
+                    if not backup.exists():
+                        target.rename(backup)
+                    else:
+                        target.rename(target.with_suffix(target.suffix + ".disabled"))
+                except OSError:
+                    pass
             try:
-                canonical.symlink_to(primary.name)
+                if target.exists() or target.is_symlink():
+                    target.unlink()
+            except OSError:
+                pass
+            try:
+                target.symlink_to(primary.name)
             except OSError:
                 pass
 

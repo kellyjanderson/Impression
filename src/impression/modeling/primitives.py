@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Literal, Sequence, Tuple
 
 import numpy as np
-import pyvista as pv
+
+from impression.mesh import Mesh, triangulate_faces
 
 from ._color import set_mesh_color
 
@@ -21,15 +21,11 @@ def make_box(
     center: Sequence[float] = (0.0, 0.0, 0.0),
     backend: Backend = "mesh",
     color: Sequence[float] | str | None = None,
-) -> pv.PolyData:
+) -> Mesh:
     """Axis-aligned box specified by size (dx, dy, dz) and center."""
 
     _ensure_backend(backend)
-    sx, sy, sz = size
-    cx, cy, cz = center
-    hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
-    bounds = (cx - hx, cx + hx, cy - hy, cy + hy, cz - hz, cz + hz)
-    mesh = pv.Box(bounds=bounds)
+    mesh = _box_mesh(size, center)
     if color is not None:
         set_mesh_color(mesh, color)
     return mesh
@@ -44,20 +40,14 @@ def make_cylinder(
     capping: bool = True,
     backend: Backend = "mesh",
     color: Sequence[float] | str | None = None,
-) -> pv.PolyData:
+) -> Mesh:
     """Right circular cylinder aligned with `direction`."""
 
     _ensure_backend(backend)
     direction = _normalize(direction)
-    mesh = pv.Cylinder(
-        center=center,
-        direction=direction,
-        radius=radius,
-        height=height,
-        resolution=resolution,
-        capping=capping,
-    )
-    mesh = mesh.triangulate()
+    mesh = _circular_frustum_mesh(radius, radius, height, resolution, capping=capping)
+    mesh = _orient_mesh(mesh, direction)
+    mesh.translate(center, inplace=True)
     if color is not None:
         set_mesh_color(mesh, color)
     return mesh
@@ -70,14 +60,10 @@ def make_sphere(
     phi_resolution: int = 64,
     backend: Backend = "mesh",
     color: Sequence[float] | str | None = None,
-) -> pv.PolyData:
+) -> Mesh:
     _ensure_backend(backend)
-    mesh = pv.Sphere(
-        radius=radius,
-        center=center,
-        theta_resolution=theta_resolution,
-        phi_resolution=phi_resolution,
-    )
+    mesh = _sphere_mesh(radius, theta_resolution, phi_resolution)
+    mesh.translate(center, inplace=True)
     if color is not None:
         set_mesh_color(mesh, color)
     return mesh
@@ -92,18 +78,12 @@ def make_torus(
     n_phi: int = 32,
     backend: Backend = "mesh",
     color: Sequence[float] | str | None = None,
-) -> pv.PolyData:
+) -> Mesh:
     """Generate a torus (donut) with given major/minor radii."""
 
     _ensure_backend(backend)
     direction = _normalize(direction)
-    base = pv.ParametricTorus(
-        ringradius=major_radius,
-        crosssectionradius=minor_radius,
-        u_res=n_theta,
-        v_res=n_phi,
-    ).triangulate()
-
+    base = _torus_mesh(major_radius, minor_radius, n_theta, n_phi)
     aligned = _orient_mesh(base, direction)
     aligned.translate(center, inplace=True)
     if color is not None:
@@ -120,10 +100,18 @@ def make_cone(
     resolution: int = 64,
     backend: Backend = "mesh",
     color: Sequence[float] | str | None = None,
-) -> pv.PolyData:
+    *,
+    radius: float | None = None,
+) -> Mesh:
     """Circular frustum. Set top_diameter=0 for a classic cone."""
 
     _ensure_backend(backend)
+    if radius is not None:
+        inferred_bottom = 2.0 * float(radius)
+        if bottom_diameter != 1.0 and not np.isclose(bottom_diameter, inferred_bottom):
+            raise ValueError("Specify either bottom_diameter or radius, not both.")
+        bottom_diameter = inferred_bottom
+
     bottom_radius = bottom_diameter / 2.0
     top_radius = top_diameter / 2.0
     if bottom_radius <= 0 and top_radius <= 0:
@@ -145,7 +133,7 @@ def make_prism(
     direction: Sequence[float] = (0.0, 0.0, 1.0),
     backend: Backend = "mesh",
     color: Sequence[float] | str | None = None,
-) -> pv.PolyData:
+) -> Mesh:
     """
     Rectangular frustum (pyramid/prism). Set top_size=(0,0) for a pyramid, or None to match base.
     """
@@ -170,7 +158,7 @@ def _normalize(vector: Sequence[float]) -> Tuple[float, float, float]:
     return float(arr[0]), float(arr[1]), float(arr[2])
 
 
-def _orient_mesh(mesh: pv.PolyData, direction: Sequence[float]) -> pv.PolyData:
+def _orient_mesh(mesh: Mesh, direction: Sequence[float]) -> Mesh:
     target = np.asarray(direction, dtype=float)
     target_norm = np.linalg.norm(target)
     if target_norm == 0:
@@ -194,12 +182,126 @@ def _orient_mesh(mesh: pv.PolyData, direction: Sequence[float]) -> pv.PolyData:
     return rotated
 
 
+def _box_mesh(size: Sequence[float], center: Sequence[float]) -> Mesh:
+    sx, sy, sz = size
+    cx, cy, cz = center
+    hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
+    points = np.array(
+        [
+            (-hx, -hy, -hz),
+            (hx, -hy, -hz),
+            (hx, hy, -hz),
+            (-hx, hy, -hz),
+            (-hx, -hy, hz),
+            (hx, -hy, hz),
+            (hx, hy, hz),
+            (-hx, hy, hz),
+        ]
+    )
+    points += np.array([cx, cy, cz], dtype=float)
+    faces = np.array(
+        [
+            [0, 2, 1],  # bottom (-Z)
+            [0, 3, 2],
+            [4, 5, 6],  # top (+Z)
+            [4, 6, 7],
+            [0, 1, 5],  # -Y
+            [0, 5, 4],
+            [1, 2, 6],  # +X
+            [1, 6, 5],
+            [2, 3, 7],  # +Y
+            [2, 7, 6],
+            [0, 4, 7],  # -X
+            [0, 7, 3],
+        ],
+        dtype=int,
+    )
+    return Mesh(points, faces)
+
+
+def _sphere_mesh(radius: float, theta_resolution: int, phi_resolution: int) -> Mesh:
+    theta_steps = max(int(theta_resolution), 3)
+    phi_points = max(int(phi_resolution), 3)
+
+    points = [
+        (0.0, 0.0, radius),
+        (0.0, 0.0, -radius),
+    ]
+
+    ring_count = phi_points - 2
+    for i in range(1, phi_points - 1):
+        phi = np.pi * i / (phi_points - 1)
+        z = radius * np.cos(phi)
+        ring_radius = radius * np.sin(phi)
+        for j in range(theta_steps):
+            theta = 2 * np.pi * j / theta_steps
+            points.append((ring_radius * np.cos(theta), ring_radius * np.sin(theta), z))
+
+    faces: list[list[int]] = []
+    ring_start = 2
+    if ring_count > 0:
+        for j in range(theta_steps):
+            j_next = (j + 1) % theta_steps
+            faces.append([0, ring_start + j, ring_start + j_next])
+
+        for i in range(ring_count - 1):
+            ring0 = ring_start + i * theta_steps
+            ring1 = ring_start + (i + 1) * theta_steps
+            for j in range(theta_steps):
+                j_next = (j + 1) % theta_steps
+                faces.append([ring0 + j, ring1 + j, ring1 + j_next, ring0 + j_next])
+
+        last_ring = ring_start + (ring_count - 1) * theta_steps
+        for j in range(theta_steps):
+            j_next = (j + 1) % theta_steps
+            faces.append([1, last_ring + j_next, last_ring + j])
+
+    points_arr = np.asarray(points, dtype=float)
+    faces_arr = triangulate_faces(faces)
+    return Mesh(points_arr, faces_arr)
+
+
+def _torus_mesh(major_radius: float, minor_radius: float, n_theta: int, n_phi: int) -> Mesh:
+    theta_steps = max(int(n_theta), 3)
+    phi_steps = max(int(n_phi), 3)
+    points = []
+    for i in range(theta_steps):
+        u = 2 * np.pi * i / theta_steps
+        cos_u = np.cos(u)
+        sin_u = np.sin(u)
+        for j in range(phi_steps):
+            v = 2 * np.pi * j / phi_steps
+            cos_v = np.cos(v)
+            sin_v = np.sin(v)
+            radial = major_radius + minor_radius * cos_v
+            points.append((radial * cos_u, radial * sin_u, minor_radius * sin_v))
+
+    faces: list[list[int]] = []
+    for i in range(theta_steps):
+        i_next = (i + 1) % theta_steps
+        for j in range(phi_steps):
+            j_next = (j + 1) % phi_steps
+            idx0 = i * phi_steps + j
+            idx1 = i * phi_steps + j_next
+            idx2 = i_next * phi_steps + j_next
+            idx3 = i_next * phi_steps + j
+            faces.append([idx0, idx1, idx2, idx3])
+
+    points_arr = np.asarray(points, dtype=float)
+    faces_arr = triangulate_faces(faces)
+    if faces_arr.size:
+        faces_arr = faces_arr[:, [0, 2, 1]]
+    return Mesh(points_arr, faces_arr)
+
+
 def _circular_frustum_mesh(
     bottom_radius: float,
     top_radius: float,
     height: float,
     resolution: int,
-) -> pv.PolyData:
+    capping: bool = True,
+) -> Mesh:
+    resolution = max(int(resolution), 3)
     bottom_radius = max(bottom_radius, 0.0)
     top_radius = max(top_radius, 0.0)
     z_bottom = -height / 2.0
@@ -207,7 +309,7 @@ def _circular_frustum_mesh(
     angles = np.linspace(0, 2 * np.pi, resolution, endpoint=False)
 
     points = []
-    faces = []
+    faces: list[list[int]] = []
 
     def ring_points(radius: float, z: float) -> np.ndarray:
         return np.column_stack(
@@ -245,34 +347,37 @@ def _circular_frustum_mesh(
         count = resolution
         for i in range(count):
             j = (i + 1) % count
-            faces.append([4, bottom_indices[i], bottom_indices[j], top_indices[j], top_indices[i]])
-        faces.append([count, *bottom_indices])
-        faces.append([count, *top_indices[::-1]])
+            faces.append([bottom_indices[i], bottom_indices[j], top_indices[j], top_indices[i]])
+        if capping:
+            faces.append(list(bottom_indices[::-1]))
+            faces.append(list(top_indices))
     elif bottom_has_ring:
         apex = int(top_indices[0])
         count = resolution
         for i in range(count):
             j = (i + 1) % count
-            faces.append([3, bottom_indices[i], bottom_indices[j], apex])
-        faces.append([count, *bottom_indices])
+            faces.append([bottom_indices[i], bottom_indices[j], apex])
+        if capping:
+            faces.append(list(bottom_indices[::-1]))
     else:
         # inverted cone (top ring, bottom apex)
         apex = int(bottom_indices[0])
         count = resolution
         for i in range(count):
             j = (i + 1) % count
-            faces.append([3, apex, top_indices[j], top_indices[i]])
-        faces.append([count, *top_indices[::-1]])
+            faces.append([apex, top_indices[j], top_indices[i]])
+        if capping:
+            faces.append(list(top_indices))
 
-    faces_arr = np.hstack(faces)
-    return pv.PolyData(points_arr, faces_arr).clean()
+    faces_arr = triangulate_faces(faces)
+    return Mesh(points_arr, faces_arr)
 
 
 def _rectangular_frustum_mesh(
     base_size: Tuple[float, float],
     top_size: Tuple[float, float],
     height: float,
-) -> pv.PolyData:
+) -> Mesh:
     hx, hy = base_size[0] / 2.0, base_size[1] / 2.0
     tx, ty = top_size[0] / 2.0, top_size[1] / 2.0
     z_bottom = -height / 2.0
@@ -302,22 +407,22 @@ def _rectangular_frustum_mesh(
         apex_only = False
 
     points = np.vstack([bottom_pts, top_pts])
-    faces = []
+    faces: list[list[int]] = []
     bottom_indices = np.arange(4)
 
     if apex_only:
         apex_idx = 4
         for i in range(4):
             j = (i + 1) % 4
-            faces.append([3, bottom_indices[i], bottom_indices[j], apex_idx])
-        faces.append([4, *bottom_indices])
+            faces.append([bottom_indices[i], bottom_indices[j], apex_idx])
+        faces.append(list(bottom_indices[::-1]))
     else:
         top_indices = np.arange(4, 8)
         for i in range(4):
             j = (i + 1) % 4
-            faces.append([4, bottom_indices[i], bottom_indices[j], top_indices[j], top_indices[i]])
-        faces.append([4, *bottom_indices])
-        faces.append([4, *top_indices[::-1]])
+            faces.append([bottom_indices[i], bottom_indices[j], top_indices[j], top_indices[i]])
+        faces.append(list(bottom_indices[::-1]))
+        faces.append(list(top_indices))
 
-    faces_arr = np.hstack(faces)
-    return pv.PolyData(points, faces_arr).clean()
+    faces_arr = triangulate_faces(faces)
+    return Mesh(points, faces_arr)

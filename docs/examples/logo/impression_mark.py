@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from impression.io import write_stl
+
 import numpy as np
 
 from impression.modeling import make_box, make_text
@@ -49,5 +51,5 @@ if __name__ == "__main__":
     OUTPUT = Path("dist")
     OUTPUT.mkdir(exist_ok=True)
     mesh = build()
-    mesh.save(OUTPUT / "impression_mark.stl")
-    print("Saved impression_mark.stl with", mesh.n_cells, "cells")
+    write_stl(mesh, OUTPUT / "impression_mark.stl")
+    print("Saved impression_mark.stl with", mesh.n_faces, "faces")

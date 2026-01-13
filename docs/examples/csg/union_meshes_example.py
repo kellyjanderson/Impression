@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from impression.io import write_stl
+
 from impression.modeling import make_box, make_cylinder, union_meshes
 
 
@@ -22,5 +24,5 @@ if __name__ == "__main__":
     OUTPUT = Path("dist")
     OUTPUT.mkdir(exist_ok=True)
     mesh = build()
-    mesh.save(OUTPUT / "union_meshes_example.stl")
-    print("Saved union_meshes_example.stl with", mesh.n_cells, "cells")
+    write_stl(mesh, OUTPUT / "union_meshes_example.stl")
+    print("Saved union_meshes_example.stl with", mesh.n_faces, "faces")

@@ -1,6 +1,6 @@
 # Modeling — Primitives
 
-All primitives are exposed from `impression.modeling` and currently use PyVista meshes under the hood. Import helpers like:
+All primitives are exposed from `impression.modeling` and return internal triangle meshes. Import helpers like:
 
 ```python
 from impression.modeling import make_box, make_cylinder, make_sphere, make_torus
@@ -8,7 +8,7 @@ from impression.modeling import make_box, make_cylinder, make_sphere, make_torus
 
 > Rendering note: the CLI preview (`impression preview`) or `docs/examples/...` scripts can be used to visualize outputs on a desktop environment.
 
-**Color support:** every `make_*` function accepts an optional `color` argument (RGB/RGBA tuple in 0–1 or a named/hex color string). Colors are stored with the mesh so previews and future exports respect object colors.
+**Color support:** every `make_*` function accepts an optional `color` argument (RGB/RGBA tuple in 0–1 or a hex/common named color string). Colors are stored with the mesh so previews and future exports respect object colors.
 
 - **Example (two colored cubes):** `docs/examples/primitives/color_dual_example.py`
 - **Example (translucent shell):** `docs/examples/primitives/color_transparency_example.py`

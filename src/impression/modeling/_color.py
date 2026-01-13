@@ -3,34 +3,29 @@ from __future__ import annotations
 from typing import Optional, Sequence, Tuple
 
 import numpy as np
-import pyvista as pv
+
+from impression.mesh import Mesh
 
 COLOR_FIELD = "__impression_color__"
 COLOR_CELL_DATA = "__impression_cell_color__"
 
 
-def set_mesh_color(mesh: pv.PolyData, color: Sequence[float] | str) -> pv.PolyData:
-    rgb, alpha = _normalize_color(color)
-    data = np.array([*rgb, alpha], dtype=float)[np.newaxis, :]
-    mesh.field_data[COLOR_FIELD] = data
+def set_mesh_color(mesh: Mesh, color: Sequence[float] | str) -> Mesh:
+    rgba = _normalize_color(color)
+    mesh.color = rgba
     return mesh
 
 
-def get_mesh_color(mesh: pv.DataObject) -> Optional[Tuple[Tuple[float, float, float], float]]:
-    if COLOR_FIELD not in mesh.field_data:
+def get_mesh_color(mesh: Mesh) -> Optional[Tuple[Tuple[float, float, float], float]]:
+    if mesh.color is None:
         return None
-    arr = np.array(mesh.field_data[COLOR_FIELD])
-    if arr.size == 0:
-        return None
-    rgba = arr[0]
-    if rgba.size < 3:
-        return None
-    rgb = tuple(float(c) for c in rgba[:3])
-    alpha = float(rgba[3]) if rgba.size >= 4 else 1.0
+    rgba = mesh.color
+    rgb = (float(rgba[0]), float(rgba[1]), float(rgba[2]))
+    alpha = float(rgba[3])
     return rgb, alpha
 
 
-def get_mesh_rgba(mesh: pv.DataObject) -> Tuple[float, float, float, float]:
+def get_mesh_rgba(mesh: Mesh) -> Tuple[float, float, float, float]:
     info = get_mesh_color(mesh)
     if info is None:
         return (0.8, 0.8, 0.8, 1.0)
@@ -38,30 +33,61 @@ def get_mesh_rgba(mesh: pv.DataObject) -> Tuple[float, float, float, float]:
     return (rgb[0], rgb[1], rgb[2], alpha)
 
 
-def transfer_mesh_color(target: pv.PolyData, source: pv.DataObject) -> pv.PolyData:
+def transfer_mesh_color(target: Mesh, source: Mesh) -> Mesh:
     info = get_mesh_color(source)
     if info is None:
         return target
     rgb, alpha = info
-    data = np.array([*rgb, alpha], dtype=float)[np.newaxis, :]
-    target.field_data[COLOR_FIELD] = data
+    target.color = (rgb[0], rgb[1], rgb[2], alpha)
     return target
 
 
-def set_cell_colors(mesh: pv.PolyData, rgba: np.ndarray) -> None:
-    if mesh.n_cells == 0:
+def set_cell_colors(mesh: Mesh, rgba: np.ndarray) -> None:
+    if mesh.n_faces == 0:
         return
-    if rgba.shape[0] != mesh.n_cells:
+    if rgba.shape[0] != mesh.n_faces:
         raise ValueError("rgba array must match number of cells")
-    mesh.cell_data[COLOR_CELL_DATA] = rgba.astype(float)
+    mesh.face_colors = rgba.astype(float)
 
 
-def _normalize_color(color: Sequence[float] | str) -> Tuple[Tuple[float, float, float], float]:
+def _normalize_color(color: Sequence[float] | str) -> Tuple[float, float, float, float]:
     if isinstance(color, str):
-        col = pv.Color(color)
-        rgb = tuple(col.float_rgb)
-        alpha = 1.0
-        return rgb, alpha
+        value = color.strip().lower()
+        if value.startswith("#"):
+            hex_value = value[1:]
+            if len(hex_value) == 3:
+                hex_value = "".join(ch * 2 for ch in hex_value)
+            if len(hex_value) == 6:
+                r, g, b = hex_value[0:2], hex_value[2:4], hex_value[4:6]
+                return (int(r, 16) / 255.0, int(g, 16) / 255.0, int(b, 16) / 255.0, 1.0)
+            if len(hex_value) == 8:
+                r, g, b, a = hex_value[0:2], hex_value[2:4], hex_value[4:6], hex_value[6:8]
+                return (
+                    int(r, 16) / 255.0,
+                    int(g, 16) / 255.0,
+                    int(b, 16) / 255.0,
+                    int(a, 16) / 255.0,
+                )
+            raise ValueError("Hex colors must be #RGB, #RRGGBB, or #RRGGBBAA.")
+        named = {
+            "black": (0.0, 0.0, 0.0),
+            "white": (1.0, 1.0, 1.0),
+            "red": (1.0, 0.0, 0.0),
+            "green": (0.0, 1.0, 0.0),
+            "blue": (0.0, 0.0, 1.0),
+            "yellow": (1.0, 1.0, 0.0),
+            "cyan": (0.0, 1.0, 1.0),
+            "magenta": (1.0, 0.0, 1.0),
+            "gray": (0.5, 0.5, 0.5),
+            "grey": (0.5, 0.5, 0.5),
+            "orange": (1.0, 0.65, 0.0),
+            "purple": (0.5, 0.0, 0.5),
+            "pink": (1.0, 0.75, 0.8),
+        }
+        if value in named:
+            rgb = named[value]
+            return (rgb[0], rgb[1], rgb[2], 1.0)
+        raise ValueError("Named colors must be a hex string or one of: " + ", ".join(sorted(named)))
 
     arr = np.asarray(color, dtype=float).flatten()
     if arr.size not in (3, 4):
@@ -70,4 +96,4 @@ def _normalize_color(color: Sequence[float] | str) -> Tuple[Tuple[float, float, 
         arr = arr / 255.0
     rgb = tuple(float(c) for c in arr[:3])
     alpha = float(arr[3]) if arr.size == 4 else 1.0
-    return rgb, alpha
+    return (rgb[0], rgb[1], rgb[2], alpha)
