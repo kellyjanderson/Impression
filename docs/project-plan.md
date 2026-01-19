@@ -7,18 +7,21 @@ Current execution order is captured in `docs/feature-pipeline.md` and should be 
 ## Modeling Core
 
 - [ ] **Primitives**
-  - [ ] Uniform API (`make_box`, `make_cylinder`, etc.) with backend selection (`mesh` vs `cad`).
-  - [x] Consistent parameter names (center, dimensions, orientation) and metadata tagging (assign IDs/names to faces/edges as soon as they are created).
+  - [x] Uniform mesh-backend API (`make_box`, `make_cylinder`, etc.) with consistent naming.
+  - [ ] CAD backend parity for primitives (`cad` backend).
+  - [ ] Metadata tagging (assign IDs/names to faces/edges as soon as they are created).
 - [ ] **Shape library + color support**
   - [ ] Curate a lightweight library of reusable shapes (fasteners, brackets, gears) under permissive licenses; expose helper loaders (`load_shape("gear_m12")`).
-  - [x] Full RGBA color pipeline: assign per-object colors, ensure booleans handle color inheritance (new cut surfaces adopt the subtracting object’s color).
-  - [ ] Future: per-face/per-vertex colors for documentation callouts.
-- [ ] **Custom primitive tessellation**
-  - Generate core primitives (box, cylinder, torus, etc.) via our own tessellation pipeline to ensure STL exports and previews are perfectly aligned.
-  - Investigate caching of generated templates for performance.
-- **CSG Operations**
-  - Wrapper helpers for `union`, `difference`, `intersection` that expose tolerance controls and auto-clean options.
-  - Optional provenance tracking (node graph) so regenerations only recompute affected nodes.
+  - [x] Per-object RGBA color pipeline.
+  - [ ] Boolean color inheritance (new cut surfaces adopt the subtracting object’s color).
+  - [ ] Per-face/per-vertex colors for documentation callouts (API + docs).
+- [x] **Custom primitive tessellation**
+  - [x] Generate core primitives (box, cylinder, torus, sphere, cone, prism) via internal tessellation so preview/export align.
+  - [ ] Investigate caching of generated templates for performance.
+- [ ] **CSG Operations**
+  - [x] Wrapper helpers for `union`, `difference`, `intersection` with tolerance controls.
+  - [ ] Auto-clean options for mesh hygiene/repair during booleans.
+  - [ ] Optional provenance tracking (node graph) so regenerations only recompute affected nodes.
 
 ## Advanced Modeling
 
@@ -26,8 +29,9 @@ Current execution order is captured in `docs/feature-pipeline.md` and should be 
   - `loft(profiles, path=None)` helper that uses build123d loft when available and falls back to PyVista mesh-based approximations.
   - Support closed paths, ruled vs smooth, and per-profile parameter overrides.
 - [ ] **Splines & Paths**
-  - Canonical `Path` abstraction (polyline, Bezier, spline) that sweep, pipe, and array modifiers consume.
-  - Extrude/sweep along path, including twist/scale controls.
+  - [x] Canonical `Path` abstraction (polyline) with length/closed utilities.
+  - [ ] Bezier/spline `Path` types that sweep, pipe, and array modifiers consume.
+  - [ ] Extrude/sweep along path, including twist/scale controls.
 - [ ] **Blobs / NURBS**
   - Implicit “blob” builder (metaballs via OpenVDB or marching cubes) with auto-conversion to PolyData.
   - NURBS surface helper leveraging OCC BSplines for precise surfacing.
@@ -44,26 +48,29 @@ Current execution order is captured in `docs/feature-pipeline.md` and should be 
 ## Tooling & Glue
 
 - [ ] **Backends & Scene Graph**
-  - Unified scene representation that can hold PyVista meshes, build123d solids, or implicit blobs, so preview/export pipelines remain backend agnostic.
+  - Unified scene representation that can hold mesh, CAD, or implicit blobs; internal Mesh/Polyline pipeline is in place.
 - [ ] **Parameter Management**
   - Config-driven parameter overrides (YAML/JSON) and CLI flags to sweep model variants.
 - [ ] **Caching & Tessellation**
   - Cache CAD tessellations keyed by parameter/tolerance to speed up preview/export in iterative workflows.
 - [ ] **IDE Integration**
-  - VS Code extension that wraps `impression preview` in a panel, streams logs, and offers STL exports from the editor.
-  - Add commands for “Preview current model”, “Export STL”, and quick links to docs/examples.
+  - [x] VS Code extension commands for “Preview current model”, “Export STL”, and test helpers.
+  - [ ] Wrap `impression preview` in a panel/webview and stream logs from the editor.
+  - [ ] Quick links to docs/examples inside the extension UI.
 
 ## Additional Nuances
 
-- [ ] Units & tolerances: settle on default units (likely millimeters) and surface tolerances for booleans/meshing.
+- [x] Default units configurable via `~/.impression/impression.cfg` (mm/m/in).
+- [ ] Tolerance policy for booleans/meshing (surface, edge, and voxel tolerances).
 - [ ] Constraint-aware sketches for CAD workflows (equality, tangency, concentricity) to keep parametric edits stable.
-- [ ] Validation hooks (minimum thickness, watertight checks) after heavy operations.
+- [x] Mesh analysis warnings (boundary, nonmanifold, degenerate) on load.
+- [ ] Validation hooks (minimum thickness, watertight checks, repair) after heavy operations.
 - [ ] Future format support: STEP/IGES export for CAD pipelines alongside STL for mesh workflows.
 
 ## Testing & QA
 
 - [x] STL regression tests verifying watertightness/manifoldness for exported meshes (`scripts/run_stl_tests.py`).
-- [ ] Adopt a standard Python test framework (pytest vs unittest) for orchestrating CLI harnesses and future unit tests.
+- [ ] Adopt pytest as the standard test harness for CLI + unit tests.
   - pytest offers concise fixtures, better parameterization, and aligns with our preference; unittest is batteries-included but more verbose.
   - Decision factors: integration with existing scripts (call via subprocess vs plugins), fixture complexity (e.g., temporary workspaces, font downloads), and ecosystem tooling (coverage, plugin availability).
 
