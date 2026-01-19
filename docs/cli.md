@@ -46,6 +46,12 @@ Generate an STL from a model.
 - `--overwrite / --no-overwrite` (default: `--no-overwrite`): guard existing files.
 - `--ascii / --binary` (default: binary): choose STL encoding.
 
+## UNITS
+
+Impression reads `~/.impression/impression.cfg` (JSON) to determine the default units.
+Valid values are `millimeters` (default), `meters`, and `inches` (case-insensitive). These
+units are echoed in preview axes labels and export summaries.
+
 ## WORKFLOW
 
 1. Write a module that defines `build()` and returns internal meshes.

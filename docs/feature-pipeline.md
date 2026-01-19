@@ -5,8 +5,8 @@ near-term features in flight, their desired user outcomes, and readiness require
 
 | Priority | Feature | Driver | Status | Notes |
 | --- | --- | --- | --- | --- |
-| P0 | Configurable unit defaults | Platform | Proposed | Create `~/.impression/impression.cfg` (JSON) with units metadata, defaulting to millimeters, so exports/previews can align with slicer expectations. Autogenerate the config on install/run if missing. |
-| P0 | VS Code integration polish | UX/Tools | In Progress | Embed reliable interpreter detection, one-click auto-install, and prepare for future webview preview. Track in `feature/vscode-interpreter`. |
+| P0 | Configurable unit defaults | Platform | Done | Create `~/.impression/impression.cfg` (JSON) with units metadata, defaulting to millimeters, so exports/previews can align with slicer expectations. Autogenerate the config on install/run if missing. |
+| P0 | VS Code integration polish | UX/Tools | Done | Embed reliable interpreter detection, one-click auto-install, and prepare for future webview preview. Track in `feature/vscode-interpreter`. |
 | P1 | Uniform primitive API | Modeling | Planned | Normalize backend selection, ensure future CAD mesh parity, and document the API in `docs/modeling/primitives.md`. |
 | P2 | Custom primitive tessellation | Modeling/QA | Planned | Move box/cylinder/sphere generation to our CAD pipeline so preview/export produce identical meshes. Requires regression tests comparing STL + preview. |
 | P3 | Robust path & spline abstraction | Modeling/UX | Planned | Formalize `Path` types (polyline, Bezier, spline) with sweep/extrude helpers and documentation + examples. |

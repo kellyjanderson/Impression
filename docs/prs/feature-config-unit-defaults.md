@@ -1,7 +1,7 @@
 # PR: Add configurable unit defaults
 
 - **Branch**: `feature/config-unit-defaults`
-- **Status**: Open (PR #6)
+- **Status**: Merged (PR #6)
 - **Owner/Reviewer**: @kellyjanderson
 
 ## Summary
