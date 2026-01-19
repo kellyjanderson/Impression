@@ -8,12 +8,9 @@ Current execution order is captured in `docs/feature-pipeline.md` and should be 
 
 - [ ] **Primitives**
   - [x] Uniform mesh-backend API (`make_box`, `make_cylinder`, etc.) with consistent naming.
-  - [ ] CAD backend parity for primitives (`cad` backend).
-  - [ ] Metadata tagging (assign IDs/names to faces/edges as soon as they are created).
 - [ ] **Shape library + color support**
-  - [ ] Curate a lightweight library of reusable shapes (fasteners, brackets, gears) under permissive licenses; expose helper loaders (`load_shape("gear_m12")`).
   - [x] Per-object RGBA color pipeline.
-  - [ ] Boolean color inheritance (new cut surfaces adopt the subtracting object’s color).
+  - [x] Boolean color inheritance (new cut surfaces adopt the subtracting object’s color).
   - [ ] Per-face/per-vertex colors for documentation callouts (API + docs).
 - [x] **Custom primitive tessellation**
   - [x] Generate core primitives (box, cylinder, torus, sphere, cone, prism) via internal tessellation so preview/export align.
@@ -25,9 +22,11 @@ Current execution order is captured in `docs/feature-pipeline.md` and should be 
 
 ## Advanced Modeling
 
-- [ ] **Skinning & Lofting**
-  - `loft(profiles, path=None)` helper that uses build123d loft when available and falls back to PyVista mesh-based approximations.
-  - Support closed paths, ruled vs smooth, and per-profile parameter overrides.
+- [ ] **Morph & Lofting**
+  - [ ] 2D morph between two shapes/paths with a parameter `t` in `[0, 1]` (0 = first profile, 1 = second profile).
+  - [ ] Resample/align profiles for compatible point counts before interpolation.
+  - [ ] `loft(profiles, path=None)` helper that supports a series of 2D shapes/paths along a path.
+  - [ ] Support closed profiles, ruled vs smooth, and per-profile parameter overrides.
 - [ ] **Splines & Paths**
   - [x] Canonical `Path` abstraction (polyline) with length/closed utilities.
   - [ ] Bezier/spline `Path` types that sweep, pipe, and array modifiers consume.
@@ -73,6 +72,10 @@ Current execution order is captured in `docs/feature-pipeline.md` and should be 
 - [ ] Adopt pytest as the standard test harness for CLI + unit tests.
   - pytest offers concise fixtures, better parameterization, and aligns with our preference; unittest is batteries-included but more verbose.
   - Decision factors: integration with existing scripts (call via subprocess vs plugins), fixture complexity (e.g., temporary workspaces, font downloads), and ecosystem tooling (coverage, plugin availability).
+
+## Appendix A: Deferred Items
+
+- [ ] Curate a lightweight library of reusable shapes (fasteners, brackets, gears) under permissive licenses; expose helper loaders (`load_shape("gear_m12")`).
 
 ## Appendix: Gravitational Modeling
 

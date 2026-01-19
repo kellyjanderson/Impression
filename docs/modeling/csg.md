@@ -6,7 +6,8 @@ Imported from `impression.modeling`:
 from impression.modeling import boolean_union, boolean_difference, boolean_intersection, union_meshes
 ```
 
-Booleans preserve the first available source color on the result mesh. Per-face color inheritance is planned for future mesh hygiene work.
+Booleans propagate per-object colors onto result faces. Union/intersection faces keep the originating mesh color; difference assigns new cut faces to the cutter’s color.
+If no input colors are provided, the result uses the default preview color.
 
 All helpers operate on internal triangle meshes and use `manifold3d` for robust, watertight-aware booleans.
 Install requirement: `pip install manifold3d`.

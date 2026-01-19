@@ -55,15 +55,18 @@ def _mesh_from_manifold(manifold_mesh) -> Mesh:
     return Mesh(vertices, faces)
 
 
-def _manifold_from_mesh(mesh: Mesh):
+def _manifold_from_mesh(mesh: Mesh, face_id: int | None = None):
     Manifold, ManifoldMesh = _load_manifold()
-    vertices = np.asarray(mesh.vertices, dtype=float)
-    faces = np.asarray(mesh.faces, dtype=int)
+    vertices = np.asarray(mesh.vertices, dtype=np.float32)
+    faces = np.asarray(mesh.faces, dtype=np.uint32)
+    face_ids = None
+    if face_id is not None:
+        face_ids = np.full(mesh.n_faces, face_id, dtype=np.uint32)
     try:
-        manifold_mesh = ManifoldMesh(vertices, faces)
+        manifold_mesh = ManifoldMesh(vertices, faces, face_id=face_ids)
     except TypeError:
         try:
-            manifold_mesh = ManifoldMesh(vertices=vertices, triangles=faces)
+            manifold_mesh = ManifoldMesh(vertices=vertices, triangles=faces, face_id=face_ids)
         except TypeError as exc:  # pragma: no cover - defensive
             raise BooleanOperationError("Unable to build manifold mesh from input data.") from exc
     try:
@@ -109,6 +112,31 @@ def _combine_color(result: Mesh, sources: list[Mesh]) -> None:
             return
 
 
+def _resolve_mesh_rgba(mesh: Mesh) -> tuple[float, float, float, float] | None:
+    if mesh.color is not None:
+        return mesh.color
+    if mesh.face_colors is None or mesh.face_colors.size == 0:
+        return None
+    colors = np.asarray(mesh.face_colors, dtype=float)
+    if colors.ndim != 2 or colors.shape[1] < 3:
+        return None
+    rgb = colors[:, :3].mean(axis=0)
+    alpha = colors[:, 3].mean() if colors.shape[1] >= 4 else 1.0
+    return (float(rgb[0]), float(rgb[1]), float(rgb[2]), float(alpha))
+
+
+def _apply_face_colors(result: Mesh, face_ids: np.ndarray, color_map: dict[int, tuple[float, float, float, float] | None]) -> None:
+    if face_ids.size == 0:
+        return
+    face_colors = np.zeros((face_ids.size, 4), dtype=float)
+    for idx, face_id in enumerate(face_ids):
+        rgba = color_map.get(int(face_id))
+        if rgba is None:
+            rgba = (0.8, 0.8, 0.8, 1.0)
+        face_colors[idx] = rgba
+    result.face_colors = face_colors
+
+
 def _apply_boolean(
     meshes: Iterable[Mesh],
     operation: str,
@@ -117,9 +145,18 @@ def _apply_boolean(
     if not meshes_list:
         raise ValueError(f"boolean_{operation} requires at least one mesh.")
 
-    base = _manifold_from_mesh(meshes_list[0])
-    for mesh in meshes_list[1:]:
-        other = _manifold_from_mesh(mesh)
+    color_map: dict[int, tuple[float, float, float, float] | None] = {}
+    explicit_color = False
+    manifold_meshes = []
+    for idx, mesh in enumerate(meshes_list, start=1):
+        color = _resolve_mesh_rgba(mesh)
+        if color is not None:
+            explicit_color = True
+        color_map[idx] = color
+        manifold_meshes.append(_manifold_from_mesh(mesh, face_id=idx))
+
+    base = manifold_meshes[0]
+    for other in manifold_meshes[1:]:
         if hasattr(base, operation):
             base = getattr(base, operation)(other)
         elif operation == "union" and hasattr(base, "__add__"):
@@ -147,7 +184,13 @@ def _apply_boolean(
         raise BooleanOperationError("manifold3d returned an unexpected result type.")
 
     result = _mesh_from_manifold(result_mesh)
-    _combine_color(result, meshes_list)
+    if explicit_color and hasattr(result_mesh, "face_id"):
+        face_ids = np.asarray(result_mesh.face_id, dtype=int)
+        if face_ids.shape[0] == result.n_faces:
+            _apply_face_colors(result, face_ids, color_map)
+        _combine_color(result, meshes_list)
+    else:
+        _combine_color(result, meshes_list)
     return result
 
 
