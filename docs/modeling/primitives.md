@@ -3,7 +3,7 @@
 All primitives are exposed from `impression.modeling` and return internal triangle meshes. Import helpers like:
 
 ```python
-from impression.modeling import make_box, make_cylinder, make_nhedron, make_ngon, make_sphere, make_torus
+from impression.modeling import make_box, make_cylinder, make_ngon, make_polyhedron, make_sphere, make_torus
 ```
 
 > Rendering note: the CLI preview (`impression preview`) or `docs/examples/...` scripts can be used to visualize outputs on a desktop environment.
@@ -118,19 +118,21 @@ def build():
 
 ![Prism primitive](../assets/previews/primitive-prism.png)
 
-## N-hedron (Regular Polyhedra)
+## Polyhedron (Regular Solids)
 
-- **Function:** `make_nhedron(faces=6, radius=0.5, center=(0,0,0))`
+- **Function:** `make_polyhedron(faces=6, radius=0.5, center=(0,0,0))`
 - **Supported face counts:** 4 (tetrahedron), 6 (hexahedron/cube), 8 (octahedron), 12 (dodecahedron), 20 (icosahedron).
-- **Example:** `docs/examples/primitives/nhedron_example.py`
-- **Preview:** `impression preview docs/examples/primitives/nhedron_example.py`
+- **Example:** `docs/examples/primitives/polyhedron_example.py`
+- **Preview:** `impression preview docs/examples/primitives/polyhedron_example.py`
 
 ```python
-from impression.modeling import make_nhedron
+from impression.modeling import make_polyhedron
 
 def build():
-    return make_nhedron(faces=12, radius=1.0)
+    return make_polyhedron(faces=12, radius=1.0)
 ```
+
+![Polyhedron primitive](../assets/previews/primitive-polyhedron.png)
 
 ## N-gon Prism
 

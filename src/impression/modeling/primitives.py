@@ -85,7 +85,7 @@ def make_ngon(
     return mesh
 
 
-def make_nhedron(
+def make_polyhedron(
     faces: int = 6,
     radius: float = 0.5,
     center: Sequence[float] = (0.0, 0.0, 0.0),
@@ -114,6 +114,24 @@ def make_nhedron(
     if color is not None:
         set_mesh_color(mesh, color)
     return mesh
+
+
+def make_nhedron(
+    faces: int = 6,
+    radius: float = 0.5,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    backend: Backend = "mesh",
+    color: Sequence[float] | str | None = None,
+) -> Mesh:
+    """Compatibility wrapper for make_polyhedron."""
+
+    return make_polyhedron(
+        faces=faces,
+        radius=radius,
+        center=center,
+        backend=backend,
+        color=color,
+    )
 
 
 def make_sphere(
