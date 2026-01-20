@@ -14,6 +14,18 @@ from .primitives import (
     make_sphere,
     make_torus,
 )
+from .drawing2d import (
+    Arc2D,
+    Bezier2D,
+    Line2D,
+    Path2D,
+    Profile2D,
+    make_circle,
+    make_ngon as make_ngon_2d,
+    make_polygon,
+    make_polyline,
+    make_rect,
+)
 from .csg import boolean_union, boolean_difference, boolean_intersection, union_meshes
 from .paths import Path
 from .group import MeshGroup, group
@@ -29,6 +41,16 @@ __all__ = [
     "make_sphere",
     "make_torus",
     "make_text",
+    "Arc2D",
+    "Bezier2D",
+    "Line2D",
+    "Path2D",
+    "Profile2D",
+    "make_rect",
+    "make_circle",
+    "make_ngon_2d",
+    "make_polygon",
+    "make_polyline",
     "boolean_union",
     "boolean_difference",
     "boolean_intersection",

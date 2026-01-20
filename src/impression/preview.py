@@ -19,6 +19,7 @@ from impression._vtk_runtime import ensure_vtk_runtime
 from impression.mesh import Mesh, Polyline, analyze_mesh, combine_meshes, mesh_to_pyvista
 from impression.modeling._color import get_mesh_color
 from impression.modeling.group import MeshGroup
+from impression.modeling.drawing2d import Path2D, Profile2D
 
 
 
@@ -64,6 +65,14 @@ def _collect_datasets_from_scene(scene: object) -> List[Mesh | Polyline]:
 
         if isinstance(item, Polyline):
             datasets.append(item)
+            return
+
+        if isinstance(item, Path2D):
+            datasets.append(item.to_polyline())
+            return
+
+        if isinstance(item, Profile2D):
+            datasets.extend(item.to_polylines())
             return
 
         if isinstance(item, (list, tuple, set)):

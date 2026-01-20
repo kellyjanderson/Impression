@@ -14,6 +14,7 @@ Impression is a parametric modeling toolkit that mixes Python, PyVista rendering
   - [Primitives](modeling/primitives.md) — boxes, cylinders, spheres, torus utilities, code snippets, and rendered examples.
   - [CSG Helpers](modeling/csg.md) — union/difference/intersection helpers with CLI-ready sample modules.
   - [Paths](modeling/paths.md) — polyline/spline utilities for sweeps and visualization.
+  - [2D Drawing](modeling/drawing2d.md) — profile and path primitives for vector-style modeling.
   - [Text](modeling/text.md) — extruded or flat glyphs (including emoji) with full color support.
   - [Drafting Helpers](modeling/drafting.md) — lines, planes, arrows, and dimensions for 2.5D annotations.
   - [Transforms](modeling/transforms.md) — rotate and translate meshes after creation.
