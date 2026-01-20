@@ -17,6 +17,7 @@ dependencies = [
     "watchfiles>=0.21.0",
     "build123d>=0.10.0",
     "manifold3d>=3.3.2",
+    "mapbox_earcut>=2.0.0",
 ]
 
 [project.scripts]

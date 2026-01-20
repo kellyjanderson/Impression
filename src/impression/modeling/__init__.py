@@ -26,6 +26,10 @@ from .drawing2d import (
     make_polyline,
     make_rect,
 )
+from .extrude import linear_extrude, rotate_extrude
+from .loft import loft, loft_profiles
+from .morph import morph, morph_profiles
+from .path3d import Arc3D, Bezier3D, Line3D, Path3D
 from .csg import boolean_union, boolean_difference, boolean_intersection, union_meshes
 from .paths import Path
 from .group import MeshGroup, group
@@ -51,6 +55,16 @@ __all__ = [
     "make_ngon_2d",
     "make_polygon",
     "make_polyline",
+    "Line3D",
+    "Arc3D",
+    "Bezier3D",
+    "Path3D",
+    "linear_extrude",
+    "rotate_extrude",
+    "morph",
+    "morph_profiles",
+    "loft",
+    "loft_profiles",
     "boolean_union",
     "boolean_difference",
     "boolean_intersection",
