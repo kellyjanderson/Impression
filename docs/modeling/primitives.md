@@ -3,7 +3,7 @@
 All primitives are exposed from `impression.modeling` and return internal triangle meshes. Import helpers like:
 
 ```python
-from impression.modeling import make_box, make_cylinder, make_sphere, make_torus
+from impression.modeling import make_box, make_cylinder, make_ngon, make_sphere, make_torus
 ```
 
 > Rendering note: the CLI preview (`impression preview`) or `docs/examples/...` scripts can be used to visualize outputs on a desktop environment.
@@ -117,3 +117,20 @@ def build():
 ```
 
 ![Prism primitive](../assets/previews/primitive-prism.png)
+
+## N-gon Prism
+
+- **Function:** `make_ngon(sides=6, radius=0.5, height=1.0, center=(0,0,0), direction=(0,0,1))`
+- **Options**
+  - `sides`: number of polygon sides (>= 3).
+  - `radius`: distance from center to vertices (circumscribed radius).
+  - `side_length`: optional alternative to `radius`.
+- **Example:** `docs/examples/primitives/ngon_example.py`
+- **Preview:** `impression preview docs/examples/primitives/ngon_example.py`
+
+```python
+from impression.modeling import make_ngon
+
+def build():
+    return make_ngon(sides=7, radius=1.0, height=0.8)
+```

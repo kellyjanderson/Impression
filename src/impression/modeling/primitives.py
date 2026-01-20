@@ -53,6 +53,38 @@ def make_cylinder(
     return mesh
 
 
+def make_ngon(
+    sides: int = 6,
+    radius: float = 0.5,
+    height: float = 1.0,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    direction: Sequence[float] = (0.0, 0.0, 1.0),
+    backend: Backend = "mesh",
+    color: Sequence[float] | str | None = None,
+    *,
+    side_length: float | None = None,
+) -> Mesh:
+    """Regular n-gon prism aligned to `direction`."""
+
+    _ensure_backend(backend)
+    sides = int(sides)
+    if sides < 3:
+        raise ValueError("sides must be >= 3.")
+    if side_length is not None:
+        inferred = float(side_length) / (2.0 * np.sin(np.pi / sides))
+        if radius != 0.5 and not np.isclose(radius, inferred):
+            raise ValueError("Specify either radius or side_length, not both.")
+        radius = inferred
+
+    direction = _normalize(direction)
+    mesh = _circular_frustum_mesh(radius, radius, height, sides, capping=True)
+    mesh = _orient_mesh(mesh, direction)
+    mesh.translate(center, inplace=True)
+    if color is not None:
+        set_mesh_color(mesh, color)
+    return mesh
+
+
 def make_sphere(
     radius: float = 0.5,
     center: Sequence[float] = (0.0, 0.0, 0.0),
