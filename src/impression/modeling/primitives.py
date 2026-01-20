@@ -85,6 +85,37 @@ def make_ngon(
     return mesh
 
 
+def make_nhedron(
+    faces: int = 6,
+    radius: float = 0.5,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    backend: Backend = "mesh",
+    color: Sequence[float] | str | None = None,
+) -> Mesh:
+    """Regular polyhedron specified by number of faces (4, 6, 8, 12, 20)."""
+
+    _ensure_backend(backend)
+    faces = int(faces)
+    if radius <= 0:
+        raise ValueError("radius must be positive.")
+
+    vertices, face_list = _regular_polyhedron_data(faces)
+    vertices = np.asarray(vertices, dtype=float)
+    faces_arr = triangulate_faces(face_list)
+    if faces_arr.size:
+        faces_arr = _orient_faces_outward(vertices, faces_arr)
+
+    max_norm = np.linalg.norm(vertices, axis=1).max(initial=0.0)
+    if max_norm > 0:
+        vertices = vertices * (radius / max_norm)
+    vertices = vertices + np.asarray(center, dtype=float).reshape(3)
+
+    mesh = Mesh(vertices, faces_arr)
+    if color is not None:
+        set_mesh_color(mesh, color)
+    return mesh
+
+
 def make_sphere(
     radius: float = 0.5,
     center: Sequence[float] = (0.0, 0.0, 0.0),
@@ -458,3 +489,180 @@ def _rectangular_frustum_mesh(
 
     faces_arr = triangulate_faces(faces)
     return Mesh(points, faces_arr)
+
+
+def _orient_faces_outward(vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:
+    if faces.size == 0:
+        return faces
+    oriented = faces.copy()
+    centers = vertices[oriented].mean(axis=1)
+    v1 = vertices[oriented[:, 1]] - vertices[oriented[:, 0]]
+    v2 = vertices[oriented[:, 2]] - vertices[oriented[:, 0]]
+    normals = np.cross(v1, v2)
+    dots = np.einsum("ij,ij->i", normals, centers)
+    flip = dots < 0
+    if np.any(flip):
+        oriented[flip] = oriented[flip][:, [0, 2, 1]]
+    return oriented
+
+
+def _regular_polyhedron_data(face_count: int) -> tuple[np.ndarray, list[list[int]]]:
+    if face_count == 4:
+        vertices = np.array(
+            [
+                (1.0, 1.0, 1.0),
+                (-1.0, -1.0, 1.0),
+                (-1.0, 1.0, -1.0),
+                (1.0, -1.0, -1.0),
+            ]
+        )
+        faces = [
+            [0, 1, 2],
+            [0, 3, 1],
+            [0, 2, 3],
+            [1, 3, 2],
+        ]
+        return vertices, faces
+
+    if face_count == 6:
+        vertices = np.array(
+            [
+                (-1.0, -1.0, -1.0),
+                (1.0, -1.0, -1.0),
+                (1.0, 1.0, -1.0),
+                (-1.0, 1.0, -1.0),
+                (-1.0, -1.0, 1.0),
+                (1.0, -1.0, 1.0),
+                (1.0, 1.0, 1.0),
+                (-1.0, 1.0, 1.0),
+            ]
+        )
+        faces = [
+            [0, 1, 2, 3],
+            [4, 5, 6, 7],
+            [0, 1, 5, 4],
+            [1, 2, 6, 5],
+            [2, 3, 7, 6],
+            [3, 0, 4, 7],
+        ]
+        return vertices, faces
+
+    if face_count == 8:
+        vertices = np.array(
+            [
+                (1.0, 0.0, 0.0),
+                (-1.0, 0.0, 0.0),
+                (0.0, 1.0, 0.0),
+                (0.0, -1.0, 0.0),
+                (0.0, 0.0, 1.0),
+                (0.0, 0.0, -1.0),
+            ]
+        )
+        faces = [
+            [0, 2, 4],
+            [2, 1, 4],
+            [1, 3, 4],
+            [3, 0, 4],
+            [2, 0, 5],
+            [1, 2, 5],
+            [3, 1, 5],
+            [0, 3, 5],
+        ]
+        return vertices, faces
+
+    if face_count == 20:
+        return _icosahedron_data()
+
+    if face_count == 12:
+        ico_vertices, ico_faces = _icosahedron_data()
+        dodeca_vertices, dodeca_faces = _dodecahedron_from_icosa(ico_vertices, ico_faces)
+        return dodeca_vertices, dodeca_faces
+
+    raise ValueError("faces must be one of: 4, 6, 8, 12, 20.")
+
+
+def _icosahedron_data() -> tuple[np.ndarray, list[list[int]]]:
+    phi = (1.0 + np.sqrt(5.0)) / 2.0
+    vertices = np.array(
+        [
+            (-1.0, phi, 0.0),
+            (1.0, phi, 0.0),
+            (-1.0, -phi, 0.0),
+            (1.0, -phi, 0.0),
+            (0.0, -1.0, phi),
+            (0.0, 1.0, phi),
+            (0.0, -1.0, -phi),
+            (0.0, 1.0, -phi),
+            (phi, 0.0, -1.0),
+            (phi, 0.0, 1.0),
+            (-phi, 0.0, -1.0),
+            (-phi, 0.0, 1.0),
+        ]
+    )
+    faces = [
+        [0, 11, 5],
+        [0, 5, 1],
+        [0, 1, 7],
+        [0, 7, 10],
+        [0, 10, 11],
+        [1, 5, 9],
+        [5, 11, 4],
+        [11, 10, 2],
+        [10, 7, 6],
+        [7, 1, 8],
+        [3, 9, 4],
+        [3, 4, 2],
+        [3, 2, 6],
+        [3, 6, 8],
+        [3, 8, 9],
+        [4, 9, 5],
+        [2, 4, 11],
+        [6, 2, 10],
+        [8, 6, 7],
+        [9, 8, 1],
+    ]
+    return vertices, faces
+
+
+def _dodecahedron_from_icosa(
+    ico_vertices: np.ndarray, ico_faces: list[list[int]]
+) -> tuple[np.ndarray, list[list[int]]]:
+    ico_vertices = np.asarray(ico_vertices, dtype=float)
+    centroids = np.asarray([ico_vertices[face].mean(axis=0) for face in ico_faces], dtype=float)
+    norms = np.linalg.norm(centroids, axis=1)
+    centroids = centroids / norms[:, None]
+
+    face_map: dict[int, list[int]] = {idx: [] for idx in range(len(ico_vertices))}
+    for face_idx, face in enumerate(ico_faces):
+        for vert_idx in face:
+            face_map[vert_idx].append(face_idx)
+
+    faces: list[list[int]] = []
+    for vert_idx, face_indices in face_map.items():
+        normal = ico_vertices[vert_idx]
+        normal_norm = np.linalg.norm(normal)
+        if normal_norm == 0:
+            continue
+        normal = normal / normal_norm
+        axis = np.array([0.0, 0.0, 1.0])
+        if abs(normal[2]) > 0.9:
+            axis = np.array([0.0, 1.0, 0.0])
+        basis_u = np.cross(axis, normal)
+        basis_norm = np.linalg.norm(basis_u)
+        if basis_norm == 0:
+            basis_u = np.array([1.0, 0.0, 0.0])
+        else:
+            basis_u = basis_u / basis_norm
+        basis_v = np.cross(normal, basis_u)
+
+        angles: list[tuple[float, int]] = []
+        for face_idx in face_indices:
+            vec = centroids[face_idx]
+            vec = vec - normal * np.dot(vec, normal)
+            x = float(np.dot(vec, basis_u))
+            y = float(np.dot(vec, basis_v))
+            angles.append((np.arctan2(y, x), face_idx))
+        ordered = [idx for _, idx in sorted(angles)]
+        faces.append(ordered)
+
+    return centroids, faces
