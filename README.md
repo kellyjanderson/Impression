@@ -1,25 +1,13 @@
 # Impression
 
-Impression is an experimental parametric 3D modeling platform for rapid spatial ideation. The goal is to support both dynamic (Python-driven) and declarative pipelines for building, previewing, and exporting solid geometry that is suitable for fabrication workflows such as 3D printing.
+Impression is a parametric modeling workshop. You describe shapes in Python, Impression produces
+watertight meshes, and a viewer renders them. The modeling layer is internal and backend-agnostic;
+PyVista is used strictly as a viewing surface.
 
-## Current focus
+If you're building for fabrication, the rule is simple: geometry stays robust, previews stay fast,
+and the final mesh should be printable.
 
-- Command-line preview tool that can hot-reload model definitions.
-- Modular architecture that lets us experiment with popular geometric kernels and renderers (e.g., Manifold, PyVista, pygfx).
-- Foundation for exporting watertight meshes to STL and other CAD-friendly formats.
-- Mesh primitives, CSG helpers, and path abstractions exposed via `impression.modeling`.
-- Documentation index: `docs/index.md` lists available features and runnable examples.
-- CLI manual: `docs/cli.md` describes `impression preview` / `export` options and usage.
-- VS Code helper extension under `ide/vscode-extension/` for launching previews, exports, and regression tests from the editor.
-
-## Roadmap highlights
-
-1. **Preview CLI** – invoke `impression preview path/to/model.py` to render and manipulate scenes (orbit, pan, zoom, strafe).
-2. **Dynamic runtime** – let Python scripts define parameterized solids with runtime overrides (CLI flags, config files, or sockets).
-3. **Declarative mode** – ingest declarative scene graphs (JSON/TOML) that map to the same geometry pipeline.
-4. **Exporters** – transform the canonical geometry representation into STL, AMF, and STEP variants.
-
-## Getting Started
+## Quickstart
 
 ```bash
 git clone https://github.com/kellyjanderson/Impression.git
@@ -31,7 +19,18 @@ pip install -e .
 
 After installation you can run `impression --help` from anywhere in that virtual environment.
 
-The CLI also writes `~/.impression/env` with an `IMPRESSION_PY` export that the VS Code
+If you want to install a local wheel (to mimic a packaged release), use the helper:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+scripts/dev/install_impression.sh
+```
+
+The script builds a wheel, installs it into the active venv, and forces `manifold3d` to build
+in serial mode so Intel TBB is not required.
+
+The CLI writes `~/.impression/env` with an `IMPRESSION_PY` export that the VS Code
 extension (and other tooling) can source. Add the following line to your shell config if you
 haven't already:
 
@@ -39,13 +38,62 @@ haven't already:
 source ~/.impression/env
 ```
 
-### Helper scripts
+## Your First Preview
 
-- `scripts/dev/setup_dev_env.sh` – create/update the repo virtual environment, install the package,
+Every model is a Python module that exposes a `build()` function returning internal meshes.
+Use the primitives and helpers in `impression.modeling` (not PyVista objects).
+
+```python
+from impression.modeling import make_box, make_cylinder, boolean_union
+
+
+def build():
+    body = make_box(size=(2, 2, 1))
+    post = make_cylinder(radius=0.4, height=2.0)
+    return boolean_union([body, post])
+```
+
+Preview it:
+
+```bash
+impression preview path/to/model.py
+```
+
+## Impression Studio (Docs + Playground)
+
+Impression Studio is a desktop app for learning and tinkering: examples on the left, a live
+editor in the center, and a 3D preview on the right. It automatically loads docs for the
+selected example and runs `build()` as you type.
+
+```bash
+impression studio --workspace /Users/k/Documents/Projects/Impression
+```
+
+See `docs/studio.md` for usage notes and shortcuts.
+
+## CLI Highlights
+
+- Preview: `impression preview docs/examples/primitives/box_example.py`
+- Export: `impression export docs/examples/csg/union_example.py --output dist/union.stl --overwrite`
+- Studio: `impression studio`
+
+Full CLI reference: `docs/cli.md`
+
+## Documentation Map
+
+- `docs/index.md` - documentation portal
+- `docs/modeling/` - primitives, CSG, drawing2d, paths, extrusions, loft, morph, text
+- `docs/examples/` - runnable scripts that power the docs
+- `docs/tutorials/` - guided walkthroughs for new and advanced users
+- `docs/project-plan.md` - roadmap and open questions
+
+## Helper Scripts
+
+- `scripts/dev/setup_dev_env.sh` - create/update the repo virtual environment, install the package,
   and append the `source ~/.impression/env` line to your shell configuration files.
-- `scripts/dev/reset_impression_env.sh` – remove the auto-installed CLI (`~/.impression-cli`),
+- `scripts/dev/reset_impression_env.sh` - remove the auto-installed CLI (`~/.impression-cli`),
   delete `~/.impression/env`, strip the sourcing line from your shell rc files, and clear VS Code
-  global state so the extension behaves like a first-time install. Use this when you want to start over.
+  global state so the extension behaves like a first-time install.
 
 ## Development
 
@@ -56,66 +104,15 @@ pip install -e .
 impression --help
 ```
 
-The CLI now opens a PyVista window for interactive previewing; the renderer backend will evolve as we integrate additional geometric kernels.
-
-## Preview workflow
-
-1. Define a `build()` function in your model module that returns one or more [PyVista](https://docs.pyvista.org/) datasets (e.g., `pv.Cube()`, `pv.Sphere()`, or a list of meshes).
-2. Run the previewer:
-
-```bash
-impression preview examples/hello_cube.py
-
-# color-aware example
-impression preview docs/examples/primitives/color_dual_example.py
-
-# text primitive demo
-impression preview docs/examples/text/text_basic.py
-
-# drafting helpers
-impression preview docs/examples/drafting/line_plane_example.py
-
-# Impression mark
-impression preview docs/examples/logo/impression_mark.py --hide-edges
-
-# programmatic modeling with primitives/CSG/paths
-python - <<'PY'
-from impression.modeling import make_box, make_cylinder, boolean_union, Path
-box = make_box(size=(2, 2, 1))
-post = make_cylinder(radius=0.4, height=2.0)
-result = boolean_union([box, post])
-path = Path.from_points([(0, 0, 0), (4, 0, 0), (4, 2, 0)], closed=False)
-print("cells:", result.n_cells, "path length:", path.length())
-PY
-
-# preview test suite (saves screenshots/results under dist/preview-tests)
-scripts/run_preview_tests.py
-```
-
-The PyVista window supports orbit, pan, and zoom out of the box. Files are watched by default, so saving changes triggers a hot reload in the same window (disable with `--no-watch` if you just want a single render).
-
-## Export workflow
-
-```bash
-impression export examples/hello_cube.py --output artifacts/hello.stl --overwrite
-```
-
-The exporter loads the same `build()` entry point, merges all returned PyVista datasets, and writes a watertight STL in binary format (use `--ascii` for text output). Existing files are protected unless `--overwrite` is specified.
+The preview window supports orbit/pan/zoom and hot reload (watch mode). For units, configure
+`~/.impression/impression.cfg` (JSON) with `millimeters`, `meters`, or `inches`.
 
 ## Contributing
 
-We work via feature branches and pull requests. Open an issue or discussion before large changes, keep branches focused, and include documentation/preview updates with every feature. Helpful references:
-
-- `docs/index.md` — full documentation index.
-- `docs/project-plan.md` — detailed roadmap.
-- `docs/feature-pipeline.md` — current implementation order.
-- `scripts/dev/setup_dev_env.sh` — spin up a repo virtualenv and shell integration.
-- `scripts/dev/reset_impression_env.sh` — clean auto-installed artifacts and shell config.
+Work via feature branches and pull requests. Keep changes focused, include documentation with
+every new feature, and add example scripts when possible.
 
 ## Community & Inclusion
 
-Impression is a collaborative project. We expect respectful communication, inclusive language, and empathy for contributors of all backgrounds. Harassment or discrimination is not tolerated—be kind, credit others’ work, and help keep the documentation and code welcoming.
-
-## Strategic roadmap
-
-See `docs/project-plan.md` for primitives, CSG, CAD integration, and helper utilities (e.g., auto-rounding sharp faces).
+Impression is a collaborative project. We expect respectful communication, inclusive language,
+and empathy for contributors of all backgrounds. Harassment or discrimination is not tolerated.
