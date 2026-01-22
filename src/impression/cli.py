@@ -12,6 +12,12 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
+import io
+import shutil
+import tempfile
+import urllib.request
+import zipfile
+
 from impression.io import write_stl
 from impression.preview import PyVistaPreviewer, PreviewBackendError
 
@@ -59,6 +65,91 @@ class ModelBuildError(RuntimeError):
 
 def _format_exception(exc: BaseException) -> str:
     return "".join(traceback.format_exception(exc))
+
+
+def _download_docs(
+    repo_url: str,
+    ref: str,
+    destination: pathlib.Path,
+    clean: bool,
+) -> None:
+    repo_url = repo_url.rstrip("/")
+    if repo_url.endswith(".git"):
+        repo_url = repo_url[:-4]
+    zip_url = f"{repo_url}/archive/refs/heads/{ref}.zip"
+
+    if clean and destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+
+    console.print(f"[cyan]Downloading docs from {zip_url}...[/cyan]")
+    with urllib.request.urlopen(zip_url) as response:
+        data = response.read()
+
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        names = archive.namelist()
+        if not names:
+            raise typer.BadParameter("Downloaded archive is empty.")
+        root = names[0].split("/", 1)[0]
+        docs_prefix = f"{root}/docs/"
+        extracted = False
+        for member in archive.infolist():
+            if not member.filename.startswith(docs_prefix):
+                continue
+            rel_path = pathlib.Path(member.filename[len(docs_prefix):])
+            if not rel_path.parts:
+                continue
+            target_path = destination / rel_path
+            if member.is_dir():
+                target_path.mkdir(parents=True, exist_ok=True)
+                continue
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as src, open(target_path, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            extracted = True
+
+    if not extracted:
+        raise typer.BadParameter("Docs folder not found in the downloaded archive.")
+    console.print(f"[green]Docs saved to {destination}[/green]")
+
+
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
+    get_docs: bool = typer.Option(
+        False,
+        "--get-docs",
+        "--getDocs",
+        help="Download documentation from GitHub and exit.",
+    ),
+    docs_dest: pathlib.Path | None = typer.Option(
+        None,
+        "--docs-dest",
+        help="Destination folder for downloaded docs (default: ./impression-docs).",
+    ),
+    docs_repo: str = typer.Option(
+        "https://github.com/kellyjanderson/Impression",
+        "--docs-repo",
+        help="GitHub repo URL for docs download.",
+    ),
+    docs_ref: str = typer.Option(
+        "main",
+        "--docs-ref",
+        help="Git ref to fetch docs from (default: main).",
+    ),
+    docs_clean: bool = typer.Option(
+        False,
+        "--docs-clean",
+        help="Delete the destination folder before downloading.",
+    ),
+) -> None:
+    if get_docs:
+        destination = docs_dest or pathlib.Path.cwd() / "impression-docs"
+        _download_docs(docs_repo, docs_ref, destination, docs_clean)
+        raise typer.Exit()
+
+    if ctx.invoked_subcommand is None:
+        return
 
 
 def _scene_factory_from_module(model_path: pathlib.Path) -> Callable[[], object]:
@@ -144,6 +235,30 @@ def preview(
         )
     except PreviewBackendError as exc:
         raise typer.BadParameter(str(exc)) from exc
+
+
+@app.command()
+def studio(
+    workspace: pathlib.Path = typer.Option(
+        pathlib.Path.cwd(),
+        "--workspace",
+        "-w",
+        help="Workspace root containing docs/examples.",
+    ),
+) -> None:
+    """
+    Launch the Impression Studio (examples + docs + live preview).
+    """
+
+    if not workspace.exists():
+        raise typer.BadParameter(f"Workspace path {workspace} does not exist.")
+
+    from impression.studio import run_studio
+
+    try:
+        run_studio(workspace)
+    except Exception as exc:
+        raise typer.BadParameter(f"Studio failed to launch: {exc}") from exc
 
 
 @app.command()

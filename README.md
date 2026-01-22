@@ -76,6 +76,7 @@ See `docs/studio.md` for usage notes and shortcuts.
 - Preview: `impression preview docs/examples/primitives/box_example.py`
 - Export: `impression export docs/examples/csg/union_example.py --output dist/union.stl --overwrite`
 - Studio: `impression studio`
+- Docs only: `impression --get-docs --docs-dest ./impression-docs`
 
 Full CLI reference: `docs/cli.md`
 
@@ -85,6 +86,7 @@ Full CLI reference: `docs/cli.md`
 - `docs/modeling/` - primitives, CSG, drawing2d, paths, extrusions, loft, morph, text
 - `docs/examples/` - runnable scripts that power the docs
 - `docs/tutorials/` - guided walkthroughs for new and advanced users
+- `docs/agents.md` - agent bootstrap and feature map
 - `docs/project-plan.md` - roadmap and open questions
 
 ## Helper Scripts
