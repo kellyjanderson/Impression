@@ -12,9 +12,8 @@ and the final mesh should be printable.
 ```bash
 git clone https://github.com/kellyjanderson/Impression.git
 cd Impression
-python3 -m venv .venv
+install impression
 source .venv/bin/activate
-pip install -e .
 ```
 
 After installation you can run `impression --help` from anywhere in that virtual environment.
@@ -29,6 +28,8 @@ scripts/dev/install_impression.sh
 
 The script builds a wheel, installs it into the active venv, and forces `manifold3d` to build
 in serial mode so Intel TBB is not required.
+
+See **Python Versions and Venvs** below for how the installer chooses a Python version.
 
 The CLI writes `~/.impression/env` with an `IMPRESSION_PY` export that the VS Code
 extension (and other tooling) can source. Add the following line to your shell config if you
@@ -108,6 +109,24 @@ impression --help
 
 The preview window supports orbit/pan/zoom and hot reload (watch mode). For units, configure
 `~/.impression/impression.cfg` (JSON) with `millimeters`, `meters`, or `inches`.
+
+## Python Versions and Venvs
+
+Impression relies on PyVista/VTK, which can lag behind the newest CPython releases. The installer
+creates a venv with **Python 3.13 by default** to avoid 3.14 wheel gaps.
+
+How it works:
+
+- `install impression` creates a `./.venv` in the current folder.
+- It prefers `uv` to provision Python 3.13 automatically.
+- If `uv` is missing, it falls back to Homebrew (`python@3.13`).
+- Existing venvs are reused only if they match the expected Python version.
+
+Overrides:
+
+- `IMPRESSION_PYTHON_VERSION=3.12` to use a different version.
+- `IMPRESSION_PYTHON=/path/to/python3.13` to force a specific interpreter.
+- `IMPRESSION_RECREATE_VENV=1` to delete/recreate the venv if the version mismatches.
 
 ## Contributing
 
