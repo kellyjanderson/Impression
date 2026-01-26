@@ -18,6 +18,12 @@ source .venv/bin/activate
 
 After installation you can run `impression --help` from anywhere in that virtual environment.
 
+By default the installer pulls the latest tagged release. To see available releases run:
+
+```bash
+scripts/dev/install_impression.sh --list
+```
+
 If you want to install a local wheel (to mimic a packaged release), use the helper:
 
 ```bash
@@ -26,8 +32,7 @@ source .venv/bin/activate
 scripts/dev/install_impression.sh --local
 ```
 
-By default the installer pulls the latest tagged release (currently `v0.0.1a1`). It builds a wheel,
-installs it into the active venv, and forces `manifold3d` to build
+The installer builds a wheel, installs it into the active venv, and forces `manifold3d` to build
 in serial mode so Intel TBB is not required.
 
 See **Python Versions and Venvs** below for how the installer chooses a Python version.

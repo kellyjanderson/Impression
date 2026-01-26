@@ -10,6 +10,17 @@ venv_path=""
 use_local=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -l|--list)
+            if ! command -v git >/dev/null 2>&1; then
+                echo "git is required to list releases." >&2
+                exit 1
+            fi
+            git ls-remote --tags --sort=-v:refname "$repo_url" \
+                | awk '{print $2}' \
+                | sed 's#refs/tags/##;s#\\^{}##' \
+                | awk 'NF && !seen[$0]++ {print}'
+            exit 0
+            ;;
         --venv)
             venv_path="$2"
             shift 2
@@ -25,7 +36,7 @@ while [[ $# -gt 0 ]]; do
             shift 1
             ;;
         *)
-            echo "Usage: install_impression.sh [--venv PATH] [--release TAG] [--local]" >&2
+            echo "Usage: install_impression.sh [--venv PATH] [--release TAG] [--local] [--list]" >&2
             exit 1
             ;;
     esac
@@ -38,7 +49,18 @@ fi
 release_dir=""
 if [[ "$install_source" == "release" ]]; then
     if [[ -z "$release_ref" ]]; then
-        release_ref="v0.0.1a1"
+        if ! command -v git >/dev/null 2>&1; then
+            echo "git is required to install a release. Install git or use --local." >&2
+            exit 1
+        fi
+        release_ref="$(git ls-remote --tags --sort=-v:refname "$repo_url" \
+            | awk '{print $2}' \
+            | sed 's#refs/tags/##;s#\\^{}##' \
+            | awk 'NF && !seen[$0]++ {print; exit}')"
+        if [[ -z "$release_ref" ]]; then
+            echo "No releases found at $repo_url" >&2
+            exit 1
+        fi
     fi
     if ! command -v git >/dev/null 2>&1; then
         echo "git is required to install a release. Install git or use --local." >&2
