@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .transform import rotate, translate
+from .transform import rotate, translate, scale, resize, mirror, multmatrix, rotate_euler
 from .primitives import (
     make_box,
     make_cone,
@@ -33,6 +33,7 @@ from .path3d import Arc3D, Bezier3D, Line3D, Path3D
 from .csg import boolean_union, boolean_difference, boolean_intersection, union_meshes
 from .paths import Path
 from .group import MeshGroup, group
+from .ops import offset, hull, minkowski
 
 __all__ = [
     "make_box",
@@ -44,7 +45,6 @@ __all__ = [
     "make_prism",
     "make_sphere",
     "make_torus",
-    "make_text",
     "Arc2D",
     "Bezier2D",
     "Line2D",
@@ -74,12 +74,13 @@ __all__ = [
     "group",
     "rotate",
     "translate",
+    "scale",
+    "resize",
+    "mirror",
+    "multmatrix",
+    "rotate_euler",
+    "offset",
+    "hull",
+    "minkowski",
 ]
-
-
-def make_text(*args, **kwargs):
-    """Lazily import text support to avoid build123d/OCCT overhead during preview."""
-
-    from .text import make_text as _make_text
-
-    return _make_text(*args, **kwargs)
+# build123d-backed text support temporarily disabled.
