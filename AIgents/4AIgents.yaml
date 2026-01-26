@@ -216,7 +216,7 @@ catalog:
           description: Manifold solid torus.
 
       - name: make_text
-        purpose: Create solid extruded text (build123d-backed), aligned XY, extruded +Z.
+        purpose: Create solid extruded text (currently disabled), aligned XY, extruded +Z.
         parameters:
           text:
             type: str

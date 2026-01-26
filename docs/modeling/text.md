@@ -1,6 +1,7 @@
-# Modeling — Text
+# Modeling - Text
 
-`make_text()` now tessellates build123d glyphs, so the exact same geometry feeds previews, STL exports, and any CAD downstream step. If a font provides vector outlines, we can extrude it—emoji included—without touching PyVista primitives.
+Text modeling is temporarily disabled in this build.
+This page documents the intended API so it can be re-enabled later.
 
 ```python
 from impression.modeling import make_text
@@ -10,14 +11,14 @@ from impression.modeling import make_text
 
 - `content`: string to render.
 - `depth`: `0` for a flat face or a positive value to extrude/bas-relief.
-- `font_size`: glyph size passed straight to build123d.
+- `font_size`: glyph size.
 - `center`: world-space anchor for the text block.
 - `direction`: axis the text should face (defaults to −Y so glyphs look toward the camera); pass any vector to orient glyphs onto other faces.
 - `justify`: `"left"`, `"center"`, or `"right"` alignment before positioning.
 - `font`: family name (defaults to `"Arial"`).
 - `font_path`: explicit font file (handy for bundled assets such as emoji fonts).
-- `font_style`: build123d `FontStyle` or a lower/upper-case string (`"bold"`, `"italic"`, ...).
-- `tolerance`: tessellation tolerance forwarded to build123d.
+- `font_style`: style string (`"bold"`, `"italic"`, ...).
+- `tolerance`: tessellation tolerance (when supported).
 - `color`: RGB/RGBA tuple or color string (propagates through previews/exports.).
 - Variation selectors (e.g., the trailing U+FE0F in `👁️`) are stripped automatically to avoid stray fallback glyphs in single-character emoji; specify multi-codepoint emoji without forcing text/emoji presentation when possible.
 
@@ -50,5 +51,5 @@ def build_emoji():
 ```
 
 - Example modules: `docs/examples/text/text_basic.py`, `docs/examples/text/text_emoji.py`, `docs/examples/logo/impression_mark.py`
-- Preview command: `impression preview docs/examples/text/text_basic.py`
+- Preview command: `impression preview docs/examples/text/text_basic.py` (currently unavailable)
 - Bundled emoji-ready font (SIL OFL 1.1): `assets/fonts/NotoSansSymbols2-Regular.ttf`

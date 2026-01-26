@@ -9,7 +9,7 @@ from impression.mesh import Mesh, combine_meshes, triangulate_faces
 
 from ._color import set_mesh_color
 from .primitives import _orient_mesh, _normalize
-from .text import make_text
+# Text labels are currently disabled; make_dimension will omit labels.
 
 Axis = Literal["x", "y", "z"]
 
@@ -148,18 +148,5 @@ def make_dimension(
 
     meshes = [make_arrow(arrow_start, arrow_end, color=color)]
 
-    if text is None:
-        text = f"{length:.2f}"
-    mid = (arrow_start + arrow_end) / 2.0
-    text_mesh = make_text(
-        text,
-        depth=0.0,
-        center=mid + up * 0.02,
-        direction=up,
-        font_size=0.1,
-        justify="center",
-        color=color,
-    )
-    meshes.append(text_mesh)
+    # Text labels are currently disabled.
     return meshes
-

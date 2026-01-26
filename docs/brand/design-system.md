@@ -3,7 +3,7 @@
 ## Core Components
 
 - **Primitives:** Base shapes using Impression Blue as default fill; mix Impression Orange for emphasis.
-- **Text Blocks:** `make_text(..., color=IMPRESSION_BLUE)` for headers, `...=IMPRESSION_ORANGE` for emphasis.
+- **Text Blocks:** `make_text(..., color=IMPRESSION_BLUE)` for headers, `...=IMPRESSION_ORANGE` for emphasis (currently disabled).
 - **Drafting Overlays:** `make_line`, `make_arrow`, `make_dimension` adopt blue/orange pairings.
 
 ## Tokens

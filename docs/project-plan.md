@@ -43,7 +43,7 @@ Current execution order is captured in `docs/feature-pipeline.md` and should be 
 
 - [ ] **Chamfers / Fillets**
   - Selection system: tag faces/edges on creation, expose selectors (by name, normal, area, adjacency, custom lambda).
-  - Build123d-backed `fillet/chamfer` operations with fallback mesh bevel approximations where exact CAD isn’t available.
+  - CAD-backed `fillet/chamfer` operations with fallback mesh bevel approximations where exact CAD isn’t available.
   - `round(face_selector, radius)` helper that evaluates face orientation and applies the requested fillet.
 - [ ] **Auto-Round Helper**
   - `round_sharp_edges(radius)` routine that scans for faces whose adjacent dihedral angles exceed 89° and applies fillets automatically. (Still needs investigation to ensure it captures intent without over-rounding.)

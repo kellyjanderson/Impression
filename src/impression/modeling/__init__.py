@@ -83,4 +83,4 @@ __all__ = [
     "hull",
     "minkowski",
 ]
-# build123d-backed text support temporarily disabled.
+# Text support temporarily disabled.
