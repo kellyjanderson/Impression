@@ -24,6 +24,12 @@ By default the installer pulls the latest tagged release. To see available relea
 scripts/dev/install_impression.sh --list
 ```
 
+To pick interactively with arrow keys:
+
+```bash
+scripts/dev/install_impression.sh --interactive
+```
+
 If you want to install a local wheel (to mimic a packaged release), use the helper:
 
 ```bash

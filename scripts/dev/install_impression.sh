@@ -5,21 +5,20 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 repo_url="${IMPRESSION_REPO_URL:-https://github.com/kellyjanderson/Impression.git}"
 install_source="${IMPRESSION_INSTALL_SOURCE:-release}"
 release_ref="${IMPRESSION_RELEASE:-}"
+interactive=0
 
 venv_path=""
 use_local=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -l|--list)
-            if ! command -v git >/dev/null 2>&1; then
-                echo "git is required to list releases." >&2
-                exit 1
-            fi
-            git ls-remote --tags --sort=-v:refname "$repo_url" \
-                | awk '{print $2}' \
-                | sed 's#refs/tags/##;s#\\^{}##' \
-                | awk 'NF && !seen[$0]++ {print}'
-            exit 0
+            list_only=1
+            shift 1
+            ;;
+        -i|--interactive)
+            interactive=1
+            install_source="release"
+            shift 1
             ;;
         --venv)
             venv_path="$2"
@@ -36,7 +35,7 @@ while [[ $# -gt 0 ]]; do
             shift 1
             ;;
         *)
-            echo "Usage: install_impression.sh [--venv PATH] [--release TAG] [--local] [--list]" >&2
+            echo "Usage: install_impression.sh [--venv PATH] [--release TAG] [--local] [--list] [--interactive]" >&2
             exit 1
             ;;
     esac
@@ -46,20 +45,80 @@ if [[ -z "$venv_path" ]]; then
     venv_path="$(pwd)/.venv"
 fi
 
+list_releases() {
+    if ! command -v git >/dev/null 2>&1; then
+        echo "git is required to list releases." >&2
+        exit 1
+    fi
+    git ls-remote --tags --sort=-v:refname "$repo_url" \
+        | awk '{print $2}' \
+        | sed 's#refs/tags/##;s#\\^{}##' \
+        | awk 'NF && !seen[$0]++ {print}'
+}
+
+if [[ "${list_only:-0}" == "1" ]]; then
+    list_releases
+    exit 0
+fi
+
+choose_release_interactive() {
+    if [[ ! -t 0 ]]; then
+        echo "Interactive mode requires a TTY." >&2
+        exit 1
+    fi
+    mapfile -t releases < <(list_releases)
+    if [[ ${#releases[@]} -eq 0 ]]; then
+        echo "No releases found at $repo_url" >&2
+        exit 1
+    fi
+    local index=0
+    while true; do
+        printf "\\033c"
+        echo "Select Impression release (arrow keys, Enter to confirm):"
+        echo
+        for i in "${!releases[@]}"; do
+            if [[ "$i" -eq "$index" ]]; then
+                printf "  > %s\\n" "${releases[$i]}"
+            else
+                printf "    %s\\n" "${releases[$i]}"
+            fi
+        done
+        IFS= read -rsn1 key
+        if [[ -z "$key" ]]; then
+            break
+        fi
+        if [[ "$key" == $'\\x1b' ]]; then
+            read -rsn2 key
+            case "$key" in
+                "[A")
+                    ((index--))
+                    ;;
+                "[B")
+                    ((index++))
+                    ;;
+            esac
+            if (( index < 0 )); then
+                index=0
+            fi
+            if (( index >= ${#releases[@]} )); then
+                index=$(( ${#releases[@]} - 1 ))
+            fi
+        fi
+    done
+    printf "%s\\n" "${releases[$index]}"
+}
+
 release_dir=""
 if [[ "$install_source" == "release" ]]; then
     if [[ -z "$release_ref" ]]; then
-        if ! command -v git >/dev/null 2>&1; then
-            echo "git is required to install a release. Install git or use --local." >&2
-            exit 1
-        fi
-        release_ref="$(git ls-remote --tags --sort=-v:refname "$repo_url" \
-            | awk '{print $2}' \
-            | sed 's#refs/tags/##;s#\\^{}##' \
-            | awk 'NF && !seen[$0]++ {print; exit}')"
-        if [[ -z "$release_ref" ]]; then
-            echo "No releases found at $repo_url" >&2
-            exit 1
+        if [[ "$interactive" == "1" ]]; then
+            release_ref="$(choose_release_interactive)"
+        else
+            release_ref="$(list_releases | head -n 1)"
+            if [[ -z "$release_ref" ]]; then
+                echo "No releases found at $repo_url" >&2
+                exit 1
+            fi
         fi
     fi
     if ! command -v git >/dev/null 2>&1; then
@@ -71,6 +130,10 @@ if [[ "$install_source" == "release" ]]; then
     git clone --depth 1 --branch "$release_ref" "$repo_url" "$release_dir/impression" >/dev/null 2>&1
     repo_root="$release_dir/impression"
 else
+    if [[ "$interactive" == "1" ]]; then
+        echo "Interactive mode is only available for release installs." >&2
+        exit 1
+    fi
     if command -v git >/dev/null 2>&1 && git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         if git -C "$repo_root" diff --quiet && git -C "$repo_root" diff --cached --quiet; then
             git -C "$repo_root" fetch --all --prune
