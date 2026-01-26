@@ -10,10 +10,18 @@ const INSTALL_FOLDER = path.join(os.homedir(), '.impression-cli');
 const IMPRESSION_HOME = path.join(os.homedir(), '.impression');
 const ENV_FILE = path.join(IMPRESSION_HOME, 'env');
 const SOURCE_LINE = 'source ~/.impression/env # Impression\n';
-const RC_FILES = ['.zshrc', '.bashrc', '.bash_profile'];
-const PYTHON_STATE_KEY = 'impression.pythonPath';
+const RC_FILES = ['.zshrc', '.zprofile', '.bashrc', '.bash_profile', '.profile'];
+const PYTHON_STATE_KEY = 'impression.pythonPathCache';
+const PREVIEW_MODE_SETTING = 'previewMode';
+const PYTHON_PATH_SETTING = 'pythonPath';
+const PREVIEW_MODE_TERMINAL = 'terminal';
+const PREVIEW_MODE_WEBVIEW = 'webview';
+const IMPRESSION_CLI_CHECK =
+  'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("impression.cli") else 1)';
+const EXECUTE_ACCESS = process.platform === 'win32' ? fs.constants.F_OK : fs.constants.X_OK;
 
 let cachedPythonPath = null;
+let previewPanel = null;
 const installerChannel = vscode.window.createOutputChannel('Impression Installer');
 let extensionContext;
 
@@ -38,7 +46,8 @@ async function previewModel() {
   if (!python) {
     return;
   }
-  runInTerminal(`${quote(python)} -m impression.cli preview ${quote(modelPath)}`);
+  const command = `${quote(python)} -m impression.cli preview ${quote(modelPath)}`;
+  await launchPreview(command, modelPath, python);
 }
 
 async function exportStl() {
@@ -58,9 +67,11 @@ async function exportStl() {
   if (!python) {
     return;
   }
-  runInTerminal(
-    `${quote(python)} -m impression.cli export ${quote(modelPath)} --output ${quote(outputPath)} --overwrite`
-  );
+  const command = `${quote(python)} -m impression.cli export ${quote(modelPath)} --output ${quote(
+    outputPath
+  )} --overwrite`;
+  const cwd = getPreferredCwd(modelPath);
+  runInTerminal(command, { cwd, env: buildPythonEnv(python) });
 }
 
 async function runPreviewTests() {
@@ -69,7 +80,9 @@ async function runPreviewTests() {
     return;
   }
   const script = path.join(getWorkspaceFolder(), 'scripts', 'run_preview_tests.py');
-  runInTerminal(`${quote(python)} ${quote(script)}`);
+  const command = `${quote(python)} ${quote(script)}`;
+  const cwd = getWorkspaceFolder();
+  runInTerminal(command, { cwd, env: buildPythonEnv(python) });
 }
 
 async function pickModelFile() {
@@ -84,8 +97,12 @@ async function pickModelFile() {
   return selection?.fsPath;
 }
 
-function runInTerminal(command) {
-  const terminal = vscode.window.createTerminal({ name: 'Impression' });
+function runInTerminal(command, options = {}) {
+  const terminal = vscode.window.createTerminal({
+    name: 'Impression',
+    cwd: options.cwd,
+    env: options.env,
+  });
   terminal.show(true);
   terminal.sendText(command);
 }
@@ -96,6 +113,68 @@ async function resolveModelPath() {
     return active;
   }
   return await pickModelFile();
+}
+
+async function launchPreview(command, modelPath, pythonPath) {
+  const mode = getPreviewMode();
+  const cwd = getPreferredCwd(modelPath);
+  const env = buildPythonEnv(pythonPath);
+  if (mode === PREVIEW_MODE_WEBVIEW) {
+    showPreviewPlaceholder();
+  }
+  runInTerminal(command, { cwd, env });
+}
+
+function showPreviewPlaceholder() {
+  if (previewPanel) {
+    previewPanel.reveal(vscode.ViewColumn.Beside);
+    return;
+  }
+  previewPanel = vscode.window.createWebviewPanel(
+    'impressionPreview',
+    'Impression Preview',
+    vscode.ViewColumn.Beside,
+    { enableScripts: false }
+  );
+  previewPanel.onDidDispose(() => {
+    previewPanel = null;
+  });
+  previewPanel.webview.html = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Impression Preview</title>
+  </head>
+  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 24px;">
+    <h2 style="margin: 0 0 12px;">Webview preview is coming soon.</h2>
+    <p style="margin: 0 0 8px;">
+      For now, Impression launches previews in a terminal-backed PyVista window.
+    </p>
+    <p style="margin: 0;">
+      You can keep this panel open while we build the embedded viewer.
+    </p>
+  </body>
+</html>`;
+}
+
+function getPreferredCwd(modelPath) {
+  if (!modelPath) {
+    return getWorkspaceFolderPath();
+  }
+  const workspace = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(modelPath));
+  if (workspace) {
+    return workspace.uri.fsPath;
+  }
+  return path.dirname(modelPath);
+}
+
+function getWorkspaceFolderPath() {
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) {
+    return undefined;
+  }
+  return folders[0].uri.fsPath;
 }
 
 function getActiveEditorPath() {
@@ -115,7 +194,7 @@ function getActiveEditorPath() {
 
 async function ensurePythonPath() {
   if (cachedPythonPath) {
-    if (await fileExists(cachedPythonPath)) {
+    if ((await fileExists(cachedPythonPath)) && (await impressionCliAvailable(cachedPythonPath))) {
       return cachedPythonPath;
     }
     cachedPythonPath = null;
@@ -157,27 +236,195 @@ async function ensurePythonPath() {
 }
 
 async function resolvePythonPath() {
-  const fromEnv = process.env.IMPRESSION_PY;
-  if (fromEnv && (await fileExists(fromEnv))) {
-    return fromEnv;
+  const candidates = [];
+  const override = getPythonOverride();
+  if (override) {
+    candidates.push(override);
   }
-
+  const fromEnv = process.env.IMPRESSION_PY;
+  if (fromEnv) {
+    candidates.push(fromEnv);
+  }
   const fromEnvFile = await pythonFromEnvFile();
   if (fromEnvFile) {
-    return fromEnvFile;
+    candidates.push(fromEnvFile);
   }
-
+  const fromSettings = await pythonFromSettings();
+  if (fromSettings) {
+    candidates.push(fromSettings);
+  }
+  const fromWorkspace = await pythonFromWorkspaceVenv();
+  if (fromWorkspace) {
+    candidates.push(fromWorkspace);
+  }
   const shebangPython = await pythonFromShebang();
   if (shebangPython) {
-    return shebangPython;
+    candidates.push(shebangPython);
+  }
+  const stored = extensionContext?.globalState.get(PYTHON_STATE_KEY);
+  if (stored) {
+    candidates.push(stored);
+  }
+  const fallback = resolveCommand('python3') || resolveCommand('python');
+  if (fallback) {
+    candidates.push(fallback);
   }
 
-  const stored = extensionContext?.globalState.get(PYTHON_STATE_KEY);
-  if (stored && (await fileExists(stored))) {
-    return stored;
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const resolved = await validatePythonCandidate(candidate, seen);
+    if (resolved) {
+      return resolved;
+    }
   }
 
   return null;
+}
+
+function getImpressionSettings() {
+  return vscode.workspace.getConfiguration('impression');
+}
+
+function getPreviewMode() {
+  const settings = getImpressionSettings();
+  const mode = settings.get(PREVIEW_MODE_SETTING, PREVIEW_MODE_TERMINAL);
+  return mode === PREVIEW_MODE_WEBVIEW ? PREVIEW_MODE_WEBVIEW : PREVIEW_MODE_TERMINAL;
+}
+
+function getPythonOverride() {
+  const settings = getImpressionSettings();
+  const override = settings.get(PYTHON_PATH_SETTING);
+  return typeof override === 'string' && override.trim() ? override.trim() : null;
+}
+
+async function validatePythonCandidate(candidate, seen) {
+  const resolved = resolveExecutable(candidate);
+  if (!resolved) {
+    return null;
+  }
+  const normalized = path.normalize(resolved);
+  if (seen.has(normalized)) {
+    return null;
+  }
+  seen.add(normalized);
+  if (!(await fileExists(resolved))) {
+    return null;
+  }
+  if (!(await impressionCliAvailable(resolved))) {
+    return null;
+  }
+  return resolved;
+}
+
+async function impressionCliAvailable(pythonPath) {
+  try {
+    await runCommandSilent(pythonPath, ['-c', IMPRESSION_CLI_CHECK], { env: buildPythonEnv(pythonPath) });
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function resolveExecutable(candidate) {
+  if (!candidate || typeof candidate !== 'string') {
+    return null;
+  }
+  const trimmed = stripQuotes(expandHome(candidate.trim()));
+  if (!trimmed) {
+    return null;
+  }
+  if (path.isAbsolute(trimmed)) {
+    return trimmed;
+  }
+  return resolveCommand(trimmed);
+}
+
+function resolveCommand(command) {
+  if (!command) {
+    return null;
+  }
+  const cmd = process.platform === 'win32' ? 'where' : 'which';
+  try {
+    const result = cp.execFileSync(cmd, [command], { encoding: 'utf8' }).trim();
+    if (!result) {
+      return null;
+    }
+    return result.split(/\r?\n/)[0];
+  } catch (error) {
+    return null;
+  }
+}
+
+async function pythonFromSettings() {
+  const config = vscode.workspace.getConfiguration('python');
+  const candidates = [
+    config.get('defaultInterpreterPath'),
+    config.get('interpreterPath'),
+    config.get('pythonPath'),
+  ]
+    .map((value) => (typeof value === 'string' ? expandWorkspaceVariables(value) : null))
+    .filter(Boolean);
+  for (const candidate of candidates) {
+    const resolved = resolveExecutable(candidate);
+    if (resolved && (await fileExists(resolved))) {
+      return resolved;
+    }
+  }
+  return null;
+}
+
+async function pythonFromWorkspaceVenv() {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  const venvNames = ['.venv', 'venv', '.virtualenv'];
+  for (const folder of folders) {
+    for (const venvName of venvNames) {
+      const candidate = path.join(
+        folder.uri.fsPath,
+        venvName,
+        process.platform === 'win32' ? 'Scripts' : 'bin',
+        process.platform === 'win32' ? 'python.exe' : 'python'
+      );
+      if (await fileExists(candidate)) {
+        return candidate;
+      }
+    }
+  }
+  return null;
+}
+
+function expandWorkspaceVariables(value) {
+  if (!value || typeof value !== 'string') {
+    return value;
+  }
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) {
+    return value;
+  }
+  const root = folders[0].uri.fsPath;
+  return value.replace('${workspaceFolder}', root).replace('${workspaceRoot}', root);
+}
+
+function expandHome(value) {
+  if (!value || typeof value !== 'string') {
+    return value;
+  }
+  if (value === '~') {
+    return os.homedir();
+  }
+  if (value.startsWith('~/') || value.startsWith('~\\')) {
+    return path.join(os.homedir(), value.slice(2));
+  }
+  return value;
+}
+
+function stripQuotes(value) {
+  if (!value || typeof value !== 'string') {
+    return value;
+  }
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    return value.slice(1, -1);
+  }
+  return value;
 }
 
 async function pythonFromShebang() {
@@ -190,15 +437,28 @@ async function pythonFromShebang() {
     const impressionBinary = result.split(/\r?\n/)[0];
     const firstLine = fs.readFileSync(impressionBinary, 'utf8').split(/\r?\n/)[0];
     if (firstLine.startsWith('#!')) {
-      const interpreter = firstLine.slice(2).trim();
-      if (await fileExists(interpreter)) {
-        return interpreter;
+      const interpreter = parseShebangInterpreter(firstLine);
+      const resolved = resolveExecutable(interpreter);
+      if (resolved && (await fileExists(resolved))) {
+        return resolved;
       }
     }
   } catch (error) {
     return null;
   }
   return null;
+}
+
+function parseShebangInterpreter(line) {
+  const stripped = line.replace(/^#!\s*/, '').trim();
+  if (!stripped) {
+    return null;
+  }
+  const parts = stripped.split(/\s+/);
+  if (parts[0].endsWith('env')) {
+    return parts[1] || null;
+  }
+  return parts[0];
 }
 
 async function pythonFromEnvFile() {
@@ -230,7 +490,11 @@ async function installImpression() {
       }
       const pythonBin = getVenvPython(INSTALL_FOLDER);
       if (!(await fileExists(pythonBin))) {
-        await runCommand('python3', ['-m', 'venv', path.join(INSTALL_FOLDER, '.venv')]);
+        const bootstrapPython = resolveCommand('python3') || resolveCommand('python');
+        if (!bootstrapPython) {
+          throw new Error('Python 3 is required to install Impression.');
+        }
+        await runCommand(bootstrapPython, ['-m', 'venv', path.join(INSTALL_FOLDER, '.venv')]);
       }
       await runCommand(pythonBin, ['-m', 'pip', 'install', '--upgrade', 'pip'], { cwd: INSTALL_FOLDER });
       await runCommand(pythonBin, ['-m', 'pip', 'install', '-e', '.'], { cwd: INSTALL_FOLDER });
@@ -253,7 +517,7 @@ async function fileExists(filePath) {
     return false;
   }
   try {
-    await fs.promises.access(filePath, fs.constants.X_OK);
+    await fs.promises.access(filePath, EXECUTE_ACCESS);
     return true;
   } catch (error) {
     return false;
@@ -273,14 +537,18 @@ async function pathExists(filePath) {
 }
 
 function runCommand(command, args = [], options = {}) {
-  installerChannel.appendLine(`$ ${command} ${args.join(' ')}`);
+  const logOutput = options.log !== false;
+  if (logOutput) {
+    installerChannel.appendLine(`$ ${command} ${args.join(' ')}`);
+  }
   return new Promise((resolve, reject) => {
     const proc = cp.spawn(command, args, {
       cwd: options.cwd,
       env: options.env ?? process.env,
     });
-    proc.stdout.on('data', (data) => installerChannel.append(data.toString()));
-    proc.stderr.on('data', (data) => installerChannel.append(data.toString()));
+    const handleOutput = logOutput ? (data) => installerChannel.append(data.toString()) : () => {};
+    proc.stdout.on('data', handleOutput);
+    proc.stderr.on('data', handleOutput);
     proc.on('error', (error) => reject(error));
     proc.on('close', (code) => {
       if (code === 0) {
@@ -290,6 +558,48 @@ function runCommand(command, args = [], options = {}) {
       }
     });
   });
+}
+
+function runCommandSilent(command, args = [], options = {}) {
+  return runCommand(command, args, { ...options, log: false });
+}
+
+function buildPythonEnv(pythonPath) {
+  const env = {};
+  if (pythonPath) {
+    env.IMPRESSION_PY = pythonPath;
+  }
+  const workspaceSrc = getWorkspaceSourcePath();
+  if (workspaceSrc) {
+    env.PYTHONPATH = mergePythonPath(process.env.PYTHONPATH, workspaceSrc);
+  }
+  return env;
+}
+
+function mergePythonPath(currentValue, addition) {
+  if (!addition) {
+    return currentValue;
+  }
+  const separator = process.platform === 'win32' ? ';' : ':';
+  if (!currentValue) {
+    return addition;
+  }
+  const parts = currentValue.split(separator);
+  if (parts.includes(addition)) {
+    return currentValue;
+  }
+  return `${addition}${separator}${currentValue}`;
+}
+
+function getWorkspaceSourcePath() {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  for (const folder of folders) {
+    const candidate = path.join(folder.uri.fsPath, 'src', 'impression');
+    if (fs.existsSync(candidate)) {
+      return path.join(folder.uri.fsPath, 'src');
+    }
+  }
+  return null;
 }
 
 async function updateShellIntegration(pythonPath) {

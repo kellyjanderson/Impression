@@ -42,6 +42,25 @@
           "when": "resourceExtname == .py"
         }
       ]
+    },
+    "configuration": {
+      "title": "Impression",
+      "properties": {
+        "impression.previewMode": {
+          "type": "string",
+          "enum": [
+            "terminal",
+            "webview"
+          ],
+          "default": "terminal",
+          "description": "Where to launch Impression previews. Webview is a placeholder until the embedded viewer ships."
+        },
+        "impression.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Explicit Python interpreter path to use for Impression commands (overrides auto-detection)."
+        }
+      }
     }
   },
   "main": "extension.js",

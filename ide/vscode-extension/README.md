@@ -10,6 +10,16 @@ A lightweight VS Code extension that shells out to the `impression` CLI so you c
 
 Each command opens a dedicated `Impression` terminal so you can see live CLI logs. Feel free to stop/reuse the terminal like any other VS Code task.
 
+## Interpreter detection
+
+The extension prefers `impression.pythonPath`, then checks `IMPRESSION_PY`, `~/.impression/env`, the VS Code Python interpreter
+setting, common workspace venvs, and the CLI shebang. If nothing is found, it offers a one-click install into `~/.impression-cli`.
+
+## Settings
+
+- `impression.pythonPath`: explicitly set the Python interpreter used for Impression commands.
+- `impression.previewMode`: choose `terminal` (default) or `webview` (placeholder panel for future embedded previews).
+
 ## Getting Started
 
 1. Install project dependencies (`pip install -e .`).
