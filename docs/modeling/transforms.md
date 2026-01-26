@@ -40,14 +40,32 @@ impression preview docs/examples/transforms/transform_example.py
 
 Impression uses manifold3d CrossSection for 2D offset and convex hull:
 
-- `offset(profile, r=..., delta=..., chamfer=False)`
+- `offset(profile_or_path, r=..., delta=..., chamfer=False, segments_per_circle=64, bezier_samples=32)`
 - `hull([profile_a, profile_b, ...])`
 
-These return one or more `Profile2D` instances.
+Notes:
+
+- `offset` accepts `Profile2D` or **closed** `Path2D`. Provide **either** `r` **or** `delta`.
+- `chamfer=False` uses rounded joins; set `chamfer=True` for mitered corners.
+- Both `offset` and 2D `hull` return **one or more `Profile2D`** instances (multiple profiles if the hull/offset splits).
+
+Example (2D hull):
+
+```python
+from impression.modeling import make_rect, translate, hull
+
+def build():
+    a = make_rect(1.0, 0.6)
+    b = translate(make_rect(0.8, 0.8), (0.6, 0.3, 0.0))
+    return hull([a, b])
+```
 
 ## 3D Hulls
 
 `hull([mesh_a, mesh_b, ...])` uses manifold3d to compute convex hulls for meshes.
+
+- Accepts `Mesh` or `MeshGroup` values.
+- Returns a single `Mesh` representing the convex hull.
 
 ## Minkowski
 
