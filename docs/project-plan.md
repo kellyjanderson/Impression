@@ -22,6 +22,10 @@ Current execution order is captured in `docs/feature-pipeline.md` and should be 
 
 ## Advanced Modeling
 
+- [ ] **3D Hull & Minkowski (Deferred)**
+  - [ ] 3D convex hulls and Minkowski sums will require an additional geometry kernel beyond manifold3d.
+  - [ ] Track candidates (CGAL/libigl) and evaluate packaging impact before implementation.
+
 - [ ] **Morph & Lofting**
   - [ ] 2D morph between two shapes/paths with a parameter `t` in `[0, 1]` (0 = first profile, 1 = second profile).
   - [ ] Resample/align profiles for compatible point counts before interpolation.
@@ -73,11 +77,13 @@ Current execution order is captured in `docs/feature-pipeline.md` and should be 
   - pytest offers concise fixtures, better parameterization, and aligns with our preference; unittest is batteries-included but more verbose.
   - Decision factors: integration with existing scripts (call via subprocess vs plugins), fixture complexity (e.g., temporary workspaces, font downloads), and ecosystem tooling (coverage, plugin availability).
 
-## Appendix A: Deferred Items
+## Appendix A: Feature Ideas
+
+### Deferred Items
 
 - [ ] Curate a lightweight library of reusable shapes (fasteners, brackets, gears) under permissive licenses; expose helper loaders (`load_shape("gear_m12")`).
 
-## Appendix: Gravitational Modeling
+### Gravitational Modeling
 
 - **Concept overview**
   - Anchors (points or closed paths) remain fixed while interior surface vertices respond to gravitational or anti-gravitational primitives.
@@ -88,7 +94,7 @@ Current execution order is captured in `docs/feature-pipeline.md` and should be 
   - Allow both positive (pull) and negative (push) sources; long-term, support animated sources for morphing effects.
   - Expose parameters for max triangle size, damping, and convergence tolerance.
 
-## Appendix: Documentation & Presentation Features
+### Documentation & Presentation Features
 
 - [x] **Text rendering**
   - Support vector-based text primitives that can be extruded or engraved, enabling technical annotations directly in scenes.
