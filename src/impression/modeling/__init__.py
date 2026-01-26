@@ -34,6 +34,7 @@ from .csg import boolean_union, boolean_difference, boolean_intersection, union_
 from .paths import Path
 from .group import MeshGroup, group
 from .ops import offset, hull, minkowski
+from .heightmap import heightmap, displace_heightmap
 
 __all__ = [
     "make_box",
@@ -82,5 +83,7 @@ __all__ = [
     "offset",
     "hull",
     "minkowski",
+    "heightmap",
+    "displace_heightmap",
 ]
 # Text support temporarily disabled.
