@@ -41,7 +41,7 @@ def test_pyvista_show_without_impression():
 
         plotter = pv.Plotter(off_screen=True)
         plotter.add_mesh(pv.Box())
-        plotter.show(auto_close=True)
+        plotter.show(auto_close=True, interactive=False)
         plotter.close()
         """
     )
@@ -58,7 +58,7 @@ def test_pyvista_show_after_impression_import():
 
         plotter = pv.Plotter(off_screen=True)
         plotter.add_mesh(pv.Box())
-        plotter.show(auto_close=True)
+        plotter.show(auto_close=True, interactive=False)
         plotter.close()
         """
     )
@@ -75,7 +75,7 @@ def test_pyvista_show_after_modeling_import():
 
         plotter = pv.Plotter(off_screen=True)
         plotter.add_mesh(pv.Box())
-        plotter.show(auto_close=True)
+        plotter.show(auto_close=True, interactive=False)
         plotter.close()
         """
     )
@@ -94,7 +94,7 @@ def test_internal_mesh_show_after_modeling_import():
         mesh = mesh_to_pyvista(make_box())
         plotter = pv.Plotter(off_screen=True)
         plotter.add_mesh(mesh)
-        plotter.show(auto_close=True)
+        plotter.show(auto_close=True, interactive=False)
         plotter.close()
         """
     )
