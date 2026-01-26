@@ -13,7 +13,7 @@ git clone https://github.com/kellyjanderson/Impression.git
 cd Impression
 python3 -m venv .venv
 source .venv/bin/activate
-scripts/dev/install_impression.sh
+scripts/dev/install_impression.sh --local
 ```
 
 Verify the CLI:

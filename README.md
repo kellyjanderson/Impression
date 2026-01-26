@@ -23,10 +23,11 @@ If you want to install a local wheel (to mimic a packaged release), use the help
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-scripts/dev/install_impression.sh
+scripts/dev/install_impression.sh --local
 ```
 
-The script builds a wheel, installs it into the active venv, and forces `manifold3d` to build
+By default the installer pulls the latest tagged release (currently `v0.0.1a1`). It builds a wheel,
+installs it into the active venv, and forces `manifold3d` to build
 in serial mode so Intel TBB is not required.
 
 See **Python Versions and Venvs** below for how the installer chooses a Python version.

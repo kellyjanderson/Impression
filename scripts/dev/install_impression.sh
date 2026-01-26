@@ -2,16 +2,30 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+repo_url="${IMPRESSION_REPO_URL:-https://github.com/kellyjanderson/Impression.git}"
+install_source="${IMPRESSION_INSTALL_SOURCE:-release}"
+release_ref="${IMPRESSION_RELEASE:-}"
 
 venv_path=""
+use_local=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --venv)
             venv_path="$2"
             shift 2
             ;;
+        --release)
+            release_ref="$2"
+            install_source="release"
+            shift 2
+            ;;
+        --local)
+            use_local=1
+            install_source="local"
+            shift 1
+            ;;
         *)
-            echo "Usage: install_impression.sh [--venv PATH]" >&2
+            echo "Usage: install_impression.sh [--venv PATH] [--release TAG] [--local]" >&2
             exit 1
             ;;
     esac
@@ -21,14 +35,29 @@ if [[ -z "$venv_path" ]]; then
     venv_path="$(pwd)/.venv"
 fi
 
-if command -v git >/dev/null 2>&1 && git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    if git -C "$repo_root" diff --quiet && git -C "$repo_root" diff --cached --quiet; then
-        git -C "$repo_root" fetch --all --prune
-        if ! git -C "$repo_root" pull --ff-only; then
-            echo "Warning: could not fast-forward; skipping repo update." >&2
+release_dir=""
+if [[ "$install_source" == "release" ]]; then
+    if [[ -z "$release_ref" ]]; then
+        release_ref="v0.0.1a1"
+    fi
+    if ! command -v git >/dev/null 2>&1; then
+        echo "git is required to install a release. Install git or use --local." >&2
+        exit 1
+    fi
+    release_dir="$(mktemp -d)"
+    trap '[[ -n "$release_dir" ]] && rm -rf "$release_dir"' EXIT
+    git clone --depth 1 --branch "$release_ref" "$repo_url" "$release_dir/impression" >/dev/null 2>&1
+    repo_root="$release_dir/impression"
+else
+    if command -v git >/dev/null 2>&1 && git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        if git -C "$repo_root" diff --quiet && git -C "$repo_root" diff --cached --quiet; then
+            git -C "$repo_root" fetch --all --prune
+            if ! git -C "$repo_root" pull --ff-only; then
+                echo "Warning: could not fast-forward; skipping repo update." >&2
+            fi
+        else
+            echo "Warning: repo has local changes; skipping git pull." >&2
         fi
-    else
-        echo "Warning: repo has local changes; skipping git pull." >&2
     fi
 fi
 
