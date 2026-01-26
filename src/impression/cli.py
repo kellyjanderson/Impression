@@ -238,30 +238,6 @@ def preview(
 
 
 @app.command()
-def studio(
-    workspace: pathlib.Path = typer.Option(
-        pathlib.Path.cwd(),
-        "--workspace",
-        "-w",
-        help="Workspace root containing docs/examples.",
-    ),
-) -> None:
-    """
-    Launch the Impression Studio (examples + docs + live preview).
-    """
-
-    if not workspace.exists():
-        raise typer.BadParameter(f"Workspace path {workspace} does not exist.")
-
-    from impression.studio import run_studio
-
-    try:
-        run_studio(workspace)
-    except Exception as exc:
-        raise typer.BadParameter(f"Studio failed to launch: {exc}") from exc
-
-
-@app.command()
 def export(
     model: pathlib.Path = typer.Argument(..., help="Model module to export."),
     output: pathlib.Path = typer.Option(

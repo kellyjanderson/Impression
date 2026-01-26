@@ -60,23 +60,10 @@ Preview it:
 impression preview path/to/model.py
 ```
 
-## Impression Studio (Docs + Playground)
-
-Impression Studio is a desktop app for learning and tinkering: examples on the left, a live
-editor in the center, and a 3D preview on the right. It automatically loads docs for the
-selected example and runs `build()` as you type.
-
-```bash
-impression studio --workspace /Users/k/Documents/Projects/Impression
-```
-
-See `docs/studio.md` for usage notes and shortcuts.
-
 ## CLI Highlights
 
 - Preview: `impression preview docs/examples/primitives/box_example.py`
 - Export: `impression export docs/examples/csg/union_example.py --output dist/union.stl --overwrite`
-- Studio: `impression studio`
 - Docs only: `impression --get-docs --docs-dest ./impression-docs`
 
 Full CLI reference: `docs/cli.md`

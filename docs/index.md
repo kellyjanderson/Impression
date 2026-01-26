@@ -7,7 +7,6 @@ library, the tools, and the examples.
 ## Start Here
 
 - **Quickstart**: [README](../README.md)
-- **Impression Studio**: [Studio Guide](studio.md)
 - **CLI Reference**: [CLI](cli.md)
 - **Examples**: `docs/examples/` (every file has a `build()` function)
 - **Agent Bootstrap**: [Agent Guide](agents.md)
@@ -38,9 +37,6 @@ library, the tools, and the examples.
 ```bash
 # preview any documented example
 impression preview docs/examples/primitives/box_example.py
-
-# studio playground + docs
-impression studio
 
 # export to STL
 impression export docs/examples/csg/union_example.py --output dist/union.stl --overwrite

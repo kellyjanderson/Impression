@@ -10,7 +10,6 @@
 impression preview [OPTIONS] MODEL
 impression export [OPTIONS] MODEL
 impression --get-docs [OPTIONS]
-impression studio [OPTIONS]
 ```
 
 ## COMMANDS
@@ -53,14 +52,6 @@ Generate an STL from a model.
 - `--overwrite / --no-overwrite` (default: `--no-overwrite`): guard existing files.
 - `--ascii / --binary` (default: binary): choose STL encoding.
 
-### `studio`
-
-Launch the Impression Studio desktop app (examples + docs + live preview).
-
-**Options**
-
-- `-w, --workspace PATH` (default: current directory): workspace root containing `docs/` and `docs/examples/`.
-
 ## `--get-docs`
 
 Download the documentation bundle without cloning the full repository.
@@ -84,8 +75,7 @@ units are echoed in preview axes labels and export summaries.
 1. Write a module that defines `build()` and returns internal meshes.
 2. Preview: `impression preview path/to/module.py`
 3. Export: `impression export path/to/module.py --output artifacts/model.stl`
-4. Studio: `impression studio`
-5. Run screenshot regression tests: `scripts/run_preview_tests.py`
-6. Validate STL exports + watertightness: `scripts/run_stl_tests.py`
+4. Run screenshot regression tests: `scripts/run_preview_tests.py`
+5. Validate STL exports + watertightness: `scripts/run_stl_tests.py`
 
 See `docs/examples/` for ready-to-run modules covering primitives, drafting helpers, text, and more.
