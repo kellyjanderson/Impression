@@ -31,6 +31,7 @@ def loft_profiles(
             raise ValueError("All profiles must have the same number of holes.")
 
     positions = _resolve_positions(path, len(profiles))
+    normals, binormals, tangents = _compute_frames(positions)
 
     loop_count = 1 + hole_count
     loops_per_profile = []
@@ -47,9 +48,16 @@ def loft_profiles(
     offsets = []
     for profile_idx, loops in enumerate(loops_per_profile):
         profile_offsets = []
+        normal = normals[profile_idx]
+        binormal = binormals[profile_idx]
+        tangent = tangents[profile_idx]
         for loop in loops:
             profile_offsets.append(len(vertices))
-            pts3 = np.column_stack([loop, np.zeros(len(loop))]) + positions[profile_idx]
+            pts3 = (
+                positions[profile_idx]
+                + loop[:, 0:1] * normal
+                + loop[:, 1:2] * binormal
+            )
             vertices.extend(pts3)
         offsets.append(profile_offsets)
 
@@ -153,6 +161,81 @@ def _resample_path(points: np.ndarray, count: int) -> np.ndarray:
             alpha = (t - seg_start) / (seg_end - seg_start)
             result.append((1 - alpha) * p0 + alpha * p1)
     return np.asarray(result, dtype=float)
+
+
+def _compute_frames(positions: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute parallel-transport frames along the path."""
+    pts = np.asarray(positions, dtype=float)
+    count = pts.shape[0]
+    if count < 2:
+        tangent = np.array([[0.0, 0.0, 1.0]])
+        normal = np.array([[1.0, 0.0, 0.0]])
+        binormal = np.array([[0.0, 1.0, 0.0]])
+        return normal, binormal, tangent
+
+    tangents = np.zeros((count, 3), dtype=float)
+    for i in range(count):
+        if i == 0:
+            delta = pts[1] - pts[0]
+        elif i == count - 1:
+            delta = pts[-1] - pts[-2]
+        else:
+            delta = pts[i + 1] - pts[i - 1]
+        norm = np.linalg.norm(delta)
+        if norm == 0:
+            tangents[i] = tangents[i - 1] if i > 0 else np.array([0.0, 0.0, 1.0])
+        else:
+            tangents[i] = delta / norm
+
+    normals = np.zeros((count, 3), dtype=float)
+    binormals = np.zeros((count, 3), dtype=float)
+
+    up = np.array([0.0, 0.0, 1.0])
+    if abs(np.dot(up, tangents[0])) > 0.9:
+        up = np.array([1.0, 0.0, 0.0])
+    n0 = np.cross(tangents[0], up)
+    if np.linalg.norm(n0) < 1e-9:
+        n0 = np.array([1.0, 0.0, 0.0])
+    n0 = n0 / np.linalg.norm(n0)
+    b0 = np.cross(tangents[0], n0)
+    b0 = b0 / np.linalg.norm(b0)
+    normals[0] = n0
+    binormals[0] = b0
+
+    for i in range(1, count):
+        v1 = tangents[i - 1]
+        v2 = tangents[i]
+        axis = np.cross(v1, v2)
+        axis_norm = np.linalg.norm(axis)
+        if axis_norm < 1e-9:
+            normals[i] = normals[i - 1]
+            binormals[i] = binormals[i - 1]
+            continue
+        axis = axis / axis_norm
+        angle = np.arccos(np.clip(np.dot(v1, v2), -1.0, 1.0))
+        n_prev = normals[i - 1]
+        n_rot = _rotate_vector(n_prev, axis, angle)
+        b_rot = np.cross(v2, n_rot)
+        if np.linalg.norm(b_rot) < 1e-9:
+            normals[i] = n_rot
+            binormals[i] = binormals[i - 1]
+        else:
+            b_rot = b_rot / np.linalg.norm(b_rot)
+            n_rot = np.cross(b_rot, v2)
+            normals[i] = n_rot / np.linalg.norm(n_rot)
+            binormals[i] = b_rot
+
+    return normals, binormals, tangents
+
+
+def _rotate_vector(vec: np.ndarray, axis: np.ndarray, angle: float) -> np.ndarray:
+    """Rotate vector around axis by angle (radians)."""
+    axis = np.asarray(axis, dtype=float)
+    axis = axis / max(np.linalg.norm(axis), 1e-9)
+    vec = np.asarray(vec, dtype=float)
+    c = np.cos(angle)
+    s = np.sin(angle)
+    return vec * c + np.cross(axis, vec) * s + axis * np.dot(axis, vec) * (1.0 - c)
 
 
 __all__ = ["loft_profiles", "loft"]

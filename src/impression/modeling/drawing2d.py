@@ -155,6 +155,158 @@ class Path2D:
         return self
 
 
+def _line_intersection(p1: np.ndarray, d1: np.ndarray, p2: np.ndarray, d2: np.ndarray) -> np.ndarray | None:
+    """Return the intersection point for two 2D lines (point+direction)."""
+    cross = d1[0] * d2[1] - d1[1] * d2[0]
+    if abs(cross) < 1e-9:
+        return None
+    t = ((p2[0] - p1[0]) * d2[1] - (p2[1] - p1[1]) * d2[0]) / cross
+    return p1 + d1 * t
+
+
+def round_corners(
+    points: Iterable[Sequence[float]],
+    radius: float,
+    closed: bool = True,
+    clamp: bool = True,
+) -> Path2D:
+    """Round sharp polyline corners with true arcs."""
+    pts = [_require_vec2(p, "point") for p in points]
+    if len(pts) < (3 if closed else 2):
+        raise ValueError("round_corners requires at least three points for closed paths.")
+    if closed and np.allclose(pts[0], pts[-1]):
+        pts = pts[:-1]
+    if len(pts) < (3 if closed else 2):
+        raise ValueError("round_corners requires at least three points for closed paths.")
+    if radius <= 0:
+        raise ValueError("radius must be positive.")
+
+    n = len(pts)
+    corners: list[dict[str, np.ndarray | float | bool] | None] = [None] * n
+    for i in range(n):
+        if not closed and (i == 0 or i == n - 1):
+            continue
+        prev = pts[i - 1 if i > 0 else n - 1]
+        curr = pts[i]
+        nxt = pts[(i + 1) % n]
+        v1 = curr - prev
+        v2 = nxt - curr
+        len1 = np.linalg.norm(v1)
+        len2 = np.linalg.norm(v2)
+        if len1 < 1e-9 or len2 < 1e-9:
+            continue
+        u1 = v1 / len1
+        u2 = v2 / len2
+        dot = float(np.clip(np.dot(u1, u2), -1.0, 1.0))
+        angle = float(np.arccos(dot))
+        if angle < 1e-6 or abs(np.pi - angle) < 1e-6:
+            continue
+
+        max_r = min(len1, len2) / max(np.tan(angle / 2.0), 1e-9)
+        r = float(radius)
+        if r > max_r:
+            if clamp:
+                r = max_r
+            else:
+                continue
+        if r <= 0:
+            continue
+
+        cross = u1[0] * u2[1] - u1[1] * u2[0]
+        if abs(cross) < 1e-9:
+            continue
+        sign = 1.0 if cross > 0 else -1.0
+        n1 = sign * np.array([-u1[1], u1[0]])
+        n2 = sign * np.array([-u2[1], u2[0]])
+        p1 = curr + n1 * r
+        p2 = curr + n2 * r
+        center = _line_intersection(p1, u1, p2, u2)
+        if center is None:
+            continue
+
+        t1 = curr + u1 * np.dot(u1, center - curr)
+        t2 = curr + u2 * np.dot(u2, center - curr)
+        start = float(np.degrees(np.arctan2(t1[1] - center[1], t1[0] - center[0])))
+        end = float(np.degrees(np.arctan2(t2[1] - center[1], t2[0] - center[0])))
+        corners[i] = {
+            "t1": t1,
+            "t2": t2,
+            "center": center,
+            "radius": float(np.linalg.norm(t1 - center)),
+            "start": start,
+            "end": end,
+            "clockwise": cross < 0,
+        }
+
+    segments: list[Segment2D] = []
+    if closed:
+        start_point = corners[0]["t1"] if corners[0] is not None else pts[0]
+        prev_anchor = start_point
+        for i in range(n):
+            corner = corners[i]
+            if corner is None:
+                line_end = pts[i]
+                if not np.allclose(prev_anchor, line_end):
+                    segments.append(Line2D(prev_anchor, line_end))
+                prev_anchor = line_end
+                continue
+            t1 = corner["t1"]
+            if not np.allclose(prev_anchor, t1):
+                segments.append(Line2D(prev_anchor, t1))
+            segments.append(
+                Arc2D(
+                    center=corner["center"],
+                    radius=corner["radius"],
+                    start_angle_deg=corner["start"],
+                    end_angle_deg=corner["end"],
+                    clockwise=bool(corner["clockwise"]),
+                )
+            )
+            prev_anchor = corner["t2"]
+        if not np.allclose(prev_anchor, start_point):
+            segments.append(Line2D(prev_anchor, start_point))
+        return Path2D(segments=segments, closed=True)
+
+    prev_anchor = pts[0]
+    for i in range(1, n - 1):
+        corner = corners[i]
+        if corner is None:
+            line_end = pts[i]
+            if not np.allclose(prev_anchor, line_end):
+                segments.append(Line2D(prev_anchor, line_end))
+            prev_anchor = line_end
+            continue
+        t1 = corner["t1"]
+        if not np.allclose(prev_anchor, t1):
+            segments.append(Line2D(prev_anchor, t1))
+        segments.append(
+            Arc2D(
+                center=corner["center"],
+                radius=corner["radius"],
+                start_angle_deg=corner["start"],
+                end_angle_deg=corner["end"],
+                clockwise=bool(corner["clockwise"]),
+            )
+        )
+        prev_anchor = corner["t2"]
+
+    if not np.allclose(prev_anchor, pts[-1]):
+        segments.append(Line2D(prev_anchor, pts[-1]))
+    return Path2D(segments=segments, closed=False)
+
+
+def round_path(path: Path2D, radius: float, clamp: bool = True) -> Path2D:
+    """Round corners of a Path2D using true arcs."""
+    if all(isinstance(seg, Line2D) for seg in path.segments):
+        pts = []
+        for segment in path.segments:
+            pts.append(segment.start)
+        pts.append(path.segments[-1].end)
+        return round_corners(pts, radius=radius, closed=path.closed, clamp=clamp)
+    sampled = path.sample()
+    return round_corners(sampled, radius=radius, closed=path.closed, clamp=clamp)
+
+
 @dataclass
 class Profile2D:
     outer: Path2D

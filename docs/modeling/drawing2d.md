@@ -25,6 +25,7 @@ Example module: `docs/examples/drawing2d/basic_example.py`
 - `docs/examples/drawing2d/ngon2d_example.py`
 - `docs/examples/drawing2d/polygon2d_example.py`
 - `docs/examples/drawing2d/polyline2d_example.py`
+- `docs/examples/drawing2d/round_path_example.py`
 
 ## Core Types
 
@@ -112,4 +113,20 @@ from impression.modeling.drawing2d import make_polyline
 
 def build():
     return make_polyline([(0, 0), (1, 0.5), (2, 0)], closed=False)
+```
+
+## Rounded Corners
+
+Use true arcs to soften sharp corners on a polyline or path.
+
+- **Function:** `round_corners(points, radius, closed=True)`
+- **Function:** `round_path(path, radius, clamp=True)`
+- **Returns:** `Path2D` (with arc segments replacing sharp corners)
+
+```python
+from impression.modeling.drawing2d import round_corners
+
+def build():
+    pts = [(0, 0), (2, 0), (2, 1), (0, 1)]
+    return round_corners(pts, radius=0.2, closed=True)
 ```

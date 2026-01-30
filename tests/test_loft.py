@@ -29,3 +29,14 @@ def test_loft_hole_mismatch():
     b.holes.append(a.outer)
     with pytest.raises(ValueError):
         loft([a, b])
+
+
+def test_loft_rotates_profiles_along_path():
+    profiles = [
+        make_rect(size=(1.0, 1.0)),
+        make_rect(size=(1.0, 1.0)),
+    ]
+    path = Path3D.from_points([(0, 0, 0), (2, 0, 0)])
+    mesh = loft(profiles, path=path, samples=40)
+    _, _, _, _, zmin, zmax = mesh.bounds
+    assert (zmax - zmin) > 0.1

@@ -1,9 +1,9 @@
 # Modeling — Loft
 
 Loft creates a surface between a series of profiles. Profiles must share the
-same hole topology. If a path is provided, each profile is translated to a
-position sampled from the path (orientation is not yet rotated to follow the
-path).
+same hole topology. If a path is provided, profiles are translated to sampled
+positions and rotated to follow the path direction (parallel-transport frames
+to minimize twist).
 
 ```python
 from impression.modeling import loft

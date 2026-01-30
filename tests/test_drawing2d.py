@@ -9,6 +9,8 @@ from impression.modeling.drawing2d import (
     Line2D,
     Path2D,
     Profile2D,
+    round_corners,
+    round_path,
     make_circle,
     make_ngon,
     make_polygon,
@@ -118,3 +120,17 @@ def test_make_polygon_requires_three_points():
 def test_make_polyline_requires_two_points():
     with pytest.raises(ValueError):
         make_polyline([(0, 0)])
+
+
+def test_round_corners_closed_path():
+    pts = [(0, 0), (2, 0), (2, 1), (0, 1)]
+    rounded = round_corners(pts, radius=0.2, closed=True)
+    assert rounded.closed
+    assert any(isinstance(seg, Arc2D) for seg in rounded.segments)
+
+
+def test_round_path_open():
+    path = Path2D.from_points([(0, 0), (1, 0), (1, 1)], closed=False)
+    rounded = round_path(path, radius=0.1)
+    assert not rounded.closed
+    assert any(isinstance(seg, Arc2D) for seg in rounded.segments)
