@@ -40,3 +40,22 @@ def test_loft_rotates_profiles_along_path():
     mesh = loft(profiles, path=path, samples=40)
     _, _, _, _, zmin, zmax = mesh.bounds
     assert (zmax - zmin) > 0.1
+
+
+def test_loft_cap_types_add_geometry():
+    profiles = [
+        make_rect(size=(1.0, 1.0)),
+        make_rect(size=(1.0, 1.0)),
+    ]
+    base = loft(profiles, samples=40)
+    capped = loft(profiles, samples=40, start_cap="taper", end_cap="dome", cap_steps=4)
+    assert capped.n_vertices > base.n_vertices
+
+
+def test_loft_invalid_cap_type():
+    profiles = [
+        make_rect(size=(1.0, 1.0)),
+        make_rect(size=(1.0, 1.0)),
+    ]
+    with pytest.raises(ValueError):
+        loft(profiles, start_cap="banana")

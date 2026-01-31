@@ -20,6 +20,9 @@ def loft_profiles(
     segments_per_circle: int = 64,
     bezier_samples: int = 32,
     cap_ends: bool = False,
+    start_cap: str = "none",
+    end_cap: str = "none",
+    cap_steps: int = 6,
 ) -> Mesh:
     """Loft a sequence of profiles, optionally along a path."""
 
@@ -31,18 +34,26 @@ def loft_profiles(
             raise ValueError("All profiles must have the same number of holes.")
 
     positions = _resolve_positions(path, len(profiles))
+    if start_cap != "none" or end_cap != "none":
+        cap_ends = True
+    if cap_ends and start_cap == "none":
+        start_cap = "flat"
+    if cap_ends and end_cap == "none":
+        end_cap = "flat"
+    _validate_caps(start_cap, end_cap)
+    loops_per_profile, positions = _apply_caps(
+        profiles=profiles,
+        positions=positions,
+        start_cap=start_cap,
+        end_cap=end_cap,
+        cap_steps=cap_steps,
+        samples=samples,
+        segments_per_circle=segments_per_circle,
+        bezier_samples=bezier_samples,
+    )
     normals, binormals, tangents = _compute_frames(positions)
 
-    loop_count = 1 + hole_count
-    loops_per_profile = []
-    for profile in profiles:
-        loops = _loops_resampled(
-            profile,
-            samples,
-            segments_per_circle=segments_per_circle,
-            bezier_samples=bezier_samples,
-        )
-        loops_per_profile.append(loops)
+    loop_count = len(loops_per_profile[0]) if loops_per_profile else 0
 
     vertices = []
     offsets = []
@@ -64,7 +75,7 @@ def loft_profiles(
     vertices = np.asarray(vertices, dtype=float)
 
     faces = []
-    for idx in range(len(profiles) - 1):
+    for idx in range(len(loops_per_profile) - 1):
         for loop_idx in range(loop_count):
             start_a = offsets[idx][loop_idx]
             start_b = offsets[idx + 1][loop_idx]
@@ -99,6 +110,9 @@ def loft(
     segments_per_circle: int = 64,
     bezier_samples: int = 32,
     cap_ends: bool = False,
+    start_cap: str = "none",
+    end_cap: str = "none",
+    cap_steps: int = 6,
 ) -> Mesh:
     """Alias for loft_profiles."""
 
@@ -109,6 +123,9 @@ def loft(
         segments_per_circle=segments_per_circle,
         bezier_samples=bezier_samples,
         cap_ends=cap_ends,
+        start_cap=start_cap,
+        end_cap=end_cap,
+        cap_steps=cap_steps,
     )
 
 
@@ -161,6 +178,93 @@ def _resample_path(points: np.ndarray, count: int) -> np.ndarray:
             alpha = (t - seg_start) / (seg_end - seg_start)
             result.append((1 - alpha) * p0 + alpha * p1)
     return np.asarray(result, dtype=float)
+
+
+def _validate_caps(start_cap: str, end_cap: str) -> None:
+    allowed = {"none", "flat", "taper", "dome", "soft"}
+    if start_cap not in allowed:
+        raise ValueError(f"start_cap must be one of {sorted(allowed)}.")
+    if end_cap not in allowed:
+        raise ValueError(f"end_cap must be one of {sorted(allowed)}.")
+
+
+def _apply_caps(
+    profiles: Sequence[Profile2D],
+    positions: np.ndarray,
+    start_cap: str,
+    end_cap: str,
+    cap_steps: int,
+    samples: int,
+    segments_per_circle: int,
+    bezier_samples: int,
+) -> tuple[list[list[np.ndarray]], np.ndarray]:
+    loops_per_profile: list[list[np.ndarray]] = []
+    for profile in profiles:
+        loops = _loops_resampled(
+            profile,
+            samples,
+            segments_per_circle=segments_per_circle,
+            bezier_samples=bezier_samples,
+        )
+        loops_per_profile.append(loops)
+
+    if start_cap == "none" and end_cap == "none":
+        return loops_per_profile, positions
+
+    if cap_steps < 1:
+        raise ValueError("cap_steps must be >= 1.")
+
+    step_dist = 1.0
+    if positions.shape[0] > 1:
+        step_dist = float(np.linalg.norm(positions[1] - positions[0])) or 1.0
+
+    normals, binormals, tangents = _compute_frames(positions)
+    new_loops: list[list[np.ndarray]] = []
+    new_positions: list[np.ndarray] = []
+
+    if start_cap != "none":
+        scales = _cap_scales(start_cap, cap_steps)
+        if scales:
+            center = loops_per_profile[0][0].mean(axis=0)
+            for idx, scale in enumerate(scales):
+                cap_loops = [_scale_loop(loop, center, scale) for loop in loops_per_profile[0]]
+                new_loops.append(cap_loops)
+                offset = (cap_steps - idx) * step_dist
+                new_positions.append(positions[0] - tangents[0] * offset)
+
+    new_loops.extend(loops_per_profile)
+    new_positions.extend(list(positions))
+
+    if end_cap != "none":
+        scales = _cap_scales(end_cap, cap_steps)
+        if scales:
+            center = loops_per_profile[-1][0].mean(axis=0)
+            for idx, scale in enumerate(reversed(scales)):
+                cap_loops = [_scale_loop(loop, center, scale) for loop in loops_per_profile[-1]]
+                new_loops.append(cap_loops)
+                offset = (idx + 1) * step_dist
+                new_positions.append(positions[-1] + tangents[-1] * offset)
+
+    return new_loops, np.asarray(new_positions, dtype=float)
+
+
+def _cap_scales(mode: str, steps: int) -> list[float]:
+    if mode == "flat" or mode == "none":
+        return []
+    t = np.linspace(0.0, 1.0, steps + 1)[:-1]
+    if mode == "taper":
+        scales = t
+    elif mode == "dome":
+        scales = np.sin(t * np.pi / 2.0)
+    elif mode == "soft":
+        scales = t * t
+    else:
+        scales = t
+    return [max(float(s), 1e-3) for s in scales]
+
+
+def _scale_loop(loop: np.ndarray, center: np.ndarray, scale: float) -> np.ndarray:
+    return center + (loop - center) * scale
 
 
 def _compute_frames(positions: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

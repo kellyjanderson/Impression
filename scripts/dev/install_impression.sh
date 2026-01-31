@@ -6,6 +6,7 @@ repo_url="${IMPRESSION_REPO_URL:-https://github.com/kellyjanderson/Impression.gi
 install_source="${IMPRESSION_INSTALL_SOURCE:-release}"
 release_ref="${IMPRESSION_RELEASE:-}"
 interactive=0
+list_only=0
 
 venv_path=""
 use_local=0
@@ -66,7 +67,14 @@ choose_release_interactive() {
         echo "Interactive mode requires a TTY." >&2
         exit 1
     fi
-    mapfile -t releases < <(list_releases)
+    local releases=()
+    if command -v mapfile >/dev/null 2>&1; then
+        mapfile -t releases < <(list_releases)
+    else
+        while IFS= read -r line; do
+            releases+=("$line")
+        done < <(list_releases)
+    fi
     if [[ ${#releases[@]} -eq 0 ]]; then
         echo "No releases found at $repo_url" >&2
         exit 1
@@ -121,6 +129,7 @@ if [[ "$install_source" == "release" ]]; then
             fi
         fi
     fi
+    echo "Installing Impression release ${release_ref}."
     if ! command -v git >/dev/null 2>&1; then
         echo "git is required to install a release. Install git or use --local." >&2
         exit 1
@@ -205,6 +214,15 @@ fi
 
 py="$venv_path/bin/python"
 
+"$py" - <<'PY' > /tmp/impression_installed_version.txt 2>/dev/null || true
+import importlib.metadata
+try:
+    print(importlib.metadata.version("impression"))
+except Exception:
+    pass
+PY
+pre_version="$(cat /tmp/impression_installed_version.txt 2>/dev/null | tail -n 1 | tr -d '\r')"
+
 "$py" -m pip install --upgrade pip >/dev/null
 "$py" -m pip install --upgrade build scikit-build-core cmake ninja >/dev/null
 "$py" -m build "$repo_root"
@@ -231,3 +249,21 @@ fi
 
 # Install the freshly built wheel.
 CMAKE_ARGS="-DMANIFOLD_PAR=OFF" "$py" -m pip install --upgrade --force-reinstall "$wheel"
+
+post_version="$("$py" - <<'PY' 2>/dev/null
+import importlib.metadata
+try:
+    print(importlib.metadata.version("impression"))
+except Exception:
+    pass
+PY
+)"
+post_version="$(printf "%s" "$post_version" | tail -n 1 | tr -d '\r')"
+
+if [[ -z "$pre_version" && -n "$post_version" ]]; then
+    echo "Installed Impression ${post_version}."
+elif [[ -n "$pre_version" && -n "$post_version" && "$pre_version" != "$post_version" ]]; then
+    echo "Upgraded Impression ${pre_version} -> ${post_version}."
+elif [[ -n "$post_version" ]]; then
+    echo "Impression ${post_version} is already installed."
+fi

@@ -19,6 +19,7 @@ import urllib.request
 import zipfile
 
 from impression.io import write_stl
+from impression import __version__
 from impression.preview import PyVistaPreviewer, PreviewBackendError
 
 console = Console()
@@ -116,6 +117,11 @@ def _download_docs(
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
+    version: bool = typer.Option(
+        False,
+        "--version",
+        help="Show the Impression version and exit.",
+    ),
     get_docs: bool = typer.Option(
         False,
         "--get-docs",
@@ -143,6 +149,10 @@ def main(
         help="Delete the destination folder before downloading.",
     ),
 ) -> None:
+    if version:
+        console.print(__version__)
+        raise typer.Exit()
+
     if get_docs:
         destination = docs_dest or pathlib.Path.cwd() / "impression-docs"
         _download_docs(docs_repo, docs_ref, destination, docs_clean)
