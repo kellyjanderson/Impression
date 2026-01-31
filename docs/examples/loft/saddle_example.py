@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from impression.modeling import Bezier3D, Path3D, loft, offset, rotate, translate
+from impression.modeling import Bezier3D, Path3D, loft, offset, rotate, translate, group
 from impression.modeling.drawing2d import Arc2D, Bezier2D, Line2D, Path2D, Profile2D
 
 # Saddle parameters
@@ -92,18 +92,33 @@ def make_soft_loft_path(depth: float = DEPTH, rise: float = CURVE_DEPTH) -> Path
     return Path3D(segments, closed=False)
 
 
-def organic_pipe_saddle():
+def organic_pipe_saddle(
+    start_cap: str = "none",
+    end_cap: str = "none",
+    cap_steps: int = 10,
+):
     profiles = [make_u_profile() for _ in range(LOFT_PROFILE_COUNT)]
     path = make_soft_loft_path()
-    return loft(profiles, path=path, cap_ends=True)
+    return loft(
+        profiles,
+        path=path,
+        start_cap=start_cap,
+        end_cap=end_cap,
+        cap_steps=cap_steps,
+    )
 
 
 def build():
-    saddle = organic_pipe_saddle()
-    rotate(saddle, [90.0, 0.0, -90.0])
-    rotate(saddle, axis=(0.0, 0.0, 1.0), angle_deg=180.0)
-    translate(saddle, (-22.0, 0.0, 0.0))
-    return saddle
+    cap_types = ["none", "flat", "taper", "dome", "soft"]
+    spacing = 60.0
+    row = group([])
+    for index, cap in enumerate(cap_types):
+        saddle = organic_pipe_saddle(start_cap=cap, end_cap=cap, cap_steps=10)
+        rotate(saddle, [90.0, 0.0, -90.0])
+        rotate(saddle, axis=(0.0, 0.0, 1.0), angle_deg=180.0)
+        translate(saddle, (-80.0 + index * spacing, 0.0, 0.0))
+        row.add(saddle)
+    return row
 
 
 if __name__ == "__main__":

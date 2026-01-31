@@ -48,7 +48,15 @@ def test_loft_cap_types_add_geometry():
         make_rect(size=(1.0, 1.0)),
     ]
     base = loft(profiles, samples=40)
-    capped = loft(profiles, samples=40, start_cap="taper", end_cap="dome", cap_steps=4)
+    capped = loft(
+        profiles,
+        samples=40,
+        start_cap="taper",
+        end_cap="dome",
+        cap_steps=4,
+        start_cap_length=0.5,
+        end_cap_length=0.75,
+    )
     assert capped.n_vertices > base.n_vertices
 
 

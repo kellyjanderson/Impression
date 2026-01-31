@@ -43,11 +43,21 @@ If either `start_cap` or `end_cap` is not `none`, the loft is automatically
 closed at both ends. `cap_ends=True` remains as a backward‑compatible shortcut
 for a flat cap.
 
+Cap length is additive by default: the cap extends beyond the path endpoints.
+Use `start_cap_length` / `end_cap_length` (in model units) to control how far
+the cap blends. If no length is provided, `cap_steps * path_step` is used.
+
 ```python
 from impression.modeling import loft
 from impression.modeling.drawing2d import make_rect
 
 def build():
     profiles = [make_rect(size=(1.0, 1.0))] * 5
-    return loft(profiles, start_cap="dome", end_cap="taper", cap_steps=6)
+    return loft(
+        profiles,
+        start_cap="dome",
+        end_cap="taper",
+        start_cap_length=2.0,
+        end_cap_length=3.0,
+    )
 ```

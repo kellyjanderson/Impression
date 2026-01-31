@@ -23,6 +23,8 @@ def loft_profiles(
     start_cap: str = "none",
     end_cap: str = "none",
     cap_steps: int = 6,
+    start_cap_length: float | None = None,
+    end_cap_length: float | None = None,
 ) -> Mesh:
     """Loft a sequence of profiles, optionally along a path."""
 
@@ -47,6 +49,8 @@ def loft_profiles(
         start_cap=start_cap,
         end_cap=end_cap,
         cap_steps=cap_steps,
+        start_cap_length=start_cap_length,
+        end_cap_length=end_cap_length,
         samples=samples,
         segments_per_circle=segments_per_circle,
         bezier_samples=bezier_samples,
@@ -113,6 +117,8 @@ def loft(
     start_cap: str = "none",
     end_cap: str = "none",
     cap_steps: int = 6,
+    start_cap_length: float | None = None,
+    end_cap_length: float | None = None,
 ) -> Mesh:
     """Alias for loft_profiles."""
 
@@ -126,6 +132,8 @@ def loft(
         start_cap=start_cap,
         end_cap=end_cap,
         cap_steps=cap_steps,
+        start_cap_length=start_cap_length,
+        end_cap_length=end_cap_length,
     )
 
 
@@ -194,6 +202,8 @@ def _apply_caps(
     start_cap: str,
     end_cap: str,
     cap_steps: int,
+    start_cap_length: float | None,
+    end_cap_length: float | None,
     samples: int,
     segments_per_circle: int,
     bezier_samples: int,
@@ -223,44 +233,86 @@ def _apply_caps(
     new_positions: list[np.ndarray] = []
 
     if start_cap != "none":
-        scales = _cap_scales(start_cap, cap_steps)
+        offsets, scales = _cap_profile_series(
+            mode=start_cap,
+            step_dist=step_dist,
+            steps=cap_steps,
+            length=start_cap_length,
+            reverse=True,
+        )
         if scales:
             center = loops_per_profile[0][0].mean(axis=0)
-            for idx, scale in enumerate(scales):
+            for offset, scale in zip(offsets, scales, strict=False):
                 cap_loops = [_scale_loop(loop, center, scale) for loop in loops_per_profile[0]]
                 new_loops.append(cap_loops)
-                offset = (cap_steps - idx) * step_dist
                 new_positions.append(positions[0] - tangents[0] * offset)
 
     new_loops.extend(loops_per_profile)
     new_positions.extend(list(positions))
 
     if end_cap != "none":
-        scales = _cap_scales(end_cap, cap_steps)
+        offsets, scales = _cap_profile_series(
+            mode=end_cap,
+            step_dist=step_dist,
+            steps=cap_steps,
+            length=end_cap_length,
+            reverse=False,
+        )
         if scales:
             center = loops_per_profile[-1][0].mean(axis=0)
-            for idx, scale in enumerate(reversed(scales)):
+            for offset, scale in zip(offsets, scales, strict=False):
                 cap_loops = [_scale_loop(loop, center, scale) for loop in loops_per_profile[-1]]
                 new_loops.append(cap_loops)
-                offset = (idx + 1) * step_dist
                 new_positions.append(positions[-1] + tangents[-1] * offset)
 
     return new_loops, np.asarray(new_positions, dtype=float)
 
 
-def _cap_scales(mode: str, steps: int) -> list[float]:
-    if mode == "flat" or mode == "none":
-        return []
-    t = np.linspace(0.0, 1.0, steps + 1)[:-1]
-    if mode == "taper":
-        scales = t
-    elif mode == "dome":
-        scales = np.sin(t * np.pi / 2.0)
-    elif mode == "soft":
-        scales = t * t
+def _cap_profile_series(
+    mode: str,
+    step_dist: float,
+    steps: int,
+    length: float | None,
+    reverse: bool,
+) -> tuple[list[float], list[float]]:
+    if mode in {"flat", "none"}:
+        return [], []
+    if length is not None:
+        if length <= 0:
+            return [], []
+        steps = max(1, int(np.ceil(length / step_dist)))
+        total_length = float(length)
     else:
-        scales = t
-    return [max(float(s), 1e-3) for s in scales]
+        total_length = float(step_dist * steps)
+
+    if steps < 1:
+        return [], []
+
+    offsets = np.linspace(step_dist, total_length, steps)
+    if reverse:
+        offsets = offsets[::-1]
+
+    scales: list[float] = []
+    resolved_offsets: list[float] = []
+    for offset in offsets:
+        t = min(max(offset / total_length, 0.0), 1.0)
+        scale = _cap_scale(mode, t)
+        if scale <= 1e-3:
+            scale = 1e-3
+        scales.append(scale)
+        resolved_offsets.append(float(offset))
+    return resolved_offsets, scales
+
+
+def _cap_scale(mode: str, t: float) -> float:
+    t = min(max(t, 0.0), 1.0)
+    if mode == "taper":
+        return 1.0 - t
+    if mode == "dome":
+        return float(np.cos(t * np.pi / 2.0))
+    if mode == "soft":
+        return (1.0 - t) ** 2
+    return 1.0 - t
 
 
 def _scale_loop(loop: np.ndarray, center: np.ndarray, scale: float) -> np.ndarray:
