@@ -38,6 +38,38 @@ Render a model and optionally watch it for changes.
 
 Environment tip: set `PYVISTA_OFF_SCREEN=true` when running in a headless environment (e.g., CI).
 
+**Hot reload controls**
+
+- Press `r` in the preview window to force a reload.
+- Send `SIGUSR1` to the preview process to force a reload (macOS/Linux):
+
+```bash
+kill -USR1 <pid>
+```
+
+**Switching preview targets (no restart)**
+
+Provide a control file to switch models. By default, Impression writes a control file named
+`.impression-preview` in the folder where you launched the preview and includes the preview
+process ID in the first line. Updating this file automatically reloads the preview; `S` and
+`SIGUSR1` are optional manual triggers.
+
+If a live preview already exists in that folder, running `impression preview other.py` will
+update the control file and exit (reusing the existing window). To force a second window, use
+`--force-window`.
+
+```bash
+impression preview docs/examples/loft/saddle_example.py
+```
+
+Write the new model path into the control file:
+
+```bash
+echo "/absolute/path/to/other_model.py" > ./.impression-preview
+```
+
+The preview will reload automatically; you can also press `S` or send `SIGUSR1` to force it.
+
 ### `export`
 
 Generate an STL from a model.

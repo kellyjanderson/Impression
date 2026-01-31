@@ -12,7 +12,7 @@ from ._config import ensure_user_config
 
 __all__ = ["__version__"]
 
-__version__ = "0.0.1a3"
+__version__ = "0.0.1a4"
 
 # Allow VTK to load side-by-side libs without crashing and repair any missing symlinked dylibs.
 os.environ.setdefault("VTK_PYTHON_ALLOW_DUPLICATE_LIBS", "1")

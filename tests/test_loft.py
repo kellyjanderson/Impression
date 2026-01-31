@@ -56,6 +56,7 @@ def test_loft_cap_types_add_geometry():
         cap_steps=4,
         start_cap_length=0.5,
         end_cap_length=0.75,
+        cap_scale_dims="both",
     )
     assert capped.n_vertices > base.n_vertices
 
@@ -67,3 +68,12 @@ def test_loft_invalid_cap_type():
     ]
     with pytest.raises(ValueError):
         loft(profiles, start_cap="banana")
+
+
+def test_loft_invalid_scale_dims():
+    profiles = [
+        make_rect(size=(1.0, 1.0)),
+        make_rect(size=(1.0, 1.0)),
+    ]
+    with pytest.raises(ValueError):
+        loft(profiles, cap_scale_dims="z")

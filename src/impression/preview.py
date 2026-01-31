@@ -6,8 +6,9 @@ import threading
 import math
 import traceback
 import sys
+import signal
 from pathlib import Path
-from typing import Callable, Iterable, List
+from typing import Callable, Iterable, List, MutableMapping
 
 import numpy as np
 from rich.console import Console
@@ -30,6 +31,7 @@ def _prepare_vtk_runtime() -> None:
     ensure_vtk_runtime()
 
 SceneFactory = Callable[[], object]
+ModelPathState = MutableMapping[str, Path]
 
 
 class PreviewBackendError(RuntimeError):
@@ -55,7 +57,7 @@ def _collect_datasets_from_scene(scene: object) -> List[Mesh | Polyline]:
         if item is None:
             return
 
-        if isinstance(item, MeshGroup):
+        if isinstance(item, MeshGroup) or (hasattr(item, "to_meshes") and callable(getattr(item, "to_meshes"))):
             for mesh in item.to_meshes():
                 visit(mesh)
             return
@@ -114,6 +116,8 @@ class PyVistaPreviewer:
         screenshot_path: Path | None = None,
         show_edges: bool = False,
         face_edges: bool = False,
+        control_file: Path | None = None,
+        model_path_state: ModelPathState | None = None,
     ) -> None:
         datasets = []
         if initial_scene is not None:
@@ -149,15 +153,103 @@ class PyVistaPreviewer:
             plotter.close()
             return
 
+        model_state = model_path_state or {"path": model_path}
         reload_queue: queue.Queue[float] = queue.Queue()
         stop_event = threading.Event()
-        watcher_thread = threading.Thread(
-            target=self._watch_model_file,
-            args=(model_path, reload_queue, stop_event),
-            name="impression-watch",
-            daemon=True,
-        )
-        watcher_thread.start()
+        watcher_thread = None
+        watch_roots: list[Path] = []
+
+        def _resolve_control_path() -> Path | None:
+            if control_file is None:
+                return None
+            path = control_file.expanduser()
+            try:
+                return path.resolve()
+            except OSError:
+                return path
+
+        control_path = _resolve_control_path()
+
+        def _read_control_file() -> Path | None:
+            if control_path is None or not control_path.exists():
+                return None
+            try:
+                lines = control_path.read_text().splitlines()
+            except OSError:
+                return None
+            if not lines:
+                return None
+            candidate_text = lines[-1].strip()
+            if not candidate_text:
+                return None
+            candidate = Path(candidate_text).expanduser()
+            if not candidate.is_absolute():
+                candidate = (Path.cwd() / candidate)
+            try:
+                return candidate.resolve()
+            except OSError:
+                return candidate
+
+        def _watch_roots_for(path: Path) -> list[Path]:
+            roots = []
+            resolved = path.resolve()
+            roots.append(resolved if resolved.is_dir() else resolved.parent)
+            if control_path is not None:
+                roots.append(control_path.parent)
+            return roots
+
+        def _start_watcher(current_path: Path) -> None:
+            nonlocal stop_event, watcher_thread, watch_roots
+            stop_event.set()
+            stop_event = threading.Event()
+            watch_roots = _watch_roots_for(current_path)
+            watcher_thread = threading.Thread(
+                target=self._watch_model_file,
+                args=(model_state, reload_queue, stop_event, watch_roots, control_path),
+                name="impression-watch",
+                daemon=True,
+            )
+            watcher_thread.start()
+
+        _start_watcher(model_state["path"])
+        previous_handler = None
+
+        def request_reload() -> None:
+            try:
+                reload_queue.put_nowait(0.0)
+            except queue.Full:
+                return
+
+        def request_reload_with_message(message: str) -> None:
+            self.console.print(message)
+            request_reload()
+
+        def maybe_switch_model() -> bool:
+            new_path = _read_control_file()
+            if new_path is None:
+                return False
+            if not new_path.exists():
+                self.console.print(f"[red]Control file points to missing model: {new_path}[/red]")
+                return False
+            current = model_state["path"]
+            if new_path.resolve() == current.resolve():
+                return False
+            model_state["path"] = new_path
+            self.console.print(f"[cyan]Switched preview model to {new_path}[/cyan]")
+            new_roots = _watch_roots_for(new_path)
+            if set(new_roots) != set(watch_roots):
+                _start_watcher(new_path)
+            return True
+
+        if hasattr(signal, "SIGUSR1"):
+            def _signal_reload(_signum, _frame) -> None:  # pragma: no cover - signal path
+                if maybe_switch_model():
+                    request_reload_with_message("[yellow]Reload requested (switch).[/yellow]")
+                else:
+                    request_reload_with_message("[yellow]Reload requested (SIGUSR1).[/yellow]")
+
+            previous_handler = signal.getsignal(signal.SIGUSR1)
+            signal.signal(signal.SIGUSR1, _signal_reload)
 
         def process_queue() -> None:
             reload_requested = False
@@ -169,8 +261,9 @@ class PyVistaPreviewer:
                     break
             if not reload_requested:
                 return
-
-            self.console.print(f"[yellow]Reloading {model_path}…[/yellow]")
+            maybe_switch_model()
+            current_path = model_state["path"]
+            self.console.print(f"[yellow]Reloading {current_path}…[/yellow]")
             datasets = self.collect_datasets(scene_factory())
             self._apply_scene(
                 plotter,
@@ -180,7 +273,7 @@ class PyVistaPreviewer:
                 align_camera=False,
             )
             plotter.render()
-            self.console.print(f"[green]Reloaded {model_path}[/green]")
+            self.console.print(f"[green]Reloaded {current_path}[/green]")
 
         interval_seconds = max(1.0 / max(target_fps, 1), 0.05)
         callback_cleanup = None
@@ -194,12 +287,28 @@ class PyVistaPreviewer:
 
             callback_cleanup = self._install_timer_callback(plotter, guarded_process_queue, interval_seconds)
 
+            def _handle_key_reload() -> None:
+                request_reload_with_message("[yellow]Reload requested (R).[/yellow]")
+
+            plotter.add_key_event("r", _handle_key_reload)
+            if control_path is not None:
+                def _handle_key_switch() -> None:
+                    if maybe_switch_model():
+                        request_reload_with_message("[yellow]Reload requested (switch).[/yellow]")
+                    else:
+                        request_reload_with_message("[yellow]Reload requested (S).[/yellow]")
+
+                plotter.add_key_event("s", _handle_key_switch)
+                plotter.add_key_event("S", _handle_key_switch)
+
         try:
             plotter.show(title="Impression Preview", auto_close=False)
         finally:
             stop_event.set()
             if callback_cleanup is not None:
                 callback_cleanup()
+            if previous_handler is not None and hasattr(signal, "SIGUSR1"):
+                signal.signal(signal.SIGUSR1, previous_handler)
             plotter.close()
 
     # Internal helpers -----------------------------------------------------
@@ -502,21 +611,28 @@ class PyVistaPreviewer:
 
     def _watch_model_file(
         self,
-        model_path: Path,
+        model_path_state: ModelPathState,
         reload_queue: "queue.Queue[float]",
         stop_event: threading.Event,
+        watch_roots: list[Path],
+        control_path: Path | None,
     ) -> None:
-        resolved_model = model_path.resolve()
-        watch_root = resolved_model if resolved_model.is_dir() else resolved_model.parent
+        watch_paths = [str(root) for root in watch_roots]
+        resolved_control = control_path.resolve() if control_path is not None else None
 
-        for changes in watch(str(watch_root), stop_event=stop_event, debounce=300):
+        for changes in watch(*watch_paths, stop_event=stop_event, debounce=300):
             if stop_event.is_set():
                 return
 
             for change, changed_path in changes:
-                if Change.deleted == change and Path(changed_path) == resolved_model:
+                changed = Path(changed_path).resolve()
+                resolved_model = model_path_state["path"].resolve()
+                if resolved_control is not None and changed == resolved_control:
                     reload_queue.put_nowait(0.0)
                     break
-                if Path(changed_path).resolve() == resolved_model:
+                if Change.deleted == change and changed == resolved_model:
+                    reload_queue.put_nowait(0.0)
+                    break
+                if changed == resolved_model:
                     reload_queue.put_nowait(0.0)
                     break

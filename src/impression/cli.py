@@ -17,6 +17,8 @@ import shutil
 import tempfile
 import urllib.request
 import zipfile
+import os
+import re
 
 from impression.io import write_stl
 from impression import __version__
@@ -48,6 +50,9 @@ def _load_module(path: pathlib.Path) -> ModuleType:
     module_name = "impression_user_model"
     if module_name in sys.modules:
         del sys.modules[module_name]
+    for name in list(sys.modules.keys()):
+        if name == "impression.modeling" or name.startswith("impression.modeling."):
+            del sys.modules[name]
 
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
@@ -195,6 +200,16 @@ def preview(
     model: pathlib.Path = typer.Argument(..., help="Path to a Python module that defines a model scene."),
     watch: bool = typer.Option(True, help="Watch the model file for changes and hot-reload."),
     target_fps: int = typer.Option(60, min=1, max=240, help="Preview framerate budget."),
+    control_file: pathlib.Path | None = typer.Option(
+        None,
+        "--control-file",
+        help="Optional control file for switching preview targets (default: ./.impression-preview).",
+    ),
+    force_window: bool = typer.Option(
+        False,
+        "--force-window",
+        help="Force a new preview window even if a live control file exists.",
+    ),
     screenshot: pathlib.Path | None = typer.Option(
         None, "--screenshot", help="Optional path to save a screenshot of the preview."
     ),
@@ -214,7 +229,59 @@ def preview(
 
     opts = PreviewOptions(watch=watch, target_fps=target_fps)
 
-    scene_factory = _scene_factory_from_module(model)
+    model_state = {"path": model}
+
+    def _pid_alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    def _read_control_header(path: pathlib.Path) -> int | None:
+        try:
+            text = path.read_text().splitlines()
+        except OSError:
+            return None
+        if not text:
+            return None
+        if not text[0].startswith("# impression-preview pid="):
+            return None
+        match = re.search(r"pid=(\d+)", text[0])
+        if not match:
+            return None
+        return int(match.group(1))
+
+    def _write_control_file(path: pathlib.Path) -> pathlib.Path | None:
+        header = f"# impression-preview pid={os.getpid()}\n"
+        try:
+            path.write_text(header + str(model) + "\n")
+        except OSError:
+            return None
+        return path
+
+    def _ensure_control_file() -> pathlib.Path | None:
+        if not opts.watch:
+            return None
+        path = control_file or (pathlib.Path.cwd() / ".impression-preview")
+        if path.exists():
+            existing_pid = _read_control_header(path)
+            if existing_pid is not None and _pid_alive(existing_pid):
+                if not force_window:
+                    path.write_text(f"# impression-preview pid={existing_pid}\n{model}\n")
+                    console.print(f"[cyan]Sent {model} to running preview (pid {existing_pid}).[/cyan]")
+                    raise typer.Exit()
+                return _write_control_file(path)
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        return _write_control_file(path)
+
+    def scene_factory() -> object:
+        return _scene_factory_from_module(model_state["path"])()
     try:
         initial_scene = scene_factory()
     except Exception as exc:
@@ -229,6 +296,13 @@ def preview(
     console.print(f"Using model [green]{model}[/green]")
     if opts.watch:
         console.print("[cyan]Watching for changes — save to hot reload, close the window to stop.[/cyan]")
+        control_path = _ensure_control_file()
+        if control_path is not None:
+            console.print(
+                f"[cyan]Switch file: {control_path} (write a new path to auto-reload; SIGUSR1 optional).[/cyan]"
+            )
+        else:
+            control_path = None
 
     previewer = PyVistaPreviewer(console=console)
     _log_active_units(previewer)
@@ -237,11 +311,13 @@ def preview(
             scene_factory=scene_factory,
             initial_scene=initial_scene,
             model_path=model,
+            model_path_state=model_state,
             watch_files=opts.watch,
             target_fps=opts.target_fps,
             screenshot_path=screenshot,
             show_edges=show_edges,
             face_edges=face_edges,
+            control_file=control_path,
         )
     except PreviewBackendError as exc:
         raise typer.BadParameter(str(exc)) from exc

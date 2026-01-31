@@ -36,8 +36,8 @@ Use `start_cap` and `end_cap` to round or taper the ends of a loft:
 - `none` (default): no extra cap geometry
 - `flat`: cap with the base profile (same as `cap_ends=True`)
 - `taper`: linearly shrink the profile to a tip
-- `dome`: smooth half‑dome scaling
-- `soft`: gentle rounded blend (quadratic easing)
+- `dome`: half‑circle profile (true dome)
+- `slope`: steeper start, gentler finish (inverse‑dome)
 
 If either `start_cap` or `end_cap` is not `none`, the loft is automatically
 closed at both ends. `cap_ends=True` remains as a backward‑compatible shortcut
@@ -45,7 +45,14 @@ for a flat cap.
 
 Cap length is additive by default: the cap extends beyond the path endpoints.
 Use `start_cap_length` / `end_cap_length` (in model units) to control how far
-the cap blends. If no length is provided, `cap_steps * path_step` is used.
+the cap blends. The blend eases to the last **non‑degenerate** profile over the
+specified length. Use `cap_scale_dims` to control which axes scale:
+
+- `both` (default): uniform scale in X/Y until the smallest dimension collapses
+- `smallest`: scale only the limiting dimension
+
+Caps use eased profiles (linear, sine, or quadratic) rather than pure linear ramps.
+If no length is provided, `cap_steps * path_step` is used.
 
 ```python
 from impression.modeling import loft
@@ -59,5 +66,6 @@ def build():
         end_cap="taper",
         start_cap_length=2.0,
         end_cap_length=3.0,
+        cap_scale_dims="both",
     )
 ```

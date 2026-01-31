@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
+import impression
 from impression.modeling import Bezier3D, Path3D, loft, offset, rotate, translate, group
 from impression.modeling.drawing2d import Arc2D, Bezier2D, Line2D, Path2D, Profile2D
 
@@ -96,8 +97,14 @@ def organic_pipe_saddle(
     start_cap: str = "none",
     end_cap: str = "none",
     cap_steps: int = 10,
+    start_cap_length: float | None = None,
+    end_cap_length: float | None = None,
+    cap_scale_dims: str = "both",
+    color: str | None = None,
 ):
     profiles = [make_u_profile() for _ in range(LOFT_PROFILE_COUNT)]
+    if color is not None:
+        profiles = [profile.with_color(color) for profile in profiles]
     path = make_soft_loft_path()
     return loft(
         profiles,
@@ -105,19 +112,44 @@ def organic_pipe_saddle(
         start_cap=start_cap,
         end_cap=end_cap,
         cap_steps=cap_steps,
+        start_cap_length=start_cap_length,
+        end_cap_length=end_cap_length,
+        cap_scale_dims=cap_scale_dims,
     )
 
 
 def build():
-    cap_types = ["none", "flat", "taper", "dome", "soft"]
+    print(f"Impression {impression.__version__} from {impression.__file__}")
+    cap_types = ["none", "flat", "taper", "dome", "slope"]
+    cap_colors = {
+        "none": "#8A8D91",
+        "flat": "#5C6D8C",
+        "taper": "#B36A5E",
+        "dome": "#6BA58E",
+        "slope": "#8C7A5C",
+    }
+    cap_scale_modes = ["both", "smallest"]
     spacing = 60.0
+    row_spacing = 35.0
     row = group([])
-    for index, cap in enumerate(cap_types):
-        saddle = organic_pipe_saddle(start_cap=cap, end_cap=cap, cap_steps=10)
-        rotate(saddle, [90.0, 0.0, -90.0])
-        rotate(saddle, axis=(0.0, 0.0, 1.0), angle_deg=180.0)
-        translate(saddle, (-80.0 + index * spacing, 0.0, 0.0))
-        row.add(saddle)
+    for row_index, scale_mode in enumerate(cap_scale_modes):
+        for col_index, cap in enumerate(cap_types):
+            saddle = organic_pipe_saddle(
+                start_cap=cap,
+                end_cap=cap,
+                cap_steps=30,
+                start_cap_length=3.0,
+                end_cap_length=3.0,
+                cap_scale_dims=scale_mode,
+                color=cap_colors[cap],
+            )
+            rotate(saddle, [90.0, 0.0, -90.0])
+            rotate(saddle, axis=(0.0, 0.0, 1.0), angle_deg=180.0)
+            translate(
+                saddle,
+                (-80.0 + col_index * spacing, row_index * row_spacing, 0.0),
+            )
+            row.add(saddle)
     return row
 
 

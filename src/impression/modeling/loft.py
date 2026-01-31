@@ -25,6 +25,7 @@ def loft_profiles(
     cap_steps: int = 6,
     start_cap_length: float | None = None,
     end_cap_length: float | None = None,
+    cap_scale_dims: str = "both",
 ) -> Mesh:
     """Loft a sequence of profiles, optionally along a path."""
 
@@ -42,6 +43,7 @@ def loft_profiles(
         start_cap = "flat"
     if cap_ends and end_cap == "none":
         end_cap = "flat"
+    _validate_scale_dims(cap_scale_dims)
     _validate_caps(start_cap, end_cap)
     loops_per_profile, positions = _apply_caps(
         profiles=profiles,
@@ -51,6 +53,7 @@ def loft_profiles(
         cap_steps=cap_steps,
         start_cap_length=start_cap_length,
         end_cap_length=end_cap_length,
+        cap_scale_dims=cap_scale_dims,
         samples=samples,
         segments_per_circle=segments_per_circle,
         bezier_samples=bezier_samples,
@@ -119,6 +122,7 @@ def loft(
     cap_steps: int = 6,
     start_cap_length: float | None = None,
     end_cap_length: float | None = None,
+    cap_scale_dims: str = "both",
 ) -> Mesh:
     """Alias for loft_profiles."""
 
@@ -134,6 +138,7 @@ def loft(
         cap_steps=cap_steps,
         start_cap_length=start_cap_length,
         end_cap_length=end_cap_length,
+        cap_scale_dims=cap_scale_dims,
     )
 
 
@@ -189,7 +194,7 @@ def _resample_path(points: np.ndarray, count: int) -> np.ndarray:
 
 
 def _validate_caps(start_cap: str, end_cap: str) -> None:
-    allowed = {"none", "flat", "taper", "dome", "soft"}
+    allowed = {"none", "flat", "taper", "dome", "slope"}
     if start_cap not in allowed:
         raise ValueError(f"start_cap must be one of {sorted(allowed)}.")
     if end_cap not in allowed:
@@ -204,6 +209,7 @@ def _apply_caps(
     cap_steps: int,
     start_cap_length: float | None,
     end_cap_length: float | None,
+    cap_scale_dims: str,
     samples: int,
     segments_per_circle: int,
     bezier_samples: int,
@@ -232,13 +238,18 @@ def _apply_caps(
     new_loops: list[list[np.ndarray]] = []
     new_positions: list[np.ndarray] = []
 
+    _validate_scale_dims(cap_scale_dims)
+
     if start_cap != "none":
+        half_dims = _loop_half_dims(loops_per_profile[0][0])
         offsets, scales = _cap_profile_series(
             mode=start_cap,
             step_dist=step_dist,
             steps=cap_steps,
             length=start_cap_length,
             reverse=True,
+            scale_dims=cap_scale_dims,
+            half_dims=half_dims,
         )
         if scales:
             center = loops_per_profile[0][0].mean(axis=0)
@@ -251,12 +262,15 @@ def _apply_caps(
     new_positions.extend(list(positions))
 
     if end_cap != "none":
+        half_dims = _loop_half_dims(loops_per_profile[-1][0])
         offsets, scales = _cap_profile_series(
             mode=end_cap,
             step_dist=step_dist,
             steps=cap_steps,
             length=end_cap_length,
             reverse=False,
+            scale_dims=cap_scale_dims,
+            half_dims=half_dims,
         )
         if scales:
             center = loops_per_profile[-1][0].mean(axis=0)
@@ -274,49 +288,80 @@ def _cap_profile_series(
     steps: int,
     length: float | None,
     reverse: bool,
-) -> tuple[list[float], list[float]]:
+    scale_dims: str,
+    half_dims: np.ndarray,
+) -> tuple[list[float], list[np.ndarray]]:
     if mode in {"flat", "none"}:
         return [], []
+    half_dims = np.asarray(half_dims, dtype=float).reshape(2)
+    if np.any(half_dims <= 1e-9):
+        return [], []
+    min_axis = int(np.argmin(half_dims))
+    min_half = float(half_dims[min_axis])
+    if min_half <= 1e-9:
+        return [], []
+    requested_steps = max(1, steps)
     if length is not None:
         if length <= 0:
             return [], []
-        steps = max(1, int(np.ceil(length / step_dist)))
+        steps = max(requested_steps, int(np.ceil(length / step_dist)))
         total_length = float(length)
     else:
+        steps = requested_steps
         total_length = float(step_dist * steps)
 
     if steps < 1:
         return [], []
 
-    offsets = np.linspace(step_dist, total_length, steps)
+    step_size = total_length / steps
+    offsets = np.linspace(step_size, total_length, steps)
     if reverse:
         offsets = offsets[::-1]
 
-    scales: list[float] = []
+    scales: list[np.ndarray] = []
     resolved_offsets: list[float] = []
+    min_scale = 1e-3
     for offset in offsets:
         t = min(max(offset / total_length, 0.0), 1.0)
-        scale = _cap_scale(mode, t)
-        if scale <= 1e-3:
-            scale = 1e-3
+        eased = _cap_ease(mode, t)
+        scale_factor = max(1.0 - eased, 0.0)
+        if scale_dims == "smallest":
+            scale = np.ones(2, dtype=float)
+            scale[min_axis] = max(scale_factor, min_scale)
+        else:
+            ratios = min_half / half_dims
+            scale = 1.0 - eased * ratios
+            scale = np.clip(scale, min_scale, 1.0)
         scales.append(scale)
         resolved_offsets.append(float(offset))
     return resolved_offsets, scales
 
 
-def _cap_scale(mode: str, t: float) -> float:
+def _cap_ease(mode: str, t: float) -> float:
     t = min(max(t, 0.0), 1.0)
     if mode == "taper":
-        return 1.0 - t
+        return t
     if mode == "dome":
-        return float(np.cos(t * np.pi / 2.0))
-    if mode == "soft":
-        return (1.0 - t) ** 2
-    return 1.0 - t
+        return float(1.0 - np.sqrt(max(1.0 - t * t, 0.0)))
+    if mode == "slope":
+        return float(np.sin(t * np.pi / 2.0))
+    return t
 
 
-def _scale_loop(loop: np.ndarray, center: np.ndarray, scale: float) -> np.ndarray:
+def _scale_loop(loop: np.ndarray, center: np.ndarray, scale: np.ndarray) -> np.ndarray:
+    scale = np.asarray(scale, dtype=float).reshape(2)
     return center + (loop - center) * scale
+
+
+def _loop_half_dims(loop: np.ndarray) -> np.ndarray:
+    bbox_min = loop.min(axis=0)
+    bbox_max = loop.max(axis=0)
+    return (bbox_max - bbox_min) / 2.0
+
+
+def _validate_scale_dims(scale_dims: str) -> None:
+    if scale_dims not in {"smallest", "both"}:
+        raise ValueError("cap_scale_dims must be 'smallest' or 'both'.")
 
 
 def _compute_frames(positions: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
