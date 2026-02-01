@@ -8,6 +8,10 @@ release_ref="${IMPRESSION_RELEASE:-}"
 interactive=0
 list_only=0
 
+log() {
+    echo "[impression-install] $*"
+}
+
 venv_path=""
 use_local=0
 while [[ $# -gt 0 ]]; do
@@ -129,14 +133,18 @@ if [[ "$install_source" == "release" ]]; then
             fi
         fi
     fi
-    echo "Installing Impression release ${release_ref}."
+    log "Installing Impression release ${release_ref}."
     if ! command -v git >/dev/null 2>&1; then
         echo "git is required to install a release. Install git or use --local." >&2
         exit 1
     fi
     release_dir="$(mktemp -d)"
     trap '[[ -n "$release_dir" ]] && rm -rf "$release_dir"' EXIT
-    git clone --depth 1 --branch "$release_ref" "$repo_url" "$release_dir/impression" >/dev/null 2>&1
+    log "Cloning release into $release_dir/impression"
+    if ! git clone --depth 1 --branch "$release_ref" "$repo_url" "$release_dir/impression"; then
+        echo "Failed to clone ${repo_url} at ${release_ref}. Check network access or tag name." >&2
+        exit 1
+    fi
     repo_root="$release_dir/impression"
 else
     if [[ "$interactive" == "1" ]]; then
@@ -208,7 +216,7 @@ PY
         fi
     fi
 else
-    echo "Creating venv at $venv_path (Python ${python_version})"
+    log "Creating venv at $venv_path (Python ${python_version})"
     create_venv
 fi
 
@@ -223,8 +231,11 @@ except Exception:
 PY
 pre_version="$(cat /tmp/impression_installed_version.txt 2>/dev/null | tail -n 1 | tr -d '\r')"
 
-"$py" -m pip install --upgrade pip >/dev/null
-"$py" -m pip install --upgrade build scikit-build-core cmake ninja >/dev/null
+log "Upgrading pip/build tooling"
+"$py" -m pip install --upgrade pip
+"$py" -m pip install --upgrade build scikit-build-core cmake ninja
+"$py" -m pip install --upgrade setuptools wheel
+"$py" -m pip install --upgrade packaging
 "$py" -m build "$repo_root"
 
 wheel=$(ls -t "$repo_root"/dist/impression-*.whl 2>/dev/null | head -n 1 || true)
@@ -239,15 +250,18 @@ import importlib.util
 raise SystemExit(0 if importlib.util.find_spec("manifold3d") else 1)
 PY
 then
-    echo "manifold3d already installed; skipping build."
+    log "manifold3d already installed; skipping build."
 else
+    log "Building manifold3d (serial mode)"
     CMAKE_ARGS="-DMANIFOLD_PAR=OFF" "$py" -m pip install --upgrade --no-binary=:all: manifold3d
 fi
 
 # Ensure PyVista (viewer) is available in the target venv.
+log "Ensuring PyVista is installed"
 "$py" -m pip install --upgrade pyvista
 
 # Install the freshly built wheel.
+log "Installing Impression wheel"
 CMAKE_ARGS="-DMANIFOLD_PAR=OFF" "$py" -m pip install --upgrade --force-reinstall "$wheel"
 
 post_version="$("$py" - <<'PY' 2>/dev/null

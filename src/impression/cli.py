@@ -143,10 +143,10 @@ def main(
         "--docs-repo",
         help="GitHub repo URL for docs download.",
     ),
-    docs_ref: str = typer.Option(
-        "main",
+    docs_ref: str | None = typer.Option(
+        None,
         "--docs-ref",
-        help="Git ref to fetch docs from (default: main).",
+        help="Git ref to fetch docs from (default: installed release tag).",
     ),
     docs_clean: bool = typer.Option(
         False,
@@ -160,7 +160,16 @@ def main(
 
     if get_docs:
         destination = docs_dest or pathlib.Path.cwd() / "impression-docs"
-        _download_docs(docs_repo, docs_ref, destination, docs_clean)
+        resolved_ref = docs_ref or f"v{__version__}"
+        try:
+            _download_docs(docs_repo, resolved_ref, destination, docs_clean)
+        except typer.BadParameter:
+            if docs_ref is not None:
+                raise
+            console.print(
+                f"[yellow]Docs ref {resolved_ref} not found; falling back to main.[/yellow]"
+            )
+            _download_docs(docs_repo, "main", destination, docs_clean)
         raise typer.Exit()
 
     if ctx.invoked_subcommand is None:

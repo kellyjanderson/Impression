@@ -41,6 +41,7 @@ Environment tip: set `PYVISTA_OFF_SCREEN=true` when running in a headless enviro
 **Hot reload controls**
 
 - Press `r` in the preview window to force a reload.
+- Press `v` to reset the camera.
 - Send `SIGUSR1` to the preview process to force a reload (macOS/Linux):
 
 ```bash
@@ -56,7 +57,10 @@ process ID in the first line. Updating this file automatically reloads the previ
 
 If a live preview already exists in that folder, running `impression preview other.py` will
 update the control file and exit (reusing the existing window). To force a second window, use
-`--force-window`.
+`--force-window`. You can also press `c` in the preview window to switch after editing the
+control file.
+
+Rendering options keybindings are currently shelved for stability.
 
 ```bash
 impression preview docs/examples/loft/saddle_example.py
@@ -93,7 +97,7 @@ Download the documentation bundle without cloning the full repository.
 - `--get-docs / --getDocs`: trigger the download and exit.
 - `--docs-dest PATH`: destination folder (default: `./impression-docs`).
 - `--docs-repo URL`: GitHub repo URL (default: `https://github.com/kellyjanderson/Impression`).
-- `--docs-ref REF`: git ref to download from (default: `main`).
+- `--docs-ref REF`: git ref to download from (default: installed release tag).
 - `--docs-clean`: delete destination before downloading.
 
 ## UNITS

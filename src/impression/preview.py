@@ -18,6 +18,7 @@ from watchfiles import Change, watch
 from impression._config import UnitSettings, get_unit_settings
 from impression._vtk_runtime import ensure_vtk_runtime
 from impression.mesh import Mesh, Polyline, analyze_mesh, combine_meshes, mesh_to_pyvista
+from impression.io import write_stl
 from impression.modeling._color import get_mesh_color
 from impression.modeling.group import MeshGroup
 from impression.modeling.drawing2d import Path2D, Profile2D
@@ -32,6 +33,19 @@ def _prepare_vtk_runtime() -> None:
 
 SceneFactory = Callable[[], object]
 ModelPathState = MutableMapping[str, Path]
+
+def _next_available_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    parent = path.parent
+    stem = path.stem
+    suffix = path.suffix
+    n = 1
+    while True:
+        candidate = parent / f"{stem} ({n}){suffix}"
+        if not candidate.exists():
+            return candidate
+        n += 1
 
 
 class PreviewBackendError(RuntimeError):
@@ -158,6 +172,14 @@ class PyVistaPreviewer:
         stop_event = threading.Event()
         watcher_thread = None
         watch_roots: list[Path] = []
+        current_datasets: list[Mesh | Polyline] = list(datasets) if datasets else []
+        render_state = {
+            "show_edges": show_edges,
+            "face_edges": face_edges,
+            "eye_dome": not _pyvista_safe_mode(),
+            "background": "dark",
+        }
+        options_mode = {"value": False}
 
         def _resolve_control_path() -> Path | None:
             if control_file is None:
@@ -251,6 +273,11 @@ class PyVistaPreviewer:
             previous_handler = signal.getsignal(signal.SIGUSR1)
             signal.signal(signal.SIGUSR1, _signal_reload)
 
+        render_dirty = {"value": False}
+
+        def _request_render_update() -> None:
+            render_dirty["value"] = True
+
         def process_queue() -> None:
             reload_requested = False
             while True:
@@ -265,11 +292,13 @@ class PyVistaPreviewer:
             current_path = model_state["path"]
             self.console.print(f"[yellow]Reloading {current_path}…[/yellow]")
             datasets = self.collect_datasets(scene_factory())
+            current_datasets.clear()
+            current_datasets.extend(datasets)
             self._apply_scene(
                 plotter,
                 datasets,
-                show_edges=show_edges,
-                face_edges=face_edges,
+                show_edges=render_state["show_edges"],
+                face_edges=render_state["face_edges"],
                 align_camera=False,
             )
             plotter.render()
@@ -281,25 +310,66 @@ class PyVistaPreviewer:
             def guarded_process_queue() -> None:
                 try:
                     process_queue()
+                    if render_dirty["value"]:
+                        render_dirty["value"] = False
+                        _render_current()
                 except Exception as exc:  # pragma: no cover - surfaced via console
                     panel = Panel.fit(_format_exception(exc), title="Reload failed", style="red")
                     self.console.print(panel)
 
             callback_cleanup = self._install_timer_callback(plotter, guarded_process_queue, interval_seconds)
 
+            def _ensure_renderer_focus() -> bool:
+                try:
+                    interactor = getattr(plotter, "iren", None)
+                    renderer = getattr(plotter, "renderer", None)
+                    if interactor is None or renderer is None:
+                        return False
+                    style = interactor.GetInteractorStyle()
+                    if style is not None:
+                        style.SetCurrentRenderer(renderer)
+                    return True
+                except Exception:
+                    return False
+                return False
+
             def _handle_key_reload() -> None:
                 request_reload_with_message("[yellow]Reload requested (R).[/yellow]")
 
             plotter.add_key_event("r", _handle_key_reload)
-            if control_path is not None:
-                def _handle_key_switch() -> None:
-                    if maybe_switch_model():
-                        request_reload_with_message("[yellow]Reload requested (switch).[/yellow]")
-                    else:
-                        request_reload_with_message("[yellow]Reload requested (S).[/yellow]")
 
-                plotter.add_key_event("s", _handle_key_switch)
-                plotter.add_key_event("S", _handle_key_switch)
+            def _handle_key_reset() -> None:
+                if current_datasets:
+                    self._reset_camera(plotter, current_datasets)
+                    plotter.render()
+                    self.console.print("[green]Camera reset.[/green]")
+
+            plotter.add_key_event("v", _handle_key_reset)
+
+            def _render_current() -> None:
+                if not current_datasets:
+                    return
+                if not _ensure_renderer_focus():
+                    self.console.print("[yellow]Renderer not ready; skipping render update.[/yellow]")
+                    return
+                if render_state["background"] == "dark":
+                    plotter.set_background("#090c10", top="#1b2333")
+                else:
+                    plotter.set_background("#e6e9ef")
+                if render_state["eye_dome"]:
+                    plotter.enable_eye_dome_lighting()
+                else:
+                    plotter.disable_eye_dome_lighting()
+                self._apply_scene(
+                    plotter,
+                    current_datasets,
+                    show_edges=render_state["show_edges"],
+                    face_edges=render_state["face_edges"],
+                    align_camera=False,
+                )
+                plotter.render()
+
+            # Additional keybindings are currently shelved for reliability.
 
         try:
             plotter.show(title="Impression Preview", auto_close=False)
