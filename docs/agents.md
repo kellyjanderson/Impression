@@ -41,12 +41,11 @@ Use these features instead of writing new implementations:
 - **Loft**: between multiple profiles, optional path
 - **Transforms**: translate, rotate
 - **Groups**: MeshGroup
-- **Drafting**: lines, planes, arrows, dimensions (text labels currently disabled)
+- **Drafting**: lines, planes, arrows, dimensions
 - **Preview/Export**: CLI preview and STL export
 
 ## Known Limitations
 
-- **Text modeling** is disabled. Do not use `make_text` for now.
 - If you see a missing feature, check [`docs/modeling/`](modeling/) and [`docs/examples/`](examples/) before adding code.
 
 ## Project Structure

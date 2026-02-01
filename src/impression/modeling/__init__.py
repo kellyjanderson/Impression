@@ -37,6 +37,7 @@ from .paths import Path
 from .group import MeshGroup, group
 from .ops import offset, hull, minkowski
 from .heightmap import heightmap, displace_heightmap
+from .text import make_text, text, text_profiles
 
 __all__ = [
     "make_box",
@@ -89,5 +90,7 @@ __all__ = [
     "minkowski",
     "heightmap",
     "displace_heightmap",
+    "make_text",
+    "text",
+    "text_profiles",
 ]
-# Text support temporarily disabled.

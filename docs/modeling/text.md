@@ -1,39 +1,43 @@
 # Modeling - Text
 
-Text modeling is temporarily disabled in this build.
-This page documents the intended API so it can be re-enabled later.
+Impression can generate text outlines and turn them into meshes. Under the hood
+the text is converted to 2D profiles and then extruded to 3D.
 
 ```python
-from impression.modeling import make_text
+from impression.modeling import make_text, text, text_profiles
 ```
 
 ## Options
 
-- `content`: string to render.
-- `depth`: `0` for a flat face or a positive value to extrude/bas-relief.
+- `content`: string to render (including multi-line text).
+- `depth`: positive value to extrude.
 - `font_size`: glyph size.
 - `center`: world-space anchor for the text block.
-- `direction`: axis the text should face (defaults to −Y so glyphs look toward the camera); pass any vector to orient glyphs onto other faces.
+- `direction`: axis the text should face (defaults to +Z).
 - `justify`: `"left"`, `"center"`, or `"right"` alignment before positioning.
+- `valign`: `"baseline"`, `"top"`, `"middle"`, or `"bottom"` alignment for multi-line blocks.
+- `letter_spacing`: extra tracking between glyphs.
+- `line_height`: line spacing multiplier (relative to `font_size`).
 - `font`: family name (defaults to `"Arial"`).
-- `font_path`: explicit font file (handy for bundled assets such as emoji fonts).
-- `font_style`: style string (`"bold"`, `"italic"`, ...).
-- `tolerance`: tessellation tolerance (when supported).
-- `color`: RGB/RGBA tuple or color string (propagates through previews/exports.).
-- Variation selectors (e.g., the trailing U+FE0F in `👁️`) are stripped automatically to avoid stray fallback glyphs in single-character emoji; specify multi-codepoint emoji without forcing text/emoji presentation when possible.
+- `font_path`: explicit font file (recommended for reproducible results).
+- `color`: RGB/RGBA tuple or color string (propagates through previews/exports).
+
+Text uses FontTools to convert glyph outlines into Bezier segments. The helper
+`text_profiles(...)` returns a list of `Profile2D` objects you can reuse for
+custom extrusions or lofts.
 
 ## Examples
 
 ```python
 def build():
-    brand = make_text("Impression", depth=0.15, font_size=0.4, color="#ff7a00")
+    brand = make_text("Impression", depth=0.15, font_size=0.4, color="#d07a5c")
     brand.translate((0, 0.1, 0), inplace=True)
-    tagline = make_text(
+    tagline = text(
         "Parametric playground",
-        depth=0.0,
-        font_size=0.2,
+        depth=0.08,
+        font_size=0.22,
         center=(0, -0.25, 0),
-        color=(0.55, 0.75, 1.0),
+        color="#7b8aa6",
     )
     return [brand, tagline]
 
@@ -41,15 +45,15 @@ def build():
 def build_emoji():
     font_path = "assets/fonts/NotoSansSymbols2-Regular.ttf"
     eye = make_text(
-        "👁️",
+        "👁",
         depth=0.12,
         font_size=0.6,
         font_path=font_path,
-        color="#5A7BFF",
+        color="#6a7fae",
     )
     return eye
 ```
 
-- Example modules: `docs/examples/text/text_basic.py`, `docs/examples/text/text_emoji.py`, `docs/examples/logo/impression_mark.py`
-- Preview command: `impression preview docs/examples/text/text_basic.py` (currently unavailable)
+- Example modules: `docs/examples/text/text_basic.py`, `docs/examples/text/text_emoji.py`
+- Preview command: `impression preview docs/examples/text/text_basic.py`
 - Bundled emoji-ready font (SIL OFL 1.1): `assets/fonts/NotoSansSymbols2-Regular.ttf`

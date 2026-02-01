@@ -2,7 +2,7 @@
 
 ## Typography
 
-- Prefer sans-serif fonts in documentation (e.g., Inter, Source Sans) and match preview annotations with `make_text` (currently disabled).
+- Prefer sans-serif fonts in documentation (e.g., Inter, Source Sans) and match preview annotations with `make_text`.
 - Primary headers use Impression Blue; secondary annotations can use Impression Orange sparingly.
 
 ## Iconography & Shapes

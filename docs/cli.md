@@ -71,6 +71,11 @@ echo "/absolute/path/to/other_model.py" > ./.impression-preview
 
 The preview will reload automatically; you can also send `SIGUSR1` to force it.
 
+**Mesh analysis on demand**
+
+Both `preview` and `export` print mesh analysis (degenerate faces, boundary edges, watertightness).
+If you just made a change, run either command to see whether the model fails.
+
 ### `export`
 
 Generate an STL from a model.
