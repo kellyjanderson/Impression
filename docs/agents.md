@@ -47,15 +47,15 @@ Use these features instead of writing new implementations:
 ## Known Limitations
 
 - **Text modeling** is disabled. Do not use `make_text` for now.
-- If you see a missing feature, check `docs/modeling/` and `docs/examples/` before adding code.
+- If you see a missing feature, check [`docs/modeling/`](modeling/) and [`docs/examples/`](examples/) before adding code.
 
 ## Project Structure
 
 - `src/impression/` - core package
 - `src/impression/modeling/` - modeling API (use this first)
 - `src/impression/preview.py` - PyVista viewer integration
-- `docs/` - guides, tutorials, and examples
-- `docs/examples/` - runnable example scripts (all define `build()`)
+- [`docs/`](./) - guides, tutorials, and examples
+- [`docs/examples/`](examples/) - runnable example scripts (all define `build()`)
 - `scripts/dev/` - setup and install helpers
 
 ## Common Commands
@@ -77,5 +77,5 @@ Before writing new code:
 2) Search the codebase for similar utilities (`rg <term>`).
 3) Prefer extending internal mesh APIs over adding external libraries.
 
-If a new dependency is unavoidable, document it in `docs/index.md` and update
+If a new dependency is unavoidable, document it in [`docs/index.md`](index.md) and update
 `requirements.txt` + `pyproject.toml` in the same change.

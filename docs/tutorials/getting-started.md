@@ -53,6 +53,8 @@ def build():
 
 ## 5) Next Steps
 
-- Learn the modeling toolkit in `docs/modeling/primitives.md` and `docs/modeling/csg.md`.
-- Try 2D profiles and extrusions in `docs/modeling/drawing2d.md` and `docs/modeling/extrusions.md`.
-- Explore the example library under `docs/examples/`.
+- Learn the modeling toolkit in [`docs/modeling/primitives.md`](../modeling/primitives.md) and
+  [`docs/modeling/csg.md`](../modeling/csg.md).
+- Try 2D profiles and extrusions in [`docs/modeling/drawing2d.md`](../modeling/drawing2d.md) and
+  [`docs/modeling/extrusions.md`](../modeling/extrusions.md).
+- Explore the example library under [`docs/examples/`](../examples/).

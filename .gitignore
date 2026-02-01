@@ -83,3 +83,4 @@ node_modules/
 
 # Project-specific
 dist/preview-tests/
+.impression-preview

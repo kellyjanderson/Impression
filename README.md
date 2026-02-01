@@ -1,11 +1,7 @@
 # Impression
 
-Impression is a parametric modeling workshop. You describe shapes in Python, Impression produces
-watertight meshes, and a viewer renders them. The modeling layer is internal and backend-agnostic;
-PyVista is used strictly as a viewing surface.
-
-If you're building for fabrication, the rule is simple: geometry stays robust, previews stay fast,
-and the final mesh should be printable.
+Impression is a parametric modeling framework for Python that is focused on providing a
+comprehensive and consistent modeling interface, fast previews, and watertight STL generation.
 
 ## Quickstart
 
@@ -78,16 +74,16 @@ impression preview path/to/model.py
 - Export: `impression export docs/examples/csg/union_example.py --output dist/union.stl --overwrite`
 - Docs only: `impression --get-docs --docs-dest ./impression-docs`
 
-Full CLI reference: `docs/cli.md`
+Full CLI reference: [`docs/cli.md`](docs/cli.md)
 
 ## Documentation Map
 
-- `docs/index.md` - documentation portal
-- `docs/modeling/` - primitives, CSG, drawing2d, paths, extrusions, loft, morph, text
-- `docs/examples/` - runnable scripts that power the docs
-- `docs/tutorials/` - guided walkthroughs for new and advanced users
-- `docs/agents.md` - agent bootstrap and feature map
-- `docs/project-plan.md` - roadmap and open questions
+- [`docs/index.md`](docs/index.md) - documentation portal
+- [`docs/modeling/`](docs/modeling/) - primitives, CSG, drawing2d, paths, extrusions, loft, morph, text
+- [`docs/examples/`](docs/examples/) - runnable scripts that power the docs
+- [`docs/tutorials/`](docs/tutorials/) - guided walkthroughs for new and advanced users
+- [`docs/agents.md`](docs/agents.md) - agent bootstrap and feature map
+- [`docs/project-plan.md`](docs/project-plan.md) - roadmap and open questions
 
 ## Helper Scripts
 

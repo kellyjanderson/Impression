@@ -24,7 +24,7 @@ After installation, open the Impression workspace. Each command opens an `Impres
 - If the extension cannot find the CLI, it offers to clone the repository under `~/.impression-cli`,
   create a virtual environment, and run `pip install -e .` automatically. It also updates
   `~/.impression/env` and appends the source line to your shell rc.
-- Declining the auto-install option opens the [Getting Started guide](../README.md#getting-started)
+- Declining the auto-install option opens the [Getting Started guide](../README.md#quickstart)
   with manual clone/install instructions.
 - You can also use `scripts/dev/setup_dev_env.sh` to configure a development environment and
   ensure your shell sources `~/.impression/env`.

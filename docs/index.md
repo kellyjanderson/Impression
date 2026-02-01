@@ -8,7 +8,7 @@ library, the tools, and the examples.
 
 - **Quickstart**: [README](../README.md)
 - **CLI Reference**: [CLI](cli.md)
-- **Examples**: `docs/examples/` (every file has a `build()` function)
+- **Examples**: [`docs/examples/`](examples/) (every file has a `build()` function)
 - **Agent Bootstrap**: [Agent Guide](agents.md)
 
 ## Tutorials
@@ -56,3 +56,16 @@ scripts/run_stl_tests.py
 
 - [Project Plan](project-plan.md) - roadmap, open questions, and future features.
 - [Feature Pipeline](feature-pipeline.md) - current implementation order.
+
+## Project Records
+
+- [Brand Guide](brand/brand-guide.md)
+- [Design System Notes](brand/design-system.md)
+- [Style Guide](brand/style-guide.md)
+- [Issue: Preview hot reload fails](issues/impression-preview-hot-reload-fails.md)
+- [Issue: Camera resets on hot reload](issues/camera-reset-on-hot-reload.md)
+- [PR: Hot reload resilience](prs/bugfix-impression-preview-hot-reload.md)
+- [PR: Camera reset on reload](prs/bugfix-camera-reset-on-hot-reload.md)
+- [PR: Configurable units](prs/feature-config-unit-defaults.md)
+- [Meeting Notes (2025-11-11)](meetings/2025-11-11.md)
+- [Findings (2025-11-11)](findings/2025-11-11.md)

@@ -52,15 +52,12 @@ kill -USR1 <pid>
 
 Provide a control file to switch models. By default, Impression writes a control file named
 `.impression-preview` in the folder where you launched the preview and includes the preview
-process ID in the first line. Updating this file automatically reloads the preview; `S` and
-`SIGUSR1` are optional manual triggers.
+process ID in the first line. Updating this file automatically reloads the preview; `SIGUSR1`
+is an optional manual trigger.
 
 If a live preview already exists in that folder, running `impression preview other.py` will
 update the control file and exit (reusing the existing window). To force a second window, use
-`--force-window`. You can also press `c` in the preview window to switch after editing the
-control file.
-
-Rendering options keybindings are currently shelved for stability.
+`--force-window`.
 
 ```bash
 impression preview docs/examples/loft/saddle_example.py
@@ -72,7 +69,7 @@ Write the new model path into the control file:
 echo "/absolute/path/to/other_model.py" > ./.impression-preview
 ```
 
-The preview will reload automatically; you can also press `S` or send `SIGUSR1` to force it.
+The preview will reload automatically; you can also send `SIGUSR1` to force it.
 
 ### `export`
 
@@ -114,4 +111,4 @@ units are echoed in preview axes labels and export summaries.
 4. Run screenshot regression tests: `scripts/run_preview_tests.py`
 5. Validate STL exports + watertightness: `scripts/run_stl_tests.py`
 
-See `docs/examples/` for ready-to-run modules covering primitives, drafting helpers, text, and more.
+See [`docs/examples/`](examples/) for ready-to-run modules covering primitives, drafting helpers, text, and more.
