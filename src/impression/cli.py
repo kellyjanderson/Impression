@@ -303,6 +303,7 @@ def preview(
 
     console.rule("Impression Preview")
     console.print(f"Using model [green]{model}[/green]")
+    control_path: pathlib.Path | None = None
     if opts.watch:
         console.print("[cyan]Watching for changes — save to hot reload, close the window to stop.[/cyan]")
         control_path = _ensure_control_file()
@@ -310,8 +311,6 @@ def preview(
             console.print(
                 f"[cyan]Switch file: {control_path} (write a new path to auto-reload; SIGUSR1 optional).[/cyan]"
             )
-        else:
-            control_path = None
 
     previewer = PyVistaPreviewer(console=console)
     _log_active_units(previewer)

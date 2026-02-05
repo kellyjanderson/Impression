@@ -9,7 +9,7 @@ Dependency: `pip install mapbox_earcut`
 Import helpers:
 
 ```python
-from impression.modeling import linear_extrude, rotate_extrude
+from impression.modeling import linear_extrude, rotate_extrude, extrude_sdf
 from impression.modeling.drawing2d import make_rect, make_circle
 ```
 
@@ -46,3 +46,21 @@ def build():
 ```
 
 Example: `docs/examples/extrusions/rotate_extrude_example.py`
+
+## SDF Extrude (Rounded Caps)
+
+If you need rounded endcaps without fragile mesh stitching, use the SDF path.
+It generates the endcaps via SDF sampling and unions them onto the mesh body.
+
+- **Function:** `extrude_sdf(profile, height=1.0, cap_radius=0.0, grid_spacing=0.2)`
+- **Returns:** `Mesh`
+- **Dependencies:** `scikit-image`, `manifold3d`
+
+```python
+from impression.modeling import extrude_sdf
+from impression.modeling.drawing2d import make_rect
+
+def build():
+    profile = make_rect(size=(2.0, 1.0))
+    return extrude_sdf(profile, height=1.5, cap_radius=0.2, grid_spacing=0.1)
+```

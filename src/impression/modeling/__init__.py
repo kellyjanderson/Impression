@@ -38,6 +38,7 @@ from .group import MeshGroup, group
 from .ops import offset, hull, minkowski
 from .heightmap import heightmap, displace_heightmap
 from .text import make_text, text, text_profiles
+from .sdf import extrude_sdf, loft_sdf
 
 __all__ = [
     "make_box",
@@ -93,4 +94,6 @@ __all__ = [
     "make_text",
     "text",
     "text_profiles",
+    "extrude_sdf",
+    "loft_sdf",
 ]

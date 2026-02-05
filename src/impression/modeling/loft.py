@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, Sequence
+from typing import Iterable, Sequence, Literal
 
 import numpy as np
 
@@ -11,6 +11,8 @@ from ._profile2d import _loops_resampled, _triangulate_loops
 from .drawing2d import Profile2D
 from .path3d import Path3D
 from .paths import Path as PolyPath
+
+CapMode = Literal["mesh", "sdf"]
 
 
 def loft_profiles(
@@ -26,8 +28,22 @@ def loft_profiles(
     start_cap_length: float | None = None,
     end_cap_length: float | None = None,
     cap_scale_dims: str = "both",
+    cap_type: CapMode = "mesh",
+    cap_radius: float = 0.0,
+    cap_grid_spacing: float = 0.2,
+    cap_padding: float | None = None,
 ) -> Mesh:
     """Loft a sequence of profiles, optionally along a path."""
+
+    if cap_type == "sdf":
+        from .sdf import loft_sdf
+        return loft_sdf(
+            profiles=profiles,
+            path=path,
+            cap_radius=cap_radius,
+            grid_spacing=cap_grid_spacing,
+            padding=cap_padding,
+        )
 
     if len(profiles) < 2:
         raise ValueError("loft_profiles requires at least two profiles.")
@@ -58,6 +74,7 @@ def loft_profiles(
         segments_per_circle=segments_per_circle,
         bezier_samples=bezier_samples,
     )
+    loops_per_profile = _align_loft_loops(loops_per_profile)
     normals, binormals, tangents = _compute_frames(positions)
 
     loop_count = len(loops_per_profile[0]) if loops_per_profile else 0
@@ -123,6 +140,10 @@ def loft(
     start_cap_length: float | None = None,
     end_cap_length: float | None = None,
     cap_scale_dims: str = "both",
+    cap_type: CapMode = "mesh",
+    cap_radius: float = 0.0,
+    cap_grid_spacing: float = 0.2,
+    cap_padding: float | None = None,
 ) -> Mesh:
     """Alias for loft_profiles."""
 
@@ -139,6 +160,10 @@ def loft(
         start_cap_length=start_cap_length,
         end_cap_length=end_cap_length,
         cap_scale_dims=cap_scale_dims,
+        cap_type=cap_type,
+        cap_radius=cap_radius,
+        cap_grid_spacing=cap_grid_spacing,
+        cap_padding=cap_padding,
     )
 
 
@@ -280,6 +305,39 @@ def _apply_caps(
                 new_positions.append(positions[-1] + tangents[-1] * offset)
 
     return new_loops, np.asarray(new_positions, dtype=float)
+
+
+def _align_loft_loops(loops_per_profile: list[list[np.ndarray]]) -> list[list[np.ndarray]]:
+    """Stabilize loop correspondence between adjacent profiles to reduce twists."""
+    if not loops_per_profile:
+        return loops_per_profile
+    aligned: list[list[np.ndarray]] = [[loop.copy() for loop in loops_per_profile[0]]]
+    for profile_loops in loops_per_profile[1:]:
+        if len(profile_loops) != len(aligned[-1]):
+            aligned.append([loop.copy() for loop in profile_loops])
+            continue
+        profile_aligned: list[np.ndarray] = []
+        for loop, ref in zip(profile_loops, aligned[-1], strict=False):
+            profile_aligned.append(_best_loop_alignment(loop, ref))
+        aligned.append(profile_aligned)
+    return aligned
+
+
+def _best_loop_alignment(loop: np.ndarray, ref: np.ndarray) -> np.ndarray:
+    if loop.shape != ref.shape or loop.shape[0] == 0:
+        return loop.copy()
+    candidates = [loop, loop[::-1].copy()]
+    best = loop
+    best_score = float("inf")
+    n = loop.shape[0]
+    for cand in candidates:
+        for shift in range(n):
+            rolled = np.concatenate([cand[shift:], cand[:shift]], axis=0)
+            score = float(np.sum((rolled - ref) ** 2))
+            if score < best_score:
+                best_score = score
+                best = rolled
+    return best.copy()
 
 
 def _cap_profile_series(

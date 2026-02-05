@@ -18,6 +18,7 @@ dependencies = [
     "manifold3d>=3.3.2",
     "mapbox_earcut>=2.0.0",
     "fonttools>=4.0.0",
+    "scikit-image>=0.22.0",
     "markdown>=3.6",
     "Pillow>=10.0.0",
 ]

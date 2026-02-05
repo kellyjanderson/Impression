@@ -6,7 +6,7 @@ positions and rotated to follow the path direction (parallel-transport frames
 to minimize twist).
 
 ```python
-from impression.modeling import loft
+from impression.modeling import loft, loft_sdf
 from impression.modeling.drawing2d import make_rect
 from impression.modeling import Path3D
 ```
@@ -28,6 +28,30 @@ def build():
 ```
 
 Example: `docs/examples/loft/loft_example.py`
+
+## SDF Loft (Rounded Caps)
+
+`loft_sdf` samples an SDF across slices and extracts the cap surface with marching
+cubes, then unions those caps onto the mesh body. You can also access this behavior
+from `loft` by setting `cap_type="sdf"`.
+
+- **Function:** `loft_sdf(profiles, path=None, positions=None, cap_radius=0.0, grid_spacing=0.2)`
+- **Returns:** `Mesh`
+- **Dependencies:** `scikit-image`, `manifold3d`
+
+```python
+from impression.modeling import loft_sdf
+from impression.modeling.drawing2d import make_rect
+
+def build():
+    profiles = [make_rect(size=(1.0, 0.6)), make_rect(size=(0.7, 0.9))]
+    return loft(
+        profiles,
+        cap_type="sdf",
+        cap_radius=0.2,
+        cap_grid_spacing=0.15,
+    )
+```
 
 ## End Caps
 
