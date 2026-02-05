@@ -16,6 +16,7 @@ import io
 import shutil
 import tempfile
 import urllib.request
+import urllib.error
 import zipfile
 import os
 import re
@@ -73,31 +74,27 @@ def _format_exception(exc: BaseException) -> str:
     return "".join(traceback.format_exception(exc))
 
 
-def _download_docs(
-    repo_url: str,
-    ref: str,
-    destination: pathlib.Path,
-    clean: bool,
-) -> None:
-    repo_url = repo_url.rstrip("/")
-    if repo_url.endswith(".git"):
-        repo_url = repo_url[:-4]
-    zip_url = f"{repo_url}/archive/refs/heads/{ref}.zip"
-
+def _extract_docs_archive(data: bytes, destination: pathlib.Path, clean: bool) -> None:
     if clean and destination.exists():
         shutil.rmtree(destination)
     destination.mkdir(parents=True, exist_ok=True)
-
-    console.print(f"[cyan]Downloading docs from {zip_url}...[/cyan]")
-    with urllib.request.urlopen(zip_url) as response:
-        data = response.read()
 
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         names = archive.namelist()
         if not names:
             raise typer.BadParameter("Downloaded archive is empty.")
-        root = names[0].split("/", 1)[0]
-        docs_prefix = f"{root}/docs/"
+
+        prefixes: list[str] = []
+        for name in names:
+            if name.startswith("docs/"):
+                prefixes.append("docs/")
+            idx = name.find("/docs/")
+            if idx != -1:
+                prefixes.append(name[: idx + len("/docs/")])
+        if not prefixes:
+            raise typer.BadParameter("Docs folder not found in the downloaded archive.")
+        docs_prefix = min(prefixes, key=len)
+
         extracted = False
         for member in archive.infolist():
             if not member.filename.startswith(docs_prefix):
@@ -117,6 +114,54 @@ def _download_docs(
     if not extracted:
         raise typer.BadParameter("Docs folder not found in the downloaded archive.")
     console.print(f"[green]Docs saved to {destination}[/green]")
+
+
+def _download_docs_archive(
+    repo_url: str,
+    ref: str,
+    destination: pathlib.Path,
+    clean: bool,
+) -> None:
+    repo_url = repo_url.rstrip("/")
+    if repo_url.endswith(".git"):
+        repo_url = repo_url[:-4]
+    tag_url = f"{repo_url}/archive/refs/tags/{ref}.zip"
+    head_url = f"{repo_url}/archive/refs/heads/{ref}.zip"
+
+    console.print(f"[cyan]Downloading docs from {tag_url}...[/cyan]")
+    data: bytes | None = None
+    try:
+        with urllib.request.urlopen(tag_url) as response:
+            data = response.read()
+    except urllib.error.HTTPError:
+        try:
+            console.print(f"[cyan]Tag archive missing; trying branch archive {head_url}...[/cyan]")
+            with urllib.request.urlopen(head_url) as response:
+                data = response.read()
+        except urllib.error.HTTPError as exc:
+            raise typer.BadParameter(f"Could not download docs archive for ref '{ref}'.") from exc
+    if data is None:
+        raise typer.BadParameter(f"Could not download docs archive for ref '{ref}'.")
+    _extract_docs_archive(data, destination, clean)
+
+
+def _download_docs_release_asset(
+    repo_url: str,
+    ref: str,
+    destination: pathlib.Path,
+    clean: bool,
+) -> None:
+    repo_url = repo_url.rstrip("/")
+    if repo_url.endswith(".git"):
+        repo_url = repo_url[:-4]
+    asset_url = f"{repo_url}/releases/download/{ref}/impression-docs-{ref}.zip"
+    console.print(f"[cyan]Downloading docs asset from {asset_url}...[/cyan]")
+    try:
+        with urllib.request.urlopen(asset_url) as response:
+            data = response.read()
+    except urllib.error.HTTPError as exc:
+        raise typer.BadParameter(f"Docs asset impression-docs-{ref}.zip not found for release {ref}.") from exc
+    _extract_docs_archive(data, destination, clean)
 
 
 @app.callback(invoke_without_command=True)
@@ -162,14 +207,9 @@ def main(
         destination = docs_dest or pathlib.Path.cwd() / "impression-docs"
         resolved_ref = docs_ref or f"v{__version__}"
         try:
-            _download_docs(docs_repo, resolved_ref, destination, docs_clean)
+            _download_docs_release_asset(docs_repo, resolved_ref, destination, docs_clean)
         except typer.BadParameter:
-            if docs_ref is not None:
-                raise
-            console.print(
-                f"[yellow]Docs ref {resolved_ref} not found; falling back to main.[/yellow]"
-            )
-            _download_docs(docs_repo, "main", destination, docs_clean)
+            _download_docs_archive(docs_repo, resolved_ref, destination, docs_clean)
         raise typer.Exit()
 
     if ctx.invoked_subcommand is None:
@@ -303,6 +343,7 @@ def preview(
 
     console.rule("Impression Preview")
     console.print(f"Using model [green]{model}[/green]")
+    control_path: pathlib.Path | None = None
     if opts.watch:
         console.print("[cyan]Watching for changes — save to hot reload, close the window to stop.[/cyan]")
         control_path = _ensure_control_file()
@@ -310,8 +351,6 @@ def preview(
             console.print(
                 f"[cyan]Switch file: {control_path} (write a new path to auto-reload; SIGUSR1 optional).[/cyan]"
             )
-        else:
-            control_path = None
 
     previewer = PyVistaPreviewer(console=console)
     _log_active_units(previewer)
@@ -335,11 +374,11 @@ def preview(
 @app.command()
 def export(
     model: pathlib.Path = typer.Argument(..., help="Model module to export."),
-    output: pathlib.Path = typer.Option(
-        pathlib.Path("model.stl"),
+    output: pathlib.Path | None = typer.Option(
+        None,
         "--output",
         "-o",
-        help="Path to the STL file that will be produced.",
+        help="Path to the STL file that will be produced (defaults to model filename with .stl).",
     ),
     overwrite: bool = typer.Option(False, "--overwrite", help="Allow replacing an existing STL."),
     ascii: bool = typer.Option(False, "--ascii", help="Write ASCII STL instead of binary."),
@@ -351,12 +390,15 @@ def export(
     if not model.exists():
         raise typer.BadParameter(f"Model path {model} does not exist.")
 
-    final_output = output
-    if output.exists():
+    requested_output = output if output is not None else model.with_suffix(".stl")
+    final_output = requested_output
+    if requested_output.exists():
         if not overwrite:
-            final_output = _next_available_path(output)
-            if final_output != output:
-                console.print(f"[yellow]Output {output} exists; writing to {final_output} instead.[/yellow]")
+            final_output = _next_available_path(requested_output)
+            if final_output != requested_output:
+                console.print(
+                    f"[yellow]Output {requested_output} exists; writing to {final_output} instead.[/yellow]"
+                )
 
     try:
         scene_factory = _scene_factory_from_module(model)

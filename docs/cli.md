@@ -99,8 +99,12 @@ Download the documentation bundle without cloning the full repository.
 - `--get-docs / --getDocs`: trigger the download and exit.
 - `--docs-dest PATH`: destination folder (default: `./impression-docs`).
 - `--docs-repo URL`: GitHub repo URL (default: `https://github.com/kellyjanderson/Impression`).
-- `--docs-ref REF`: git ref to download from (default: installed release tag).
+- `--docs-ref REF`: release/tag/branch ref (default: installed release tag).
 - `--docs-clean`: delete destination before downloading.
+
+By default, `--get-docs` fetches `impression-docs-<installed-tag>.zip` from the
+matching GitHub release, then falls back to that same ref's source archive if
+the docs asset is unavailable.
 
 ## UNITS
 
