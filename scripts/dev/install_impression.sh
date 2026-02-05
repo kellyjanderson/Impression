@@ -57,7 +57,7 @@ list_releases() {
     fi
     git ls-remote --tags --sort=-v:refname "$repo_url" \
         | awk '{print $2}' \
-        | sed 's#refs/tags/##;s#\\^{}##' \
+        | sed 's#refs/tags/##;s#\^{}##' \
         | awk 'NF && !seen[$0]++ {print}'
 }
 
@@ -131,6 +131,8 @@ if [[ "$install_source" == "release" ]]; then
                 echo "No releases found at $repo_url" >&2
                 exit 1
             fi
+            # Defensive normalization in case upstream refs include annotated-tag suffixes.
+            release_ref="${release_ref%\^\{\}}"
         fi
     fi
     log "Installing Impression release ${release_ref}."

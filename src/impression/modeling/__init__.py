@@ -38,6 +38,28 @@ from .group import MeshGroup, group
 from .ops import offset, hull, minkowski
 from .heightmap import heightmap, displace_heightmap
 from .text import make_text, text, text_profiles
+from .threading import (
+    FIT_PRESETS,
+    InvalidFitSpec,
+    InvalidThreadSpec,
+    MeshBudgetExceeded,
+    MeshQuality,
+    ThreadFitPreset,
+    ThreadMeshEstimate,
+    ThreadSpec,
+    ThreadingError,
+    apply_fit,
+    estimate_mesh_cost,
+    lookup_standard_thread,
+    make_external_thread,
+    make_hex_nut,
+    make_internal_thread,
+    make_round_nut,
+    make_tapped_hole_cutter,
+    make_threaded_rod,
+    paired_fit,
+    validate_thread,
+)
 
 __all__ = [
     "make_box",
@@ -93,4 +115,24 @@ __all__ = [
     "make_text",
     "text",
     "text_profiles",
+    "FIT_PRESETS",
+    "InvalidFitSpec",
+    "InvalidThreadSpec",
+    "MeshBudgetExceeded",
+    "MeshQuality",
+    "ThreadFitPreset",
+    "ThreadMeshEstimate",
+    "ThreadSpec",
+    "ThreadingError",
+    "apply_fit",
+    "estimate_mesh_cost",
+    "lookup_standard_thread",
+    "make_external_thread",
+    "make_hex_nut",
+    "make_internal_thread",
+    "make_round_nut",
+    "make_tapped_hole_cutter",
+    "make_threaded_rod",
+    "paired_fit",
+    "validate_thread",
 ]

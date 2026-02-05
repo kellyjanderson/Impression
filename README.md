@@ -72,7 +72,7 @@ impression preview path/to/model.py
 
 - Preview: `impression preview docs/examples/primitives/box_example.py`
 - Export: `impression export docs/examples/csg/union_example.py --output dist/union.stl --overwrite`
-- Docs only: `impression --get-docs --docs-dest ./impression-docs`
+- Docs only (matching installed release): `impression --get-docs --docs-dest ./impression-docs`
 
 Full CLI reference: [`docs/cli.md`](docs/cli.md)
 
