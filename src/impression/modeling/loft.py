@@ -5,6 +5,7 @@ from typing import Iterable, Sequence
 import numpy as np
 
 from impression.mesh import Mesh
+from impression.mesh_quality import MeshQuality, apply_lod
 
 from ._color import set_mesh_color
 from ._profile2d import _loops_resampled, _triangulate_loops
@@ -19,6 +20,7 @@ def loft_profiles(
     samples: int = 200,
     segments_per_circle: int = 64,
     bezier_samples: int = 32,
+    quality: MeshQuality | None = None,
     cap_ends: bool = False,
     start_cap: str = "none",
     end_cap: str = "none",
@@ -28,6 +30,12 @@ def loft_profiles(
     cap_scale_dims: str = "both",
 ) -> Mesh:
     """Loft a sequence of profiles, optionally along a path."""
+
+    if quality is not None:
+        quality = apply_lod(quality)
+        samples = _apply_quality_samples(samples, quality)
+        segments_per_circle = _apply_quality_samples(segments_per_circle, quality)
+        bezier_samples = _apply_quality_samples(bezier_samples, quality)
 
     if len(profiles) < 2:
         raise ValueError("loft_profiles requires at least two profiles.")
@@ -116,6 +124,7 @@ def loft(
     samples: int = 200,
     segments_per_circle: int = 64,
     bezier_samples: int = 32,
+    quality: MeshQuality | None = None,
     cap_ends: bool = False,
     start_cap: str = "none",
     end_cap: str = "none",
@@ -132,6 +141,7 @@ def loft(
         samples=samples,
         segments_per_circle=segments_per_circle,
         bezier_samples=bezier_samples,
+        quality=quality,
         cap_ends=cap_ends,
         start_cap=start_cap,
         end_cap=end_cap,
@@ -160,6 +170,12 @@ def _resolve_positions(
         raise ValueError("path must be a sequence of 3D points.")
 
     return _resample_path(pts, count)
+
+
+def _apply_quality_samples(value: int, quality: MeshQuality) -> int:
+    if quality.lod == "preview":
+        return max(6, int(value * 0.5))
+    return value
 
 
 def _resample_path(points: np.ndarray, count: int) -> np.ndarray:

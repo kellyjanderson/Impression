@@ -5,6 +5,7 @@ from typing import Iterable, Sequence
 import numpy as np
 
 from impression.mesh import Mesh
+from impression.mesh_quality import MeshQuality, apply_lod
 
 from ._color import set_mesh_color
 from ._profile2d import _profile_loops, _triangulate_profile
@@ -44,6 +45,7 @@ def linear_extrude(
     center: Sequence[float] = (0.0, 0.0, 0.0),
     segments_per_circle: int = 64,
     bezier_samples: int = 32,
+    quality: MeshQuality | None = None,
 ) -> Mesh:
     """Extrude a 2D profile along a straight direction."""
 
@@ -52,6 +54,11 @@ def linear_extrude(
         raise ValueError("height must be positive.")
     direction_vec = _normalize(direction) * height
     center_vec = np.asarray(center, dtype=float).reshape(3)
+
+    if quality is not None:
+        quality = apply_lod(quality)
+        segments_per_circle = _apply_quality_samples(segments_per_circle, quality)
+        bezier_samples = _apply_quality_samples(bezier_samples, quality)
 
     vertices_2d, faces_2d, loops = _triangulate_profile(
         profile,
@@ -111,6 +118,7 @@ def rotate_extrude(
     segments_per_circle: int = 64,
     bezier_samples: int = 32,
     cap_ends: bool = True,
+    quality: MeshQuality | None = None,
 ) -> Mesh:
     """Rotate-extrude (lathe) a profile around an axis."""
 
@@ -124,6 +132,12 @@ def rotate_extrude(
     if u_norm == 0:
         raise ValueError("plane_normal cannot be parallel to axis_direction.")
     u = u / u_norm
+
+    if quality is not None:
+        quality = apply_lod(quality)
+        segments = _apply_quality_samples(segments, quality)
+        segments_per_circle = _apply_quality_samples(segments_per_circle, quality)
+        bezier_samples = _apply_quality_samples(bezier_samples, quality)
 
     vertices_2d, faces_2d, loops = _triangulate_profile(
         profile,
@@ -217,6 +231,11 @@ def _rotate_vector(vec: np.ndarray, axis: np.ndarray, angle: float) -> np.ndarra
     cross = np.cross(axis, vec)
     dot = np.dot(axis, vec)
     return vec * cos_a + cross * sin_a + axis * dot * (1 - cos_a)
+
+def _apply_quality_samples(value: int, quality: MeshQuality) -> int:
+    if quality.lod == "preview":
+        return max(6, int(value * 0.5))
+    return value
 
 
 __all__ = ["linear_extrude", "rotate_extrude"]

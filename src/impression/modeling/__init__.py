@@ -38,12 +38,12 @@ from .group import MeshGroup, group
 from .ops import offset, hull, minkowski
 from .heightmap import heightmap, displace_heightmap
 from .text import make_text, text, text_profiles
+from impression.mesh_quality import MeshQuality
 from .threading import (
     FIT_PRESETS,
     InvalidFitSpec,
     InvalidThreadSpec,
     MeshBudgetExceeded,
-    MeshQuality,
     ThreadFitPreset,
     ThreadMeshEstimate,
     ThreadSpec,
@@ -55,8 +55,10 @@ from .threading import (
     make_hex_nut,
     make_internal_thread,
     make_round_nut,
+    make_runout_relief,
     make_tapped_hole_cutter,
     make_threaded_rod,
+    clear_thread_cache,
     paired_fit,
     validate_thread,
 )
@@ -131,8 +133,10 @@ __all__ = [
     "make_hex_nut",
     "make_internal_thread",
     "make_round_nut",
+    "make_runout_relief",
     "make_tapped_hole_cutter",
     "make_threaded_rod",
+    "clear_thread_cache",
     "paired_fit",
     "validate_thread",
 ]

@@ -7,9 +7,13 @@ import numpy as np
 from PIL import Image
 
 from impression.mesh import Mesh
+from impression.cache import LRUCache
+from impression.mesh_quality import MeshQuality, apply_lod
 
 
 ArrayLike = np.ndarray
+
+_HEIGHTMAP_CACHE = LRUCache(max_size=32)
 
 
 def _as_scale(value: float | Sequence[float]) -> tuple[float, float]:
@@ -73,6 +77,7 @@ def heightmap(
     xy_scale: float | Sequence[float] = 1.0,
     center: Sequence[float] = (0.0, 0.0, 0.0),
     alpha_mode: str = "mask",
+    quality: MeshQuality | None = None,
 ) -> Mesh:
     """Create a heightfield mesh from an image.
 
@@ -81,7 +86,17 @@ def heightmap(
         - "ignore": treat transparent pixels as zero height (no holes).
     """
 
+    cache_key = _heightmap_cache_key(image, height, xy_scale, center, alpha_mode, quality)
+    cached = _HEIGHTMAP_CACHE.get(cache_key) if cache_key is not None else None
+    if cached is not None:
+        return cached.copy()
+
     heights, mask = _load_heightmap(image)
+    if quality is not None:
+        quality = apply_lod(quality)
+        if quality.lod == "preview":
+            heights = heights[::2, ::2]
+            mask = mask[::2, ::2]
     if heights.size == 0:
         return Mesh(np.zeros((0, 3), dtype=float), np.zeros((0, 3), dtype=int))
 
@@ -117,7 +132,10 @@ def heightmap(
                 faces.append([i0, i2, i3])
 
     faces_arr = np.asarray(faces, dtype=int) if faces else np.zeros((0, 3), dtype=int)
-    return Mesh(vertices, faces_arr)
+    mesh = Mesh(vertices, faces_arr)
+    if cache_key is not None:
+        _HEIGHTMAP_CACHE.set(cache_key, mesh.copy())
+    return mesh
 
 
 def _vertex_normals(mesh: Mesh) -> np.ndarray:
@@ -225,6 +243,7 @@ def displace_heightmap(
     direction: str | Sequence[float] = "normal",
     alpha_mode: str = "ignore",
     bounds: Sequence[float] | None = None,
+    quality: MeshQuality | None = None,
 ) -> Mesh:
     """Displace a mesh using a heightmap with planar projection.
 
@@ -240,6 +259,11 @@ def displace_heightmap(
         raise ValueError("plane must be 'xy', 'xz', or 'yz'.")
 
     heights, mask = _load_heightmap(image)
+    if quality is not None:
+        quality = apply_lod(quality)
+        if quality.lod == "preview":
+            heights = heights[::2, ::2]
+            mask = mask[::2, ::2]
     if heights.size == 0 or mesh.n_vertices == 0:
         return mesh.copy()
 
@@ -287,6 +311,32 @@ def displace_heightmap(
         result = _mask_faces(result, masked)
 
     return result
+
+
+def _heightmap_cache_key(
+    image: str | Path | Image.Image | ArrayLike,
+    height: float,
+    xy_scale: float | Sequence[float],
+    center: Sequence[float],
+    alpha_mode: str,
+    quality: MeshQuality | None,
+) -> tuple | None:
+    if isinstance(image, (str, Path)):
+        path = Path(image)
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return None
+        return (
+            str(path),
+            float(mtime),
+            float(height),
+            tuple(np.asarray(xy_scale, dtype=float).ravel()) if not isinstance(xy_scale, (int, float)) else float(xy_scale),
+            tuple(np.asarray(center, dtype=float).ravel()),
+            alpha_mode,
+            quality.lod if quality is not None else None,
+        )
+    return None
 
 
 __all__ = ["heightmap", "displace_heightmap"]

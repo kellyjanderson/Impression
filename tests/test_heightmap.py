@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from impression.modeling import heightmap, displace_heightmap
+from impression.modeling import MeshQuality, heightmap, displace_heightmap
 from impression.modeling.drafting import make_plane
 
 
@@ -27,6 +27,12 @@ def test_heightmap_alpha_mask(tmp_path: Path):
     ignored = heightmap(path, height=1.0, alpha_mode="ignore")
     assert ignored.n_faces == 2
     assert np.isclose(ignored.vertices[0, 2], 0.0)
+
+
+def test_heightmap_quality_preview(tmp_path: Path):
+    path = _write_test_image(tmp_path / "mask.png", transparent_corner=False)
+    mesh = heightmap(path, height=1.0, alpha_mode="ignore", quality=MeshQuality(lod="preview"))
+    assert mesh.n_faces >= 0
 
 
 def test_displace_heightmap_planar():

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from impression.modeling import linear_extrude, rotate_extrude
+from impression.modeling import MeshQuality, linear_extrude, rotate_extrude
 from impression.modeling.drawing2d import make_polygon, make_rect
 
 
@@ -24,6 +24,12 @@ def test_rotate_extrude_positive():
     mesh = rotate_extrude(profile, angle_deg=180, segments=24)
     assert mesh.n_faces > 0
     assert mesh.n_vertices > 0
+
+
+def test_linear_extrude_quality_preview():
+    profile = make_rect(size=(1.0, 0.6))
+    mesh = linear_extrude(profile, height=1.0, quality=MeshQuality(lod="preview"))
+    assert mesh.n_faces > 0
 
 
 def test_rotate_extrude_invalid_plane():

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import numpy as np
 
 from impression.mesh import analyze_mesh
 from impression.modeling import (
@@ -15,6 +16,8 @@ from impression.modeling import (
     make_external_thread,
     make_hex_nut,
     make_internal_thread,
+    clear_thread_cache,
+    make_runout_relief,
     make_round_nut,
     make_tapped_hole_cutter,
     make_threaded_rod,
@@ -132,8 +135,8 @@ def test_threaded_rod_convenience() -> None:
 
 def test_nut_convenience_generators() -> None:
     spec = lookup_standard_thread("metric", "M6x1", length=8.0)
-    hex_nut = make_hex_nut(spec, thickness=5.0, across_flats=10.0, quality=MeshQuality(segments_per_turn=18))
-    round_nut = make_round_nut(spec, thickness=5.0, outer_diameter=12.0, quality=MeshQuality(segments_per_turn=18))
+    hex_nut = make_hex_nut(spec, thickness=5.0, across_flats=10.0, quality=MeshQuality(segments_per_turn=18, boolean_epsilon=0.1))
+    round_nut = make_round_nut(spec, thickness=5.0, outer_diameter=12.0, quality=MeshQuality(segments_per_turn=18, boolean_epsilon=0.1))
     assert hex_nut.n_faces > 0
     assert round_nut.n_faces > 0
 
@@ -161,3 +164,173 @@ def test_treatments_reduce_thread_amplitude_near_start() -> None:
 
 def test_fit_presets_registered() -> None:
     assert "fdm_default" in FIT_PRESETS
+
+
+def test_lead_in_alignment_reduces_major_radius() -> None:
+    base = ThreadSpec(major_diameter=8.0, pitch=1.25, length=10.0, lead_in_length=2.0)
+    mesh = make_external_thread(base, quality=MeshQuality(segments_per_turn=20, circumferential_segments=64))
+    z_count = int(mesh.n_vertices / 64) - 1
+    start_ring = mesh.vertices[:64]
+    mid_ring = mesh.vertices[(z_count // 2) * 64 : (z_count // 2 + 1) * 64]
+    r_start = (start_ring[:, 0] ** 2 + start_ring[:, 1] ** 2) ** 0.5
+    r_mid = (mid_ring[:, 0] ** 2 + mid_ring[:, 1] ** 2) ** 0.5
+    assert r_start.max() < r_mid.max()
+
+
+def test_variable_pitch_profile_changes_phase() -> None:
+    spec = ThreadSpec(
+        major_diameter=8.0,
+        pitch=1.5,
+        length=10.0,
+        pitch_profile=((0.0, 1.0), (10.0, 2.0)),
+    )
+    mesh = make_external_thread(spec, quality=MeshQuality(segments_per_turn=16, circumferential_segments=48))
+    assert mesh.n_faces > 0
+
+
+def test_profile_anchor_pitch() -> None:
+    base = ThreadSpec(major_diameter=8.0, pitch=1.25, length=8.0, profile_anchor="pitch")
+    mesh = make_external_thread(base, quality=MeshQuality(segments_per_turn=16, circumferential_segments=48))
+    assert mesh.n_vertices > 0
+
+
+def test_runout_relief_affects_core() -> None:
+    base = ThreadSpec(major_diameter=8.0, pitch=1.25, length=8.0, runout_length=1.5, runout_depth=0.4)
+    mesh = make_external_thread(base, quality=MeshQuality(segments_per_turn=16, circumferential_segments=48))
+    start_ring = mesh.vertices[:48]
+    mid_ring = mesh.vertices[5 * 48 : 6 * 48]
+    r_start = (start_ring[:, 0] ** 2 + start_ring[:, 1] ** 2) ** 0.5
+    r_mid = (mid_ring[:, 0] ** 2 + mid_ring[:, 1] ** 2) ** 0.5
+    assert r_start.min() < r_mid.min()
+
+
+def test_custom_profile_duplicate_phase_error() -> None:
+    spec = ThreadSpec(
+        major_diameter=8.0,
+        pitch=1.25,
+        length=8.0,
+        profile="custom",
+        custom_profile_points=((0.0, 0.0), (0.5, 1.0), (0.5, 0.2)),
+    )
+    with pytest.raises(Exception):
+        validate_thread(spec)
+
+
+def test_custom_profile_wrap_continuity_error() -> None:
+    spec = ThreadSpec(
+        major_diameter=8.0,
+        pitch=1.25,
+        length=8.0,
+        profile="custom",
+        custom_profile_points=((0.0, 0.0), (0.5, 1.0), (1.0, 0.8)),
+    )
+    with pytest.raises(Exception):
+        validate_thread(spec)
+
+
+def test_custom_profile_valid() -> None:
+    spec = ThreadSpec(
+        major_diameter=8.0,
+        pitch=1.25,
+        length=8.0,
+        profile="custom",
+        custom_profile_points=((0.0, 0.0), (0.5, 1.0), (1.0, 0.0)),
+    )
+    validate_thread(spec)
+
+
+def test_whitworth_profile_generation() -> None:
+    spec = ThreadSpec(major_diameter=10.0, pitch=1.5, length=8.0, profile="whitworth")
+    mesh = make_external_thread(spec, quality=MeshQuality(segments_per_turn=16, circumferential_segments=48))
+    assert mesh.n_faces > 0
+
+
+def test_pipe_profile_generation() -> None:
+    spec = ThreadSpec(major_diameter=10.0, pitch=1.5, length=8.0, profile="pipe", taper_diameter_per_length=1.0 / 16.0)
+    mesh = make_external_thread(spec, quality=MeshQuality(segments_per_turn=16, circumferential_segments=48))
+    assert mesh.n_faces > 0
+
+
+def test_runout_relief_geometry_generation() -> None:
+    spec = ThreadSpec(
+        major_diameter=8.0,
+        pitch=1.25,
+        length=8.0,
+        runout_length=1.0,
+        runout_depth=0.3,
+    )
+    relief = make_runout_relief(spec, quality=MeshQuality(circumferential_segments=32))
+    assert relief.n_faces > 0
+
+
+def test_min_feature_warning() -> None:
+    spec = ThreadSpec(
+        major_diameter=2.0,
+        pitch=0.3,
+        length=4.0,
+        nozzle_diameter=0.4,
+    )
+    with pytest.warns(RuntimeWarning):
+        validate_thread(spec)
+
+
+def test_cache_returns_copy() -> None:
+    clear_thread_cache()
+    spec = ThreadSpec(major_diameter=8.0, pitch=1.25, length=6.0)
+    mesh1 = make_external_thread(spec, quality=MeshQuality(segments_per_turn=16, circumferential_segments=48))
+    mesh2 = make_external_thread(spec, quality=MeshQuality(segments_per_turn=16, circumferential_segments=48))
+    assert mesh1.n_faces == mesh2.n_faces
+    assert mesh1 is not mesh2
+
+
+def test_lod_preview_reduces_faces() -> None:
+    spec = ThreadSpec(major_diameter=8.0, pitch=1.25, length=6.0)
+    high = make_external_thread(spec, quality=MeshQuality(segments_per_turn=24, circumferential_segments=96, lod="final"))
+    low = make_external_thread(spec, quality=MeshQuality(segments_per_turn=24, circumferential_segments=96, lod="preview"))
+    assert low.n_faces < high.n_faces
+
+
+def test_tr8x8_lead_repeats_profile() -> None:
+    spec = ThreadSpec(major_diameter=8.0, pitch=2.0, length=16.0, starts=4, profile="trapezoidal")
+    mesh = make_external_thread(spec, quality=MeshQuality(segments_per_turn=16, circumferential_segments=48))
+    theta_count = 48
+    z_count = int(mesh.n_vertices / theta_count) - 1
+    ring0 = mesh.vertices[:theta_count]
+    ring_lead = mesh.vertices[(z_count // 2) * theta_count : (z_count // 2 + 1) * theta_count]
+    r0 = (ring0[:, 0] ** 2 + ring0[:, 1] ** 2) ** 0.5
+    r1 = (ring_lead[:, 0] ** 2 + ring_lead[:, 1] ** 2) ** 0.5
+    assert np.allclose(r0, r1, atol=1e-2)
+
+
+def test_pipe_taper_increases_radius() -> None:
+    spec = ThreadSpec(
+        major_diameter=10.0,
+        pitch=1.5,
+        length=10.0,
+        profile="pipe",
+        taper_diameter_per_length=1.0 / 16.0,
+    )
+    mesh = make_external_thread(spec, quality=MeshQuality(segments_per_turn=16, circumferential_segments=48))
+    theta_count = 48
+    ring0 = mesh.vertices[:theta_count]
+    ring_end = mesh.vertices[-(theta_count + 2) : -2]
+    r0 = (ring0[:, 0] ** 2 + ring0[:, 1] ** 2) ** 0.5
+    r1 = (ring_end[:, 0] ** 2 + ring_end[:, 1] ** 2) ** 0.5
+    assert r1.max() > r0.max()
+
+
+def test_higbee_smooths_start() -> None:
+    spec = ThreadSpec(
+        major_diameter=8.0,
+        pitch=1.25,
+        length=8.0,
+        start_treatment="higbee",
+        start_treatment_length=2.0,
+    )
+    mesh = make_external_thread(spec, quality=MeshQuality(segments_per_turn=16, circumferential_segments=48))
+    theta_count = 48
+    ring0 = mesh.vertices[:theta_count]
+    ring1 = mesh.vertices[theta_count : 2 * theta_count]
+    r0 = (ring0[:, 0] ** 2 + ring0[:, 1] ** 2) ** 0.5
+    r1 = (ring1[:, 0] ** 2 + ring1[:, 1] ** 2) ** 0.5
+    assert r1.max() >= r0.max()

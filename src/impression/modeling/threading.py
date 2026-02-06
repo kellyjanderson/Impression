@@ -7,7 +7,11 @@ from typing import Callable, Literal, Sequence
 import numpy as np
 
 from impression.mesh import Mesh, analyze_mesh
-from impression.modeling.csg import boolean_difference
+from impression.cache import LRUCache
+from impression.mesh_quality import MeshLOD, MeshQuality, apply_lod, downshift_quality
+from impression.printability import warn_min_feature
+from impression.validation import validate_periodic_profile
+from impression.modeling.csg import boolean_difference, boolean_union
 from impression.modeling.primitives import make_cylinder, make_ngon
 
 ThreadHand = Literal["right", "left"]
@@ -24,6 +28,7 @@ ThreadProfileName = Literal[
     "rounded",
     "custom",
 ]
+ProfileAnchor = Literal["minor", "major", "pitch"]
 EndTreatment = Literal["none", "higbee", "chamfer", "lead_in"]
 
 
@@ -55,17 +60,6 @@ class ThreadFitPreset:
 
 
 @dataclass(frozen=True)
-class MeshQuality:
-    """Controls tessellation density and runtime cost."""
-
-    segments_per_turn: int = 48
-    circumferential_segments: int | None = None
-    max_chord_deviation: float | None = 0.08
-    max_triangles: int | None = 400_000
-    adaptive_budget: bool = False
-
-
-@dataclass(frozen=True)
 class ThreadMeshEstimate:
     """Predicted mesh size for planning and budget enforcement."""
 
@@ -86,7 +80,9 @@ class ThreadSpec:
     hand: ThreadHand = "right"
     starts: int = 1
     taper_diameter_per_length: float = 0.0
+    pitch_profile: tuple[tuple[float, float], ...] | None = None
     thread_depth: float | None = None
+    profile_anchor: ProfileAnchor = "minor"
     crest_flat_ratio: float = 0.125
     root_flat_ratio: float = 0.125
     flank_angle_deg: float | None = None
@@ -97,6 +93,13 @@ class ThreadSpec:
     end_treatment: EndTreatment = "none"
     start_treatment_length: float = 0.0
     end_treatment_length: float = 0.0
+    lead_in_length: float = 0.0
+    lead_out_length: float = 0.0
+    shell_only: bool = False
+    runout_length: float = 0.0
+    runout_depth: float = 0.0
+    runout_clearance: float = 0.2
+    nozzle_diameter: float = 0.4
     axis_origin: tuple[float, float, float] = (0.0, 0.0, 0.0)
     axis_direction: tuple[float, float, float] = (0.0, 0.0, 1.0)
     custom_profile_points: tuple[tuple[float, float], ...] | None = None
@@ -124,6 +127,8 @@ _METRIC_COARSE: dict[int, float] = {
     20: 2.50,
     24: 3.00,
 }
+
+_THREAD_MESH_CACHE = LRUCache(max_size=64)
 
 
 def lookup_standard_thread(
@@ -265,6 +270,8 @@ def validate_thread(spec: ThreadSpec, quality: MeshQuality | None = None) -> Thr
         raise InvalidThreadSpec(f"Unsupported start treatment '{spec.start_treatment}'.")
     if spec.end_treatment not in {"none", "higbee", "chamfer", "lead_in"}:
         raise InvalidThreadSpec(f"Unsupported end treatment '{spec.end_treatment}'.")
+    if spec.lead_in_length < 0 or spec.lead_out_length < 0:
+        raise InvalidThreadSpec("Lead-in/lead-out lengths must be non-negative.")
 
     axis = np.asarray(spec.axis_direction, dtype=float)
     if np.linalg.norm(axis) == 0:
@@ -272,6 +279,23 @@ def validate_thread(spec: ThreadSpec, quality: MeshQuality | None = None) -> Thr
 
     if spec.custom_profile_points is not None and len(spec.custom_profile_points) < 3:
         raise InvalidThreadSpec("custom_profile_points must contain at least 3 points.")
+    if spec.profile_anchor not in {"minor", "major", "pitch"}:
+        raise InvalidThreadSpec("profile_anchor must be 'minor', 'major', or 'pitch'.")
+    if spec.custom_profile_points is not None:
+        try:
+            validate_periodic_profile(spec.custom_profile_points)
+        except Exception as exc:  # pragma: no cover - defensive mapping
+            raise InvalidThreadSpec(str(exc)) from exc
+    if spec.pitch_profile is not None:
+        if len(spec.pitch_profile) < 2:
+            raise InvalidThreadSpec("pitch_profile must contain at least 2 (z, pitch) points.")
+        for z, pitch in spec.pitch_profile:
+            if pitch <= 0:
+                raise InvalidThreadSpec("pitch_profile pitches must be positive.")
+    if spec.runout_length < 0 or spec.runout_depth < 0 or spec.runout_clearance < 0:
+        raise InvalidThreadSpec("runout_length, runout_depth, and runout_clearance must be non-negative.")
+    if spec.nozzle_diameter < 0:
+        raise InvalidThreadSpec("nozzle_diameter must be non-negative.")
 
     if quality is not None:
         if quality.segments_per_turn < 8:
@@ -279,6 +303,8 @@ def validate_thread(spec: ThreadSpec, quality: MeshQuality | None = None) -> Thr
         if quality.circumferential_segments is not None and quality.circumferential_segments < 12:
             raise InvalidThreadSpec("circumferential_segments must be at least 12 when provided.")
 
+    warn_min_feature("thread depth", thread_depth, spec.nozzle_diameter)
+    warn_min_feature("thread pitch", spec.pitch, spec.nozzle_diameter)
     return spec
 
 
@@ -370,16 +396,25 @@ def make_hex_nut(
     if thickness <= 0 or across_flats <= 0:
         raise InvalidThreadSpec("thickness and across_flats must be positive.")
 
+    epsilon = max(0.0, quality.boolean_epsilon)
+    adjusted_thickness = thickness + epsilon * 2.0
     circ_radius = across_flats / np.sqrt(3.0)
     nut_body = make_ngon(
         sides=6,
         radius=circ_radius,
-        height=thickness,
-        center=(spec.axis_origin[0], spec.axis_origin[1], spec.axis_origin[2] + thickness / 2.0),
+        height=adjusted_thickness,
+        center=(spec.axis_origin[0], spec.axis_origin[1], spec.axis_origin[2] + adjusted_thickness / 2.0),
     )
 
-    cutter_spec = replace(spec, kind="internal", length=thickness + 1.0, axis_origin=(spec.axis_origin[0], spec.axis_origin[1], spec.axis_origin[2] - 0.5))
-    cutter = make_internal_thread(cutter_spec, quality=quality)
+    cutter_spec = replace(
+        spec,
+        kind="internal",
+        length=adjusted_thickness + 1.0 + epsilon * 2.0,
+        axis_origin=(spec.axis_origin[0], spec.axis_origin[1], spec.axis_origin[2] - 0.5 - epsilon),
+        major_diameter=spec.major_diameter + epsilon * 2.0,
+    )
+    cutter_quality = replace(quality, boolean_epsilon=0.0)
+    cutter = make_internal_thread(cutter_spec, quality=cutter_quality)
     nut = boolean_difference(nut_body, [cutter])
     if color is not None:
         from impression.modeling._color import set_mesh_color
@@ -401,19 +436,76 @@ def make_round_nut(
     if thickness <= 0 or outer_diameter <= 0:
         raise InvalidThreadSpec("thickness and outer_diameter must be positive.")
 
+    epsilon = max(0.0, quality.boolean_epsilon)
+    adjusted_thickness = thickness + epsilon * 2.0
     nut_body = make_cylinder(
         radius=outer_diameter / 2.0,
-        height=thickness,
-        center=(spec.axis_origin[0], spec.axis_origin[1], spec.axis_origin[2] + thickness / 2.0),
+        height=adjusted_thickness,
+        center=(spec.axis_origin[0], spec.axis_origin[1], spec.axis_origin[2] + adjusted_thickness / 2.0),
     )
-    cutter_spec = replace(spec, kind="internal", length=thickness + 1.0, axis_origin=(spec.axis_origin[0], spec.axis_origin[1], spec.axis_origin[2] - 0.5))
-    cutter = make_internal_thread(cutter_spec, quality=quality)
+    cutter_spec = replace(
+        spec,
+        kind="internal",
+        length=adjusted_thickness + 1.0 + epsilon * 2.0,
+        axis_origin=(spec.axis_origin[0], spec.axis_origin[1], spec.axis_origin[2] - 0.5 - epsilon),
+        major_diameter=spec.major_diameter + epsilon * 2.0,
+    )
+    cutter_quality = replace(quality, boolean_epsilon=0.0)
+    cutter = make_internal_thread(cutter_spec, quality=cutter_quality)
     nut = boolean_difference(nut_body, [cutter])
     if color is not None:
         from impression.modeling._color import set_mesh_color
 
         set_mesh_color(nut, color)
     return nut
+
+
+def make_runout_relief(
+    spec: ThreadSpec,
+    *,
+    quality: MeshQuality = MeshQuality(),
+    color: Sequence[float] | str | None = None,
+) -> Mesh:
+    """Create explicit runout relief (undercut) at thread ends."""
+
+    validate_thread(spec, quality)
+    if spec.runout_length <= 1e-9 or spec.runout_depth <= 1e-9:
+        raise InvalidThreadSpec("runout_length and runout_depth must be positive for relief geometry.")
+
+    base_major = spec.major_diameter * 0.5
+    depth = _resolve_thread_depth(spec) + spec.runout_depth
+    if spec.kind == "external":
+        relief_radius = max(base_major - depth - spec.runout_clearance, 1e-6)
+    else:
+        relief_radius = base_major + spec.runout_depth + spec.runout_clearance
+
+    axis_origin = np.asarray(spec.axis_origin, dtype=float)
+    axis_basis = _build_axis_basis(spec.axis_direction)
+
+    def _make_relief_at(z_center: float) -> Mesh:
+        center = axis_origin + axis_basis @ np.array([0.0, 0.0, z_center], dtype=float)
+        return make_cylinder(
+            radius=relief_radius,
+            height=spec.runout_length,
+            center=(float(center[0]), float(center[1]), float(center[2])),
+            direction=spec.axis_direction,
+            resolution=quality.circumferential_segments or 64,
+        )
+
+    start = _make_relief_at(spec.runout_length / 2.0)
+    end = _make_relief_at(spec.length - spec.runout_length / 2.0)
+    relief = boolean_union([start, end])
+    if color is not None:
+        from impression.modeling._color import set_mesh_color
+
+        set_mesh_color(relief, color)
+    return relief
+
+
+def clear_thread_cache() -> None:
+    """Clear cached thread meshes."""
+
+    _THREAD_MESH_CACHE.clear()
 
 
 def _build_thread_mesh(
@@ -423,26 +515,31 @@ def _build_thread_mesh(
     color: Sequence[float] | str | None,
 ) -> Mesh:
     validate_thread(spec, quality)
+    quality = apply_lod(quality)
     estimate = estimate_mesh_cost(spec, quality)
     if quality.max_triangles is not None and estimate.predicted_faces > quality.max_triangles:
         if quality.adaptive_budget:
-            reduced = max(8, int(quality.segments_per_turn * quality.max_triangles / max(estimate.predicted_faces, 1)))
-            quality = replace(quality, segments_per_turn=reduced)
+            quality = downshift_quality(quality, estimate.predicted_faces)
             estimate = estimate_mesh_cost(spec, quality)
         else:
             raise MeshBudgetExceeded(
                 f"Predicted face count {estimate.predicted_faces} exceeds budget {quality.max_triangles}."
             )
 
+    cache_key = _cache_key(spec, quality, color)
+    cached = _THREAD_MESH_CACHE.get(cache_key)
+    if cached is not None:
+        return cached.copy()
+
     z_count = estimate.z_segments + 1
     z_values = np.linspace(0.0, spec.length, z_count, dtype=float)
+    pitch_fn = _build_pitch_function(spec)
+    cumulative_turns = _integrate_turns(z_values, pitch_fn)
     theta_count = estimate.theta_segments
     theta_values = np.linspace(0.0, 2.0 * np.pi, theta_count, endpoint=False, dtype=float)
 
     profile_fn = _build_profile_function(spec)
     thread_depth = _resolve_thread_depth(spec)
-    base_minor = spec.major_diameter - 2.0 * thread_depth
-    base_minor_radius = max(base_minor * 0.5, 1e-6)
 
     axis_origin = np.asarray(spec.axis_origin, dtype=float)
     axis_basis = _build_axis_basis(spec.axis_direction)
@@ -450,13 +547,43 @@ def _build_thread_mesh(
     verts = np.zeros((z_count * theta_count + 2, 3), dtype=float)
 
     for zi, z in enumerate(z_values):
-        radius_base = spec.major_diameter * 0.5 + 0.5 * spec.taper_diameter_per_length * z
-        minor_radius = radius_base - thread_depth
+        base_major_radius = spec.major_diameter * 0.5 + 0.5 * spec.taper_diameter_per_length * z
+        base_minor_radius = base_major_radius - thread_depth
         amp = _thread_amplitude(spec, z)
+        align_scale = _lead_alignment_scale(spec, z)
+        align_extra = (1.0 - align_scale) * thread_depth
+        if spec.profile_anchor == "major":
+            anchor_radius = base_major_radius
+        elif spec.profile_anchor == "pitch":
+            anchor_radius = base_major_radius - thread_depth * 0.5
+        else:
+            anchor_radius = base_minor_radius
+
+        core_radius = anchor_radius
+        major_radius = anchor_radius + thread_depth
+        if spec.kind == "internal":
+            major_radius = base_major_radius
+            core_radius = base_major_radius - thread_depth
+
+        # Apply lead-in/out alignment (taper the major/core separation).
+        if spec.kind == "external":
+            major_radius = max(major_radius - align_extra, core_radius)
+        else:
+            core_radius = min(core_radius + align_extra, major_radius)
+
+        # Apply runout relief (undercut near ends).
+        runout = _runout_relief(spec, z)
+        if runout > 0:
+            if spec.kind == "external":
+                core_radius = max(core_radius - runout, 1e-6)
+            else:
+                major_radius = max(major_radius - runout, core_radius)
+        local_depth = max(major_radius - core_radius, 0.0)
+        turns = cumulative_turns[zi]
         for ti, theta in enumerate(theta_values):
-            base_phase = _thread_phase(spec, theta=theta, z=z)
+            base_phase = _thread_phase(spec, theta=theta, turns=turns)
             h = max(profile_fn(base_phase + k / spec.starts) for k in range(spec.starts))
-            local_radius = minor_radius + thread_depth * amp * h
+            local_radius = core_radius + local_depth * amp * h
             p_local = np.array([local_radius * np.cos(theta), local_radius * np.sin(theta), z], dtype=float)
             verts[zi * theta_count + ti] = axis_origin + axis_basis @ p_local
 
@@ -481,14 +608,15 @@ def _build_thread_mesh(
             faces.append([a, b, c])
             faces.append([a, c, d])
 
-    for ti in range(theta_count):
-        tj = (ti + 1) % theta_count
-        faces.append([bottom_center_idx, tj, ti])
+    if not spec.shell_only:
+        for ti in range(theta_count):
+            tj = (ti + 1) % theta_count
+            faces.append([bottom_center_idx, tj, ti])
 
-    top_offset = (z_count - 1) * theta_count
-    for ti in range(theta_count):
-        tj = (ti + 1) % theta_count
-        faces.append([top_center_idx, top_offset + ti, top_offset + tj])
+        top_offset = (z_count - 1) * theta_count
+        for ti in range(theta_count):
+            tj = (ti + 1) % theta_count
+            faces.append([top_center_idx, top_offset + ti, top_offset + tj])
 
     mesh = Mesh(vertices=verts, faces=np.asarray(faces, dtype=int))
     if color is not None:
@@ -497,12 +625,13 @@ def _build_thread_mesh(
         set_mesh_color(mesh, color)
 
     analyze_mesh(mesh)
+    _THREAD_MESH_CACHE.set(cache_key, mesh.copy())
     return mesh
 
 
-def _thread_phase(spec: ThreadSpec, *, theta: float, z: float) -> float:
+def _thread_phase(spec: ThreadSpec, *, theta: float, turns: float) -> float:
     hand_sign = 1.0 if spec.hand == "right" else -1.0
-    base = (hand_sign * theta - (2.0 * np.pi / spec.pitch) * z) / (2.0 * np.pi)
+    base = (hand_sign * theta) / (2.0 * np.pi) - turns
     return _frac(base)
 
 
@@ -535,19 +664,60 @@ def _edge_treatment_factor(distance_to_edge: float, mode: EndTreatment, length: 
     return 1.0
 
 
+def _lead_alignment_scale(spec: ThreadSpec, z: float) -> float:
+    length = spec.length
+    start_len = spec.lead_in_length
+    end_len = spec.lead_out_length
+    start_scale = 1.0
+    end_scale = 1.0
+    if start_len > 1e-9:
+        start_scale = np.clip(z / start_len, 0.0, 1.0)
+    if end_len > 1e-9:
+        end_scale = np.clip((length - z) / end_len, 0.0, 1.0)
+    return float(min(start_scale, end_scale))
+
+
+def _runout_relief(spec: ThreadSpec, z: float) -> float:
+    if spec.runout_length <= 1e-9 or spec.runout_depth <= 1e-9:
+        return 0.0
+    start_zone = max(spec.runout_length - z, 0.0)
+    end_zone = max(spec.runout_length - (spec.length - z), 0.0)
+    zone = max(start_zone, end_zone)
+    if zone <= 0.0:
+        return 0.0
+    t = np.clip(zone / spec.runout_length, 0.0, 1.0)
+    return spec.runout_depth * t
+
+
+def _warn_min_feature(spec: ThreadSpec, thread_depth: float) -> None:
+    if spec.nozzle_diameter <= 0:
+        return
+    nozzle = spec.nozzle_diameter
+    if thread_depth < nozzle:
+        warnings.warn(
+            f"Thread depth {thread_depth:.3f}mm is below nozzle diameter {nozzle:.3f}mm.",
+            RuntimeWarning,
+        )
+    if spec.pitch < nozzle:
+        warnings.warn(
+            f"Thread pitch {spec.pitch:.3f}mm is below nozzle diameter {nozzle:.3f}mm.",
+            RuntimeWarning,
+        )
+
+
 def _build_profile_function(spec: ThreadSpec) -> Callable[[float], float]:
     if spec.profile == "custom":
         if not spec.custom_profile_points:
             raise InvalidThreadSpec("custom profile requires custom_profile_points.")
         return _build_custom_profile(spec.custom_profile_points)
 
-    if spec.profile in {"iso", "unified", "pipe"}:
+    if spec.profile in {"iso", "unified"}:
         crest = spec.crest_flat_ratio
         root = spec.root_flat_ratio
         return lambda phase: _trapezoid_wave(phase, crest_ratio=crest, root_ratio=root)
 
     if spec.profile == "whitworth":
-        return lambda phase: _rounded_trapezoid_wave(phase, crest_ratio=0.12, root_ratio=0.12, roundness=0.8)
+        return _whitworth_wave
 
     if spec.profile in {"acme", "trapezoidal"}:
         return lambda phase: _trapezoid_wave(phase, crest_ratio=0.30, root_ratio=0.30)
@@ -557,6 +727,9 @@ def _build_profile_function(spec: ThreadSpec) -> Callable[[float], float]:
 
     if spec.profile == "buttress":
         return lambda phase: _buttress_wave(phase)
+
+    if spec.profile == "pipe":
+        return _pipe_wave
 
     if spec.profile == "rounded":
         return lambda phase: 0.5 * (1.0 + np.cos(2.0 * np.pi * _frac(phase)))
@@ -568,6 +741,10 @@ def _build_custom_profile(points: Sequence[tuple[float, float]]) -> Callable[[fl
     arr = np.asarray(points, dtype=float)
     if arr.ndim != 2 or arr.shape[1] != 2:
         raise InvalidThreadSpec("custom_profile_points must be Nx2 points.")
+    try:
+        validate_periodic_profile(points)
+    except Exception as exc:  # pragma: no cover - defensive mapping
+        raise InvalidThreadSpec(str(exc)) from exc
     phases = arr[:, 0]
     values = arr[:, 1]
     if np.any(np.diff(phases) < 0):
@@ -623,6 +800,20 @@ def _rounded_trapezoid_wave(phase: float, *, crest_ratio: float, root_ratio: flo
     return float((1.0 - blend) * raw + blend * smooth)
 
 
+def _whitworth_wave(phase: float) -> float:
+    """Whitworth 55° thread form approximation with rounded crest/root."""
+
+    p = _frac(phase)
+    # Sinusoidal profile gives rounded crest/root without flats.
+    return float(0.5 - 0.5 * np.cos(2.0 * np.pi * p))
+
+
+def _pipe_wave(phase: float) -> float:
+    """Pipe thread approximation with reduced crest/root flats."""
+
+    return _trapezoid_wave(phase, crest_ratio=0.10, root_ratio=0.10)
+
+
 def _buttress_wave(phase: float) -> float:
     p = _frac(phase)
     if p < 0.20:
@@ -639,12 +830,14 @@ def _resolve_thread_depth(spec: ThreadSpec) -> float:
         return float(spec.thread_depth)
 
     pitch = float(spec.pitch)
-    if spec.profile in {"iso", "pipe"}:
+    if spec.profile == "iso":
         return 0.61343 * pitch
     if spec.profile == "unified":
         return 0.64952 * pitch
     if spec.profile == "whitworth":
         return 0.64033 * pitch
+    if spec.profile == "pipe":
+        return 0.80000 * pitch
     if spec.profile in {"acme", "trapezoidal"}:
         return 0.50 * pitch
     if spec.profile == "square":
@@ -656,6 +849,76 @@ def _resolve_thread_depth(spec: ThreadSpec) -> float:
     if spec.profile == "custom":
         return 0.55 * pitch
     raise InvalidThreadSpec(f"Unsupported profile '{spec.profile}'.")
+
+
+def _apply_lod(quality: MeshQuality) -> MeshQuality:
+    if quality.lod == "final":
+        return quality
+    if quality.lod != "preview":
+        raise InvalidThreadSpec("lod must be 'preview' or 'final'.")
+    return replace(
+        quality,
+        segments_per_turn=max(8, int(quality.segments_per_turn * 0.5)),
+        circumferential_segments=(
+            None
+            if quality.circumferential_segments is None
+            else max(12, int(quality.circumferential_segments * 0.5))
+        ),
+    )
+
+
+def _downshift_quality(quality: MeshQuality, estimate: ThreadMeshEstimate) -> MeshQuality:
+    if quality.max_triangles is None or estimate.predicted_faces == 0:
+        return quality
+    scale = max(quality.max_triangles / estimate.predicted_faces, 0.1)
+    new_segments = max(8, int(quality.segments_per_turn * scale))
+    if quality.circumferential_segments is not None:
+        new_circ = max(12, int(quality.circumferential_segments * scale))
+    else:
+        new_circ = None
+    return replace(quality, segments_per_turn=new_segments, circumferential_segments=new_circ)
+
+
+def _cache_key(spec: ThreadSpec, quality: MeshQuality, color: Sequence[float] | str | None) -> tuple:
+    return (
+        spec,
+        quality,
+        tuple(color) if isinstance(color, (list, tuple)) else color,
+    )
+
+
+def _build_pitch_function(spec: ThreadSpec) -> Callable[[float], float]:
+    if spec.pitch_profile is None:
+        pitch = float(spec.pitch)
+        return lambda z: pitch
+    points = np.asarray(spec.pitch_profile, dtype=float)
+    if points.ndim != 2 or points.shape[1] != 2:
+        raise InvalidThreadSpec("pitch_profile must be a sequence of (z, pitch) pairs.")
+    points = points[np.argsort(points[:, 0])]
+    zs = points[:, 0]
+    ps = points[:, 1]
+
+    def fn(z: float) -> float:
+        if z <= zs[0]:
+            return float(ps[0])
+        if z >= zs[-1]:
+            return float(ps[-1])
+        return float(np.interp(z, zs, ps))
+
+    return fn
+
+
+def _integrate_turns(z_values: np.ndarray, pitch_fn: Callable[[float], float]) -> np.ndarray:
+    turns = np.zeros_like(z_values, dtype=float)
+    for i in range(1, len(z_values)):
+        z0 = float(z_values[i - 1])
+        z1 = float(z_values[i])
+        p0 = pitch_fn(z0)
+        p1 = pitch_fn(z1)
+        if p0 <= 0 or p1 <= 0:
+            raise InvalidThreadSpec("pitch must be positive along the profile.")
+        turns[i] = turns[i - 1] + 0.5 * ((1.0 / p0) + (1.0 / p1)) * (z1 - z0)
+    return turns
 
 
 def _resolve_theta_segments(spec: ThreadSpec, quality: MeshQuality) -> int:
@@ -777,6 +1040,8 @@ __all__ = [
     "make_round_nut",
     "make_tapped_hole_cutter",
     "make_threaded_rod",
+    "make_runout_relief",
+    "clear_thread_cache",
     "paired_fit",
     "validate_thread",
 ]
