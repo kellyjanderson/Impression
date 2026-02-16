@@ -29,7 +29,7 @@ from .drawing2d import (
     make_rect,
 )
 from .extrude import linear_extrude, rotate_extrude
-from .loft import loft, loft_profiles
+from .loft import loft, loft_profiles, loft_endcaps
 from .morph import morph, morph_profiles
 from .path3d import Arc3D, Bezier3D, Line3D, Path3D
 from .csg import boolean_union, boolean_difference, boolean_intersection, union_meshes
@@ -95,6 +95,7 @@ __all__ = [
     "morph_profiles",
     "loft",
     "loft_profiles",
+    "loft_endcaps",
     "boolean_union",
     "boolean_difference",
     "boolean_intersection",

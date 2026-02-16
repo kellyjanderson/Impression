@@ -61,6 +61,52 @@ list_releases() {
         | awk 'NF && !seen[$0]++ {print}'
 }
 
+read_project_version() {
+    local pyproject="$1/pyproject.toml"
+    if [[ ! -f "$pyproject" ]]; then
+        return 1
+    fi
+    awk -F'"' '/^version[[:space:]]*=[[:space:]]*"/ {print $2; exit}' "$pyproject"
+}
+
+set_project_version() {
+    local root="$1"
+    local version="$2"
+    local pyproject="$root/pyproject.toml"
+    local init_py="$root/src/impression/__init__.py"
+    local tmp=""
+
+    if [[ ! -f "$pyproject" || ! -f "$init_py" ]]; then
+        return 1
+    fi
+
+    tmp="$(mktemp)"
+    awk -v v="$version" '
+        BEGIN { updated=0 }
+        /^version[[:space:]]*=[[:space:]]*"/ {
+            print "version = \"" v "\""
+            updated=1
+            next
+        }
+        { print }
+        END { if (!updated) exit 2 }
+    ' "$pyproject" > "$tmp"
+    mv "$tmp" "$pyproject"
+
+    tmp="$(mktemp)"
+    awk -v v="$version" '
+        BEGIN { updated=0 }
+        /^__version__[[:space:]]*=[[:space:]]*"/ {
+            print "__version__ = \"" v "\""
+            updated=1
+            next
+        }
+        { print }
+        END { if (!updated) exit 2 }
+    ' "$init_py" > "$tmp"
+    mv "$tmp" "$init_py"
+}
+
 if [[ "${list_only:-0}" == "1" ]]; then
     list_releases
     exit 0
@@ -148,6 +194,31 @@ if [[ "$install_source" == "release" ]]; then
         exit 1
     fi
     repo_root="$release_dir/impression"
+    release_version="${release_ref#v}"
+    project_version="$(read_project_version "$repo_root" || true)"
+    if [[ -n "$project_version" && "$project_version" != "$release_version" ]]; then
+        mismatch_msg="Release tag ${release_ref} contains project version ${project_version}."
+        if [[ "${IMPRESSION_STRICT_TAG_VERSION:-0}" == "1" ]]; then
+            echo "${mismatch_msg}" >&2
+            echo "Refusing to install mismatched release because IMPRESSION_STRICT_TAG_VERSION=1." >&2
+            exit 1
+        fi
+        log "WARNING: ${mismatch_msg} Normalizing package metadata to ${release_version}."
+        if ! set_project_version "$repo_root" "$release_version"; then
+            echo "Failed to normalize package version metadata for ${release_ref}." >&2
+            exit 1
+        fi
+        project_version="$(read_project_version "$repo_root" || true)"
+        if [[ "$project_version" != "$release_version" ]]; then
+            echo "Package version normalization failed (expected ${release_version}, got ${project_version})." >&2
+            exit 1
+        fi
+        if [[ "${IMPRESSION_ALLOW_VERSION_MISMATCH:-0}" == "1" ]]; then
+            log "IMPRESSION_ALLOW_VERSION_MISMATCH is set; normalization completed and install will continue."
+        else
+            log "Version mismatch was auto-corrected for installation."
+        fi
+    fi
 else
     if [[ "$interactive" == "1" ]]; then
         echo "Interactive mode is only available for release installs." >&2
