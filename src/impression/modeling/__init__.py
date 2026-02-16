@@ -38,6 +38,12 @@ from .group import MeshGroup, group
 from .ops import offset, hull, minkowski
 from .heightmap import heightmap, displace_heightmap
 from .text import make_text, text, text_profiles
+from .hinges import (
+    make_traditional_hinge_leaf,
+    make_traditional_hinge_pair,
+    make_living_hinge,
+    make_bistable_hinge,
+)
 from impression.mesh_quality import MeshQuality
 from .threading import (
     FIT_PRESETS,
@@ -118,6 +124,10 @@ __all__ = [
     "make_text",
     "text",
     "text_profiles",
+    "make_traditional_hinge_leaf",
+    "make_traditional_hinge_pair",
+    "make_living_hinge",
+    "make_bistable_hinge",
     "FIT_PRESETS",
     "InvalidFitSpec",
     "InvalidThreadSpec",
