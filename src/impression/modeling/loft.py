@@ -80,6 +80,83 @@ class _PairedSectionTransition:
     region_closures: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class PlannedStation:
+    """Planner output for one normalized station."""
+
+    station_index: int
+    t: float
+    origin: np.ndarray
+    u: np.ndarray
+    v: np.ndarray
+    n: np.ndarray
+    regions: tuple[tuple[np.ndarray, ...], ...]
+
+
+@dataclass(frozen=True)
+class PlannedLoopRef:
+    """Planner-native loop reference."""
+
+    kind: str  # actual | synthetic
+    index: int
+
+
+@dataclass(frozen=True)
+class PlannedRegionRef:
+    """Planner-native region reference."""
+
+    kind: str  # actual | synthetic
+    index: int
+
+
+@dataclass(frozen=True)
+class PlannedLoopPair:
+    """Planner output for one loop correspondence."""
+
+    prev_loop_ref: PlannedLoopRef
+    curr_loop_ref: PlannedLoopRef
+    prev_loop: np.ndarray
+    curr_loop: np.ndarray
+    role: str  # stable | synthetic_birth | synthetic_death
+
+
+@dataclass(frozen=True)
+class PlannedClosure:
+    """Planner output for closure ownership."""
+
+    side: str  # prev | curr
+    scope: str  # loop | region
+    loop_index: int | None = None
+
+
+@dataclass(frozen=True)
+class PlannedRegionPair:
+    """Planner output for one region-level transition pairing."""
+
+    prev_region_ref: PlannedRegionRef
+    curr_region_ref: PlannedRegionRef
+    loop_pairs: tuple[PlannedLoopPair, ...]
+    closures: tuple[PlannedClosure, ...]
+
+
+@dataclass(frozen=True)
+class PlannedTransition:
+    """Planner output for one station interval transition."""
+
+    interval: tuple[int, int]
+    region_pairs: tuple[PlannedRegionPair, ...]
+
+
+@dataclass(frozen=True)
+class LoftPlan:
+    """Deterministic planner output consumed by the loft executor."""
+
+    samples: int
+    stations: tuple[PlannedStation, ...]
+    transitions: tuple[PlannedTransition, ...]
+    metadata: dict[str, object]
+
+
 def loft_profiles(
     profiles: Sequence[Section | Region | Path2D | object],
     path: Path3D | PolyPath | Sequence[Sequence[float]] | None = None,
@@ -232,17 +309,28 @@ def loft_sections(
     split_merge_steps: int = 8,
     split_merge_bias: float = 0.5,
 ) -> Mesh:
-    """Loft topology-native sections using explicit station frames.
+    """Loft topology-native sections using a planner/executor pipeline."""
 
-    Current contract:
-    - stations must be strictly ordered by `t`
-    - station frames must be right-handed orthonormal bases
-    - deterministic one-to-one region correspondence
-    - hole birth/death is supported via bounded synthetic transition loops
-    - `split_merge_mode="fail"` rejects split/merge transitions
-    - `split_merge_mode="resolve"` supports deterministic 1->N and N->1
-      decomposition (N->M with N>1 and M>1 remains unsupported)
-    """
+    plan = loft_plan_sections(
+        stations,
+        samples=samples,
+        quality=quality,
+        split_merge_mode=split_merge_mode,
+        split_merge_steps=split_merge_steps,
+        split_merge_bias=split_merge_bias,
+    )
+    return loft_execute_plan(plan, cap_ends=cap_ends)
+
+
+def loft_plan_sections(
+    stations: Sequence[Station],
+    samples: int = 200,
+    quality: MeshQuality | None = None,
+    split_merge_mode: str = "fail",
+    split_merge_steps: int = 8,
+    split_merge_bias: float = 0.5,
+) -> LoftPlan:
+    """Build a deterministic loft execution plan from section stations."""
 
     if quality is not None:
         quality = apply_lod(quality)
@@ -250,8 +338,8 @@ def loft_sections(
 
     _validate_split_merge_mode(split_merge_mode)
     _validate_split_merge_controls(split_merge_steps, split_merge_bias)
-
     _validate_section_stations(stations)
+
     effective_stations = list(stations)
     if split_merge_mode == "resolve":
         effective_stations = _expand_split_merge_stations(
@@ -262,18 +350,70 @@ def loft_sections(
         )
         _validate_section_stations(effective_stations)
 
-    station_regions: list[list[list[np.ndarray]]] = []
+    planned_stations: list[PlannedStation] = []
     for idx, station in enumerate(effective_stations):
         section = station.section
         if section is None:
             raise ValueError(f"Station at index {idx} is missing section data.")
-        station_regions.append(_section_to_region_loops(section, samples=samples))
+        regions = _section_to_region_loops(section, samples=samples)
+        planned_stations.append(
+            PlannedStation(
+                station_index=idx,
+                t=station.t,
+                origin=station.origin.copy(),
+                u=station.u.copy(),
+                v=station.v.copy(),
+                n=station.n.copy(),
+                regions=tuple(tuple(np.asarray(loop, dtype=float) for loop in region) for region in regions),
+            )
+        )
+
+    planned_transitions: list[PlannedTransition] = []
+    for idx in range(len(planned_stations) - 1):
+        transitions = _pair_sections_for_transition(
+            [list(region) for region in planned_stations[idx].regions],
+            [list(region) for region in planned_stations[idx + 1].regions],
+            split_merge_mode=split_merge_mode,
+            split_merge_steps=split_merge_steps,
+            split_merge_bias=split_merge_bias,
+        )
+        planned_transitions.append(
+            PlannedTransition(
+                interval=(idx, idx + 1),
+                region_pairs=tuple(_as_planned_region_pair(transition) for transition in transitions),
+            )
+        )
+
+    plan = LoftPlan(
+        samples=samples,
+        stations=tuple(planned_stations),
+        transitions=tuple(planned_transitions),
+        metadata={
+            "plan_schema_version": 1,
+            "planner": "loft_plan_sections",
+            "split_merge_mode": split_merge_mode,
+            "split_merge_steps": split_merge_steps,
+            "split_merge_bias": split_merge_bias,
+        },
+    )
+    _validate_loft_plan(plan)
+    return plan
+
+
+def loft_execute_plan(
+    plan: LoftPlan,
+    *,
+    cap_ends: bool = False,
+) -> Mesh:
+    """Execute a loft plan into a deterministic mesh."""
+
+    _validate_loft_plan(plan)
 
     vertices: list[np.ndarray] = []
     offsets: list[list[list[int]]] = []
-    for station, regions in zip(effective_stations, station_regions, strict=True):
+    for station in plan.stations:
         station_offsets: list[list[int]] = []
-        for loops in regions:
+        for loops in station.regions:
             region_offsets: list[int] = []
             for loop in loops:
                 region_offsets.append(len(vertices))
@@ -284,40 +424,38 @@ def loft_sections(
 
     faces: list[list[int]] = []
     loop_start_cache: dict[tuple[int, str, int, str, int], int] = {}
-    for idx in range(len(station_regions) - 1):
-        transitions = _pair_sections_for_transition(
-            station_regions[idx],
-            station_regions[idx + 1],
-            split_merge_mode=split_merge_mode,
-            split_merge_steps=split_merge_steps,
-            split_merge_bias=split_merge_bias,
-        )
-        for transition in transitions:
-            paired = transition.region
-
-            for loop_idx in range(len(paired.prev_loops)):
+    for transition_block in plan.transitions:
+        prev_idx, curr_idx = transition_block.interval
+        prev_station = plan.stations[prev_idx]
+        curr_station = plan.stations[curr_idx]
+        for region_pair in transition_block.region_pairs:
+            for loop_pair in region_pair.loop_pairs:
                 prev_start = _resolve_transition_loop_start(
-                    station_index=idx,
-                    station=effective_stations[idx],
-                    region_ref=transition.prev_region_ref,
-                    ref=paired.prev_sources[loop_idx],
-                    loop=paired.prev_loops[loop_idx],
+                    station_index=prev_idx,
+                    station_origin=prev_station.origin,
+                    station_u=prev_station.u,
+                    station_v=prev_station.v,
+                    region_ref=region_pair.prev_region_ref,
+                    ref=loop_pair.prev_loop_ref,
+                    loop=loop_pair.prev_loop,
                     offsets=offsets,
                     vertices=vertices,
                     loop_start_cache=loop_start_cache,
                 )
                 curr_start = _resolve_transition_loop_start(
-                    station_index=idx + 1,
-                    station=effective_stations[idx + 1],
-                    region_ref=transition.curr_region_ref,
-                    ref=paired.curr_sources[loop_idx],
-                    loop=paired.curr_loops[loop_idx],
+                    station_index=curr_idx,
+                    station_origin=curr_station.origin,
+                    station_u=curr_station.u,
+                    station_v=curr_station.v,
+                    region_ref=region_pair.curr_region_ref,
+                    ref=loop_pair.curr_loop_ref,
+                    loop=loop_pair.curr_loop,
                     offsets=offsets,
                     vertices=vertices,
                     loop_start_cache=loop_start_cache,
                 )
-                for i in range(samples):
-                    j = (i + 1) % samples
+                for i in range(plan.samples):
+                    j = (i + 1) % plan.samples
                     a0 = prev_start + i
                     a1 = prev_start + j
                     b0 = curr_start + i
@@ -325,85 +463,350 @@ def loft_sections(
                     faces.append([a0, a1, b1])
                     faces.append([a0, b1, b0])
 
-            for side, loop_idx in paired.closures:
-                if side == "prev":
-                    closure_start = _resolve_transition_loop_start(
-                        station_index=idx,
-                        station=effective_stations[idx],
-                        region_ref=transition.prev_region_ref,
-                        ref=paired.prev_sources[loop_idx],
-                        loop=paired.prev_loops[loop_idx],
-                        offsets=offsets,
-                        vertices=vertices,
-                        loop_start_cache=loop_start_cache,
-                    )
-                    _, closure_faces = _triangulate_loops([paired.prev_loops[loop_idx]])
-                    faces.extend((closure_faces + closure_start).tolist())
-                else:
-                    closure_start = _resolve_transition_loop_start(
-                        station_index=idx + 1,
-                        station=effective_stations[idx + 1],
-                        region_ref=transition.curr_region_ref,
-                        ref=paired.curr_sources[loop_idx],
-                        loop=paired.curr_loops[loop_idx],
-                        offsets=offsets,
-                        vertices=vertices,
-                        loop_start_cache=loop_start_cache,
-                    )
-                    _, closure_faces = _triangulate_loops([paired.curr_loops[loop_idx]])
-                    faces.extend((closure_faces[:, [0, 2, 1]] + closure_start).tolist())
-
-            for side in transition.region_closures:
-                if side == "prev":
-                    loop_starts = [
-                        _resolve_transition_loop_start(
-                            station_index=idx,
-                            station=effective_stations[idx],
-                            region_ref=transition.prev_region_ref,
-                            ref=paired.prev_sources[loop_idx],
-                            loop=paired.prev_loops[loop_idx],
+            for closure in region_pair.closures:
+                if closure.scope == "loop":
+                    if closure.loop_index is None:
+                        raise ValueError("Invalid plan closure: loop scope requires loop_index.")
+                    loop_pair = region_pair.loop_pairs[closure.loop_index]
+                    if closure.side == "prev":
+                        closure_start = _resolve_transition_loop_start(
+                            station_index=prev_idx,
+                            station_origin=prev_station.origin,
+                            station_u=prev_station.u,
+                            station_v=prev_station.v,
+                            region_ref=region_pair.prev_region_ref,
+                            ref=loop_pair.prev_loop_ref,
+                            loop=loop_pair.prev_loop,
                             offsets=offsets,
                             vertices=vertices,
                             loop_start_cache=loop_start_cache,
                         )
-                        for loop_idx in range(len(paired.prev_loops))
+                        _, closure_faces = _triangulate_loops([loop_pair.prev_loop])
+                        faces.extend((closure_faces + closure_start).tolist())
+                    elif closure.side == "curr":
+                        closure_start = _resolve_transition_loop_start(
+                            station_index=curr_idx,
+                            station_origin=curr_station.origin,
+                            station_u=curr_station.u,
+                            station_v=curr_station.v,
+                            region_ref=region_pair.curr_region_ref,
+                            ref=loop_pair.curr_loop_ref,
+                            loop=loop_pair.curr_loop,
+                            offsets=offsets,
+                            vertices=vertices,
+                            loop_start_cache=loop_start_cache,
+                        )
+                        _, closure_faces = _triangulate_loops([loop_pair.curr_loop])
+                        faces.extend((closure_faces[:, [0, 2, 1]] + closure_start).tolist())
+                    else:
+                        raise ValueError(f"Invalid plan closure side: {closure.side!r}")
+                elif closure.scope == "region" and closure.side == "prev":
+                    loop_starts = [
+                        _resolve_transition_loop_start(
+                            station_index=prev_idx,
+                            station_origin=prev_station.origin,
+                            station_u=prev_station.u,
+                            station_v=prev_station.v,
+                            region_ref=region_pair.prev_region_ref,
+                            ref=loop_pair.prev_loop_ref,
+                            loop=loop_pair.prev_loop,
+                            offsets=offsets,
+                            vertices=vertices,
+                            loop_start_cache=loop_start_cache,
+                        )
+                        for loop_pair in region_pair.loop_pairs
                     ]
                     closure_faces = _triangulate_loopset_faces_with_starts(
-                        paired.prev_loops,
+                        [loop_pair.prev_loop for loop_pair in region_pair.loop_pairs],
                         loop_starts,
                     )
                     faces.extend(closure_faces.tolist())
-                else:
+                elif closure.scope == "region" and closure.side == "curr":
                     loop_starts = [
                         _resolve_transition_loop_start(
-                            station_index=idx + 1,
-                            station=effective_stations[idx + 1],
-                            region_ref=transition.curr_region_ref,
-                            ref=paired.curr_sources[loop_idx],
-                            loop=paired.curr_loops[loop_idx],
+                            station_index=curr_idx,
+                            station_origin=curr_station.origin,
+                            station_u=curr_station.u,
+                            station_v=curr_station.v,
+                            region_ref=region_pair.curr_region_ref,
+                            ref=loop_pair.curr_loop_ref,
+                            loop=loop_pair.curr_loop,
                             offsets=offsets,
                             vertices=vertices,
                             loop_start_cache=loop_start_cache,
                         )
-                        for loop_idx in range(len(paired.curr_loops))
+                        for loop_pair in region_pair.loop_pairs
                     ]
                     closure_faces = _triangulate_loopset_faces_with_starts(
-                        paired.curr_loops,
+                        [loop_pair.curr_loop for loop_pair in region_pair.loop_pairs],
                         loop_starts,
                     )
                     faces.extend(closure_faces[:, [0, 2, 1]].tolist())
+                else:
+                    raise ValueError(
+                        "Invalid plan closure record: "
+                        f"scope={closure.scope!r} side={closure.side!r}"
+                    )
 
     if cap_ends:
-        for region_idx in range(len(station_regions[0])):
-            _, base_faces_start = _triangulate_loops(station_regions[0][region_idx])
+        for region_idx in range(len(plan.stations[0].regions)):
+            _, base_faces_start = _triangulate_loops(list(plan.stations[0].regions[region_idx]))
             if base_faces_start.size:
                 faces.extend((base_faces_start + offsets[0][region_idx][0]).tolist())
-        for region_idx in range(len(station_regions[-1])):
-            _, base_faces_end = _triangulate_loops(station_regions[-1][region_idx])
+        for region_idx in range(len(plan.stations[-1].regions)):
+            _, base_faces_end = _triangulate_loops(list(plan.stations[-1].regions[region_idx]))
             if base_faces_end.size:
                 faces.extend((base_faces_end[:, [0, 2, 1]] + offsets[-1][region_idx][0]).tolist())
 
     return Mesh(np.asarray(vertices, dtype=float), np.asarray(faces, dtype=int))
+
+
+def _as_planned_region_pair(transition: _PairedSectionTransition) -> PlannedRegionPair:
+    loop_pairs: list[PlannedLoopPair] = []
+    for prev_loop, curr_loop, prev_ref, curr_ref in zip(
+        transition.region.prev_loops,
+        transition.region.curr_loops,
+        transition.region.prev_sources,
+        transition.region.curr_sources,
+        strict=True,
+    ):
+        loop_pairs.append(
+            PlannedLoopPair(
+                prev_loop_ref=_to_planned_loop_ref(prev_ref),
+                curr_loop_ref=_to_planned_loop_ref(curr_ref),
+                prev_loop=np.array(prev_loop, dtype=float, copy=True),
+                curr_loop=np.array(curr_loop, dtype=float, copy=True),
+                role=_planned_loop_pair_role(
+                    _to_planned_loop_ref(prev_ref),
+                    _to_planned_loop_ref(curr_ref),
+                ),
+            )
+        )
+
+    closures: list[PlannedClosure] = [
+        PlannedClosure(side=side, scope="loop", loop_index=loop_idx)
+        for side, loop_idx in transition.region.closures
+    ]
+    closures.extend(
+        PlannedClosure(side=side, scope="region", loop_index=None)
+        for side in transition.region_closures
+    )
+
+    return PlannedRegionPair(
+        prev_region_ref=_to_planned_region_ref(transition.prev_region_ref),
+        curr_region_ref=_to_planned_region_ref(transition.curr_region_ref),
+        loop_pairs=tuple(loop_pairs),
+        closures=tuple(closures),
+    )
+
+
+def _planned_loop_pair_role(prev_ref: PlannedLoopRef, curr_ref: PlannedLoopRef) -> str:
+    if prev_ref.kind == "actual" and curr_ref.kind == "actual":
+        return "stable"
+    if prev_ref.kind == "synthetic" and curr_ref.kind == "actual":
+        return "synthetic_birth"
+    if prev_ref.kind == "actual" and curr_ref.kind == "synthetic":
+        return "synthetic_death"
+    return "stable"
+
+
+def _to_planned_loop_ref(ref: _LoopRef) -> PlannedLoopRef:
+    return PlannedLoopRef(kind=ref.kind, index=ref.index)
+
+
+def _to_planned_region_ref(ref: _RegionRef) -> PlannedRegionRef:
+    return PlannedRegionRef(kind=ref.kind, index=ref.index)
+
+
+def _validate_loft_plan(plan: LoftPlan) -> None:
+    if plan.samples < 3:
+        raise ValueError("Invalid loft plan: samples must be >= 3.")
+    if len(plan.stations) < 2:
+        raise ValueError("Invalid loft plan: requires at least two planned stations.")
+    if len(plan.transitions) != len(plan.stations) - 1:
+        raise ValueError("Invalid loft plan: transition count must be stations-1.")
+
+    prev_t: float | None = None
+    for idx, station in enumerate(plan.stations):
+        if station.station_index != idx:
+            raise ValueError(
+                f"Invalid loft plan station index: expected {idx}, got {station.station_index}."
+            )
+        if prev_t is not None and station.t <= prev_t:
+            raise ValueError("Invalid loft plan: station t values must be strictly increasing.")
+        prev_t = station.t
+        if (
+            station.origin.shape != (3,)
+            or station.u.shape != (3,)
+            or station.v.shape != (3,)
+            or station.n.shape != (3,)
+        ):
+            raise ValueError(f"Invalid loft plan station {idx}: frame vectors must be shape (3,).")
+        if not (
+            np.all(np.isfinite(station.origin))
+            and np.all(np.isfinite(station.u))
+            and np.all(np.isfinite(station.v))
+            and np.all(np.isfinite(station.n))
+        ):
+            raise ValueError(f"Invalid loft plan station {idx}: non-finite frame values.")
+
+    if not isinstance(plan.metadata, dict):
+        raise ValueError("Invalid loft plan: metadata must be a dict.")
+    if "plan_schema_version" not in plan.metadata:
+        raise ValueError("Invalid loft plan metadata: missing plan_schema_version.")
+
+    valid_roles = {"stable", "synthetic_birth", "synthetic_death"}
+    valid_scopes = {"loop", "region"}
+    valid_sides = {"prev", "curr"}
+    valid_ref_kinds = {"actual", "synthetic"}
+
+    for transition_idx, transition in enumerate(plan.transitions):
+        expected_interval = (transition_idx, transition_idx + 1)
+        if transition.interval != expected_interval:
+            raise ValueError(
+                "Invalid loft plan transition interval: "
+                f"expected {expected_interval}, got {transition.interval}."
+            )
+        prev_idx, curr_idx = transition.interval
+        prev_station = plan.stations[prev_idx]
+        curr_station = plan.stations[curr_idx]
+        for region_pair_idx, region_pair in enumerate(transition.region_pairs):
+            if region_pair.prev_region_ref.kind not in valid_ref_kinds:
+                raise ValueError(
+                    f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
+                    f"invalid prev region kind {region_pair.prev_region_ref.kind!r}."
+                )
+            if region_pair.curr_region_ref.kind not in valid_ref_kinds:
+                raise ValueError(
+                    f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
+                    f"invalid curr region kind {region_pair.curr_region_ref.kind!r}."
+                )
+            if region_pair.prev_region_ref.index < 0:
+                raise ValueError(
+                    f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
+                    "prev region ref index must be >= 0."
+                )
+            if region_pair.curr_region_ref.index < 0:
+                raise ValueError(
+                    f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
+                    "curr region ref index must be >= 0."
+                )
+            if region_pair.prev_region_ref.kind == "actual" and region_pair.prev_region_ref.index >= len(prev_station.regions):
+                raise ValueError(
+                    f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
+                    f"prev region ref out of range ({region_pair.prev_region_ref.index})."
+                )
+            if region_pair.curr_region_ref.kind == "actual" and region_pair.curr_region_ref.index >= len(curr_station.regions):
+                raise ValueError(
+                    f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
+                    f"curr region ref out of range ({region_pair.curr_region_ref.index})."
+                )
+            if not region_pair.loop_pairs:
+                raise ValueError(
+                    f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
+                    "requires at least one loop pair."
+                )
+            for loop_pair_idx, loop_pair in enumerate(region_pair.loop_pairs):
+                if loop_pair.role not in valid_roles:
+                    raise ValueError(
+                        f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx} "
+                        f"loop pair {loop_pair_idx}: invalid role {loop_pair.role!r}."
+                    )
+                expected_role = _planned_loop_pair_role(loop_pair.prev_loop_ref, loop_pair.curr_loop_ref)
+                if loop_pair.role != expected_role:
+                    raise ValueError(
+                        f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx} "
+                        f"loop pair {loop_pair_idx}: role {loop_pair.role!r} does not match refs."
+                    )
+                if loop_pair.prev_loop_ref.kind not in valid_ref_kinds:
+                    raise ValueError(
+                        f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx} "
+                        f"loop pair {loop_pair_idx}: invalid prev loop kind "
+                        f"{loop_pair.prev_loop_ref.kind!r}."
+                    )
+                if loop_pair.curr_loop_ref.kind not in valid_ref_kinds:
+                    raise ValueError(
+                        f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx} "
+                        f"loop pair {loop_pair_idx}: invalid curr loop kind "
+                        f"{loop_pair.curr_loop_ref.kind!r}."
+                    )
+                if loop_pair.prev_loop_ref.index < 0 or loop_pair.curr_loop_ref.index < 0:
+                    raise ValueError(
+                        f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx} "
+                        f"loop pair {loop_pair_idx}: loop ref indices must be >= 0."
+                    )
+                if (
+                    region_pair.prev_region_ref.kind == "actual"
+                    and loop_pair.prev_loop_ref.kind == "actual"
+                    and loop_pair.prev_loop_ref.index >= len(prev_station.regions[region_pair.prev_region_ref.index])
+                ):
+                    raise ValueError(
+                        f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx} "
+                        f"loop pair {loop_pair_idx}: prev loop ref out of range "
+                        f"({loop_pair.prev_loop_ref.index})."
+                    )
+                if (
+                    region_pair.curr_region_ref.kind == "actual"
+                    and loop_pair.curr_loop_ref.kind == "actual"
+                    and loop_pair.curr_loop_ref.index >= len(curr_station.regions[region_pair.curr_region_ref.index])
+                ):
+                    raise ValueError(
+                        f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx} "
+                        f"loop pair {loop_pair_idx}: curr loop ref out of range "
+                        f"({loop_pair.curr_loop_ref.index})."
+                    )
+                if loop_pair.prev_loop.ndim != 2 or loop_pair.prev_loop.shape[1] != 2:
+                    raise ValueError(
+                        f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx} "
+                        f"loop pair {loop_pair_idx}: prev loop must be Nx2."
+                    )
+                if loop_pair.curr_loop.ndim != 2 or loop_pair.curr_loop.shape[1] != 2:
+                    raise ValueError(
+                        f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx} "
+                        f"loop pair {loop_pair_idx}: curr loop must be Nx2."
+                    )
+                if loop_pair.prev_loop.shape[0] != plan.samples or loop_pair.curr_loop.shape[0] != plan.samples:
+                    raise ValueError(
+                        f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx} "
+                        f"loop pair {loop_pair_idx}: loop vertex count must equal samples={plan.samples}."
+                    )
+            for closure_idx, closure in enumerate(region_pair.closures):
+                if closure.scope not in valid_scopes:
+                    raise ValueError(
+                        f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx} "
+                        f"closure {closure_idx}: invalid scope {closure.scope!r}."
+                    )
+                if closure.side not in valid_sides:
+                    raise ValueError(
+                        f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx} "
+                        f"closure {closure_idx}: invalid side {closure.side!r}."
+                    )
+                if closure.scope == "loop":
+                    if closure.loop_index is None:
+                        raise ValueError(
+                            f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx} "
+                            f"closure {closure_idx}: loop closure missing loop_index."
+                        )
+                    if closure.loop_index < 0 or closure.loop_index >= len(region_pair.loop_pairs):
+                        raise ValueError(
+                            f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx} "
+                            f"closure {closure_idx}: loop_index {closure.loop_index} out of range."
+                        )
+                else:
+                    if closure.loop_index is not None:
+                        raise ValueError(
+                            f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx} "
+                            f"closure {closure_idx}: region closure must not define loop_index."
+                        )
+            seen_closure_keys: set[tuple[str, str, int | None]] = set()
+            for closure_idx, closure in enumerate(region_pair.closures):
+                closure_key = (closure.side, closure.scope, closure.loop_index)
+                if closure_key in seen_closure_keys:
+                    raise ValueError(
+                        f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx} "
+                        f"closure {closure_idx}: duplicate closure ownership for {closure_key}."
+                    )
+                seen_closure_keys.add(closure_key)
 
 
 def loft_endcaps(
@@ -1250,9 +1653,11 @@ def _shrunken_region(region_loops: list[np.ndarray], scale: float) -> list[np.nd
 def _resolve_transition_loop_start(
     *,
     station_index: int,
-    station: Station,
-    region_ref: _RegionRef,
-    ref: _LoopRef,
+    station_origin: np.ndarray,
+    station_u: np.ndarray,
+    station_v: np.ndarray,
+    region_ref: PlannedRegionRef,
+    ref: PlannedLoopRef,
     loop: np.ndarray,
     offsets: list[list[list[int]]],
     vertices: list[np.ndarray],
@@ -1266,7 +1671,7 @@ def _resolve_transition_loop_start(
         return cached
     if ref.kind == "synthetic" or region_ref.kind == "synthetic":
         start = len(vertices)
-        pts3 = station.origin + loop[:, 0:1] * station.u + loop[:, 1:2] * station.v
+        pts3 = station_origin + loop[:, 0:1] * station_u + loop[:, 1:2] * station_v
         vertices.extend(pts3)
         loop_start_cache[cache_key] = start
         return start
@@ -1790,4 +2195,20 @@ def _rotate_vector(vec: np.ndarray, axis: np.ndarray, angle: float) -> np.ndarra
     return vec * c + np.cross(axis, vec) * s + axis * np.dot(axis, vec) * (1.0 - c)
 
 
-__all__ = ["Station", "loft_profiles", "loft", "loft_sections", "loft_endcaps"]
+__all__ = [
+    "Station",
+    "PlannedStation",
+    "PlannedLoopRef",
+    "PlannedRegionRef",
+    "PlannedLoopPair",
+    "PlannedClosure",
+    "PlannedRegionPair",
+    "PlannedTransition",
+    "LoftPlan",
+    "loft_profiles",
+    "loft",
+    "loft_plan_sections",
+    "loft_execute_plan",
+    "loft_sections",
+    "loft_endcaps",
+]

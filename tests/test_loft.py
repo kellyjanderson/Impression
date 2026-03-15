@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import importlib.util
 from pathlib import Path
 
@@ -10,10 +11,14 @@ from impression.mesh import analyze_mesh
 from impression.modeling import (
     MeshQuality,
     Path3D,
+    PlannedLoopRef,
+    PlannedRegionRef,
     Section,
     Station,
     loft,
+    loft_execute_plan,
     loft_endcaps,
+    loft_plan_sections,
     loft_sections,
     as_section,
 )
@@ -26,6 +31,38 @@ def _assert_mesh_quality(mesh) -> None:
     assert analysis.boundary_edges == 0, analysis.issues()
     assert analysis.nonmanifold_edges == 0, analysis.issues()
     assert analysis.degenerate_faces == 0, analysis.issues()
+
+
+def _plan_transition_signature(plan) -> tuple:
+    signatures: list[tuple] = []
+    for transition in plan.transitions:
+        region_sigs: list[tuple] = []
+        for pair in transition.region_pairs:
+            loop_sigs = tuple(
+                (
+                    loop_pair.prev_loop_ref.kind,
+                    loop_pair.prev_loop_ref.index,
+                    loop_pair.curr_loop_ref.kind,
+                    loop_pair.curr_loop_ref.index,
+                    loop_pair.role,
+                )
+                for loop_pair in pair.loop_pairs
+            )
+            closure_sigs = tuple(
+                (closure.side, closure.scope, closure.loop_index) for closure in pair.closures
+            )
+            region_sigs.append(
+                (
+                    pair.prev_region_ref.kind,
+                    pair.prev_region_ref.index,
+                    pair.curr_region_ref.kind,
+                    pair.curr_region_ref.index,
+                    loop_sigs,
+                    closure_sigs,
+                )
+            )
+        signatures.append((transition.interval, tuple(region_sigs)))
+    return tuple(signatures)
 
 
 def test_loft_positive():
@@ -315,6 +352,180 @@ def test_loft_sections_basic_with_station_frames():
     _assert_mesh_quality(mesh)
 
 
+def test_loft_sections_matches_planner_executor_pipeline():
+    outer = make_rect(size=(1.4, 1.2)).outer
+    hole = make_circle(radius=0.2, center=(0.1, 0.0)).outer
+    start = PlanarShape2D(outer=outer, holes=[hole])
+    end = PlanarShape2D(outer=make_rect(size=(1.1, 1.4)).outer, holes=[hole])
+    stations = [
+        Station(
+            t=0.0,
+            section=as_section(start),
+            origin=[0.0, 0.0, 0.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+        Station(
+            t=1.0,
+            section=as_section(end),
+            origin=[0.0, 0.0, 1.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+    ]
+    direct = loft_sections(stations, samples=36, cap_ends=True)
+    plan = loft_plan_sections(stations, samples=36)
+    from_plan = loft_execute_plan(plan, cap_ends=True)
+    assert np.array_equal(direct.vertices, from_plan.vertices)
+    assert np.array_equal(direct.faces, from_plan.faces)
+    _assert_mesh_quality(from_plan)
+
+
+def test_loft_sections_resolve_mode_matches_planner_executor_pipeline():
+    left = make_rect(size=(0.9, 0.9), center=(-0.2, 0.0))
+    right = make_rect(size=(0.9, 0.9), center=(0.2, 0.0))
+    merged = make_rect(size=(1.2, 1.0), center=(0.0, 0.0))
+    s0 = Section((as_section(left).regions[0], as_section(right).regions[0]))
+    s1 = Section((as_section(merged).regions[0],))
+    stations = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    direct = loft_sections(
+        stations,
+        samples=32,
+        cap_ends=True,
+        split_merge_mode="resolve",
+        split_merge_steps=10,
+        split_merge_bias=0.5,
+    )
+    plan = loft_plan_sections(
+        stations,
+        samples=32,
+        split_merge_mode="resolve",
+        split_merge_steps=10,
+        split_merge_bias=0.5,
+    )
+    from_plan = loft_execute_plan(plan, cap_ends=True)
+    assert np.array_equal(direct.vertices, from_plan.vertices)
+    assert np.array_equal(direct.faces, from_plan.faces)
+    _assert_mesh_quality(from_plan)
+
+
+def test_loft_plan_sections_marks_synthetic_loop_birth_and_closure():
+    outer = make_rect(size=(1.2, 1.2)).outer
+    hole = make_rect(size=(0.4, 0.4)).outer
+    start = PlanarShape2D(outer=outer, holes=[])
+    end = PlanarShape2D(outer=outer, holes=[hole])
+    stations = [
+        Station(t=0.0, section=as_section(start), origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=as_section(end), origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(stations, samples=28)
+    pair = plan.transitions[0].region_pairs[0]
+    assert isinstance(pair.prev_region_ref, PlannedRegionRef)
+    assert isinstance(pair.curr_region_ref, PlannedRegionRef)
+    assert all(isinstance(loop_pair.prev_loop_ref, PlannedLoopRef) for loop_pair in pair.loop_pairs)
+    assert all(isinstance(loop_pair.curr_loop_ref, PlannedLoopRef) for loop_pair in pair.loop_pairs)
+    assert any(loop_pair.role == "synthetic_birth" for loop_pair in pair.loop_pairs)
+    assert any(closure.scope == "loop" and closure.side == "prev" for closure in pair.closures)
+
+
+def test_loft_plan_sections_marks_synthetic_region_death_and_closure():
+    base = as_section(make_rect(size=(1.0, 1.0)))
+    extra = as_section(make_rect(size=(0.5, 0.5), center=(2.0, 0.0)))
+    s0 = Section((base.regions[0], extra.regions[0]))
+    s1 = Section((base.regions[0],))
+    stations = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(stations, samples=24)
+    transition = plan.transitions[0]
+    assert any(pair.curr_region_ref.kind == "synthetic" for pair in transition.region_pairs)
+    assert any(
+        closure.scope == "region" and closure.side == "curr"
+        for pair in transition.region_pairs
+        for closure in pair.closures
+    )
+
+
+def test_loft_plan_sections_sets_plan_metadata_contract():
+    base = as_section(make_rect(size=(1.0, 1.0)))
+    stations = [
+        Station(t=0.0, section=base, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=base, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(stations, samples=24)
+    assert plan.metadata["plan_schema_version"] == 1
+    assert plan.metadata["planner"] == "loft_plan_sections"
+
+
+def test_loft_execute_plan_rejects_invalid_loop_closure_index_with_interval_context():
+    outer = make_rect(size=(1.2, 1.2)).outer
+    hole = make_rect(size=(0.4, 0.4)).outer
+    start = PlanarShape2D(outer=outer, holes=[])
+    end = PlanarShape2D(outer=outer, holes=[hole])
+    stations = [
+        Station(t=0.0, section=as_section(start), origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=as_section(end), origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(stations, samples=24)
+    transition = plan.transitions[0]
+    pair = transition.region_pairs[0]
+    assert pair.closures and pair.closures[0].scope == "loop"
+    broken_closure = replace(pair.closures[0], loop_index=999)
+    broken_pair = replace(pair, closures=(broken_closure, *pair.closures[1:]))
+    broken_transition = replace(transition, region_pairs=(broken_pair, *transition.region_pairs[1:]))
+    broken_plan = replace(plan, transitions=(broken_transition, *plan.transitions[1:]))
+
+    with pytest.raises(ValueError, match=r"interval 0->1.*loop_index 999 out of range"):
+        loft_execute_plan(broken_plan, cap_ends=True)
+
+
+def test_loft_execute_plan_rejects_duplicate_closure_ownership():
+    outer = make_rect(size=(1.2, 1.2)).outer
+    hole = make_rect(size=(0.4, 0.4)).outer
+    start = PlanarShape2D(outer=outer, holes=[])
+    end = PlanarShape2D(outer=outer, holes=[hole])
+    stations = [
+        Station(t=0.0, section=as_section(start), origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=as_section(end), origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(stations, samples=24)
+    transition = plan.transitions[0]
+    pair = transition.region_pairs[0]
+    assert pair.closures
+    duplicate = pair.closures[0]
+    broken_pair = replace(pair, closures=(*pair.closures, duplicate))
+    broken_transition = replace(transition, region_pairs=(broken_pair, *transition.region_pairs[1:]))
+    broken_plan = replace(plan, transitions=(broken_transition, *plan.transitions[1:]))
+
+    with pytest.raises(ValueError, match=r"interval 0->1.*duplicate closure ownership"):
+        loft_execute_plan(broken_plan, cap_ends=True)
+
+
+def test_loft_execute_plan_rejects_out_of_range_actual_region_ref():
+    base = as_section(make_rect(size=(1.0, 1.0)))
+    stations = [
+        Station(t=0.0, section=base, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=base, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(stations, samples=24)
+    transition = plan.transitions[0]
+    pair = transition.region_pairs[0]
+    broken_pair = replace(
+        pair,
+        prev_region_ref=replace(pair.prev_region_ref, index=999),
+    )
+    broken_transition = replace(transition, region_pairs=(broken_pair, *transition.region_pairs[1:]))
+    broken_plan = replace(plan, transitions=(broken_transition, *plan.transitions[1:]))
+    with pytest.raises(ValueError, match=r"interval 0->1.*prev region ref out of range"):
+        loft_execute_plan(broken_plan, cap_ends=True)
+
+
 def test_loft_sections_requires_strictly_ordered_t():
     base = as_section(make_rect(size=(1.0, 1.0)))
     stations = [
@@ -418,6 +629,21 @@ def test_loft_sections_supports_region_birth_transition():
     _assert_mesh_quality(mesh)
 
 
+def test_loft_sections_fail_mode_supports_region_birth_transition():
+    base = as_section(make_rect(size=(1.0, 1.0)))
+    extra = as_section(make_rect(size=(0.5, 0.5), center=(2.0, 0.0)))
+    s0 = Section((base.regions[0],))
+    s1 = Section((base.regions[0], extra.regions[0]))
+    stations = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    mesh = loft_sections(stations, samples=24, cap_ends=True, split_merge_mode="fail")
+    assert mesh.n_vertices > 0
+    assert mesh.n_faces > 0
+    _assert_mesh_quality(mesh)
+
+
 def test_loft_sections_supports_region_death_transition():
     base = as_section(make_rect(size=(1.0, 1.0)))
     extra = as_section(make_rect(size=(0.5, 0.5), center=(2.0, 0.0)))
@@ -428,6 +654,21 @@ def test_loft_sections_supports_region_death_transition():
         Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
     ]
     mesh = loft_sections(stations, samples=24, cap_ends=True)
+    assert mesh.n_vertices > 0
+    assert mesh.n_faces > 0
+    _assert_mesh_quality(mesh)
+
+
+def test_loft_sections_fail_mode_supports_region_death_transition():
+    base = as_section(make_rect(size=(1.0, 1.0)))
+    extra = as_section(make_rect(size=(0.5, 0.5), center=(2.0, 0.0)))
+    s0 = Section((base.regions[0], extra.regions[0]))
+    s1 = Section((base.regions[0],))
+    stations = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    mesh = loft_sections(stations, samples=24, cap_ends=True, split_merge_mode="fail")
     assert mesh.n_vertices > 0
     assert mesh.n_faces > 0
     _assert_mesh_quality(mesh)
@@ -669,6 +910,29 @@ def test_loft_sections_resolve_mode_rejects_many_to_many_region_ambiguity():
         )
 
 
+def test_loft_sections_fail_mode_rejects_many_to_many_region_ambiguity():
+    left = make_rect(size=(0.8, 0.8), center=(-0.8, 0.0))
+    center = make_rect(size=(0.8, 0.8), center=(0.0, 0.0))
+    right = make_rect(size=(0.8, 0.8), center=(0.8, 0.0))
+    wide_left = make_rect(size=(1.3, 0.9), center=(-0.35, 0.0))
+    wide_right = make_rect(size=(1.3, 0.9), center=(0.35, 0.0))
+    s0 = Section((as_section(left).regions[0], as_section(center).regions[0], as_section(right).regions[0]))
+    s1 = Section((as_section(wide_left).regions[0], as_section(wide_right).regions[0]))
+    stations = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    with pytest.raises(ValueError, match="region split/merge ambiguity"):
+        loft_sections(
+            stations,
+            samples=28,
+            cap_ends=True,
+            split_merge_mode="fail",
+            split_merge_steps=8,
+            split_merge_bias=0.5,
+        )
+
+
 def test_loft_sections_resolve_mode_rejects_many_to_many_hole_ambiguity():
     outer = make_rect(size=(2.0, 1.5)).outer
     h0 = make_rect(size=(0.25, 0.25), center=(-0.6, 0.0)).outer
@@ -724,6 +988,84 @@ def test_loft_sections_resolve_mode_is_deterministic_for_identical_inputs():
     assert (mesh_a.vertices == mesh_b.vertices).all()
     assert (mesh_a.faces == mesh_b.faces).all()
     _assert_mesh_quality(mesh_a)
+
+
+def test_loft_plan_sections_region_split_branch_order_is_deterministic_under_reordering():
+    source = make_rect(size=(1.2, 1.0), center=(0.0, 0.0))
+    left = make_rect(size=(0.8, 0.9), center=(-0.8, 0.0))
+    right = make_rect(size=(0.8, 0.9), center=(0.8, 0.0))
+    s0 = Section((as_section(source).regions[0],))
+    s1_ordered = Section((as_section(left).regions[0], as_section(right).regions[0]))
+    s1_swapped = Section((as_section(right).regions[0], as_section(left).regions[0]))
+
+    stations_a = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1_ordered, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    stations_b = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1_swapped, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+
+    plan_a = loft_plan_sections(
+        stations_a,
+        samples=30,
+        split_merge_mode="resolve",
+        split_merge_steps=8,
+        split_merge_bias=0.5,
+    )
+    plan_b = loft_plan_sections(
+        stations_b,
+        samples=30,
+        split_merge_mode="resolve",
+        split_merge_steps=8,
+        split_merge_bias=0.5,
+    )
+
+    assert _plan_transition_signature(plan_a) == _plan_transition_signature(plan_b)
+    mesh_a = loft_execute_plan(plan_a, cap_ends=True)
+    mesh_b = loft_execute_plan(plan_b, cap_ends=True)
+    assert np.array_equal(mesh_a.vertices, mesh_b.vertices)
+    assert np.array_equal(mesh_a.faces, mesh_b.faces)
+
+
+def test_loft_plan_sections_region_merge_branch_order_is_deterministic_under_reordering():
+    left = make_rect(size=(0.8, 0.9), center=(-0.8, 0.0))
+    right = make_rect(size=(0.8, 0.9), center=(0.8, 0.0))
+    target = make_rect(size=(1.2, 1.0), center=(0.0, 0.0))
+    s0_ordered = Section((as_section(left).regions[0], as_section(right).regions[0]))
+    s0_swapped = Section((as_section(right).regions[0], as_section(left).regions[0]))
+    s1 = Section((as_section(target).regions[0],))
+
+    stations_a = [
+        Station(t=0.0, section=s0_ordered, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    stations_b = [
+        Station(t=0.0, section=s0_swapped, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+
+    plan_a = loft_plan_sections(
+        stations_a,
+        samples=30,
+        split_merge_mode="resolve",
+        split_merge_steps=8,
+        split_merge_bias=0.5,
+    )
+    plan_b = loft_plan_sections(
+        stations_b,
+        samples=30,
+        split_merge_mode="resolve",
+        split_merge_steps=8,
+        split_merge_bias=0.5,
+    )
+
+    assert _plan_transition_signature(plan_a) == _plan_transition_signature(plan_b)
+    mesh_a = loft_execute_plan(plan_a, cap_ends=True)
+    mesh_b = loft_execute_plan(plan_b, cap_ends=True)
+    assert np.array_equal(mesh_a.vertices, mesh_b.vertices)
+    assert np.array_equal(mesh_a.faces, mesh_b.faces)
 
 
 def test_loft_split_merge_resolve_example_meshes_are_watertight():

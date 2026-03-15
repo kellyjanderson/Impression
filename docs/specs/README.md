@@ -13,3 +13,11 @@
 - [Loft Spec 10: Example Program (Impress + Teach)](loft-10-example-program.md)
 - [Loft Spec 11: Resolve-Mode Watertightness (v1.1)](loft-11-resolve-watertightness-v1_1.md)
 - [Loft Spec 12: Topology Completion Gate](loft-12-topology-completion-gate.md)
+- [Loft Spec 14: Planner/Executor Architecture (v1.0)](loft-14-planner-executor-architecture-v1_0.md)
+- [Loft Spec 15: Region 1->N and N->1 on Planner (v1.4)](loft-15-region-1n-n1-planning-v1_4.md)
+- [Loft Spec 16: Region N->M / M->N Branch Planner (v2.0)](loft-16-region-nm-mn-branch-planner-v2_0.md)
+
+## Historical / Superseded
+
+- [Loft Spec 13: Region N->1 and 1->N Transitions (v1.2)](loft-13-region-n1-1n-v1_2.md)
+: superseded for implementation by Spec 15 (v1.4).
