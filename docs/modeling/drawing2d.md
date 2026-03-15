@@ -1,9 +1,9 @@
 # Modeling — 2D Drawing
 
 The 2D drawing API provides profile- and path-based primitives that keep true curve
-segments (lines, arcs, beziers). Filled shapes return `Profile2D`; open shapes return
-`Path2D`. These are intended for future extrude/loft/morph workflows while remaining
-renderable in previews today via polyline sampling.
+segments (lines, arcs, beziers). Open shapes return `Path2D`. Filled-shape authoring
+is available through `PlanarShape2D`, and kernel modeling consumes topology-native
+`Region`/`Section` via `as_section`.
 
 Import helpers from the 2D module:
 
@@ -13,13 +13,35 @@ from impression.modeling.drawing2d import make_rect, make_circle, make_ngon, mak
 
 Example module: `docs/examples/drawing2d/basic_example.py`
 
+## Ownership Matrix
+
+`drawing2d` is the authored-geometry surface. Topology ownership lives in `topology`.
+
+Owned by `drawing2d`:
+
+- authored segments and paths: `Line2D`, `Arc2D`, `Bezier2D`, `Path2D`
+- user-facing 2D constructors: `make_rect`, `make_circle`, `make_ngon`, `make_polygon`, `make_polyline`
+- curve authoring helpers: `round_corners`, `round_path`
+
+Not owned by `drawing2d`:
+
+- winding/classification policy for planar solids
+- triangulation kernels
+- region/section correspondence and matching
+- hole/region topology event handling
+
+See:
+
+- [Topology](topology.md) for loop/region/section ownership and kernel helpers
+- [Topology Spec 05](../specs/topology-05-drawing2d-boundary.md) for the boundary contract
+
 ### Example Catalog
 
 - `docs/examples/drawing2d/line2d_example.py`
 - `docs/examples/drawing2d/arc2d_example.py`
 - `docs/examples/drawing2d/bezier2d_example.py`
 - `docs/examples/drawing2d/path2d_example.py`
-- `docs/examples/drawing2d/profile2d_example.py`
+- `docs/examples/drawing2d/planarshape2d_example.py`
 - `docs/examples/drawing2d/rect2d_example.py`
 - `docs/examples/drawing2d/circle2d_example.py`
 - `docs/examples/drawing2d/ngon2d_example.py`
@@ -30,7 +52,9 @@ Example module: `docs/examples/drawing2d/basic_example.py`
 ## Core Types
 
 - **Path2D**: ordered segments (line, arc, bezier), open or closed.
-- **Profile2D**: filled shape with an outer boundary and optional holes.
+- **PlanarShape2D**: filled-shape container with an outer boundary
+  and optional holes. Kernel planar-topology operations should use
+  `Loop`/`Region`/`Section` from topology.
 
 ### Open vs Closed Paths
 
@@ -48,7 +72,7 @@ closed_path = make_polyline([(0, 0), (1, 0), (1, 1), (0, 1)], closed=True)
 ### Holes and Winding
 
 Profiles support holes via a list of closed `Path2D` loops. Winding is preserved
-but not enforced yet. `Profile2D` assumes closed loops; validation will come later.
+but not enforced yet. `PlanarShape2D` assumes closed loops; validation will come later.
 For future boolean/extrude operations, follow this rule:
 
 - Outer boundary: counter-clockwise (CCW)
@@ -60,17 +84,17 @@ Both support per-object color. Profiles with holes can be created directly from
 paths:
 
 ```python
-from impression.modeling.drawing2d import Path2D, Profile2D, Arc2D
+from impression.modeling.drawing2d import Path2D, PlanarShape2D, Arc2D
 
 outer = Path2D([Arc2D(center=(0, 0), radius=1.0, start_angle_deg=0, end_angle_deg=360)], closed=True)
 inner = Path2D([Arc2D(center=(0, 0), radius=0.4, start_angle_deg=0, end_angle_deg=360, clockwise=True)], closed=True)
-ring = Profile2D(outer=outer, holes=[inner])
+ring = PlanarShape2D(outer=outer, holes=[inner])
 ```
 
 ## Rect
 
 - **Function:** `make_rect(size=(w, h), center=(x, y))`
-- **Returns:** `Profile2D`
+- **Returns:** `PlanarShape2D`
 
 ```python
 from impression.modeling.drawing2d import make_rect
@@ -82,7 +106,7 @@ def build():
 ## Circle
 
 - **Function:** `make_circle(radius=0.5, center=(x, y))`
-- **Returns:** `Profile2D`
+- **Returns:** `PlanarShape2D`
 
 ```python
 from impression.modeling.drawing2d import make_circle
@@ -94,7 +118,7 @@ def build():
 ## N-gon
 
 - **Function:** `make_ngon(sides=6, radius=0.5, center=(x, y))`
-- **Returns:** `Profile2D`
+- **Returns:** `PlanarShape2D`
 
 ```python
 from impression.modeling.drawing2d import make_ngon

@@ -19,7 +19,6 @@ from .drawing2d import (
     Bezier2D,
     Line2D,
     Path2D,
-    Profile2D,
     round_corners,
     round_path,
     make_circle,
@@ -29,15 +28,24 @@ from .drawing2d import (
     make_rect,
 )
 from .extrude import linear_extrude, rotate_extrude
-from .loft import loft, loft_profiles, loft_endcaps
+from .loft import Station, loft, loft_profiles, loft_sections, loft_endcaps
 from .morph import morph, morph_profiles
 from .path3d import Arc3D, Bezier3D, Line3D, Path3D
 from .csg import boolean_union, boolean_difference, boolean_intersection, union_meshes
 from .paths import Path
 from .group import MeshGroup, group
-from .ops import offset, hull, minkowski
+from .ops import offset, hull
 from .heightmap import heightmap, displace_heightmap
-from .text import make_text, text, text_profiles
+from .text import make_text, text, text_profiles, text_sections
+from .topology import (
+    Loop,
+    Region,
+    Section,
+    as_section,
+    as_sections,
+    regions_from_paths,
+    sections_from_paths,
+)
 from .hinges import (
     make_traditional_hinge_leaf,
     make_traditional_hinge_pair,
@@ -83,7 +91,6 @@ __all__ = [
     "Bezier2D",
     "Line2D",
     "Path2D",
-    "Profile2D",
     "round_corners",
     "round_path",
     "make_rect",
@@ -101,6 +108,8 @@ __all__ = [
     "morph_profiles",
     "loft",
     "loft_profiles",
+    "loft_sections",
+    "Station",
     "loft_endcaps",
     "boolean_union",
     "boolean_difference",
@@ -118,12 +127,19 @@ __all__ = [
     "rotate_euler",
     "offset",
     "hull",
-    "minkowski",
     "heightmap",
     "displace_heightmap",
     "make_text",
     "text",
     "text_profiles",
+    "text_sections",
+    "Loop",
+    "Region",
+    "Section",
+    "as_section",
+    "as_sections",
+    "regions_from_paths",
+    "sections_from_paths",
     "make_traditional_hinge_leaf",
     "make_traditional_hinge_pair",
     "make_living_hinge",

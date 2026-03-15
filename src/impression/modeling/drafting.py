@@ -9,7 +9,7 @@ from impression.mesh import Mesh, combine_meshes, triangulate_faces
 
 from ._color import set_mesh_color
 from .primitives import _orient_mesh, _normalize
-# Text labels are currently disabled; make_dimension will omit labels.
+from .text import make_text
 
 Axis = Literal["x", "y", "z"]
 
@@ -128,6 +128,8 @@ def make_dimension(
     offset: float = 0.1,
     text: str | None = None,
     color: Sequence[float] | str | None = None,
+    font: str = "Arial",
+    font_path: str | None = None,
 ) -> list[Mesh]:
     start = np.asarray(start, dtype=float)
     end = np.asarray(end, dtype=float)
@@ -147,6 +149,45 @@ def make_dimension(
     arrow_end = end + offset_vec
 
     meshes = [make_arrow(arrow_start, arrow_end, color=color)]
+    if text:
+        label_up = np.cross(right, norm_dir)
+        up_norm = np.linalg.norm(label_up)
+        if up_norm < 1e-9:
+            label_up = up
+        else:
+            label_up = label_up / up_norm
 
-    # Text labels are currently disabled.
+        label_depth = max(length * 0.015, 0.02)
+        label_size = max(length * 0.15, 0.08)
+        label_gap = max(abs(offset) * 0.25, label_depth * 2.0)
+        label_center = (arrow_start + arrow_end) / 2.0 + right * label_gap
+
+        try:
+            label = make_text(
+                text,
+                depth=label_depth,
+                center=(0.0, 0.0, 0.0),
+                direction=(0.0, 0.0, 1.0),
+                font_size=label_size,
+                justify="center",
+                valign="middle",
+                font=font,
+                font_path=font_path,
+                color=color,
+            )
+        except FileNotFoundError:
+            return meshes
+
+        # Re-center label thickness so it straddles the local annotation plane.
+        zmin, zmax = label.bounds[4], label.bounds[5]
+        label.translate((0.0, 0.0, -0.5 * (zmin + zmax)), inplace=True)
+
+        transform = np.eye(4, dtype=float)
+        transform[:3, 0] = norm_dir
+        transform[:3, 1] = label_up
+        transform[:3, 2] = right
+        transform[:3, 3] = label_center
+        label.transform(transform, inplace=True)
+        meshes.append(label)
+
     return meshes

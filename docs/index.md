@@ -9,7 +9,7 @@ library, the tools, and the examples.
 - **Quickstart**: [README](../README.md)
 - **CLI Reference**: [CLI](cli.md)
 - **Examples**: [`docs/examples/`](examples/) (every file has a `build()` function)
-- **Agent Bootstrap**: [Agent Guide](agents.md)
+- **Agent Usage Guide**: [Agent Guide](agents.md)
 
 ## Tutorials
 
@@ -24,10 +24,13 @@ library, the tools, and the examples.
 - [Paths](modeling/paths.md) - polyline/spline utilities for sweeps and visualization.
 - [Path3D](modeling/path3d.md) - true-curve 3D paths (line/arc/bezier).
 - [2D Drawing](modeling/drawing2d.md) - profile and path primitives for vector-style modeling.
+- [Topology](modeling/topology.md) - shared planar loop/region/section helpers used across modeling features.
 - [Morph](modeling/morph.md) - profile interpolation between two shapes.
 - [Loft](modeling/loft.md) - surface lofting between multiple profiles.
 - [Heightmaps](modeling/heightmaps.md) - heightfield generation and image-based displacement.
 - [Text](modeling/text.md) - extruded or flat glyphs (including emoji) with full color support.
+- [Threading](modeling/threading.md) - standards-based thread specs, fit presets, and part generators.
+- [Hinges](modeling/hinges.md) - traditional, living, and bistable hinge generators.
 - [Drafting Helpers](modeling/drafting.md) - lines, planes, arrows, and dimensions for 2.5D annotations.
 - [Transforms](modeling/transforms.md) - rotate and translate meshes after creation.
 - [Groups](modeling/groups.md) - move collections together without losing the parts.
@@ -54,8 +57,11 @@ scripts/run_stl_tests.py
 
 ## Planning & Roadmap
 
+- [Project DNA](project-dna.md) - core values and quality bar for every feature, example, and workflow.
 - [Project Plan](project-plan.md) - roadmap, open questions, and future features.
 - [Feature Pipeline](feature-pipeline.md) - current implementation order.
+- [Implementation Specs](specs/README.md) - detailed implementation plans for major refactors/features.
+- [Changelog](../CHANGELOG.md) - release notes and supported/unsupported feature classes.
 
 ## Project Records
 

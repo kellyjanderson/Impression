@@ -4,8 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from impression.modeling import make_text, text_profiles
-from impression.modeling.drawing2d import Profile2D
+from impression.modeling import Section, make_text, text_profiles
 
 FONT_PATH = (
     Path(__file__).resolve().parents[1]
@@ -15,11 +14,11 @@ FONT_PATH = (
 )
 
 
-def test_text_profiles_returns_profiles():
-    profiles = text_profiles("A", font_size=1.0, font_path=str(FONT_PATH))
-    assert profiles
-    assert all(isinstance(profile, Profile2D) for profile in profiles)
-    assert profiles[0].outer.segments
+def test_text_profiles_returns_sections():
+    sections = text_profiles("A", font_size=1.0, font_path=str(FONT_PATH))
+    assert sections
+    assert all(isinstance(section, Section) for section in sections)
+    assert sections[0].regions
 
 
 def test_make_text_mesh():

@@ -4,12 +4,12 @@ from typing import Iterable, Sequence
 
 import numpy as np
 
-from impression.mesh import Mesh
+from impression.mesh import Mesh, combine_meshes
 from impression.mesh_quality import MeshQuality, apply_lod
 
 from ._color import set_mesh_color
-from ._profile2d import _profile_loops, _triangulate_profile
-from .drawing2d import Profile2D
+from .drawing2d import Path2D
+from .topology import Region, Section, as_section, triangulate_loops
 
 
 def _normalize(vector: Sequence[float]) -> np.ndarray:
@@ -39,7 +39,7 @@ def _cap_faces(
 
 
 def linear_extrude(
-    profile: Profile2D,
+    shape: Section | Region | Path2D | object,
     height: float = 1.0,
     direction: Sequence[float] = (0.0, 0.0, 1.0),
     center: Sequence[float] = (0.0, 0.0, 0.0),
@@ -47,7 +47,14 @@ def linear_extrude(
     bezier_samples: int = 32,
     quality: MeshQuality | None = None,
 ) -> Mesh:
-    """Extrude a 2D profile along a straight direction."""
+    """Extrude a planar shape along a straight direction.
+
+    Topology-native input:
+    - `Section` / `Region` / closed `Path2D`
+
+    Legacy shape objects with ``outer``/``holes`` path fields are adapted via
+    topology normalization.
+    """
 
     height = float(height)
     if height <= 0:
@@ -60,14 +67,39 @@ def linear_extrude(
         segments_per_circle = _apply_quality_samples(segments_per_circle, quality)
         bezier_samples = _apply_quality_samples(bezier_samples, quality)
 
-    vertices_2d, faces_2d, loops = _triangulate_profile(
-        profile,
+    section = as_section(
+        shape,
         segments_per_circle=segments_per_circle,
         bezier_samples=bezier_samples,
-    )
-    if vertices_2d.size == 0:
+    ).normalized()
+    if not section.regions:
         return Mesh(np.zeros((0, 3), dtype=float), np.zeros((0, 3), dtype=int))
 
+    meshes: list[Mesh] = []
+    for region in section.regions:
+        loops = [region.outer.points, *(hole.points for hole in region.holes)]
+        vertices_2d, faces_2d = triangulate_loops(loops)
+        if vertices_2d.size == 0:
+            continue
+        meshes.append(_linear_extrude_loops(vertices_2d, faces_2d, loops, direction_vec, center_vec, direction))
+
+    if not meshes:
+        return Mesh(np.zeros((0, 3), dtype=float), np.zeros((0, 3), dtype=int))
+    mesh = meshes[0] if len(meshes) == 1 else combine_meshes(meshes)
+    color = getattr(shape, "color", None)
+    if color is not None:
+        set_mesh_color(mesh, color)
+    return mesh
+
+
+def _linear_extrude_loops(
+    vertices_2d: np.ndarray,
+    faces_2d: np.ndarray,
+    loops: list[np.ndarray],
+    direction_vec: np.ndarray,
+    center_vec: np.ndarray,
+    direction: Sequence[float],
+) -> Mesh:
     base = np.column_stack([vertices_2d[:, 0], vertices_2d[:, 1], np.zeros(len(vertices_2d))])
     base = base + center_vec
     top = base + direction_vec
@@ -102,14 +134,11 @@ def linear_extrude(
                 faces.append(np.array([[b0, t1, b1], [b0, t0, t1]], dtype=int))
         offset += count
 
-    mesh = Mesh(vertices, np.vstack(faces))
-    if profile.color is not None:
-        set_mesh_color(mesh, profile.color)
-    return mesh
+    return Mesh(vertices, np.vstack(faces))
 
 
 def rotate_extrude(
-    profile: Profile2D,
+    shape: Section | Region | Path2D | object,
     angle_deg: float = 360.0,
     axis_origin: Sequence[float] = (0.0, 0.0, 0.0),
     axis_direction: Sequence[float] = (0.0, 0.0, 1.0),
@@ -120,7 +149,7 @@ def rotate_extrude(
     cap_ends: bool = True,
     quality: MeshQuality | None = None,
 ) -> Mesh:
-    """Rotate-extrude (lathe) a profile around an axis."""
+    """Rotate-extrude (lathe) a planar shape around an axis."""
 
     axis_origin = np.asarray(axis_origin, dtype=float).reshape(3)
     axis_dir = _normalize(axis_direction)
@@ -139,11 +168,16 @@ def rotate_extrude(
         segments_per_circle = _apply_quality_samples(segments_per_circle, quality)
         bezier_samples = _apply_quality_samples(bezier_samples, quality)
 
-    vertices_2d, faces_2d, loops = _triangulate_profile(
-        profile,
+    section = as_section(
+        shape,
         segments_per_circle=segments_per_circle,
         bezier_samples=bezier_samples,
-    )
+    ).normalized()
+    if len(section.regions) != 1:
+        raise ValueError("rotate_extrude currently requires a single connected region.")
+    region = section.regions[0]
+    loops = [region.outer.points, *(hole.points for hole in region.holes)]
+    vertices_2d, faces_2d = triangulate_loops(loops)
     if vertices_2d.size == 0:
         return Mesh(np.zeros((0, 3), dtype=float), np.zeros((0, 3), dtype=int))
 
@@ -202,8 +236,9 @@ def rotate_extrude(
         faces.append(end_cap)
 
     mesh = Mesh(vertices, np.vstack(faces))
-    if profile.color is not None:
-        set_mesh_color(mesh, profile.color)
+    color = getattr(shape, "color", None)
+    if color is not None:
+        set_mesh_color(mesh, color)
     return mesh
 
 

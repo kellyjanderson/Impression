@@ -7,6 +7,7 @@ import math
 import traceback
 import sys
 import signal
+import time
 from pathlib import Path
 from typing import Callable, Iterable, List, MutableMapping
 
@@ -21,8 +22,9 @@ from impression.mesh import Mesh, Polyline, analyze_mesh, combine_meshes, mesh_t
 from impression.io import write_stl
 from impression.modeling._color import get_mesh_color
 from impression.modeling.group import MeshGroup
-from impression.modeling.drawing2d import Path2D, Profile2D
+from impression.modeling.drawing2d import Path2D
 from impression.modeling.path3d import Path3D
+from impression.modeling.topology import Region, Section
 
 
 
@@ -67,6 +69,17 @@ def _format_exception(exc: BaseException) -> str:
 def _collect_datasets_from_scene(scene: object) -> List[Mesh | Polyline]:
     datasets: List[Mesh | Polyline] = []
 
+    def _loop_to_polyline(loop_points: np.ndarray) -> Polyline:
+        pts = np.asarray(loop_points, dtype=float).reshape(-1, 2)
+        pts3 = np.column_stack([pts, np.zeros((pts.shape[0], 1), dtype=float)])
+        return Polyline(pts3, closed=True, color=None)
+
+    def _region_to_polylines(region: Region) -> list[Polyline]:
+        normalized = region.normalized()
+        polylines = [_loop_to_polyline(normalized.outer.points)]
+        polylines.extend(_loop_to_polyline(hole.points) for hole in normalized.holes)
+        return polylines
+
     def visit(item: object) -> None:
         if item is None:
             return
@@ -88,8 +101,17 @@ def _collect_datasets_from_scene(scene: object) -> List[Mesh | Polyline]:
             datasets.append(item.to_polyline())
             return
 
-        if isinstance(item, Profile2D):
+        if hasattr(item, "to_polylines") and callable(getattr(item, "to_polylines")):
             datasets.extend(item.to_polylines())
+            return
+
+        if isinstance(item, Region):
+            datasets.extend(_region_to_polylines(item))
+            return
+
+        if isinstance(item, Section):
+            for region in item.normalized().regions:
+                datasets.extend(_region_to_polylines(region))
             return
 
         if isinstance(item, Path3D):
@@ -130,8 +152,11 @@ class PyVistaPreviewer:
         screenshot_path: Path | None = None,
         show_edges: bool = False,
         face_edges: bool = False,
+        show_bounds: bool = True,
+        show_axes: bool = True,
         control_file: Path | None = None,
         model_path_state: ModelPathState | None = None,
+        auto_rebuild_interval_getter: Callable[[], float | None] | None = None,
     ) -> None:
         datasets = []
         if initial_scene is not None:
@@ -146,13 +171,15 @@ class PyVistaPreviewer:
 
         pv = self._ensure_backend()
         plotter = pv.Plotter(window_size=(1280, 800))
-        self._configure_plotter(plotter)
+        self._configure_plotter(plotter, show_bounds=show_bounds, show_axes=show_axes)
         if datasets:
             self._apply_scene(
                 plotter,
                 datasets,
                 show_edges=show_edges,
                 face_edges=face_edges,
+                show_bounds=show_bounds,
+                show_axes=show_axes,
                 align_camera=True,
             )
 
@@ -299,6 +326,8 @@ class PyVistaPreviewer:
                 datasets,
                 show_edges=render_state["show_edges"],
                 face_edges=render_state["face_edges"],
+                show_bounds=show_bounds,
+                show_axes=show_axes,
                 align_camera=False,
             )
             plotter.render()
@@ -307,9 +336,40 @@ class PyVistaPreviewer:
         interval_seconds = max(1.0 / max(target_fps, 1), 0.05)
         callback_cleanup = None
         if watch_files:
+            last_auto_rebuild = {"time": time.monotonic()}
+
+            def _maybe_auto_rebuild() -> None:
+                if auto_rebuild_interval_getter is None:
+                    return
+                interval = auto_rebuild_interval_getter()
+                if interval is None or interval <= 0:
+                    return
+                now = time.monotonic()
+                if now - last_auto_rebuild["time"] < interval:
+                    return
+                last_auto_rebuild["time"] = now
+                try:
+                    datasets = self.collect_datasets(scene_factory())
+                    current_datasets.clear()
+                    current_datasets.extend(datasets)
+                    self._apply_scene(
+                        plotter,
+                        datasets,
+                        show_edges=render_state["show_edges"],
+                        face_edges=render_state["face_edges"],
+                        show_bounds=show_bounds,
+                        show_axes=show_axes,
+                        align_camera=False,
+                    )
+                    plotter.render()
+                except Exception as exc:  # pragma: no cover - surfaced via console
+                    panel = Panel.fit(_format_exception(exc), title="Animation tick failed", style="red")
+                    self.console.print(panel)
+
             def guarded_process_queue() -> None:
                 try:
                     process_queue()
+                    _maybe_auto_rebuild()
                     if render_dirty["value"]:
                         render_dirty["value"] = False
                         _render_current()
@@ -365,6 +425,8 @@ class PyVistaPreviewer:
                     current_datasets,
                     show_edges=render_state["show_edges"],
                     face_edges=render_state["face_edges"],
+                    show_bounds=show_bounds,
+                    show_axes=show_axes,
                     align_camera=False,
                 )
                 plotter.render()
@@ -425,13 +487,15 @@ class PyVistaPreviewer:
             return datasets[0].copy()
         return combine_meshes(datasets)
 
-    def _configure_plotter(self, plotter) -> None:
+    def _configure_plotter(self, plotter, *, show_bounds: bool = True, show_axes: bool = True) -> None:
         plotter.set_background("#090c10", top="#1b2333")
         safe_mode = _pyvista_safe_mode()
         if not safe_mode:
             plotter.enable_eye_dome_lighting()
-            plotter.add_axes(interactive=True)
-            self._show_bounds_with_units(plotter)
+            if show_axes:
+                plotter.add_axes(interactive=True)
+            if show_bounds:
+                self._show_bounds_with_units(plotter)
             self._install_home_button(plotter)
 
     def _apply_scene(
@@ -440,6 +504,8 @@ class PyVistaPreviewer:
         datasets: Iterable[Mesh | Polyline],
         show_edges: bool,
         face_edges: bool,
+        show_bounds: bool = True,
+        show_axes: bool = True,
         align_camera: bool = False,
     ) -> None:
         datasets = list(datasets)
@@ -448,8 +514,10 @@ class PyVistaPreviewer:
         edge_angle = 60.0
         plotter.clear()
         if not _pyvista_safe_mode():
-            self._show_bounds_with_units(plotter)
-            plotter.add_axes(interactive=True)
+            if show_bounds:
+                self._show_bounds_with_units(plotter)
+            if show_axes:
+                plotter.add_axes(interactive=True)
 
         for index, mesh in enumerate(datasets):
             if isinstance(mesh, Polyline):

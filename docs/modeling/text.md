@@ -4,8 +4,27 @@ Impression can generate text outlines and turn them into meshes. Under the hood
 the text is converted to 2D profiles and then extruded to 3D.
 
 ```python
-from impression.modeling import make_text, text, text_profiles
+from impression.modeling import make_text, text, text_profiles, text_sections
 ```
+
+## Ownership Boundary
+
+`text.py` owns:
+
+- font file resolution
+- glyph outline extraction
+- character/line layout
+- conversion of glyph commands into authored `Path2D` values
+
+`text.py` does not own:
+
+- generic path nesting (outer/hole detection)
+- loop containment/classification policy
+- winding normalization/triangulation behavior
+
+Those topology concerns are handled by [`topology`](topology.md) via shared
+helpers (currently `sections_from_paths` in the text pipeline). See
+[Topology Spec 07](../specs/topology-07-text-boundary.md).
 
 ## Options
 
@@ -23,8 +42,8 @@ from impression.modeling import make_text, text, text_profiles
 - `color`: RGB/RGBA tuple or color string (propagates through previews/exports).
 
 Text uses FontTools to convert glyph outlines into Bezier segments. The helper
-`text_profiles(...)` returns a list of `Profile2D` objects you can reuse for
-custom extrusions or lofts.
+`text_profiles(...)`/`text_sections(...)` return a list of topology-native `Section` values you
+can reuse for custom extrusions or lofts.
 
 ## Examples
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from impression.modeling.drawing2d import (
     Arc2D,
     Path2D,
-    Profile2D,
+    PlanarShape2D,
     make_circle,
     make_ngon,
     make_polyline,
@@ -22,7 +22,7 @@ def build():
         [Arc2D(center=(0.0, 1.6), radius=0.3, start_angle_deg=0, end_angle_deg=360, clockwise=True)],
         closed=True,
     )
-    ring = Profile2D(outer=outer, holes=[inner]).with_color("#7fbf7f")
+    ring = PlanarShape2D(outer=outer, holes=[inner]).with_color("#7fbf7f")
 
     path = make_polyline([(-2.2, -1.4), (-0.4, -1.1), (0.6, -1.6), (2.0, -1.1)], closed=False)
     path.with_color("#9aa6bf")

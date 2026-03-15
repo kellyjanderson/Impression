@@ -18,7 +18,7 @@ We will build the clamp in layers:
 
 ```python
 from impression.modeling import make_rect, make_circle
-from impression.modeling.drawing2d import Profile2D
+from impression.modeling.drawing2d import PlanarShape2D
 from impression.modeling import linear_extrude
 
 
@@ -27,7 +27,7 @@ def make_base():
     hole_left = make_circle(radius=3, center=(-14, 0)).outer
     hole_right = make_circle(radius=3, center=(14, 0)).outer
 
-    profile = Profile2D(outer=outer, holes=[hole_left, hole_right])
+    profile = PlanarShape2D(outer=outer, holes=[hole_left, hole_right])
     return linear_extrude(profile, height=4)
 ```
 
@@ -96,14 +96,14 @@ from impression.modeling import (
     linear_extrude,
     loft,
 )
-from impression.modeling.drawing2d import Profile2D
+from impression.modeling.drawing2d import PlanarShape2D
 
 
 def make_base():
     outer = make_rect(size=(40, 20)).outer
     hole_left = make_circle(radius=3, center=(-14, 0)).outer
     hole_right = make_circle(radius=3, center=(14, 0)).outer
-    profile = Profile2D(outer=outer, holes=[hole_left, hole_right])
+    profile = PlanarShape2D(outer=outer, holes=[hole_left, hole_right])
     return linear_extrude(profile, height=4)
 
 

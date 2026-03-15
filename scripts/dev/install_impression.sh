@@ -317,17 +317,35 @@ if [[ -z "$wheel" ]]; then
     exit 1
 fi
 
-# Ensure manifold3d is available. If already installed, skip rebuilding it.
-if "$py" - <<'PY'
-import importlib.util
-raise SystemExit(0 if importlib.util.find_spec("manifold3d") else 1)
-PY
-then
+# Ensure manifold3d is available.
+# Default behavior prefers binary wheels (fast) and falls back to source build only if needed.
+# Set IMPRESSION_MANIFOLD_MODE=source to force source builds, or =skip to skip manifold install.
+manifold_mode="${IMPRESSION_MANIFOLD_MODE:-auto}"
+if [[ "$manifold_mode" != "auto" && "$manifold_mode" != "source" && "$manifold_mode" != "skip" ]]; then
+    echo "Invalid IMPRESSION_MANIFOLD_MODE='$manifold_mode' (expected auto|source|skip)." >&2
+    exit 1
+fi
+
+if "$py" -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("manifold3d") else 1)'; then
     log "manifold3d already installed; skipping build."
 else
-    log "Building manifold3d (serial mode)"
-    CMAKE_ARGS="-DMANIFOLD_PAR=OFF" "$py" -m pip install --upgrade --no-binary=:all: manifold3d
+    if [[ "$manifold_mode" == "skip" ]]; then
+        log "IMPRESSION_MANIFOLD_MODE=skip; skipping manifold3d install."
+    elif [[ "$manifold_mode" == "source" ]]; then
+        log "Building manifold3d from source (serial mode)"
+        CMAKE_ARGS="-DMANIFOLD_PAR=OFF" "$py" -m pip install --upgrade --no-binary=:all: manifold3d
+    else
+        log "Installing manifold3d (prefer wheel)"
+        if ! "$py" -m pip install --upgrade --only-binary=:all: manifold3d; then
+            log "manifold3d wheel unavailable; building from source (serial mode)"
+            CMAKE_ARGS="-DMANIFOLD_PAR=OFF" "$py" -m pip install --upgrade --no-binary=:all: manifold3d
+        fi
+    fi
 fi
+
+# Ensure PyVista (viewer) is available in the target venv.
+log "Ensuring Impression CLI runtime dependencies are installed"
+"$py" -m pip install --upgrade typer rich watchfiles mapbox_earcut pyclipper fonttools markdown Pillow
 
 # Ensure PyVista (viewer) is available in the target venv.
 log "Ensuring PyVista is installed"
@@ -335,7 +353,24 @@ log "Ensuring PyVista is installed"
 
 # Install the freshly built wheel.
 log "Installing Impression wheel"
-CMAKE_ARGS="-DMANIFOLD_PAR=OFF" "$py" -m pip install --upgrade --force-reinstall "$wheel"
+CMAKE_ARGS="-DMANIFOLD_PAR=OFF" "$py" -m pip install --upgrade --force-reinstall --no-deps "$wheel"
+
+# Validate CLI installation (module + executable entrypoint).
+if ! "$py" -m impression.cli --version >/dev/null 2>&1; then
+    echo "Impression CLI module failed to run after install." >&2
+    exit 1
+fi
+
+if [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* || "$OSTYPE" == win32* ]]; then
+    cli_bin="$venv_path/Scripts/impression.exe"
+else
+    cli_bin="$venv_path/bin/impression"
+fi
+
+if [[ ! -x "$cli_bin" ]]; then
+    echo "Impression CLI executable not found at $cli_bin after install." >&2
+    exit 1
+fi
 
 post_version="$("$py" - <<'PY' 2>/dev/null
 import importlib.metadata

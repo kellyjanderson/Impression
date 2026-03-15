@@ -3,6 +3,14 @@
 Impression is a parametric modeling framework for Python that is focused on providing a
 comprehensive and consistent modeling interface, fast previews, and watertight STL generation.
 
+## Project DNA
+
+Impression aims for more than functional correctness. We build features, docs, and workflows to
+solve real modeling problems, bridge mechanical and organic design, and help users dream bigger
+about what they can create.
+
+See: [Project DNA](docs/project-dna.md)
+
 ## Quickstart
 
 ```bash
@@ -79,10 +87,11 @@ Full CLI reference: [`docs/cli.md`](docs/cli.md)
 ## Documentation Map
 
 - [`docs/index.md`](docs/index.md) - documentation portal
-- [`docs/modeling/`](docs/modeling/) - primitives, CSG, drawing2d, paths, extrusions, loft, morph, text
+- [`docs/modeling/`](docs/modeling/) - primitives, CSG, drawing2d, paths, extrusions, loft, threading, hinges, morph, text
 - [`docs/examples/`](docs/examples/) - runnable scripts that power the docs
 - [`docs/tutorials/`](docs/tutorials/) - guided walkthroughs for new and advanced users
-- [`docs/agents.md`](docs/agents.md) - agent bootstrap and feature map
+- [`docs/agents.md`](docs/agents.md) - agent usage guide for building with Impression
+- [`docs/project-dna.md`](docs/project-dna.md) - core product values and quality bar
 - [`docs/project-plan.md`](docs/project-plan.md) - roadmap and open questions
 
 ## Helper Scripts
@@ -122,6 +131,7 @@ Overrides:
 - `IMPRESSION_PYTHON_VERSION=3.12` to use a different version.
 - `IMPRESSION_PYTHON=/path/to/python3.13` to force a specific interpreter.
 - `IMPRESSION_RECREATE_VENV=1` to delete/recreate the venv if the version mismatches.
+- `IMPRESSION_MANIFOLD_MODE=auto|source|skip` to control manifold install behavior (`auto` prefers wheels, then falls back to source).
 
 ## Contributing
 

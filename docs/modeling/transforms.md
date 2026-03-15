@@ -45,9 +45,12 @@ Impression uses manifold3d CrossSection for 2D offset and convex hull:
 
 Notes:
 
-- `offset` accepts `Profile2D` or **closed** `Path2D`. Provide **either** `r` **or** `delta`.
+- `offset` accepts `Section`, `Region`, or **closed** `Path2D`. Provide **either** `r` **or** `delta`.
 - `chamfer=False` uses rounded joins; set `chamfer=True` for mitered corners.
-- Both `offset` and 2D `hull` return **one or more `Profile2D`** instances (multiple profiles if the hull/offset splits).
+- Both `offset` and 2D `hull` return **one or more `Section`** instances
+  (multiple sections if the hull/offset splits into disconnected islands).
+- `ops` remains a stable public façade; planar and mesh hull implementations are split internally.
+- `hull` inputs must be all planar or all mesh types (mixed domain inputs are rejected).
 
 Example (2D hull):
 
@@ -66,8 +69,3 @@ def build():
 
 - Accepts `Mesh` or `MeshGroup` values.
 - Returns a single `Mesh` representing the convex hull.
-
-## Minkowski
-
-`minkowski(...)` is not yet supported with the current backend. It will require an
-additional geometry kernel (e.g., CGAL/libigl) to implement 3D Minkowski sums.

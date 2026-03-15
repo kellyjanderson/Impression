@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Iterable, Sequence
 
 import numpy as np
@@ -8,14 +9,79 @@ from impression.mesh import Mesh
 from impression.mesh_quality import MeshQuality, apply_lod
 
 from ._color import set_mesh_color
-from ._profile2d import _loops_resampled, _profile_loops, _resample_loop, _triangulate_loops, _signed_area, _ensure_winding
-from .drawing2d import Profile2D
+from .topology import (
+    loops_resampled as _loops_resampled,
+    profile_loops as _profile_loops,
+    resample_loop as _resample_loop,
+    triangulate_loops as _triangulate_loops,
+    anchor_loop as _anchor_loop,
+    inset_profile_loops as _inset_profile_loops,
+    classify_loops as _classify_loops,
+    signed_area as _signed_area,
+    minimum_cost_loop_assignment as _minimum_cost_loop_assignment_topology,
+    minimum_cost_subset_assignment as _minimum_cost_subset_assignment_topology,
+    stable_loop_transition as _stable_loop_transition,
+    split_merge_ambiguous as _split_merge_ambiguous,
+    Loop,
+    Section,
+    Region,
+    as_section,
+)
+from .drawing2d import Path2D
 from .path3d import Path3D
 from .paths import Path as PolyPath
 
 
+@dataclass(frozen=True)
+class Station:
+    """A loft station with explicit 3D frame data."""
+
+    t: float
+    origin: np.ndarray
+    u: np.ndarray
+    v: np.ndarray
+    n: np.ndarray
+    section: Section | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "t", float(self.t))
+        object.__setattr__(self, "origin", np.asarray(self.origin, dtype=float).reshape(3))
+        object.__setattr__(self, "u", np.asarray(self.u, dtype=float).reshape(3))
+        object.__setattr__(self, "v", np.asarray(self.v, dtype=float).reshape(3))
+        object.__setattr__(self, "n", np.asarray(self.n, dtype=float).reshape(3))
+
+
+@dataclass(frozen=True)
+class _LoopRef:
+    kind: str  # "actual" | "synthetic"
+    index: int
+
+
+@dataclass(frozen=True)
+class _RegionRef:
+    kind: str  # "actual" | "synthetic"
+    index: int
+
+
+@dataclass(frozen=True)
+class _PairedRegionLoops:
+    prev_loops: tuple[np.ndarray, ...]
+    curr_loops: tuple[np.ndarray, ...]
+    prev_sources: tuple[_LoopRef, ...]
+    curr_sources: tuple[_LoopRef, ...]
+    closures: tuple[tuple[str, int], ...]
+
+
+@dataclass(frozen=True)
+class _PairedSectionTransition:
+    prev_region_ref: _RegionRef
+    curr_region_ref: _RegionRef
+    region: _PairedRegionLoops
+    region_closures: tuple[str, ...]
+
+
 def loft_profiles(
-    profiles: Sequence[Profile2D],
+    profiles: Sequence[Section | Region | Path2D | object],
     path: Path3D | PolyPath | Sequence[Sequence[float]] | None = None,
     samples: int = 200,
     segments_per_circle: int = 64,
@@ -29,7 +95,7 @@ def loft_profiles(
     end_cap_length: float | None = None,
     cap_scale_dims: str = "both",
 ) -> Mesh:
-    """Loft a sequence of profiles, optionally along a path."""
+    """Loft a sequence of planar sections/profiles, optionally along a path."""
 
     if quality is not None:
         quality = apply_lod(quality)
@@ -37,14 +103,20 @@ def loft_profiles(
         segments_per_circle = _apply_quality_samples(segments_per_circle, quality)
         bezier_samples = _apply_quality_samples(bezier_samples, quality)
 
-    if len(profiles) < 2:
-        raise ValueError("loft_profiles requires at least two profiles.")
-    hole_count = len(profiles[0].holes)
-    for profile in profiles[1:]:
-        if len(profile.holes) != hole_count:
-            raise ValueError("All profiles must have the same number of holes.")
+    normalized_profiles = _normalize_profile_inputs(
+        profiles,
+        segments_per_circle=segments_per_circle,
+        bezier_samples=bezier_samples,
+    )
 
-    positions = _resolve_positions(path, len(profiles))
+    _validate_profile_topology_input(
+        normalized_profiles,
+        fn_name="loft_profiles",
+        segments_per_circle=segments_per_circle,
+        bezier_samples=bezier_samples,
+    )
+
+    positions = _resolve_positions(path, len(normalized_profiles))
     if start_cap != "none" or end_cap != "none":
         cap_ends = True
     if cap_ends and start_cap == "none":
@@ -54,7 +126,7 @@ def loft_profiles(
     _validate_scale_dims(cap_scale_dims)
     _validate_caps(start_cap, end_cap)
     loops_per_profile, positions = _apply_caps(
-        profiles=profiles,
+        profiles=normalized_profiles,
         positions=positions,
         start_cap=start_cap,
         end_cap=end_cap,
@@ -66,7 +138,8 @@ def loft_profiles(
         segments_per_circle=segments_per_circle,
         bezier_samples=bezier_samples,
     )
-    normals, binormals, tangents = _compute_frames(positions)
+    loops_per_profile = _align_loops_for_loft(loops_per_profile)
+    stations = _build_stations(positions)
 
     loop_count = len(loops_per_profile[0]) if loops_per_profile else 0
 
@@ -74,15 +147,13 @@ def loft_profiles(
     offsets = []
     for profile_idx, loops in enumerate(loops_per_profile):
         profile_offsets = []
-        normal = normals[profile_idx]
-        binormal = binormals[profile_idx]
-        tangent = tangents[profile_idx]
+        station = stations[profile_idx]
         for loop in loops:
             profile_offsets.append(len(vertices))
             pts3 = (
-                positions[profile_idx]
-                + loop[:, 0:1] * normal
-                + loop[:, 1:2] * binormal
+                station.origin
+                + loop[:, 0:1] * station.u
+                + loop[:, 1:2] * station.v
             )
             vertices.extend(pts3)
         offsets.append(profile_offsets)
@@ -112,14 +183,14 @@ def loft_profiles(
             faces.extend((base_faces[:, [0, 2, 1]] + end_offset).tolist())
 
     mesh = Mesh(vertices, np.asarray(faces, dtype=int))
-    color = profiles[0].color
+    color = getattr(normalized_profiles[0], "color", None)
     if color is not None:
         set_mesh_color(mesh, color)
     return mesh
 
 
 def loft(
-    profiles: Sequence[Profile2D],
+    profiles: Sequence[Section | Region | Path2D | object],
     path: Path3D | PolyPath | Sequence[Sequence[float]] | None = None,
     samples: int = 200,
     segments_per_circle: int = 64,
@@ -152,15 +223,201 @@ def loft(
     )
 
 
+def loft_sections(
+    stations: Sequence[Station],
+    samples: int = 200,
+    quality: MeshQuality | None = None,
+    cap_ends: bool = False,
+    split_merge_mode: str = "fail",
+    split_merge_steps: int = 8,
+    split_merge_bias: float = 0.5,
+) -> Mesh:
+    """Loft topology-native sections using explicit station frames.
+
+    Current contract:
+    - stations must be strictly ordered by `t`
+    - station frames must be right-handed orthonormal bases
+    - deterministic one-to-one region correspondence
+    - hole birth/death is supported via bounded synthetic transition loops
+    - `split_merge_mode="fail"` rejects split/merge transitions
+    - `split_merge_mode="resolve"` supports deterministic 1->N and N->1
+      decomposition (N->M with N>1 and M>1 remains unsupported)
+    """
+
+    if quality is not None:
+        quality = apply_lod(quality)
+        samples = _apply_quality_samples(samples, quality)
+
+    _validate_split_merge_mode(split_merge_mode)
+    _validate_split_merge_controls(split_merge_steps, split_merge_bias)
+
+    _validate_section_stations(stations)
+    effective_stations = list(stations)
+    if split_merge_mode == "resolve":
+        effective_stations = _expand_split_merge_stations(
+            stations=effective_stations,
+            samples=samples,
+            split_merge_steps=split_merge_steps,
+            split_merge_bias=split_merge_bias,
+        )
+        _validate_section_stations(effective_stations)
+
+    station_regions: list[list[list[np.ndarray]]] = []
+    for idx, station in enumerate(effective_stations):
+        section = station.section
+        if section is None:
+            raise ValueError(f"Station at index {idx} is missing section data.")
+        station_regions.append(_section_to_region_loops(section, samples=samples))
+
+    vertices: list[np.ndarray] = []
+    offsets: list[list[list[int]]] = []
+    for station, regions in zip(effective_stations, station_regions, strict=True):
+        station_offsets: list[list[int]] = []
+        for loops in regions:
+            region_offsets: list[int] = []
+            for loop in loops:
+                region_offsets.append(len(vertices))
+                pts3 = station.origin + loop[:, 0:1] * station.u + loop[:, 1:2] * station.v
+                vertices.extend(pts3)
+            station_offsets.append(region_offsets)
+        offsets.append(station_offsets)
+
+    faces: list[list[int]] = []
+    loop_start_cache: dict[tuple[int, str, int, str, int], int] = {}
+    for idx in range(len(station_regions) - 1):
+        transitions = _pair_sections_for_transition(
+            station_regions[idx],
+            station_regions[idx + 1],
+            split_merge_mode=split_merge_mode,
+            split_merge_steps=split_merge_steps,
+            split_merge_bias=split_merge_bias,
+        )
+        for transition in transitions:
+            paired = transition.region
+
+            for loop_idx in range(len(paired.prev_loops)):
+                prev_start = _resolve_transition_loop_start(
+                    station_index=idx,
+                    station=effective_stations[idx],
+                    region_ref=transition.prev_region_ref,
+                    ref=paired.prev_sources[loop_idx],
+                    loop=paired.prev_loops[loop_idx],
+                    offsets=offsets,
+                    vertices=vertices,
+                    loop_start_cache=loop_start_cache,
+                )
+                curr_start = _resolve_transition_loop_start(
+                    station_index=idx + 1,
+                    station=effective_stations[idx + 1],
+                    region_ref=transition.curr_region_ref,
+                    ref=paired.curr_sources[loop_idx],
+                    loop=paired.curr_loops[loop_idx],
+                    offsets=offsets,
+                    vertices=vertices,
+                    loop_start_cache=loop_start_cache,
+                )
+                for i in range(samples):
+                    j = (i + 1) % samples
+                    a0 = prev_start + i
+                    a1 = prev_start + j
+                    b0 = curr_start + i
+                    b1 = curr_start + j
+                    faces.append([a0, a1, b1])
+                    faces.append([a0, b1, b0])
+
+            for side, loop_idx in paired.closures:
+                if side == "prev":
+                    closure_start = _resolve_transition_loop_start(
+                        station_index=idx,
+                        station=effective_stations[idx],
+                        region_ref=transition.prev_region_ref,
+                        ref=paired.prev_sources[loop_idx],
+                        loop=paired.prev_loops[loop_idx],
+                        offsets=offsets,
+                        vertices=vertices,
+                        loop_start_cache=loop_start_cache,
+                    )
+                    _, closure_faces = _triangulate_loops([paired.prev_loops[loop_idx]])
+                    faces.extend((closure_faces + closure_start).tolist())
+                else:
+                    closure_start = _resolve_transition_loop_start(
+                        station_index=idx + 1,
+                        station=effective_stations[idx + 1],
+                        region_ref=transition.curr_region_ref,
+                        ref=paired.curr_sources[loop_idx],
+                        loop=paired.curr_loops[loop_idx],
+                        offsets=offsets,
+                        vertices=vertices,
+                        loop_start_cache=loop_start_cache,
+                    )
+                    _, closure_faces = _triangulate_loops([paired.curr_loops[loop_idx]])
+                    faces.extend((closure_faces[:, [0, 2, 1]] + closure_start).tolist())
+
+            for side in transition.region_closures:
+                if side == "prev":
+                    loop_starts = [
+                        _resolve_transition_loop_start(
+                            station_index=idx,
+                            station=effective_stations[idx],
+                            region_ref=transition.prev_region_ref,
+                            ref=paired.prev_sources[loop_idx],
+                            loop=paired.prev_loops[loop_idx],
+                            offsets=offsets,
+                            vertices=vertices,
+                            loop_start_cache=loop_start_cache,
+                        )
+                        for loop_idx in range(len(paired.prev_loops))
+                    ]
+                    closure_faces = _triangulate_loopset_faces_with_starts(
+                        paired.prev_loops,
+                        loop_starts,
+                    )
+                    faces.extend(closure_faces.tolist())
+                else:
+                    loop_starts = [
+                        _resolve_transition_loop_start(
+                            station_index=idx + 1,
+                            station=effective_stations[idx + 1],
+                            region_ref=transition.curr_region_ref,
+                            ref=paired.curr_sources[loop_idx],
+                            loop=paired.curr_loops[loop_idx],
+                            offsets=offsets,
+                            vertices=vertices,
+                            loop_start_cache=loop_start_cache,
+                        )
+                        for loop_idx in range(len(paired.curr_loops))
+                    ]
+                    closure_faces = _triangulate_loopset_faces_with_starts(
+                        paired.curr_loops,
+                        loop_starts,
+                    )
+                    faces.extend(closure_faces[:, [0, 2, 1]].tolist())
+
+    if cap_ends:
+        for region_idx in range(len(station_regions[0])):
+            _, base_faces_start = _triangulate_loops(station_regions[0][region_idx])
+            if base_faces_start.size:
+                faces.extend((base_faces_start + offsets[0][region_idx][0]).tolist())
+        for region_idx in range(len(station_regions[-1])):
+            _, base_faces_end = _triangulate_loops(station_regions[-1][region_idx])
+            if base_faces_end.size:
+                faces.extend((base_faces_end[:, [0, 2, 1]] + offsets[-1][region_idx][0]).tolist())
+
+    return Mesh(np.asarray(vertices, dtype=float), np.asarray(faces, dtype=int))
+
+
 def loft_endcaps(
-    profiles: Sequence[Profile2D],
+    profiles: Sequence[Section | Region | Path2D | object],
     path: Path3D | PolyPath | Sequence[Sequence[float]] | None = None,
     samples: int = 200,
     segments_per_circle: int = 64,
     bezier_samples: int = 32,
     quality: MeshQuality | None = None,
     endcap_mode: str = "FLAT",
-    endcap_amount: float = 0.0,
+    endcap_amount: float | None = None,
+    endcap_depth: float | None = None,
+    endcap_radius: float | None = None,
+    endcap_parameter_mode: str = "independent",
     endcap_steps: int = 12,
     endcap_placement: str = "BOTH",
 ) -> Mesh:
@@ -172,23 +429,37 @@ def loft_endcaps(
         segments_per_circle = _apply_quality_samples(segments_per_circle, quality)
         bezier_samples = _apply_quality_samples(bezier_samples, quality)
 
-    if len(profiles) < 2:
-        raise ValueError("loft_endcaps requires at least two profiles.")
+    normalized_profiles = _normalize_profile_inputs(
+        profiles,
+        segments_per_circle=segments_per_circle,
+        bezier_samples=bezier_samples,
+    )
 
-    hole_count = len(profiles[0].holes)
-    for profile in profiles[1:]:
-        if len(profile.holes) != hole_count:
-            raise ValueError("All profiles must have the same number of holes.")
+    _validate_profile_topology_input(
+        normalized_profiles,
+        fn_name="loft_endcaps",
+        segments_per_circle=segments_per_circle,
+        bezier_samples=bezier_samples,
+    )
+    hole_count = len(normalized_profiles[0].regions[0].holes)
 
     _validate_endcap_mode(endcap_mode)
     _validate_endcap_placement(endcap_placement)
-    if endcap_mode != "FLAT" and endcap_amount <= 0:
-        raise ValueError("endcap_amount must be > 0 for CHAMFER or ROUND.")
+    _validate_endcap_parameter_mode(endcap_parameter_mode)
+    depth, radius = _resolve_endcap_amounts(
+        endcap_mode=endcap_mode,
+        endcap_amount=endcap_amount,
+        endcap_depth=endcap_depth,
+        endcap_radius=endcap_radius,
+        parameter_mode=endcap_parameter_mode,
+    )
+    if endcap_mode != "FLAT" and (depth <= 0 or radius <= 0):
+        raise ValueError("endcap_depth and endcap_radius must be > 0 for non-flat endcaps.")
     if endcap_mode == "ROUND" and endcap_steps < 2:
         raise ValueError("endcap_steps must be >= 2 for ROUND.")
 
-    positions = _resolve_positions(path, len(profiles))
-    normals, binormals, tangents = _compute_frames(positions)
+    positions = _resolve_positions(path, len(normalized_profiles))
+    stations = _build_stations(positions)
 
     loops_per_profile = [
         _loops_resampled_anchored(
@@ -197,7 +468,7 @@ def loft_endcaps(
             segments_per_circle=segments_per_circle,
             bezier_samples=bezier_samples,
         )
-        for profile in profiles
+        for profile in normalized_profiles
     ]
 
     start_enabled = endcap_placement in {"START", "BOTH"} and endcap_mode != "FLAT"
@@ -208,17 +479,18 @@ def loft_endcaps(
     cap_indices: list[tuple[int, str]] = []
 
     start_body_index = 0
-    end_body_index = len(profiles)
+    end_body_index = len(normalized_profiles)
 
     if start_enabled:
         cap_sections = _build_endcap_sections(
-            profile=profiles[0],
+            section=normalized_profiles[0],
             base_loops=loops_per_profile[0],
-            position=positions[0],
-            tangent=tangents[0],
+            position=stations[0].origin,
+            tangent=stations[0].n,
             direction=-1.0,
             mode=endcap_mode,
-            amount=endcap_amount,
+            depth=depth,
+            radius=radius,
             steps=endcap_steps,
             samples=samples,
             segments_per_circle=segments_per_circle,
@@ -234,7 +506,7 @@ def loft_endcaps(
         start_body_index = 1
 
     if end_enabled:
-        end_body_index = len(profiles) - 1
+        end_body_index = len(normalized_profiles) - 1
 
     for idx in range(start_body_index, end_body_index):
         new_loops.append(loops_per_profile[idx])
@@ -242,13 +514,14 @@ def loft_endcaps(
 
     if end_enabled:
         cap_sections = _build_endcap_sections(
-            profile=profiles[-1],
+            section=normalized_profiles[-1],
             base_loops=loops_per_profile[-1],
-            position=positions[-1],
-            tangent=tangents[-1],
+            position=stations[-1].origin,
+            tangent=stations[-1].n,
             direction=1.0,
             mode=endcap_mode,
-            amount=endcap_amount,
+            depth=depth,
+            radius=radius,
             steps=endcap_steps,
             samples=samples,
             segments_per_circle=segments_per_circle,
@@ -267,20 +540,19 @@ def loft_endcaps(
         if endcap_placement in {"END", "BOTH"}:
             cap_indices.append((len(loops_per_profile) - 1, "end"))
 
-    loops_per_profile = new_loops
+    loops_per_profile = _align_loops_for_loft(new_loops)
     positions = np.asarray(new_positions, dtype=float)
-    normals, binormals, tangents = _compute_frames(positions)
+    stations = _build_stations(positions)
 
     loop_count = len(loops_per_profile[0]) if loops_per_profile else 0
     vertices: list[np.ndarray] = []
     offsets: list[list[int]] = []
     for profile_idx, loops in enumerate(loops_per_profile):
         profile_offsets = []
-        normal = normals[profile_idx]
-        binormal = binormals[profile_idx]
+        station = stations[profile_idx]
         for loop in loops:
             profile_offsets.append(len(vertices))
-            pts3 = positions[profile_idx] + loop[:, 0:1] * normal + loop[:, 1:2] * binormal
+            pts3 = station.origin + loop[:, 0:1] * station.u + loop[:, 1:2] * station.v
             vertices.extend(pts3)
         offsets.append(profile_offsets)
 
@@ -311,7 +583,7 @@ def loft_endcaps(
             faces.extend((base_faces[:, [0, 2, 1]] + offset).tolist())
 
     mesh = Mesh(vertices, np.asarray(faces, dtype=int))
-    color = profiles[0].color
+    color = getattr(normalized_profiles[0], "color", None)
     if color is not None:
         set_mesh_color(mesh, color)
     return mesh
@@ -335,6 +607,90 @@ def _resolve_positions(
         raise ValueError("path must be a sequence of 3D points.")
 
     return _resample_path(pts, count)
+
+
+def _normalize_profile_inputs(
+    profiles: Sequence[Section | Region | Path2D | object],
+    *,
+    segments_per_circle: int,
+    bezier_samples: int,
+) -> list[Section]:
+    normalized: list[Section] = []
+    for idx, shape in enumerate(profiles):
+        section = as_section(
+            shape,
+            segments_per_circle=segments_per_circle,
+            bezier_samples=bezier_samples,
+        ).normalized()
+        if len(section.regions) != 1:
+            raise ValueError(
+                "loft currently requires one connected region per profile "
+                f"(profile index {idx} has {len(section.regions)} regions)."
+            )
+        if not section.regions:
+            raise ValueError(f"Profile at index {idx} resolved to empty topology.")
+        normalized.append(section)
+    return normalized
+
+
+def _validate_profile_topology_input(
+    profiles: Sequence[Section],
+    *,
+    fn_name: str,
+    segments_per_circle: int,
+    bezier_samples: int,
+) -> None:
+    if len(profiles) < 2:
+        raise ValueError(f"{fn_name} requires at least two profiles.")
+
+    expected_holes = len(profiles[0].regions[0].holes)
+    for idx, section in enumerate(profiles):
+        region = section.regions[0]
+        if len(region.holes) != expected_holes:
+            raise ValueError(
+                "Unsupported topology transition: hole birth/death (split/merge) "
+                f"is not supported in {fn_name} (profile index {idx})."
+            )
+        loops = _profile_loops(
+            section,
+            segments_per_circle=segments_per_circle,
+            bezier_samples=bezier_samples,
+            enforce_winding=True,
+        )
+        try:
+            _classify_loops(loops, expected_holes=expected_holes)
+        except ValueError as exc:
+            raise ValueError(
+                "Unsupported topology transition: region split/merge or invalid "
+                f"hole containment in {fn_name} (profile index {idx})."
+            ) from exc
+
+
+def _validate_section_stations(stations: Sequence[Station]) -> None:
+    if len(stations) < 2:
+        raise ValueError("loft_sections requires at least two stations.")
+    prev_t: float | None = None
+    for idx, station in enumerate(stations):
+        if not np.all(np.isfinite(station.origin)):
+            raise ValueError(f"Station at index {idx} has non-finite origin.")
+        _validate_station_frame(station, idx)
+        if prev_t is not None and station.t <= prev_t:
+            raise ValueError("Stations must be strictly ordered by t.")
+        prev_t = station.t
+
+
+def _validate_station_frame(station: Station, idx: int, tol: float = 1e-6) -> None:
+    u = station.u
+    v = station.v
+    n = station.n
+    norms = (np.linalg.norm(u), np.linalg.norm(v), np.linalg.norm(n))
+    if not all(abs(float(norm) - 1.0) <= tol for norm in norms):
+        raise ValueError(f"Station frame at index {idx} must be unit-length.")
+    if abs(float(np.dot(u, v))) > tol or abs(float(np.dot(u, n))) > tol or abs(float(np.dot(v, n))) > tol:
+        raise ValueError(f"Station frame at index {idx} must be orthogonal.")
+    handedness = float(np.dot(np.cross(u, v), n))
+    if handedness <= 0.0:
+        raise ValueError(f"Station frame at index {idx} must be right-handed.")
 
 
 def _apply_quality_samples(value: int, quality: MeshQuality) -> int:
@@ -374,6 +730,636 @@ def _resample_path(points: np.ndarray, count: int) -> np.ndarray:
     return np.asarray(result, dtype=float)
 
 
+def _build_stations(positions: np.ndarray) -> list[Station]:
+    pts = np.asarray(positions, dtype=float)
+    if pts.ndim != 2 or pts.shape[1] != 3:
+        raise ValueError("stations require Nx3 positions.")
+    normals, binormals, tangents = _compute_frames(pts)
+    t_values = _normalized_path_parameters(pts)
+    stations: list[Station] = []
+    for i in range(pts.shape[0]):
+        u, v, n = _orthonormalize_frame(
+            _normalized_vector(normals[i]),
+            _normalized_vector(binormals[i]),
+            _normalized_vector(tangents[i]),
+        )
+        stations.append(
+            Station(
+                t=float(t_values[i]),
+                origin=pts[i].copy(),
+                u=u,
+                v=v,
+                n=n,
+            )
+        )
+    return stations
+
+
+def _normalized_path_parameters(positions: np.ndarray) -> np.ndarray:
+    if positions.shape[0] <= 1:
+        return np.zeros(positions.shape[0], dtype=float)
+    seg = np.linalg.norm(np.diff(positions, axis=0), axis=1)
+    total = float(seg.sum())
+    if total <= 1e-12:
+        return np.linspace(0.0, 1.0, positions.shape[0])
+    cumulative = np.concatenate([[0.0], np.cumsum(seg)])
+    return cumulative / total
+
+
+def _normalized_vector(vec: np.ndarray) -> np.ndarray:
+    arr = np.asarray(vec, dtype=float)
+    norm = float(np.linalg.norm(arr))
+    if norm <= 1e-12:
+        return np.array([1.0, 0.0, 0.0], dtype=float)
+    return arr / norm
+
+
+def _orthonormalize_frame(u: np.ndarray, v: np.ndarray, n: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return a right-handed orthonormal frame from approximate basis vectors."""
+
+    u = _normalized_vector(u)
+    n = _normalized_vector(n)
+
+    # Keep U perpendicular to N.
+    u = u - np.dot(u, n) * n
+    if np.linalg.norm(u) <= 1e-12:
+        aux = np.array([1.0, 0.0, 0.0], dtype=float)
+        if abs(np.dot(aux, n)) > 0.9:
+            aux = np.array([0.0, 1.0, 0.0], dtype=float)
+        u = aux - np.dot(aux, n) * n
+    u = _normalized_vector(u)
+
+    # Rebuild V from N and U to guarantee right-handedness.
+    v = np.cross(n, u)
+    if np.linalg.norm(v) <= 1e-12:
+        aux = np.array([0.0, 1.0, 0.0], dtype=float)
+        if abs(np.dot(aux, n)) > 0.9:
+            aux = np.array([0.0, 0.0, 1.0], dtype=float)
+        v = aux - np.dot(aux, n) * n - np.dot(aux, u) * u
+    v = _normalized_vector(v)
+
+    # Recompute N from UxV to remove residual drift and guarantee orthogonality.
+    n = np.cross(u, v)
+    n = _normalized_vector(n)
+
+    return u, v, n
+
+
+def _align_loops_for_loft(loops_per_profile: list[list[np.ndarray]]) -> list[list[np.ndarray]]:
+    if not loops_per_profile:
+        return loops_per_profile
+    hole_count = len(loops_per_profile[0]) - 1
+    aligned: list[list[np.ndarray]] = []
+    first_outer, first_holes = _validate_profile_loops(loops_per_profile[0], hole_count)
+    aligned.append([first_outer, *first_holes])
+
+    for profile_idx in range(1, len(loops_per_profile)):
+        outer, holes = _validate_profile_loops(loops_per_profile[profile_idx], hole_count)
+        prev_holes = aligned[-1][1:]
+        order = _minimum_cost_hole_assignment(prev_holes, holes)
+        reordered_holes = [holes[target_idx] for target_idx in order]
+        aligned.append([outer, *reordered_holes])
+    return aligned
+
+
+def _section_to_region_loops(section: Section, *, samples: int) -> list[list[np.ndarray]]:
+    normalized = section.normalized()
+    regions: list[list[np.ndarray]] = []
+    ordered_regions = sorted(normalized.regions, key=lambda region: _loop_sort_key(region.outer.points))
+    for region in ordered_regions:
+        ordered_holes = sorted(region.holes, key=lambda hole: _loop_sort_key(hole.points))
+        loops = [region.outer.points, *(hole.points for hole in ordered_holes)]
+        regions.append([_resample_loop(_anchor_loop(loop), samples) for loop in loops])
+    return regions
+
+
+def _expand_split_merge_stations(
+    *,
+    stations: list[Station],
+    samples: int,
+    split_merge_steps: int,
+    split_merge_bias: float,
+) -> list[Station]:
+    if len(stations) < 2 or split_merge_steps <= 1:
+        return stations
+
+    expanded: list[Station] = [stations[0]]
+    for idx in range(len(stations) - 1):
+        prev = stations[idx]
+        curr = stations[idx + 1]
+        if prev.section is None or curr.section is None:
+            expanded.append(curr)
+            continue
+        prev_regions = _section_to_region_loops(prev.section, samples=samples)
+        curr_regions = _section_to_region_loops(curr.section, samples=samples)
+        if not _needs_split_merge_staging(prev_regions, curr_regions):
+            expanded.append(curr)
+            continue
+
+        transitions = _pair_sections_for_transition(
+            prev_regions,
+            curr_regions,
+            split_merge_mode="resolve",
+            split_merge_steps=split_merge_steps,
+            split_merge_bias=split_merge_bias,
+        )
+        u0 = float(np.clip(split_merge_bias - 0.2, 0.0, 1.0))
+        u1 = float(np.clip(split_merge_bias + 0.2, 0.0, 1.0))
+        if u1 <= u0:
+            u0, u1 = 0.25, 0.75
+        u_values = np.linspace(u0, u1, split_merge_steps + 2, dtype=float)[1:-1]
+        for u in u_values:
+            alpha = (float(u) - u0) / (u1 - u0)
+            staged_region_loops: list[list[np.ndarray]] = []
+            for transition in transitions:
+                region_loops: list[np.ndarray] = []
+                for prev_loop, curr_loop in zip(
+                    transition.region.prev_loops,
+                    transition.region.curr_loops,
+                    strict=True,
+                ):
+                    region_loops.append((1.0 - alpha) * prev_loop + alpha * curr_loop)
+                staged_region_loops.append(region_loops)
+            staged_section = _section_from_region_loops(staged_region_loops, color=curr.section.color)
+            expanded.append(_interpolate_station(prev, curr, float(u), staged_section))
+        expanded.append(curr)
+    return expanded
+
+
+def _needs_split_merge_staging(
+    prev_regions: list[list[np.ndarray]],
+    curr_regions: list[list[np.ndarray]],
+) -> bool:
+    if len(prev_regions) != len(curr_regions):
+        return True
+    if not prev_regions:
+        return False
+    order = _minimum_cost_region_assignment(
+        [region[0] for region in prev_regions],
+        [region[0] for region in curr_regions],
+    )
+    for prev_idx, curr_idx in enumerate(order):
+        if len(prev_regions[prev_idx]) != len(curr_regions[curr_idx]):
+            return True
+    return False
+
+
+def _section_from_region_loops(
+    regions: list[list[np.ndarray]],
+    *,
+    color: tuple[float, float, float, float] | None = None,
+) -> Section:
+    region_objs: list[Region] = []
+    for loops in regions:
+        if not loops:
+            continue
+        outer_pts = np.asarray(loops[0], dtype=float)
+        if outer_pts.shape[0] < 3:
+            continue
+        holes: list[Loop] = []
+        for hole in loops[1:]:
+            hole_pts = np.asarray(hole, dtype=float)
+            if hole_pts.shape[0] < 3:
+                continue
+            holes.append(Loop(hole_pts))
+        region_objs.append(Region(outer=Loop(outer_pts), holes=tuple(holes)).normalized())
+    return Section(tuple(region_objs), color=color).normalized()
+
+
+def _interpolate_station(prev: Station, curr: Station, u: float, section: Section) -> Station:
+    u = float(np.clip(u, 0.0, 1.0))
+    t = (1.0 - u) * prev.t + u * curr.t
+    origin = (1.0 - u) * prev.origin + u * curr.origin
+    u_vec = (1.0 - u) * prev.u + u * curr.u
+    v_vec = (1.0 - u) * prev.v + u * curr.v
+    n_vec = (1.0 - u) * prev.n + u * curr.n
+    fu, fv, fn = _orthonormalize_frame(u_vec, v_vec, n_vec)
+    return Station(t=t, origin=origin, u=fu, v=fv, n=fn, section=section)
+
+
+def _loop_sort_key(loop: np.ndarray) -> tuple[float, ...]:
+    pts = np.asarray(loop, dtype=float)
+    centroid = pts.mean(axis=0)
+    area = abs(_signed_area(pts))
+    perimeter = float(np.linalg.norm(np.roll(pts, -1, axis=0) - pts, axis=1).sum())
+    anchor = _anchor_loop(pts)
+    # Rounded coordinates keep deterministic ordering while avoiding noise-level drift.
+    signature = tuple(np.round(anchor.reshape(-1), decimals=9).tolist())
+    return (float(centroid[0]), float(centroid[1]), area, perimeter, *signature)
+
+
+def _pair_sections_for_transition(
+    prev_regions: list[list[np.ndarray]],
+    curr_regions: list[list[np.ndarray]],
+    *,
+    split_merge_mode: str,
+    split_merge_steps: int,
+    split_merge_bias: float,
+) -> list[_PairedSectionTransition]:
+    prev_count = len(prev_regions)
+    curr_count = len(curr_regions)
+    transitions: list[_PairedSectionTransition] = []
+
+    prev_refs = [_RegionRef("actual", i) for i in range(prev_count)]
+    curr_refs = [_RegionRef("actual", i) for i in range(curr_count)]
+
+    if prev_count == curr_count:
+        region_order = _minimum_cost_region_assignment(
+            [region[0] for region in prev_regions],
+            [region[0] for region in curr_regions],
+        )
+        for prev_idx, curr_idx in enumerate(region_order):
+            paired = _pair_region_loops_for_transition(
+                prev_regions[prev_idx],
+                curr_regions[curr_idx],
+                split_merge_mode=split_merge_mode,
+                split_merge_steps=split_merge_steps,
+                split_merge_bias=split_merge_bias,
+            )
+            transitions.append(
+                _PairedSectionTransition(
+                    prev_region_ref=prev_refs[prev_idx],
+                    curr_region_ref=curr_refs[curr_idx],
+                    region=paired,
+                    region_closures=(),
+                )
+            )
+        return transitions
+
+    if prev_count < curr_count:
+        matched_targets = _minimum_cost_subset_assignment(
+            [region[0] for region in prev_regions],
+            [region[0] for region in curr_regions],
+        )
+        matched_target_set = set(matched_targets)
+        unmatched_curr = sorted(set(range(curr_count)) - matched_target_set)
+        _reject_many_to_many_topology(prev_count, curr_count, entity="region")
+        if split_merge_mode == "fail":
+            _assert_unmatched_regions_non_ambiguous(
+                unmatched_regions=[curr_regions[idx][0] for idx in unmatched_curr],
+                opposite_regions=[region[0] for region in prev_regions],
+            )
+        for prev_idx, curr_idx in enumerate(matched_targets):
+            paired = _pair_region_loops_for_transition(
+                prev_regions[prev_idx],
+                curr_regions[curr_idx],
+                split_merge_mode=split_merge_mode,
+                split_merge_steps=split_merge_steps,
+                split_merge_bias=split_merge_bias,
+            )
+            transitions.append(
+                _PairedSectionTransition(
+                    prev_region_ref=prev_refs[prev_idx],
+                    curr_region_ref=curr_refs[curr_idx],
+                    region=paired,
+                    region_closures=(),
+                )
+            )
+        for curr_idx in unmatched_curr:
+            synthetic_prev = _shrunken_region(
+                curr_regions[curr_idx],
+                scale=_synthetic_seed_scale(split_merge_steps, split_merge_bias),
+            )
+            paired = _pair_region_loops_for_transition(
+                synthetic_prev,
+                curr_regions[curr_idx],
+                split_merge_mode=split_merge_mode,
+                split_merge_steps=split_merge_steps,
+                split_merge_bias=split_merge_bias,
+            )
+            transitions.append(
+                _PairedSectionTransition(
+                    prev_region_ref=_RegionRef("synthetic", curr_idx),
+                    curr_region_ref=curr_refs[curr_idx],
+                    region=paired,
+                    region_closures=("prev",),
+                )
+            )
+        return transitions
+
+    matched_prev_for_curr = _minimum_cost_subset_assignment(
+        [region[0] for region in curr_regions],
+        [region[0] for region in prev_regions],
+    )
+    matched_prev_set = set(matched_prev_for_curr)
+    unmatched_prev = sorted(set(range(prev_count)) - matched_prev_set)
+    _reject_many_to_many_topology(prev_count, curr_count, entity="region")
+    if split_merge_mode == "fail":
+        _assert_unmatched_regions_non_ambiguous(
+            unmatched_regions=[prev_regions[idx][0] for idx in unmatched_prev],
+            opposite_regions=[region[0] for region in curr_regions],
+        )
+    inv: dict[int, int] = {prev_idx: curr_idx for curr_idx, prev_idx in enumerate(matched_prev_for_curr)}
+    for prev_idx in range(prev_count):
+        if prev_idx in inv:
+            curr_idx = inv[prev_idx]
+            paired = _pair_region_loops_for_transition(
+                prev_regions[prev_idx],
+                curr_regions[curr_idx],
+                split_merge_mode=split_merge_mode,
+                split_merge_steps=split_merge_steps,
+                split_merge_bias=split_merge_bias,
+            )
+            transitions.append(
+                _PairedSectionTransition(
+                    prev_region_ref=prev_refs[prev_idx],
+                    curr_region_ref=curr_refs[curr_idx],
+                    region=paired,
+                    region_closures=(),
+                )
+            )
+        else:
+            synthetic_curr = _shrunken_region(
+                prev_regions[prev_idx],
+                scale=_synthetic_seed_scale(split_merge_steps, split_merge_bias),
+            )
+            paired = _pair_region_loops_for_transition(
+                prev_regions[prev_idx],
+                synthetic_curr,
+                split_merge_mode=split_merge_mode,
+                split_merge_steps=split_merge_steps,
+                split_merge_bias=split_merge_bias,
+            )
+            transitions.append(
+                _PairedSectionTransition(
+                    prev_region_ref=prev_refs[prev_idx],
+                    curr_region_ref=_RegionRef("synthetic", prev_idx),
+                    region=paired,
+                    region_closures=("curr",),
+                )
+            )
+    if len(matched_prev_set) != len(curr_regions):
+        raise ValueError("Unsupported topology transition: region split/merge detected.")
+    return transitions
+
+
+def _pair_region_loops_for_transition(
+    prev_region_loops: list[np.ndarray],
+    curr_region_loops: list[np.ndarray],
+    *,
+    split_merge_mode: str,
+    split_merge_steps: int,
+    split_merge_bias: float,
+) -> _PairedRegionLoops:
+    prev_outer = prev_region_loops[0]
+    curr_outer = curr_region_loops[0]
+    prev_holes = list(prev_region_loops[1:])
+    curr_holes = list(curr_region_loops[1:])
+
+    prev_out: list[np.ndarray] = [prev_outer]
+    curr_out: list[np.ndarray] = [curr_outer]
+    prev_refs: list[_LoopRef] = [_LoopRef("actual", 0)]
+    curr_refs: list[_LoopRef] = [_LoopRef("actual", 0)]
+    closures: list[tuple[str, int]] = []
+
+    if len(prev_holes) == len(curr_holes):
+        order = _minimum_cost_hole_assignment(prev_holes, curr_holes)
+        for src_idx, tgt_idx in enumerate(order):
+            prev_out.append(prev_holes[src_idx])
+            curr_out.append(curr_holes[tgt_idx])
+            prev_refs.append(_LoopRef("actual", src_idx + 1))
+            curr_refs.append(_LoopRef("actual", tgt_idx + 1))
+        return _PairedRegionLoops(
+            prev_loops=tuple(prev_out),
+            curr_loops=tuple(curr_out),
+            prev_sources=tuple(prev_refs),
+            curr_sources=tuple(curr_refs),
+            closures=tuple(closures),
+        )
+
+    if len(prev_holes) < len(curr_holes):
+        matched_targets = _minimum_cost_subset_assignment(prev_holes, curr_holes)
+        matched_target_set = set(matched_targets)
+        unmatched_curr = sorted(set(range(len(curr_holes))) - matched_target_set)
+        _reject_many_to_many_topology(len(prev_holes), len(curr_holes), entity="hole")
+        if split_merge_mode == "fail":
+            _assert_unmatched_holes_non_ambiguous(
+                unmatched_holes=[curr_holes[idx] for idx in unmatched_curr],
+                opposite_holes=prev_holes,
+            )
+        for src_idx, tgt_idx in enumerate(matched_targets):
+            prev_out.append(prev_holes[src_idx])
+            curr_out.append(curr_holes[tgt_idx])
+            prev_refs.append(_LoopRef("actual", src_idx + 1))
+            curr_refs.append(_LoopRef("actual", tgt_idx + 1))
+
+        for tgt_idx in unmatched_curr:
+            target_loop = curr_holes[tgt_idx]
+            seed = _shrunken_loop(
+                target_loop,
+                scale=_synthetic_seed_scale(split_merge_steps, split_merge_bias),
+            )
+            loop_slot = len(prev_out)
+            prev_out.append(seed)
+            curr_out.append(target_loop)
+            prev_refs.append(_LoopRef("synthetic", loop_slot))
+            curr_refs.append(_LoopRef("actual", tgt_idx + 1))
+            closures.append(("prev", loop_slot))
+    else:
+        matched_prev_for_curr = _minimum_cost_subset_assignment(curr_holes, prev_holes)
+        unmatched_prev = sorted(set(range(len(prev_holes))) - set(matched_prev_for_curr))
+        _reject_many_to_many_topology(len(prev_holes), len(curr_holes), entity="hole")
+        if split_merge_mode == "fail":
+            _assert_unmatched_holes_non_ambiguous(
+                unmatched_holes=[prev_holes[idx] for idx in unmatched_prev],
+                opposite_holes=curr_holes,
+            )
+        inv_match: dict[int, int] = {
+            prev_idx: curr_idx for curr_idx, prev_idx in enumerate(matched_prev_for_curr)
+        }
+        for prev_idx in range(len(prev_holes)):
+            prev_loop = prev_holes[prev_idx]
+            if prev_idx in inv_match:
+                curr_idx = inv_match[prev_idx]
+                prev_out.append(prev_loop)
+                curr_out.append(curr_holes[curr_idx])
+                prev_refs.append(_LoopRef("actual", prev_idx + 1))
+                curr_refs.append(_LoopRef("actual", curr_idx + 1))
+            else:
+                collapsed = _shrunken_loop(
+                    prev_loop,
+                    scale=_synthetic_seed_scale(split_merge_steps, split_merge_bias),
+                )
+                loop_slot = len(prev_out)
+                prev_out.append(prev_loop)
+                curr_out.append(collapsed)
+                prev_refs.append(_LoopRef("actual", prev_idx + 1))
+                curr_refs.append(_LoopRef("synthetic", loop_slot))
+                closures.append(("curr", loop_slot))
+
+    return _PairedRegionLoops(
+        prev_loops=tuple(prev_out),
+        curr_loops=tuple(curr_out),
+        prev_sources=tuple(prev_refs),
+        curr_sources=tuple(curr_refs),
+        closures=tuple(closures),
+    )
+
+
+def _minimum_cost_subset_assignment(
+    source_loops: list[np.ndarray],
+    target_loops: list[np.ndarray],
+    *,
+    area_weight: float = 0.1,
+) -> tuple[int, ...]:
+    return _minimum_cost_subset_assignment_topology(
+        source_loops,
+        target_loops,
+        area_weight=area_weight,
+    )
+
+
+def _assert_unmatched_regions_non_ambiguous(
+    *,
+    unmatched_regions: list[np.ndarray],
+    opposite_regions: list[np.ndarray],
+) -> None:
+    for candidate in unmatched_regions:
+        for other in opposite_regions:
+            if _is_split_merge_ambiguous(candidate, other):
+                raise ValueError("Unsupported topology transition: region split/merge ambiguity detected.")
+
+
+def _assert_unmatched_holes_non_ambiguous(
+    *,
+    unmatched_holes: list[np.ndarray],
+    opposite_holes: list[np.ndarray],
+) -> None:
+    for candidate in unmatched_holes:
+        for other in opposite_holes:
+            if _is_split_merge_ambiguous(candidate, other):
+                raise ValueError("Unsupported topology transition: hole split/merge ambiguity detected.")
+
+
+def _shrunken_loop(loop: np.ndarray, scale: float) -> np.ndarray:
+    pts = np.asarray(loop, dtype=float)
+    centroid = pts.mean(axis=0)
+    return centroid + (pts - centroid) * float(scale)
+
+
+def _shrunken_region(region_loops: list[np.ndarray], scale: float) -> list[np.ndarray]:
+    outer = np.asarray(region_loops[0], dtype=float)
+    centroid = outer.mean(axis=0)
+    scaled: list[np.ndarray] = []
+    for loop in region_loops:
+        pts = np.asarray(loop, dtype=float)
+        scaled.append(centroid + (pts - centroid) * float(scale))
+    return scaled
+
+
+def _resolve_transition_loop_start(
+    *,
+    station_index: int,
+    station: Station,
+    region_ref: _RegionRef,
+    ref: _LoopRef,
+    loop: np.ndarray,
+    offsets: list[list[list[int]]],
+    vertices: list[np.ndarray],
+    loop_start_cache: dict[tuple[int, str, int, str, int], int],
+) -> int:
+    if region_ref.kind == "actual" and ref.kind == "actual":
+        return offsets[station_index][region_ref.index][ref.index]
+    cache_key = (station_index, region_ref.kind, region_ref.index, ref.kind, ref.index)
+    cached = loop_start_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    if ref.kind == "synthetic" or region_ref.kind == "synthetic":
+        start = len(vertices)
+        pts3 = station.origin + loop[:, 0:1] * station.u + loop[:, 1:2] * station.v
+        vertices.extend(pts3)
+        loop_start_cache[cache_key] = start
+        return start
+    raise ValueError(f"Unknown loop reference kind: {ref.kind}")
+
+
+def _triangulate_loopset_faces_with_starts(
+    loops: Sequence[np.ndarray],
+    loop_starts: Sequence[int],
+) -> np.ndarray:
+    if len(loops) != len(loop_starts):
+        raise ValueError("loop_starts length must match loops length.")
+    _, local_faces = _triangulate_loops(list(loops))
+    if local_faces.size == 0:
+        return np.zeros((0, 3), dtype=int)
+    total = int(sum(np.asarray(loop).shape[0] for loop in loops))
+    index_map = np.empty(total, dtype=int)
+    cursor = 0
+    for start, loop in zip(loop_starts, loops, strict=True):
+        count = int(np.asarray(loop).shape[0])
+        index_map[cursor : cursor + count] = np.arange(start, start + count, dtype=int)
+        cursor += count
+    return index_map[local_faces]
+
+
+def _validate_profile_loops(
+    loops: list[np.ndarray],
+    expected_holes: int,
+) -> tuple[np.ndarray, list[np.ndarray]]:
+    if len(loops) != expected_holes + 1:
+        raise ValueError("Unsupported topology transition: hole split/merge detected.")
+    try:
+        outer, holes = _classify_loops(loops, expected_holes=expected_holes)
+    except ValueError as exc:
+        raise ValueError("Unsupported topology transition: region split/merge detected.") from exc
+    return outer, holes
+
+
+def _minimum_cost_hole_assignment(
+    source_holes: list[np.ndarray],
+    target_holes: list[np.ndarray],
+    *,
+    area_weight: float = 0.1,
+) -> tuple[int, ...]:
+    """Return deterministic one-to-one hole correspondence.
+
+    Primary score is centroid distance plus weighted area delta. Tie-breaks are
+    resolved lexicographically by:
+    1) lower total centroid distance
+    2) lower total area delta
+    3) lower target-index tuple in source order
+    """
+
+    if len(source_holes) != len(target_holes):
+        raise ValueError("Unsupported topology transition: hole split/merge detected.")
+    assignment = _minimum_cost_loop_assignment_topology(
+        source_holes,
+        target_holes,
+        area_weight=area_weight,
+    )
+    for src_idx, dst_idx in enumerate(assignment):
+        if not _is_stable_loop_transition(source_holes[src_idx], target_holes[dst_idx]):
+            raise ValueError("Unsupported topology transition: hole split/merge ambiguity detected.")
+    return assignment
+
+
+def _minimum_cost_region_assignment(
+    source_regions: list[np.ndarray],
+    target_regions: list[np.ndarray],
+    *,
+    area_weight: float = 0.1,
+) -> tuple[int, ...]:
+    if len(source_regions) != len(target_regions):
+        raise ValueError("Unsupported topology transition: region split/merge detected.")
+    assignment = _minimum_cost_loop_assignment_topology(
+        source_regions,
+        target_regions,
+        area_weight=area_weight,
+    )
+    for src_idx, dst_idx in enumerate(assignment):
+        if not _is_stable_loop_transition(source_regions[src_idx], target_regions[dst_idx]):
+            raise ValueError("Unsupported topology transition: region split/merge ambiguity detected.")
+    return assignment
+
+
+def _is_stable_loop_transition(source_loop: np.ndarray, target_loop: np.ndarray) -> bool:
+    return _stable_loop_transition(source_loop, target_loop)
+
+
+def _is_split_merge_ambiguous(a_loop: np.ndarray, b_loop: np.ndarray) -> bool:
+    return _split_merge_ambiguous(a_loop, b_loop)
+
+
 def _validate_caps(start_cap: str, end_cap: str) -> None:
     allowed = {"none", "flat", "taper", "dome", "slope"}
     if start_cap not in allowed:
@@ -394,8 +1380,54 @@ def _validate_endcap_placement(placement: str) -> None:
         raise ValueError(f"endcap_placement must be one of {sorted(allowed)}.")
 
 
+def _validate_endcap_parameter_mode(mode: str) -> None:
+    allowed = {"independent", "linked"}
+    if mode not in allowed:
+        raise ValueError(f"endcap_parameter_mode must be one of {sorted(allowed)}.")
+
+
+def _resolve_endcap_amounts(
+    *,
+    endcap_mode: str,
+    endcap_amount: float | None,
+    endcap_depth: float | None,
+    endcap_radius: float | None,
+    parameter_mode: str,
+) -> tuple[float, float]:
+    explicit_depth = endcap_depth is not None
+    explicit_radius = endcap_radius is not None
+
+    if endcap_mode == "FLAT":
+        return 0.0, 0.0
+
+    if endcap_amount is not None:
+        if endcap_depth is None:
+            endcap_depth = float(endcap_amount)
+        if endcap_radius is None:
+            endcap_radius = float(endcap_amount)
+
+    if endcap_depth is None and endcap_radius is None:
+        raise ValueError("Provide endcap_amount or endcap_depth/endcap_radius for non-flat endcaps.")
+    if endcap_depth is None:
+        endcap_depth = float(endcap_radius)
+    if endcap_radius is None:
+        endcap_radius = float(endcap_depth)
+
+    depth = float(endcap_depth)
+    radius = float(endcap_radius)
+
+    if parameter_mode == "linked":
+        if explicit_depth and explicit_radius and not np.isclose(depth, radius):
+            raise ValueError("linked endcap mode requires endcap_depth == endcap_radius.")
+        linked = depth if explicit_depth else radius
+        depth = linked
+        radius = linked
+
+    return depth, radius
+
+
 def _apply_caps(
-    profiles: Sequence[Profile2D],
+    profiles: Sequence[Section],
     positions: np.ndarray,
     start_cap: str,
     end_cap: str,
@@ -408,9 +1440,9 @@ def _apply_caps(
     bezier_samples: int,
 ) -> tuple[list[list[np.ndarray]], np.ndarray]:
     loops_per_profile: list[list[np.ndarray]] = []
-    for profile in profiles:
+    for section in profiles:
         loops = _loops_resampled(
-            profile,
+            section,
             samples,
             segments_per_circle=segments_per_circle,
             bezier_samples=bezier_samples,
@@ -557,14 +1589,48 @@ def _validate_scale_dims(scale_dims: str) -> None:
         raise ValueError("cap_scale_dims must be 'smallest' or 'both'.")
 
 
+def _validate_split_merge_mode(mode: str) -> None:
+    if mode not in {"fail", "resolve"}:
+        raise ValueError("split_merge_mode must be 'fail' or 'resolve'.")
+
+
+def _validate_split_merge_controls(steps: int, bias: float) -> None:
+    if int(steps) < 1:
+        raise ValueError("split_merge_steps must be >= 1.")
+    if not np.isfinite(float(bias)) or float(bias) < 0.0 or float(bias) > 1.0:
+        raise ValueError("split_merge_bias must be within [0.0, 1.0].")
+
+
+def _reject_many_to_many_topology(prev_count: int, curr_count: int, *, entity: str) -> None:
+    if prev_count > 1 and curr_count > 1 and prev_count != curr_count:
+        raise ValueError(f"Unsupported topology transition: {entity} split/merge ambiguity detected.")
+
+
+def _synthetic_seed_scale(split_merge_steps: int, split_merge_bias: float) -> float:
+    """Return deterministic synthetic seed scale used for birth/death decomposition.
+
+    `split_merge_steps` and `split_merge_bias` are threaded through the v1 resolve
+    path so progression stays deterministic and configurable without introducing
+    random or ad-hoc seeds.
+    """
+
+    steps = max(1, int(split_merge_steps))
+    bias = float(np.clip(split_merge_bias, 0.0, 1.0))
+    # More steps -> tighter seed. Bias shifts where the synthetic loop appears
+    # within the interval; use it as a deterministic seed-size modifier.
+    base = 1.0 / (steps + 4.0)
+    bias_mod = 0.75 + 0.5 * abs(bias - 0.5)
+    return float(np.clip(base * bias_mod, 0.02, 0.2))
+
+
 def _loops_resampled_anchored(
-    profile: Profile2D,
+    section: Section,
     count: int,
     segments_per_circle: int,
     bezier_samples: int,
 ) -> list[np.ndarray]:
     loops = _profile_loops(
-        profile,
+        section,
         segments_per_circle=segments_per_circle,
         bezier_samples=bezier_samples,
         enforce_winding=True,
@@ -572,28 +1638,15 @@ def _loops_resampled_anchored(
     return [_resample_loop(_anchor_loop(loop), count) for loop in loops]
 
 
-def _anchor_loop(loop: np.ndarray) -> np.ndarray:
-    if loop.shape[0] == 0:
-        return loop
-    max_x = np.max(loop[:, 0])
-    candidates = np.where(np.isclose(loop[:, 0], max_x))[0]
-    if candidates.size == 1:
-        idx = int(candidates[0])
-    else:
-        max_y = np.max(loop[candidates, 1])
-        candidates = candidates[np.where(np.isclose(loop[candidates, 1], max_y))[0]]
-        idx = int(candidates[0])
-    return np.roll(loop, -idx, axis=0)
-
-
 def _build_endcap_sections(
-    profile: Profile2D,
+    section: Section,
     base_loops: list[np.ndarray],
     position: np.ndarray,
     tangent: np.ndarray,
     direction: float,
     mode: str,
-    amount: float,
+    depth: float,
+    radius: float,
     steps: int,
     samples: int,
     segments_per_circle: int,
@@ -601,157 +1654,65 @@ def _build_endcap_sections(
     hole_count: int,
     reverse: bool = False,
 ) -> list[tuple[list[np.ndarray], np.ndarray]]:
-    schedule = _endcap_schedule(mode, amount, steps)
+    schedule = _endcap_schedule(mode, depth, radius, steps)
     sections: list[tuple[list[np.ndarray], np.ndarray]] = []
-    if mode == "COVE":
-        center = base_loops[0].mean(axis=0)
-        for scale, d in schedule:
-            scale_vec = np.array([scale, scale], dtype=float)
-            loops = [_scale_loop(loop, center, scale_vec) for loop in base_loops]
-            loops = [_resample_loop(_anchor_loop(loop), samples) for loop in loops]
-            pos = position + tangent * (direction * d)
-            sections.append((loops, pos))
-    else:
-        for t, d in schedule:
-            if np.isclose(t, 0.0):
-                loops = base_loops
-            else:
+    for t, d in schedule:
+        if np.isclose(t, 0.0):
+            loops = base_loops
+        else:
+            try:
                 loops = _inset_profile_loops(
-                    profile,
+                    section,
                     t,
                     join_type=mode,
                     hole_count=hole_count,
+                    segments_per_circle=segments_per_circle,
+                    bezier_samples=bezier_samples,
                 )
-                loops = [_resample_loop(_anchor_loop(loop), samples) for loop in loops]
-            pos = position + tangent * (direction * d)
-            sections.append((loops, pos))
+            except ValueError as exc:
+                msg = str(exc).lower()
+                if "hole topology changed" in msg or "hole collapsed" in msg:
+                    raise ValueError(
+                        "Unsupported topology transition during endcap generation: "
+                        "hole birth/death is not supported."
+                    ) from exc
+                if "inset collapsed" in msg:
+                    raise ValueError(
+                        "endcap_amount too large for profile features; "
+                        "region collapsed during endcap generation."
+                    ) from exc
+                raise
+            loops = [_resample_loop(_anchor_loop(loop), samples) for loop in loops]
+        pos = position + tangent * (direction * d)
+        sections.append((loops, pos))
     if reverse:
         if len(sections) > 1:
             sections = list(reversed(sections))
     return sections
 
 
-def _endcap_schedule(mode: str, amount: float, steps: int) -> list[tuple[float, float]]:
+def _endcap_schedule(mode: str, depth: float, radius: float, steps: int) -> list[tuple[float, float]]:
     if mode == "CHAMFER":
-        return [(0.0, 0.0), (amount, amount)]
+        return [(0.0, 0.0), (radius, depth)]
     if mode == "ROUND":
         count = max(1, steps)
         schedule: list[tuple[float, float]] = []
         for i in range(count + 1):
             theta = (i / count) * (np.pi / 2.0)
-            t = amount * np.sin(theta)
-            d = amount * (1.0 - np.cos(theta))
+            t = radius * np.sin(theta)
+            d = depth * (1.0 - np.cos(theta))
             schedule.append((float(t), float(d)))
         return schedule
     if mode == "COVE":
         count = max(1, steps)
         schedule = []
         for i in range(count + 1):
-            theta = (i / count) * (np.pi / 2.0)
-            scale = max(np.cos(theta), 1e-3)
-            d = amount * np.sin(theta)
-            schedule.append((float(scale), float(d)))
+            u = i / count
+            t = radius * (u**2)
+            d = depth * u
+            schedule.append((float(t), float(d)))
         return schedule
     return [(0.0, 0.0)]
-
-
-def _inset_profile_loops(
-    profile: Profile2D,
-    inset: float,
-    join_type: str,
-    hole_count: int,
-) -> list[np.ndarray]:
-    try:
-        import pyclipper
-    except ImportError as exc:  # pragma: no cover - runtime dependency
-        raise ImportError("pyclipper is required for endcap inset operations.") from exc
-
-    if inset <= 0:
-        loops = _profile_loops(
-            profile,
-            segments_per_circle=64,
-            bezier_samples=32,
-            enforce_winding=True,
-        )
-        return loops
-
-    scale = 1_000_000.0
-    loops = _profile_loops(
-        profile,
-        segments_per_circle=64,
-        bezier_samples=32,
-        enforce_winding=True,
-    )
-    if not loops:
-        raise ValueError("Profile has no loops to inset.")
-
-    join_key = "ROUND" if join_type in {"ROUND", "COVE"} else join_type
-    jt = pyclipper.JT_ROUND if join_key == "ROUND" else pyclipper.JT_MITER
-
-    def offset_single(path_pts: np.ndarray, delta: float) -> list[np.ndarray]:
-        pco = pyclipper.PyclipperOffset(miter_limit=2.0, arc_tolerance=0.25 * scale)
-        path = np.round(path_pts * scale).astype(np.int64).tolist()
-        pco.AddPath(path, jt, pyclipper.ET_CLOSEDPOLYGON)
-        result = pco.Execute(delta * scale)
-        return [np.asarray(p, dtype=float) / scale for p in result]
-
-    outer = loops[0]
-    holes = loops[1:]
-
-    outer_result = offset_single(outer, -inset)
-    if len(outer_result) != 1:
-        raise ValueError("endcap_amount too large for profile; inset collapsed.")
-    outer = _ensure_winding(outer_result[0], clockwise=False)
-
-    inset_holes: list[np.ndarray] = []
-    for hole in holes:
-        hole_result = offset_single(hole, inset)
-        if len(hole_result) != 1:
-            raise ValueError("endcap_amount too large for profile; inset collapsed.")
-        hole_loop = _ensure_winding(hole_result[0], clockwise=True)
-        if not _point_in_polygon(hole_loop[0], outer):
-            raise ValueError("endcap_amount too large for profile; hole collapsed.")
-        inset_holes.append(hole_loop)
-
-    if hole_count and len(inset_holes) != hole_count:
-        raise ValueError("endcap_amount too large for profile; hole topology changed.")
-    return [outer] + inset_holes
-
-
-def _classify_loops(loops: list[np.ndarray], hole_count: int) -> list[np.ndarray]:
-    if not loops:
-        raise ValueError("Inset produced no geometry.")
-    areas = [_signed_area(loop) for loop in loops]
-    abs_areas = [abs(a) for a in areas]
-    outer_idx = int(np.argmax(abs_areas))
-    outer = loops[outer_idx]
-    holes = [loops[i] for i in range(len(loops)) if i != outer_idx]
-    for hole in holes:
-        if not _point_in_polygon(hole[0], outer):
-            raise ValueError("Inset produced split geometry; endcap_amount too large.")
-    outer = _ensure_winding(outer, clockwise=False)
-    holes = [_ensure_winding(hole, clockwise=True) for hole in holes]
-    if hole_count and len(holes) != hole_count:
-        raise ValueError("Inset changed hole count; endcap_amount too large.")
-    return [outer] + holes
-
-
-def _point_in_polygon(point: np.ndarray, polygon: np.ndarray) -> bool:
-    x = float(point[0])
-    y = float(point[1])
-    inside = False
-    n = polygon.shape[0]
-    j = n - 1
-    for i in range(n):
-        xi = polygon[i, 0]
-        yi = polygon[i, 1]
-        xj = polygon[j, 0]
-        yj = polygon[j, 1]
-        intersect = (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi
-        if intersect:
-            inside = not inside
-        j = i
-    return inside
 
 
 def _compute_frames(positions: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -829,4 +1790,4 @@ def _rotate_vector(vec: np.ndarray, axis: np.ndarray, angle: float) -> np.ndarra
     return vec * c + np.cross(axis, vec) * s + axis * np.dot(axis, vec) * (1.0 - c)
 
 
-__all__ = ["loft_profiles", "loft", "loft_endcaps"]
+__all__ = ["Station", "loft_profiles", "loft", "loft_sections", "loft_endcaps"]

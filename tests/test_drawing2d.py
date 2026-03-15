@@ -8,7 +8,7 @@ from impression.modeling.drawing2d import (
     Bezier2D,
     Line2D,
     Path2D,
-    Profile2D,
+    PlanarShape2D,
     round_corners,
     round_path,
     make_circle,
@@ -73,18 +73,18 @@ def test_path2d_requires_two_points():
         Path2D.from_points([(0, 0)], closed=False)
 
 
-def test_profile2d_hole_positive():
+def test_planarshape2d_hole_positive():
     outer = Path2D.from_points([(-1, -1), (1, -1), (1, 1), (-1, 1)], closed=True)
     inner = Path2D.from_points([(-0.2, -0.2), (0.2, -0.2), (0.2, 0.2), (-0.2, 0.2)], closed=True)
-    profile = Profile2D(outer=outer, holes=[inner])
-    polylines = profile.to_polylines()
+    shape = PlanarShape2D(outer=outer, holes=[inner])
+    polylines = shape.to_polylines()
     assert len(polylines) == 2
 
 
-def test_profile2d_requires_closed_outer():
+def test_planarshape2d_requires_closed_outer():
     outer = Path2D.from_points([(-1, -1), (1, -1), (1, 1)], closed=False)
     with pytest.raises(ValueError):
-        Profile2D(outer=outer, holes=[])
+        PlanarShape2D(outer=outer, holes=[])
 
 
 def test_make_rect_positive():

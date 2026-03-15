@@ -1,8 +1,16 @@
+"""Text modeling built from font outlines and layout.
+
+This module owns font resolution, glyph extraction, and text layout. Generic
+planar topology assembly (outer/hole classification and winding policy) is
+delegated to ``impression.modeling.topology``.
+"""
+
 from __future__ import annotations
 
-from typing import Iterable, Sequence
+from typing import Sequence
 from pathlib import Path
 import math
+import warnings
 
 import numpy as np
 from fontTools.ttLib import TTFont, TTLibFileIsCollectionError
@@ -10,9 +18,12 @@ from fontTools.pens.recordingPen import RecordingPen
 
 from impression.mesh import Mesh, combine_meshes
 
-from .drawing2d import Path2D, Profile2D, Line2D, Bezier2D
+from .drawing2d import Path2D, Line2D, Bezier2D
+from ._color import _normalize_color, set_mesh_color
 from .extrude import linear_extrude
-from ._color import _normalize_color
+from .topology import Section, sections_from_paths
+
+_WARNED_TEXT_PROFILE_COLOR = False
 
 
 def make_text(
@@ -44,9 +55,8 @@ def make_text(
         line_height=line_height,
         font=font,
         font_path=font_path,
-        color=color,
     )
-    meshes = [linear_extrude(profile, height=depth) for profile in profiles]
+    meshes = [linear_extrude(section, height=depth) for section in profiles]
     if not meshes:
         return Mesh(np.zeros((0, 3), dtype=float), np.zeros((0, 3), dtype=int))
     mesh = combine_meshes(meshes)
@@ -63,6 +73,8 @@ def make_text(
             mesh.rotate_vector((1.0, 0.0, 0.0), 180.0, point=(0.0, 0.0, 0.0), inplace=True)
 
     mesh.translate(center, inplace=True)
+    if color is not None:
+        set_mesh_color(mesh, color)
     return mesh
 
 
@@ -108,8 +120,13 @@ def text_profiles(
     font: str = "Arial",
     font_path: str | None = None,
     color: Sequence[float] | str | None = None,
-) -> list[Profile2D]:
-    """Return Profile2D objects for the given text string."""
+) -> list[Section]:
+    """Return topology-native Section objects for the given text string.
+
+    Topology ownership note: glyph path nesting and profile assembly are routed
+    through ``sections_from_paths`` so text does not maintain duplicate
+    topology logic.
+    """
 
     if not content:
         return []
@@ -172,12 +189,45 @@ def text_profiles(
         for path in paths:
             aligned_paths.append(_translate_path(path, (x_offset, y_offset)))
 
-    profiles = _profiles_from_paths(aligned_paths)
+    sections = sections_from_paths(aligned_paths)
     if color is not None:
-        rgba = _normalize_color(color)
-        for profile in profiles:
-            profile.color = rgba
-    return profiles
+        global _WARNED_TEXT_PROFILE_COLOR
+        _normalize_color(color)  # keep validation behavior for callers
+        if not _WARNED_TEXT_PROFILE_COLOR:
+            _WARNED_TEXT_PROFILE_COLOR = True
+            warnings.warn(
+                "text_profiles(..., color=...) no longer annotates profile colors; "
+                "apply color at mesh stage (e.g., make_text color=...).",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+    return sections
+
+
+def text_sections(
+    content: str,
+    font_size: float = 1.0,
+    justify: str = "left",
+    valign: str = "baseline",
+    letter_spacing: float = 0.0,
+    line_height: float = 1.2,
+    font: str = "Arial",
+    font_path: str | None = None,
+    color: Sequence[float] | str | None = None,
+) -> list[Section]:
+    """Alias for text_profiles with topology-native naming."""
+
+    return text_profiles(
+        content=content,
+        font_size=font_size,
+        justify=justify,
+        valign=valign,
+        letter_spacing=letter_spacing,
+        line_height=line_height,
+        font=font,
+        font_path=font_path,
+        color=color,
+    )
 
 
 def _resolve_font_path(font_path: str | None, font: str) -> str:
@@ -309,54 +359,6 @@ def _translate_path(path: Path2D, offset: Sequence[float]) -> Path2D:
     return Path2D(segments=segments, closed=path.closed, color=path.color, metadata=dict(path.metadata))
 
 
-def _profiles_from_paths(paths: Iterable[Path2D]) -> list[Profile2D]:
-    info = []
-    for path in paths:
-        pts = path.sample()
-        if len(pts) < 3:
-            continue
-        area = _polygon_area(pts)
-        info.append({"path": path, "abs_area": abs(area), "pts": pts})
-    info.sort(key=lambda x: x["abs_area"], reverse=True)
-    outers = []
-    for item in info:
-        path = item["path"]
-        pts = item["pts"]
-        candidate = None
-        for outer in outers:
-            if _point_in_polygon(pts[0], outer["pts"]):
-                if candidate is None or outer["abs_area"] < candidate["abs_area"]:
-                    candidate = outer
-        if candidate is None:
-            item["holes"] = []
-            outers.append(item)
-        else:
-            candidate["holes"].append(path)
-    profiles = []
-    for outer in outers:
-        profiles.append(Profile2D(outer=outer["path"], holes=outer.get("holes", [])))
-    return profiles
-
-
-def _polygon_area(points: np.ndarray) -> float:
-    if len(points) < 3:
-        return 0.0
-    x = points[:, 0]
-    y = points[:, 1]
-    return 0.5 * float(np.dot(x[:-1], y[1:]) - np.dot(x[1:], y[:-1]))
-
-
-def _point_in_polygon(point: np.ndarray, polygon: np.ndarray) -> bool:
-    x, y = point
-    inside = False
-    for i in range(len(polygon) - 1):
-        x0, y0 = polygon[i]
-        x1, y1 = polygon[i + 1]
-        if ((y0 > y) != (y1 > y)) and (x < (x1 - x0) * (y - y0) / (y1 - y0 + 1e-9) + x0):
-            inside = not inside
-    return inside
-
-
 def _normalize_vec(vector: Sequence[float]) -> np.ndarray:
     arr = np.asarray(vector, dtype=float).reshape(3)
     norm = np.linalg.norm(arr)
@@ -365,4 +367,4 @@ def _normalize_vec(vector: Sequence[float]) -> np.ndarray:
     return arr / norm
 
 
-__all__ = ["make_text", "text", "text_profiles"]
+__all__ = ["make_text", "text", "text_profiles", "text_sections"]

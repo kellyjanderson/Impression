@@ -24,7 +24,7 @@ Render a model and optionally watch it for changes.
 
 **Requirements**
 
-- `build()` must return internal meshes (`Mesh`, `MeshGroup`, `Polyline`, `Path2D`, `Profile2D`, or lists of them).
+- `build()` must return internal meshes (`Mesh`, `MeshGroup`, `Polyline`, `Path2D`, `Section`, `Region`, or lists of them).
 - PyVista is used as a viewer only; do not return PyVista datasets directly.
 
 **Options**
@@ -86,9 +86,12 @@ Generate an STL from a model.
 
 **Options**
 
-- `-o, --output PATH` (default: `model.stl`): destination STL path.
-- `--overwrite / --no-overwrite` (default: `--no-overwrite`): guard existing files.
-- `--ascii / --binary` (default: binary): choose STL encoding.
+- `-o, --output PATH` (default: `<model_filename>.stl`): destination STL path.
+- `--overwrite / --no-overwrite` (default: `--no-overwrite`): allow replacing an existing STL.
+- `--ascii` (default: binary): write ASCII STL instead of binary.
+
+If the output path already exists and `--overwrite` is not set, Impression writes to the next
+macOS-style name (for example `part.stl`, then `part (1).stl`, `part (2).stl`, ...).
 
 ## `--get-docs`
 

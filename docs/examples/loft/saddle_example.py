@@ -10,7 +10,7 @@ import numpy as np
 
 import impression
 from impression.modeling import Bezier3D, Path3D, loft, offset, rotate, translate, group
-from impression.modeling.drawing2d import Arc2D, Bezier2D, Line2D, Path2D, Profile2D
+from impression.modeling.drawing2d import Arc2D, Bezier2D, Line2D, Path2D, PlanarShape2D
 
 # Saddle parameters
 DEPTH = 100
@@ -31,7 +31,7 @@ def make_u_profile(
     bottom_sag: float = U_BOTTOM_SAG,
     corner_radius: float = U_CORNER_RADIUS,
     wall_thickness: float = U_WALL_THICKNESS,
-) -> Profile2D:
+) -> PlanarShape2D:
     half = width / 2.0
     radius = min(corner_radius, arm_height / 2.0, width / 4.0)
     top_y = arm_height
@@ -68,17 +68,17 @@ def make_u_profile(
     outer = Path2D(segments, closed=True)
 
     if wall_thickness <= 0.0:
-        return Profile2D(outer=outer)
+        return PlanarShape2D(outer=outer)
 
-    inner_profiles = offset(Profile2D(outer=outer), delta=-wall_thickness)
-    if isinstance(inner_profiles, list):
-        if not inner_profiles:
-            return Profile2D(outer=outer)
-        inner = inner_profiles[0]
-    else:
-        inner = inner_profiles
+    inner_sections = offset(outer, delta=-wall_thickness)
+    if not inner_sections:
+        return PlanarShape2D(outer=outer)
+    inner_section = inner_sections[0]
+    if not inner_section.regions:
+        return PlanarShape2D(outer=outer)
+    inner = inner_section.regions[0].outer.to_path()
 
-    return Profile2D(outer=outer, holes=[inner.outer])
+    return PlanarShape2D(outer=outer, holes=[inner])
 
 
 def make_soft_loft_path(depth: float = DEPTH, rise: float = CURVE_DEPTH) -> Path3D:

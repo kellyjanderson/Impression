@@ -12,7 +12,7 @@ If no input colors are provided, the result uses the default preview color.
 All helpers operate on internal triangle meshes and use `manifold3d` for robust, watertight-aware booleans.
 Install requirement: `pip install manifold3d`.
 
-## boolean_union(meshes, tolerance=1e-5)
+## boolean_union(meshes, tolerance=1e-4)
 - Combine two or more meshes into a single body.
 - `meshes`: iterable of internal meshes (`Mesh`/`MeshGroup`).
 - `tolerance`: reserved for future mesh hygiene tuning.
@@ -43,7 +43,7 @@ def build():
 
 Example: `docs/examples/csg/union_meshes_example.py`
 
-## boolean_difference(base, cutters, tolerance=1e-5)
+## boolean_difference(base, cutters, tolerance=1e-4)
 - Subtract one or more cutter meshes from `base`.
 - Example: `docs/examples/csg/difference_example.py`
 - Preview: `impression preview docs/examples/csg/difference_example.py`
@@ -59,7 +59,7 @@ def build():
 
 ![Difference CSG](../assets/previews/csg-difference.png)
 
-## boolean_intersection(meshes, tolerance=1e-5)
+## boolean_intersection(meshes, tolerance=1e-4)
 - Keep only overlapping volume among provided meshes.
 - Example: `docs/examples/csg/intersection_example.py`
 - Preview: `impression preview docs/examples/csg/intersection_example.py`

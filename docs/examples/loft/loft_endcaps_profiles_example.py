@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from impression.modeling import (
     Path2D,
-    Profile2D,
     loft_endcaps,
     make_circle,
     make_polygon,
     make_rect,
     translate,
 )
+from impression.modeling.drawing2d import PlanarShape2D
 
 
 def _profile_from_points(points, color=None):
     outer = Path2D.from_points(points, closed=True)
-    profile = Profile2D(outer=outer)
+    profile = PlanarShape2D(outer=outer)
     if color is not None:
         profile.with_color(color)
     return profile
@@ -22,7 +22,7 @@ def _profile_from_points(points, color=None):
 def _with_hole():
     outer = make_rect(size=(12.0, 8.0), color="#8b7a6a").outer
     hole = make_circle(radius=2.0).outer
-    return Profile2D(outer=outer, holes=[hole]).with_color("#8b7a6a")
+    return PlanarShape2D(outer=outer, holes=[hole]).with_color("#8b7a6a")
 
 
 def _letter_l():
@@ -49,15 +49,15 @@ def _curved():
 
 
 def build():
-    profiles = [
-        ("hole", _with_hole()),
-        ("l_shape", _letter_l()),
-        ("acute", _acute()),
-        ("curved", _curved()),
+    profile_factories = [
+        ("hole", _with_hole),
+        ("l_shape", _letter_l),
+        ("acute", _acute),
+        ("curved", _curved),
     ]
 
     amounts = {
-        "hole": {"ROUND": 1.0, "CHAMFER": 0.6, "COVE": 0.6},
+        "hole": {"ROUND": 0.6, "CHAMFER": 0.6, "COVE": 0.6},
         "l_shape": {"ROUND": 1.2, "CHAMFER": 0.6, "COVE": 1.0},
         "acute": {"ROUND": 1.0, "CHAMFER": 0.6, "COVE": 0.6},
         "curved": {"ROUND": 2.0, "CHAMFER": 1.5, "COVE": 1.5},
@@ -68,8 +68,9 @@ def build():
     spacing_x = 18.0
     spacing_y = 18.0
 
-    for row, (name, profile) in enumerate(profiles):
+    for row, (name, profile_factory) in enumerate(profile_factories):
         for col, mode in enumerate(cap_modes):
+            profile = profile_factory()
             if mode == "FLAT":
                 amount = 0.0
             else:

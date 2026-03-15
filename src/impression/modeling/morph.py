@@ -4,54 +4,63 @@ from typing import Sequence
 
 import numpy as np
 
-from ._profile2d import _loops_resampled
-from .drawing2d import Path2D, Profile2D
+from .topology import Loop, Region, Section, as_section, resample_loop
 
 
 def morph_profiles(
-    start: Profile2D,
-    end: Profile2D,
+    start: Section | Region | object,
+    end: Section | Region | object,
     t: float,
     samples: int = 200,
     segments_per_circle: int = 64,
     bezier_samples: int = 32,
-) -> Profile2D:
-    """Interpolate between two profiles with matching topology."""
+) -> Section:
+    """Interpolate between two planar sections with matching topology."""
 
     t = float(t)
     if t < 0.0 or t > 1.0:
         raise ValueError("t must be in [0, 1].")
-    if len(start.holes) != len(end.holes):
-        raise ValueError("Profiles must have the same number of holes to morph.")
+    start_section = as_section(
+        start,
+        segments_per_circle=segments_per_circle,
+        bezier_samples=bezier_samples,
+    ).normalized()
+    end_section = as_section(
+        end,
+        segments_per_circle=segments_per_circle,
+        bezier_samples=bezier_samples,
+    ).normalized()
+    if len(start_section.regions) != len(end_section.regions):
+        raise ValueError("Sections must have the same number of regions to morph.")
 
-    loops_a = _loops_resampled(start, samples, segments_per_circle, bezier_samples)
-    loops_b = _loops_resampled(end, samples, segments_per_circle, bezier_samples)
+    result_regions: list[Region] = []
+    for start_region, end_region in zip(start_section.regions, end_section.regions, strict=True):
+        if len(start_region.holes) != len(end_region.holes):
+            raise ValueError("Regions must have the same number of holes to morph.")
+        start_loops = [start_region.outer.points, *(hole.points for hole in start_region.holes)]
+        end_loops = [end_region.outer.points, *(hole.points for hole in end_region.holes)]
 
-    blended_loops = []
-    for a, b in zip(loops_a, loops_b):
-        blended_loops.append((1.0 - t) * a + t * b)
+        blended_loops: list[np.ndarray] = []
+        for a, b in zip(start_loops, end_loops, strict=True):
+            a_resampled = resample_loop(a, samples)
+            b_resampled = resample_loop(b, samples)
+            blended_loops.append((1.0 - t) * a_resampled + t * b_resampled)
 
-    outer = Path2D.from_points(blended_loops[0], closed=True)
-    holes = [Path2D.from_points(loop, closed=True) for loop in blended_loops[1:]]
-    profile = Profile2D(outer=outer, holes=holes)
+        outer = Loop(np.asarray(blended_loops[0], dtype=float))
+        holes = tuple(Loop(np.asarray(loop, dtype=float)) for loop in blended_loops[1:])
+        result_regions.append(Region(outer=outer, holes=holes).normalized())
 
-    if start.color is not None and end.color is not None:
-        profile.color = tuple((1.0 - t) * np.array(start.color) + t * np.array(end.color))
-    elif start.color is not None:
-        profile.color = start.color
-    elif end.color is not None:
-        profile.color = end.color
-    return profile
+    return Section(tuple(result_regions)).normalized()
 
 
 def morph(
-    start: Profile2D,
-    end: Profile2D,
+    start: Section | Region | object,
+    end: Section | Region | object,
     t: float,
     samples: int = 200,
     segments_per_circle: int = 64,
     bezier_samples: int = 32,
-) -> Profile2D:
+) -> Section:
     """Alias for morph_profiles."""
 
     return morph_profiles(

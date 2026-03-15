@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from impression.modeling import Profile2D, loft, loft_endcaps, make_circle, make_rect, translate
+from impression.modeling import loft, loft_endcaps, make_circle, make_rect, translate
+from impression.modeling.drawing2d import PlanarShape2D
 
 
 def _profile(size, hole_radius):
     outer = make_rect(size=size).outer
     hole = make_circle(radius=hole_radius).outer
-    return Profile2D(outer=outer, holes=[hole])
+    return PlanarShape2D(outer=outer, holes=[hole])
 
 
 def build():
@@ -29,7 +30,7 @@ def build():
     experimental = loft_endcaps(
         profiles,
         endcap_mode="ROUND",
-        endcap_amount=2.0,
+        endcap_amount=0.25,
         endcap_steps=12,
         endcap_placement="BOTH",
     )
@@ -37,4 +38,3 @@ def build():
     translate(legacy, (-18.0, 0.0, 0.0))
     translate(experimental, (18.0, 0.0, 0.0))
     return [legacy, experimental]
-

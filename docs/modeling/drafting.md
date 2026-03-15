@@ -34,7 +34,14 @@ arrow = make_arrow((0, 0, 0), (0.8, 0.2, 0.3), shaft_diameter=0.03, color="#ffb7
 meshes = make_dimension((0, 0, 0), (1.5, 0, 0), offset=0.15, text="1.50", color="#ff5a36")
 ```
 
-Returns `[arrow_mesh, text_mesh]` so you can merge or preview them individually.
+Returns a list containing the dimension arrow mesh and, when `text` is set, a text label mesh.
+
+Optional label controls:
+
+- `font`: font family name lookup (default: `"Arial"`).
+- `font_path`: explicit font file path (recommended for deterministic output).
+
+If the selected font cannot be resolved, `make_dimension` keeps the arrow and skips label geometry.
 
 ### Examples
 

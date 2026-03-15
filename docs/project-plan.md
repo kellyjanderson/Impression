@@ -4,6 +4,9 @@ This document tracks the near-term roadmap for Impression’s modeling toolkit. 
 
 Current execution order is captured in [`docs/feature-pipeline.md`](feature-pipeline.md) and should be reviewed each planning cycle.
 
+Project value baseline: [`Project DNA`](project-dna.md). Roadmap execution should prioritize
+solutions that are both technically rigorous and clearly compelling in real-world use.
+
 ## Modeling Core
 
 - [ ] **Primitives**
@@ -22,9 +25,8 @@ Current execution order is captured in [`docs/feature-pipeline.md`](feature-pipe
 
 ## Advanced Modeling
 
-- [ ] **3D Hull & Minkowski (Deferred)**
-  - [ ] 3D convex hulls and Minkowski sums will require an additional geometry kernel beyond manifold3d.
-  - [ ] Track candidates (CGAL/libigl) and evaluate packaging impact before implementation.
+- [x] **3D Hull**
+  - [x] 3D convex hull support for mesh inputs via manifold3d-backed operations.
 
 - [ ] **Morph & Lofting**
   - [ ] 2D morph between two shapes/paths with a parameter `t` in `[0, 1]` (0 = first profile, 1 = second profile).
@@ -60,6 +62,40 @@ Current execution order is captured in [`docs/feature-pipeline.md`](feature-pipe
   - [x] VS Code extension commands for “Preview current model”, “Export STL”, and test helpers.
   - [ ] Wrap `impression preview` in a panel/webview and stream logs from the editor.
   - [ ] Quick links to docs/examples inside the extension UI.
+
+## Simulation Program (Multi-Project)
+
+This workstream is intentionally split into separate projects so each layer can be built, tested, and released independently.
+
+- [ ] **Project 1: `impression-time` (time + animation)**
+  - Add deterministic scene evaluation with `t` support (`build(t=...)` style workflows).
+  - Add keyframes, easing, timeline controls (scrub/play), and frame export.
+  - Keep this layer physics-agnostic and interaction-agnostic.
+- [ ] **Project 2: `impression-physics` (physics primitives + engine adapter)**
+  - Add rigid bodies, colliders, joints, gravity, and engine bindings.
+  - Expose low-level stepping and state I/O only; no scenario-level solver policy here.
+  - Provide stable geometry-to-collider conversion rules.
+- [ ] **Project 3: `impression-interactive` (inputs + actions)**
+  - Add keyboard/mouse/event bindings and action routing to params, motors, and forces.
+  - Add recordable input streams for deterministic replay in tests.
+  - Keep this layer independent of solver internals.
+- [ ] **Project 4: `impression-sim` (integrated simulation runtime)**
+  - Integrate time + interactivity + physics in one runtime loop.
+  - Own solver orchestration/policy: substeps, stabilization, convergence tolerances, and deterministic stepping.
+  - Add record/replay, diagnostics, and failure handling for repeatable simulation runs.
+
+### Simulation Integration Rules
+
+- [ ] Use a shared `SceneState` contract between projects (transforms, parameters, metadata, timestamps).
+- [ ] Keep core Impression modeling APIs free from solver-specific behavior.
+- [ ] Make physics engine support optional so non-simulation workflows remain lightweight.
+
+### Milestone Sequence
+
+- [ ] M1: `impression-time` prototype with timeline + example scene playback.
+- [ ] M2: `impression-physics` prototype with rigid body + hinge constraint demo.
+- [ ] M3: `impression-interactive` prototype with input-mapped controls.
+- [ ] M4: `impression-sim` integration demo combining all layers in one deterministic run.
 
 ## Additional Nuances
 

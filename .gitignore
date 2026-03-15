@@ -84,3 +84,4 @@ node_modules/
 # Project-specific
 dist/preview-tests/
 .impression-preview
+docs/examples/loft/.loft-showcase
