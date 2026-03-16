@@ -19,9 +19,9 @@ from .topology import (
     classify_loops as _classify_loops,
     signed_area as _signed_area,
     minimum_cost_loop_assignment as _minimum_cost_loop_assignment_topology,
-    minimum_cost_subset_assignment as _minimum_cost_subset_assignment_topology,
     stable_loop_transition as _stable_loop_transition,
     split_merge_ambiguous as _split_merge_ambiguous,
+    point_in_polygon as _point_in_polygon,
     Loop,
     Section,
     Region,
@@ -78,6 +78,7 @@ class _PairedSectionTransition:
     curr_region_ref: _RegionRef
     region: _PairedRegionLoops
     region_closures: tuple[str, ...]
+    action: str
 
 
 @dataclass(frozen=True)
@@ -137,6 +138,8 @@ class PlannedRegionPair:
     curr_region_ref: PlannedRegionRef
     loop_pairs: tuple[PlannedLoopPair, ...]
     closures: tuple[PlannedClosure, ...]
+    action: str  # stable | split_match | split_birth | merge_match | merge_death
+    branch_id: str
 
 
 @dataclass(frozen=True)
@@ -145,6 +148,9 @@ class PlannedTransition:
 
     interval: tuple[int, int]
     region_pairs: tuple[PlannedRegionPair, ...]
+    branch_order: tuple[str, ...]
+    topology_case: str  # one_to_one | one_to_many | many_to_one | many_to_many_expand | many_to_many_collapse
+    ambiguity_class: str = "none"  # none | permutation | containment | symmetry | closure
 
 
 @dataclass(frozen=True)
@@ -308,6 +314,13 @@ def loft_sections(
     split_merge_mode: str = "fail",
     split_merge_steps: int = 8,
     split_merge_bias: float = 0.5,
+    ambiguity_mode: str | None = None,
+    ambiguity_cost_profile: str = "balanced",
+    ambiguity_max_branches: int = 64,
+    fairness_mode: str = "local",
+    fairness_weight: float = 0.2,
+    skeleton_mode: str = "auto",
+    fairness_iterations: int = 12,
 ) -> Mesh:
     """Loft topology-native sections using a planner/executor pipeline."""
 
@@ -318,6 +331,13 @@ def loft_sections(
         split_merge_mode=split_merge_mode,
         split_merge_steps=split_merge_steps,
         split_merge_bias=split_merge_bias,
+        ambiguity_mode=ambiguity_mode,
+        ambiguity_cost_profile=ambiguity_cost_profile,
+        ambiguity_max_branches=ambiguity_max_branches,
+        fairness_mode=fairness_mode,
+        fairness_weight=fairness_weight,
+        skeleton_mode=skeleton_mode,
+        fairness_iterations=fairness_iterations,
     )
     return loft_execute_plan(plan, cap_ends=cap_ends)
 
@@ -329,6 +349,13 @@ def loft_plan_sections(
     split_merge_mode: str = "fail",
     split_merge_steps: int = 8,
     split_merge_bias: float = 0.5,
+    ambiguity_mode: str | None = None,
+    ambiguity_cost_profile: str = "balanced",
+    ambiguity_max_branches: int = 64,
+    fairness_mode: str = "local",
+    fairness_weight: float = 0.2,
+    skeleton_mode: str = "auto",
+    fairness_iterations: int = 12,
 ) -> LoftPlan:
     """Build a deterministic loft execution plan from section stations."""
 
@@ -338,6 +365,13 @@ def loft_plan_sections(
 
     _validate_split_merge_mode(split_merge_mode)
     _validate_split_merge_controls(split_merge_steps, split_merge_bias)
+    resolved_ambiguity_mode = _resolve_ambiguity_mode(split_merge_mode, ambiguity_mode)
+    _validate_ambiguity_cost_profile(ambiguity_cost_profile)
+    _validate_ambiguity_max_branches(ambiguity_max_branches)
+    _validate_fairness_mode(fairness_mode)
+    _validate_fairness_weight(fairness_weight)
+    _validate_skeleton_mode(skeleton_mode)
+    _validate_fairness_iterations(fairness_iterations)
     _validate_section_stations(stations)
 
     effective_stations = list(stations)
@@ -368,22 +402,137 @@ def loft_plan_sections(
             )
         )
 
+    skeleton_available = _skeleton_guidance_available(planned_stations)
+    if skeleton_mode == "required" and not skeleton_available:
+        raise ValueError(
+            "Unsupported topology transition: skeleton_required_unavailable "
+            "(skeleton_mode='required' but skeleton guidance is unavailable)."
+        )
+
     planned_transitions: list[PlannedTransition] = []
+    ambiguity_class_counts: dict[str, int] = {
+        "permutation": 0,
+        "containment": 0,
+        "symmetry": 0,
+        "closure": 0,
+    }
+    ambiguity_resolved_intervals_count = 0
+    global_optimizer_ran = False
+    global_optimizer_hit_iteration_cap = False
+    previous_interval_vectors: dict[int, np.ndarray] | None = None
     for idx in range(len(planned_stations) - 1):
-        transitions = _pair_sections_for_transition(
-            [list(region) for region in planned_stations[idx].regions],
-            [list(region) for region in planned_stations[idx + 1].regions],
-            split_merge_mode=split_merge_mode,
-            split_merge_steps=split_merge_steps,
-            split_merge_bias=split_merge_bias,
+        prev_station = planned_stations[idx]
+        curr_station = planned_stations[idx + 1]
+        prev_regions = [list(region) for region in planned_stations[idx].regions]
+        curr_regions = [list(region) for region in planned_stations[idx + 1].regions]
+        topology_case = _classify_region_topology_case(
+            len(prev_regions),
+            len(curr_regions),
+        )
+        ambiguity_class = _classify_region_transition_ambiguity(
+            prev_regions=[region[0] for region in prev_regions],
+            curr_regions=[region[0] for region in curr_regions],
+            ambiguity_max_branches=int(ambiguity_max_branches),
+            ambiguity_cost_profile=ambiguity_cost_profile,
+        )
+        interval = (idx, idx + 1)
+        if split_merge_mode == "resolve" and resolved_ambiguity_mode == "fail" and ambiguity_class != "none":
+            _raise_structured_ambiguity_error(
+                interval=interval,
+                ambiguity_class=ambiguity_class,
+                tie_break_stage="ambiguity_mode_fail",
+                candidate_count_after_pruning="unknown",
+                detail=(
+                    "ambiguity_mode='fail' rejects ambiguous interval; "
+                    "use ambiguity_mode='auto' to enable deterministic auto-resolution."
+                ),
+            )
+        if ambiguity_class != "none" and split_merge_mode == "resolve" and resolved_ambiguity_mode == "auto":
+            ambiguity_class_counts[ambiguity_class] = ambiguity_class_counts.get(ambiguity_class, 0) + 1
+            ambiguity_resolved_intervals_count += 1
+        region_order_override: tuple[int, ...] | None = None
+        if fairness_mode == "global" and topology_case == "one_to_one":
+            (
+                region_order_override,
+                interval_optimizer_ran,
+                interval_hit_iteration_cap,
+            ) = _select_global_region_order(
+                prev_regions=[region[0] for region in prev_regions],
+                curr_regions=[region[0] for region in curr_regions],
+                prev_station=prev_station,
+                curr_station=curr_station,
+                previous_interval_vectors=previous_interval_vectors,
+                ambiguity_cost_profile=ambiguity_cost_profile,
+                ambiguity_max_branches=int(ambiguity_max_branches),
+                fairness_weight=float(fairness_weight),
+                fairness_iterations=int(fairness_iterations),
+            )
+            global_optimizer_ran = global_optimizer_ran or interval_optimizer_ran
+            global_optimizer_hit_iteration_cap = (
+                global_optimizer_hit_iteration_cap or interval_hit_iteration_cap
+            )
+        try:
+            transitions = _pair_sections_for_transition(
+                prev_regions,
+                curr_regions,
+                split_merge_mode=split_merge_mode,
+                split_merge_steps=split_merge_steps,
+                split_merge_bias=split_merge_bias,
+                ambiguity_mode=resolved_ambiguity_mode,
+                ambiguity_cost_profile=ambiguity_cost_profile,
+                ambiguity_max_branches=int(ambiguity_max_branches),
+                fairness_mode=fairness_mode,
+                fairness_weight=fairness_weight,
+                skeleton_mode=skeleton_mode,
+                fairness_iterations=fairness_iterations,
+                region_order_override=region_order_override,
+            )
+        except ValueError as exc:
+            message = str(exc)
+            if "unsupported_topology_ambiguity" not in message:
+                raise
+            _raise_structured_ambiguity_error(
+                interval=interval,
+                ambiguity_class=ambiguity_class,
+                tie_break_stage=_ambiguity_failure_stage(message),
+                candidate_count_after_pruning=_ambiguity_failure_candidate_count(message),
+                detail=message,
+            )
+        previous_interval_vectors = _transition_curr_vectors(
+            prev_station=prev_station,
+            curr_station=curr_station,
+            transitions=transitions,
+        )
+        planned_pairs = tuple(
+            _as_planned_region_pair(
+                transition,
+                interval=interval,
+                pair_index=pair_index,
+            )
+            for pair_index, transition in enumerate(transitions)
         )
         planned_transitions.append(
             PlannedTransition(
-                interval=(idx, idx + 1),
-                region_pairs=tuple(_as_planned_region_pair(transition) for transition in transitions),
+                interval=interval,
+                region_pairs=planned_pairs,
+                branch_order=tuple(pair.branch_id for pair in planned_pairs),
+                topology_case=topology_case,
+                ambiguity_class=ambiguity_class,
             )
         )
 
+    fairness_objective_pre = _compute_fairness_objective_terms(planned_stations, planned_transitions)
+    fairness_objective_post = dict(fairness_objective_pre)
+    fairness_diagnostics = {
+        "branch_crossing_count": float(fairness_objective_post["branch_crossing"]),
+        "continuity_score": float(fairness_objective_post["curvature_continuity"]),
+        "closure_distortion_score": float(fairness_objective_post["closure_stress"]),
+    }
+    fairness_convergence_status = "not_run"
+    if fairness_mode == "global" and global_optimizer_ran:
+        fairness_convergence_status = (
+            "max_iterations" if global_optimizer_hit_iteration_cap else "converged"
+        )
     plan = LoftPlan(
         samples=samples,
         stations=tuple(planned_stations),
@@ -394,6 +543,22 @@ def loft_plan_sections(
             "split_merge_mode": split_merge_mode,
             "split_merge_steps": split_merge_steps,
             "split_merge_bias": split_merge_bias,
+            "ambiguity_mode": resolved_ambiguity_mode,
+            "ambiguity_cost_profile": ambiguity_cost_profile,
+            "ambiguity_max_branches": int(ambiguity_max_branches),
+            "ambiguity_resolved_intervals_count": ambiguity_resolved_intervals_count,
+            "ambiguity_failed_intervals_count": 0,
+            "ambiguity_class_counts": ambiguity_class_counts,
+            "region_topology_case_counts": _count_region_topology_cases(planned_transitions),
+            "region_action_counts": _count_region_actions(planned_transitions),
+            "fairness_mode": fairness_mode,
+            "fairness_weight": float(fairness_weight),
+            "fairness_iterations": int(fairness_iterations),
+            "skeleton_mode": skeleton_mode,
+            "fairness_objective_pre": fairness_objective_pre,
+            "fairness_objective_post": fairness_objective_post,
+            "fairness_diagnostics": fairness_diagnostics,
+            "fairness_optimization_convergence_status": fairness_convergence_status,
         },
     )
     _validate_loft_plan(plan)
@@ -428,7 +593,9 @@ def loft_execute_plan(
         prev_idx, curr_idx = transition_block.interval
         prev_station = plan.stations[prev_idx]
         curr_station = plan.stations[curr_idx]
-        for region_pair in transition_block.region_pairs:
+        region_pairs_by_branch = {pair.branch_id: pair for pair in transition_block.region_pairs}
+        for branch_id in transition_block.branch_order:
+            region_pair = region_pairs_by_branch[branch_id]
             for loop_pair in region_pair.loop_pairs:
                 prev_start = _resolve_transition_loop_start(
                     station_index=prev_idx,
@@ -561,7 +728,12 @@ def loft_execute_plan(
     return Mesh(np.asarray(vertices, dtype=float), np.asarray(faces, dtype=int))
 
 
-def _as_planned_region_pair(transition: _PairedSectionTransition) -> PlannedRegionPair:
+def _as_planned_region_pair(
+    transition: _PairedSectionTransition,
+    *,
+    interval: tuple[int, int],
+    pair_index: int,
+) -> PlannedRegionPair:
     loop_pairs: list[PlannedLoopPair] = []
     for prev_loop, curr_loop, prev_ref, curr_ref in zip(
         transition.region.prev_loops,
@@ -597,7 +769,62 @@ def _as_planned_region_pair(transition: _PairedSectionTransition) -> PlannedRegi
         curr_region_ref=_to_planned_region_ref(transition.curr_region_ref),
         loop_pairs=tuple(loop_pairs),
         closures=tuple(closures),
+        action=transition.action,
+        branch_id=_make_branch_id(interval, pair_index, transition),
     )
+
+
+def _make_branch_id(
+    interval: tuple[int, int],
+    pair_index: int,
+    transition: _PairedSectionTransition,
+) -> str:
+    prev_ref = transition.prev_region_ref
+    curr_ref = transition.curr_region_ref
+    return (
+        f"i{interval[0]}_{interval[1]}:"
+        f"p{pair_index}:"
+        f"{transition.action}:"
+        f"{prev_ref.kind}{prev_ref.index}_to_{curr_ref.kind}{curr_ref.index}"
+    )
+
+
+def _raise_structured_ambiguity_error(
+    *,
+    interval: tuple[int, int],
+    ambiguity_class: str,
+    tie_break_stage: str,
+    candidate_count_after_pruning: str,
+    detail: str,
+) -> None:
+    raise ValueError(
+        "Unsupported topology transition: unsupported_topology_ambiguity "
+        f"(interval {interval[0]}->{interval[1]}; "
+        f"ambiguity_class={ambiguity_class}; "
+        f"tie_break_stage={tie_break_stage}; "
+        f"candidate_count_after_pruning={candidate_count_after_pruning}; "
+        f"detail={detail})"
+    )
+
+
+def _ambiguity_failure_stage(message: str) -> str:
+    if "tie_break_stage=" in message:
+        token = message.split("tie_break_stage=", 1)[1]
+        return token.split(";", 1)[0].split(")", 1)[0].strip()
+    if "candidate count exceeds ambiguity_max_branches" in message:
+        return "candidate_enumeration_limit"
+    if "residual indeterminate ambiguity" in message:
+        return "residual_tie_break"
+    if "ambiguity detected" in message:
+        return "ambiguity_gate"
+    return "unknown"
+
+
+def _ambiguity_failure_candidate_count(message: str) -> str:
+    if "candidate_count_after_pruning=" in message:
+        token = message.split("candidate_count_after_pruning=", 1)[1]
+        return token.split(";", 1)[0].split(")", 1)[0].strip()
+    return "unknown"
 
 
 def _planned_loop_pair_role(prev_ref: PlannedLoopRef, curr_ref: PlannedLoopRef) -> str:
@@ -654,11 +881,111 @@ def _validate_loft_plan(plan: LoftPlan) -> None:
         raise ValueError("Invalid loft plan: metadata must be a dict.")
     if "plan_schema_version" not in plan.metadata:
         raise ValueError("Invalid loft plan metadata: missing plan_schema_version.")
+    if "ambiguity_mode" not in plan.metadata:
+        raise ValueError("Invalid loft plan metadata: missing ambiguity_mode.")
+    if "ambiguity_cost_profile" not in plan.metadata:
+        raise ValueError("Invalid loft plan metadata: missing ambiguity_cost_profile.")
+    if "ambiguity_max_branches" not in plan.metadata:
+        raise ValueError("Invalid loft plan metadata: missing ambiguity_max_branches.")
+    if "ambiguity_resolved_intervals_count" not in plan.metadata:
+        raise ValueError("Invalid loft plan metadata: missing ambiguity_resolved_intervals_count.")
+    if "ambiguity_failed_intervals_count" not in plan.metadata:
+        raise ValueError("Invalid loft plan metadata: missing ambiguity_failed_intervals_count.")
+    if "ambiguity_class_counts" not in plan.metadata:
+        raise ValueError("Invalid loft plan metadata: missing ambiguity_class_counts.")
+    if "fairness_mode" not in plan.metadata:
+        raise ValueError("Invalid loft plan metadata: missing fairness_mode.")
+    if "fairness_weight" not in plan.metadata:
+        raise ValueError("Invalid loft plan metadata: missing fairness_weight.")
+    if "fairness_iterations" not in plan.metadata:
+        raise ValueError("Invalid loft plan metadata: missing fairness_iterations.")
+    if "skeleton_mode" not in plan.metadata:
+        raise ValueError("Invalid loft plan metadata: missing skeleton_mode.")
+    if "fairness_objective_pre" not in plan.metadata:
+        raise ValueError("Invalid loft plan metadata: missing fairness_objective_pre.")
+    if "fairness_objective_post" not in plan.metadata:
+        raise ValueError("Invalid loft plan metadata: missing fairness_objective_post.")
+    if "fairness_diagnostics" not in plan.metadata:
+        raise ValueError("Invalid loft plan metadata: missing fairness_diagnostics.")
+    if "fairness_optimization_convergence_status" not in plan.metadata:
+        raise ValueError("Invalid loft plan metadata: missing fairness_optimization_convergence_status.")
+
+    _validate_ambiguity_mode(str(plan.metadata["ambiguity_mode"]))
+    _validate_ambiguity_cost_profile(str(plan.metadata["ambiguity_cost_profile"]))
+    _validate_ambiguity_max_branches(int(plan.metadata["ambiguity_max_branches"]))
+    _validate_fairness_mode(str(plan.metadata["fairness_mode"]))
+    _validate_fairness_weight(float(plan.metadata["fairness_weight"]))
+    _validate_fairness_iterations(int(plan.metadata["fairness_iterations"]))
+    _validate_skeleton_mode(str(plan.metadata["skeleton_mode"]))
+    if int(plan.metadata["ambiguity_resolved_intervals_count"]) < 0:
+        raise ValueError(
+            "Invalid loft plan metadata: ambiguity_resolved_intervals_count must be >= 0."
+        )
+    if int(plan.metadata["ambiguity_failed_intervals_count"]) < 0:
+        raise ValueError(
+            "Invalid loft plan metadata: ambiguity_failed_intervals_count must be >= 0."
+        )
+    class_counts = plan.metadata["ambiguity_class_counts"]
+    if not isinstance(class_counts, dict):
+        raise ValueError("Invalid loft plan metadata: ambiguity_class_counts must be a dict.")
+    for key in ("permutation", "containment", "symmetry", "closure"):
+        if key not in class_counts:
+            raise ValueError(
+                f"Invalid loft plan metadata: ambiguity_class_counts missing key {key!r}."
+            )
+        if int(class_counts[key]) < 0:
+            raise ValueError(
+                f"Invalid loft plan metadata: ambiguity_class_counts[{key!r}] must be >= 0."
+            )
+    for key in ("fairness_objective_pre", "fairness_objective_post"):
+        terms = plan.metadata[key]
+        if not isinstance(terms, dict):
+            raise ValueError(f"Invalid loft plan metadata: {key} must be a dict.")
+        for term in (
+            "curvature_continuity",
+            "branch_crossing",
+            "branch_acceleration",
+            "synthetic_harshness",
+            "closure_stress",
+        ):
+            if term not in terms:
+                raise ValueError(f"Invalid loft plan metadata: {key} missing term {term!r}.")
+            if float(terms[term]) < 0.0:
+                raise ValueError(f"Invalid loft plan metadata: {key}[{term!r}] must be >= 0.")
+    fairness_diagnostics = plan.metadata["fairness_diagnostics"]
+    if not isinstance(fairness_diagnostics, dict):
+        raise ValueError("Invalid loft plan metadata: fairness_diagnostics must be a dict.")
+    for key in ("branch_crossing_count", "continuity_score", "closure_distortion_score"):
+        if key not in fairness_diagnostics:
+            raise ValueError(f"Invalid loft plan metadata: fairness_diagnostics missing key {key!r}.")
+        if float(fairness_diagnostics[key]) < 0.0:
+            raise ValueError(
+                f"Invalid loft plan metadata: fairness_diagnostics[{key!r}] must be >= 0."
+            )
+    if str(plan.metadata["fairness_optimization_convergence_status"]) not in {
+        "not_run",
+        "converged",
+        "max_iterations",
+        "failed",
+    }:
+        raise ValueError(
+            "Invalid loft plan metadata: fairness_optimization_convergence_status "
+            "must be one of ['converged', 'failed', 'max_iterations', 'not_run']."
+        )
 
     valid_roles = {"stable", "synthetic_birth", "synthetic_death"}
     valid_scopes = {"loop", "region"}
     valid_sides = {"prev", "curr"}
     valid_ref_kinds = {"actual", "synthetic"}
+    valid_region_actions = {"stable", "split_match", "split_birth", "merge_match", "merge_death"}
+    valid_topology_cases = {
+        "one_to_one",
+        "one_to_many",
+        "many_to_one",
+        "many_to_many_expand",
+        "many_to_many_collapse",
+    }
+    valid_ambiguity_classes = {"none", "permutation", "containment", "symmetry", "closure"}
 
     for transition_idx, transition in enumerate(plan.transitions):
         expected_interval = (transition_idx, transition_idx + 1)
@@ -667,10 +994,42 @@ def _validate_loft_plan(plan: LoftPlan) -> None:
                 "Invalid loft plan transition interval: "
                 f"expected {expected_interval}, got {transition.interval}."
             )
+        if transition.topology_case not in valid_topology_cases:
+            raise ValueError(
+                f"Invalid loft plan transition interval {expected_interval}: "
+                f"invalid topology_case {transition.topology_case!r}."
+            )
+        if transition.ambiguity_class not in valid_ambiguity_classes:
+            raise ValueError(
+                f"Invalid loft plan transition interval {expected_interval}: "
+                f"invalid ambiguity_class {transition.ambiguity_class!r}."
+            )
+        if len(transition.branch_order) != len(transition.region_pairs):
+            raise ValueError(
+                f"Invalid loft plan transition interval {expected_interval}: "
+                "branch_order length must match region_pairs length."
+            )
+        if len(set(transition.branch_order)) != len(transition.branch_order):
+            raise ValueError(
+                f"Invalid loft plan transition interval {expected_interval}: "
+                "branch_order contains duplicate branch IDs."
+            )
         prev_idx, curr_idx = transition.interval
         prev_station = plan.stations[prev_idx]
         curr_station = plan.stations[curr_idx]
+        collected_branch_order: list[str] = []
         for region_pair_idx, region_pair in enumerate(transition.region_pairs):
+            if region_pair.action not in valid_region_actions:
+                raise ValueError(
+                    f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
+                    f"invalid action {region_pair.action!r}."
+                )
+            if not isinstance(region_pair.branch_id, str) or not region_pair.branch_id.strip():
+                raise ValueError(
+                    f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
+                    "branch_id must be a non-empty string."
+                )
+            collected_branch_order.append(region_pair.branch_id)
             if region_pair.prev_region_ref.kind not in valid_ref_kinds:
                 raise ValueError(
                     f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
@@ -705,6 +1064,17 @@ def _validate_loft_plan(plan: LoftPlan) -> None:
                 raise ValueError(
                     f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
                     "requires at least one loop pair."
+                )
+            expected_action = _expected_region_pair_action(
+                transition.topology_case,
+                region_pair.prev_region_ref,
+                region_pair.curr_region_ref,
+            )
+            if region_pair.action != expected_action:
+                raise ValueError(
+                    f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
+                    f"action {region_pair.action!r} does not match refs/topology_case "
+                    f"(expected {expected_action!r})."
                 )
             for loop_pair_idx, loop_pair in enumerate(region_pair.loop_pairs):
                 if loop_pair.role not in valid_roles:
@@ -807,6 +1177,67 @@ def _validate_loft_plan(plan: LoftPlan) -> None:
                         f"closure {closure_idx}: duplicate closure ownership for {closure_key}."
                     )
                 seen_closure_keys.add(closure_key)
+            _validate_region_pair_closure_ownership(
+                region_pair=region_pair,
+                interval=(prev_idx, curr_idx),
+                region_pair_idx=region_pair_idx,
+            )
+        if tuple(collected_branch_order) != transition.branch_order:
+            raise ValueError(
+                f"Invalid loft plan transition interval {expected_interval}: "
+                "branch_order must match region_pairs emission order."
+            )
+
+
+def _validate_region_pair_closure_ownership(
+    *,
+    region_pair: PlannedRegionPair,
+    interval: tuple[int, int],
+    region_pair_idx: int,
+) -> None:
+    prev_idx, curr_idx = interval
+    region_prev = sum(1 for c in region_pair.closures if c.scope == "region" and c.side == "prev")
+    region_curr = sum(1 for c in region_pair.closures if c.scope == "region" and c.side == "curr")
+    if region_pair.action == "split_birth":
+        if region_prev != 1 or region_curr != 0:
+            raise ValueError(
+                f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
+                "split_birth requires exactly one prev region closure and zero curr region closures."
+            )
+    elif region_pair.action == "merge_death":
+        if region_curr != 1 or region_prev != 0:
+            raise ValueError(
+                f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
+                "merge_death requires exactly one curr region closure and zero prev region closures."
+            )
+    else:
+        if region_prev != 0 or region_curr != 0:
+            raise ValueError(
+                f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
+                f"action {region_pair.action!r} must not define region closures."
+            )
+
+    loop_prev = {c.loop_index for c in region_pair.closures if c.scope == "loop" and c.side == "prev"}
+    loop_curr = {c.loop_index for c in region_pair.closures if c.scope == "loop" and c.side == "curr"}
+    for loop_idx, loop_pair in enumerate(region_pair.loop_pairs):
+        if loop_pair.role == "synthetic_birth":
+            if loop_idx not in loop_prev or loop_idx in loop_curr:
+                raise ValueError(
+                    f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
+                    f"synthetic_birth loop pair {loop_idx} must be closed on prev side only."
+                )
+        elif loop_pair.role == "synthetic_death":
+            if loop_idx not in loop_curr or loop_idx in loop_prev:
+                raise ValueError(
+                    f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
+                    f"synthetic_death loop pair {loop_idx} must be closed on curr side only."
+                )
+        else:
+            if loop_idx in loop_prev or loop_idx in loop_curr:
+                raise ValueError(
+                    f"Invalid loft plan interval {prev_idx}->{curr_idx} region pair {region_pair_idx}: "
+                    f"stable loop pair {loop_idx} must not define loop closures."
+                )
 
 
 def loft_endcaps(
@@ -1358,6 +1789,14 @@ def _pair_sections_for_transition(
     split_merge_mode: str,
     split_merge_steps: int,
     split_merge_bias: float,
+    ambiguity_mode: str = "auto",
+    ambiguity_cost_profile: str = "balanced",
+    ambiguity_max_branches: int = 64,
+    fairness_mode: str = "local",
+    fairness_weight: float = 0.2,
+    skeleton_mode: str = "auto",
+    fairness_iterations: int = 12,
+    region_order_override: tuple[int, ...] | None = None,
 ) -> list[_PairedSectionTransition]:
     prev_count = len(prev_regions)
     curr_count = len(curr_regions)
@@ -1367,10 +1806,23 @@ def _pair_sections_for_transition(
     curr_refs = [_RegionRef("actual", i) for i in range(curr_count)]
 
     if prev_count == curr_count:
-        region_order = _minimum_cost_region_assignment(
-            [region[0] for region in prev_regions],
-            [region[0] for region in curr_regions],
-        )
+        if region_order_override is not None:
+            if len(region_order_override) != prev_count:
+                raise ValueError("Invalid region_order_override length for one_to_one transition.")
+            if sorted(region_order_override) != list(range(curr_count)):
+                raise ValueError("Invalid region_order_override permutation for one_to_one transition.")
+            region_order = region_order_override
+        else:
+            region_order = _minimum_cost_subset_assignment(
+                [region[0] for region in prev_regions],
+                [region[0] for region in curr_regions],
+                entity="region",
+                ambiguity_cost_profile=ambiguity_cost_profile,
+                ambiguity_max_branches=ambiguity_max_branches,
+                fairness_mode=fairness_mode,
+                fairness_weight=fairness_weight,
+                fairness_iterations=fairness_iterations,
+            )
         for prev_idx, curr_idx in enumerate(region_order):
             paired = _pair_region_loops_for_transition(
                 prev_regions[prev_idx],
@@ -1378,6 +1830,13 @@ def _pair_sections_for_transition(
                 split_merge_mode=split_merge_mode,
                 split_merge_steps=split_merge_steps,
                 split_merge_bias=split_merge_bias,
+                ambiguity_mode=ambiguity_mode,
+                ambiguity_cost_profile=ambiguity_cost_profile,
+                ambiguity_max_branches=ambiguity_max_branches,
+                fairness_mode=fairness_mode,
+                fairness_weight=fairness_weight,
+                skeleton_mode=skeleton_mode,
+                fairness_iterations=fairness_iterations,
             )
             transitions.append(
                 _PairedSectionTransition(
@@ -1385,6 +1844,7 @@ def _pair_sections_for_transition(
                     curr_region_ref=curr_refs[curr_idx],
                     region=paired,
                     region_closures=(),
+                    action="stable",
                 )
             )
         return transitions
@@ -1393,11 +1853,16 @@ def _pair_sections_for_transition(
         matched_targets = _minimum_cost_subset_assignment(
             [region[0] for region in prev_regions],
             [region[0] for region in curr_regions],
+            entity="region",
+            ambiguity_cost_profile=ambiguity_cost_profile,
+            ambiguity_max_branches=ambiguity_max_branches,
+            fairness_mode=fairness_mode,
+            fairness_weight=fairness_weight,
+            fairness_iterations=fairness_iterations,
         )
         matched_target_set = set(matched_targets)
         unmatched_curr = sorted(set(range(curr_count)) - matched_target_set)
-        _reject_many_to_many_topology(prev_count, curr_count, entity="region")
-        if split_merge_mode == "fail":
+        if split_merge_mode == "fail" or _is_many_to_many_region_transition(prev_count, curr_count):
             _assert_unmatched_regions_non_ambiguous(
                 unmatched_regions=[curr_regions[idx][0] for idx in unmatched_curr],
                 opposite_regions=[region[0] for region in prev_regions],
@@ -1409,6 +1874,13 @@ def _pair_sections_for_transition(
                 split_merge_mode=split_merge_mode,
                 split_merge_steps=split_merge_steps,
                 split_merge_bias=split_merge_bias,
+                ambiguity_mode=ambiguity_mode,
+                ambiguity_cost_profile=ambiguity_cost_profile,
+                ambiguity_max_branches=ambiguity_max_branches,
+                fairness_mode=fairness_mode,
+                fairness_weight=fairness_weight,
+                skeleton_mode=skeleton_mode,
+                fairness_iterations=fairness_iterations,
             )
             transitions.append(
                 _PairedSectionTransition(
@@ -1416,6 +1888,7 @@ def _pair_sections_for_transition(
                     curr_region_ref=curr_refs[curr_idx],
                     region=paired,
                     region_closures=(),
+                    action="split_match",
                 )
             )
         for curr_idx in unmatched_curr:
@@ -1429,6 +1902,13 @@ def _pair_sections_for_transition(
                 split_merge_mode=split_merge_mode,
                 split_merge_steps=split_merge_steps,
                 split_merge_bias=split_merge_bias,
+                ambiguity_mode=ambiguity_mode,
+                ambiguity_cost_profile=ambiguity_cost_profile,
+                ambiguity_max_branches=ambiguity_max_branches,
+                fairness_mode=fairness_mode,
+                fairness_weight=fairness_weight,
+                skeleton_mode=skeleton_mode,
+                fairness_iterations=fairness_iterations,
             )
             transitions.append(
                 _PairedSectionTransition(
@@ -1436,6 +1916,7 @@ def _pair_sections_for_transition(
                     curr_region_ref=curr_refs[curr_idx],
                     region=paired,
                     region_closures=("prev",),
+                    action="split_birth",
                 )
             )
         return transitions
@@ -1443,11 +1924,16 @@ def _pair_sections_for_transition(
     matched_prev_for_curr = _minimum_cost_subset_assignment(
         [region[0] for region in curr_regions],
         [region[0] for region in prev_regions],
+        entity="region",
+        ambiguity_cost_profile=ambiguity_cost_profile,
+        ambiguity_max_branches=ambiguity_max_branches,
+        fairness_mode=fairness_mode,
+        fairness_weight=fairness_weight,
+        fairness_iterations=fairness_iterations,
     )
     matched_prev_set = set(matched_prev_for_curr)
     unmatched_prev = sorted(set(range(prev_count)) - matched_prev_set)
-    _reject_many_to_many_topology(prev_count, curr_count, entity="region")
-    if split_merge_mode == "fail":
+    if split_merge_mode == "fail" or _is_many_to_many_region_transition(prev_count, curr_count):
         _assert_unmatched_regions_non_ambiguous(
             unmatched_regions=[prev_regions[idx][0] for idx in unmatched_prev],
             opposite_regions=[region[0] for region in curr_regions],
@@ -1462,6 +1948,13 @@ def _pair_sections_for_transition(
                 split_merge_mode=split_merge_mode,
                 split_merge_steps=split_merge_steps,
                 split_merge_bias=split_merge_bias,
+                ambiguity_mode=ambiguity_mode,
+                ambiguity_cost_profile=ambiguity_cost_profile,
+                ambiguity_max_branches=ambiguity_max_branches,
+                fairness_mode=fairness_mode,
+                fairness_weight=fairness_weight,
+                skeleton_mode=skeleton_mode,
+                fairness_iterations=fairness_iterations,
             )
             transitions.append(
                 _PairedSectionTransition(
@@ -1469,6 +1962,7 @@ def _pair_sections_for_transition(
                     curr_region_ref=curr_refs[curr_idx],
                     region=paired,
                     region_closures=(),
+                    action="merge_match",
                 )
             )
         else:
@@ -1482,6 +1976,13 @@ def _pair_sections_for_transition(
                 split_merge_mode=split_merge_mode,
                 split_merge_steps=split_merge_steps,
                 split_merge_bias=split_merge_bias,
+                ambiguity_mode=ambiguity_mode,
+                ambiguity_cost_profile=ambiguity_cost_profile,
+                ambiguity_max_branches=ambiguity_max_branches,
+                fairness_mode=fairness_mode,
+                fairness_weight=fairness_weight,
+                skeleton_mode=skeleton_mode,
+                fairness_iterations=fairness_iterations,
             )
             transitions.append(
                 _PairedSectionTransition(
@@ -1489,6 +1990,7 @@ def _pair_sections_for_transition(
                     curr_region_ref=_RegionRef("synthetic", prev_idx),
                     region=paired,
                     region_closures=("curr",),
+                    action="merge_death",
                 )
             )
     if len(matched_prev_set) != len(curr_regions):
@@ -1503,7 +2005,18 @@ def _pair_region_loops_for_transition(
     split_merge_mode: str,
     split_merge_steps: int,
     split_merge_bias: float,
+    ambiguity_mode: str = "auto",
+    ambiguity_cost_profile: str = "balanced",
+    ambiguity_max_branches: int = 64,
+    fairness_mode: str = "local",
+    fairness_weight: float = 0.2,
+    skeleton_mode: str = "auto",
+    fairness_iterations: int = 12,
 ) -> _PairedRegionLoops:
+    # Step 1 (Spec 19): fairness/skeleton controls are surfaced and propagated.
+    # Optimization behavior is introduced in follow-up steps.
+    _ = (fairness_mode, fairness_weight, skeleton_mode, fairness_iterations)
+
     prev_outer = prev_region_loops[0]
     curr_outer = curr_region_loops[0]
     prev_holes = list(prev_region_loops[1:])
@@ -1531,10 +2044,18 @@ def _pair_region_loops_for_transition(
         )
 
     if len(prev_holes) < len(curr_holes):
-        matched_targets = _minimum_cost_subset_assignment(prev_holes, curr_holes)
+        matched_targets = _minimum_cost_subset_assignment(
+            prev_holes,
+            curr_holes,
+            entity="hole",
+            ambiguity_cost_profile=ambiguity_cost_profile,
+            ambiguity_max_branches=ambiguity_max_branches,
+            fairness_mode=fairness_mode,
+            fairness_weight=fairness_weight,
+            fairness_iterations=fairness_iterations,
+        )
         matched_target_set = set(matched_targets)
         unmatched_curr = sorted(set(range(len(curr_holes))) - matched_target_set)
-        _reject_many_to_many_topology(len(prev_holes), len(curr_holes), entity="hole")
         if split_merge_mode == "fail":
             _assert_unmatched_holes_non_ambiguous(
                 unmatched_holes=[curr_holes[idx] for idx in unmatched_curr],
@@ -1559,9 +2080,17 @@ def _pair_region_loops_for_transition(
             curr_refs.append(_LoopRef("actual", tgt_idx + 1))
             closures.append(("prev", loop_slot))
     else:
-        matched_prev_for_curr = _minimum_cost_subset_assignment(curr_holes, prev_holes)
+        matched_prev_for_curr = _minimum_cost_subset_assignment(
+            curr_holes,
+            prev_holes,
+            entity="hole",
+            ambiguity_cost_profile=ambiguity_cost_profile,
+            ambiguity_max_branches=ambiguity_max_branches,
+            fairness_mode=fairness_mode,
+            fairness_weight=fairness_weight,
+            fairness_iterations=fairness_iterations,
+        )
         unmatched_prev = sorted(set(range(len(prev_holes))) - set(matched_prev_for_curr))
-        _reject_many_to_many_topology(len(prev_holes), len(curr_holes), entity="hole")
         if split_merge_mode == "fail":
             _assert_unmatched_holes_non_ambiguous(
                 unmatched_holes=[prev_holes[idx] for idx in unmatched_prev],
@@ -1603,13 +2132,489 @@ def _minimum_cost_subset_assignment(
     source_loops: list[np.ndarray],
     target_loops: list[np.ndarray],
     *,
-    area_weight: float = 0.1,
+    entity: str,
+    ambiguity_cost_profile: str = "balanced",
+    ambiguity_max_branches: int = 64,
+    fairness_mode: str = "local",
+    fairness_weight: float = 0.2,
+    fairness_iterations: int = 12,
 ) -> tuple[int, ...]:
-    return _minimum_cost_subset_assignment_topology(
+    _ = fairness_iterations  # used by global mode selection in planner for now
+    if not source_loops:
+        return ()
+    candidates, _, _ = _enumerate_subset_assignment_candidates(
         source_loops,
         target_loops,
-        area_weight=area_weight,
+        entity=entity,
+        ambiguity_cost_profile=ambiguity_cost_profile,
+        ambiguity_max_branches=ambiguity_max_branches,
     )
+    if not candidates:
+        raise ValueError("Unsupported topology transition: failed to compute subset assignment.")
+
+    if fairness_mode in {"local", "global"} and float(fairness_weight) > 0.0:
+        min_base = min(candidate[1][:3] for candidate in candidates)
+        pool = [candidate for candidate in candidates if candidate[1][:3] == min_base]
+        assignment = min(
+            pool,
+            key=lambda candidate: (
+                float(fairness_weight) * candidate[2],
+                candidate[1][3],
+                candidate[1][4],
+                candidate[1][5],
+                candidate[1][6],
+            ),
+        )[0]
+    else:
+        assignment = min(candidates, key=lambda candidate: candidate[1])[0]
+
+    for src_idx, dst_idx in enumerate(assignment):
+        if not _is_stable_loop_transition(source_loops[src_idx], target_loops[dst_idx]):
+            raise ValueError(
+                "Unsupported topology transition: "
+                f"unsupported_topology_ambiguity ({entity} split/merge ambiguity detected)."
+            )
+    return assignment
+
+
+def _enumerate_subset_assignment_candidates(
+    source_loops: list[np.ndarray],
+    target_loops: list[np.ndarray],
+    *,
+    entity: str,
+    ambiguity_cost_profile: str,
+    ambiguity_max_branches: int,
+) -> tuple[
+    list[
+        tuple[
+            tuple[int, ...],
+            tuple[float, float, float, float, float, tuple[tuple[float, ...], ...], tuple[int, ...]],
+            float,
+        ]
+    ],
+    list[np.ndarray],
+    list[np.ndarray],
+]:
+    source = [np.asarray(loop, dtype=float) for loop in source_loops]
+    target = [np.asarray(loop, dtype=float) for loop in target_loops]
+    if len(source) > len(target):
+        raise ValueError("subset assignment expects source count <= target count.")
+    if not source:
+        return [], [], []
+
+    src_centroids = [loop.mean(axis=0) for loop in source]
+    dst_centroids = [loop.mean(axis=0) for loop in target]
+    src_areas = [abs(_signed_area(loop)) for loop in source]
+    dst_areas = [abs(_signed_area(loop)) for loop in target]
+    tgt_signatures = [tuple(np.round(_anchor_loop(loop).reshape(-1), decimals=9).tolist()) for loop in target]
+
+    dist = np.zeros((len(source), len(target)), dtype=float)
+    area = np.zeros((len(source), len(target)), dtype=float)
+    containment = np.zeros((len(source), len(target)), dtype=float)
+    for i in range(len(source)):
+        for j in range(len(target)):
+            dist[i, j] = float(np.linalg.norm(src_centroids[i] - dst_centroids[j]))
+            area[i, j] = abs(src_areas[i] - dst_areas[j])
+            containment[i, j] = 1.0 if _is_split_merge_ambiguous(source[i], target[j]) else 0.0
+
+    max_assignments = int(ambiguity_max_branches)
+    visited = 0
+    candidates: list[
+        tuple[
+            tuple[int, ...],
+            tuple[float, float, float, float, float, tuple[tuple[float, ...], ...], tuple[int, ...]],
+            float,
+        ]
+    ] = []
+    d_weight, a_weight = _ambiguity_profile_weights(ambiguity_cost_profile)
+
+    def _recurse(i: int, used: set[int], partial: list[int]) -> None:
+        nonlocal visited
+        if i == len(source):
+            visited += 1
+            if visited > max_assignments:
+                raise ValueError(
+                    "Unsupported topology transition: unsupported_topology_ambiguity "
+                    f"({entity} split/merge ambiguity candidate count exceeds ambiguity_max_branches; "
+                    "tie_break_stage=candidate_enumeration_limit; "
+                    f"candidate_count_after_pruning={visited}; "
+                    f"ambiguity_max_branches={max_assignments})"
+                )
+            assignment = tuple(partial)
+            score = _score_subset_assignment(
+                assignment=assignment,
+                dist=dist,
+                area=area,
+                containment=containment,
+                src_centroids=src_centroids,
+                dst_centroids=dst_centroids,
+                target_signatures=tgt_signatures,
+                distance_weight=d_weight,
+                area_weight=a_weight,
+            )
+            local_fairness = _local_assignment_fairness(assignment, src_centroids, dst_centroids)
+            candidates.append((assignment, score, local_fairness))
+            return
+
+        candidate_targets = sorted(
+            (j for j in range(len(target)) if j not in used),
+            key=lambda j: (dist[i, j], area[i, j], containment[i, j], j),
+        )
+        for j in candidate_targets:
+            used.add(j)
+            partial.append(j)
+            _recurse(i + 1, used, partial)
+            partial.pop()
+            used.remove(j)
+
+    _recurse(0, set(), [])
+    return candidates, src_centroids, dst_centroids
+
+
+def _local_assignment_fairness(
+    assignment: tuple[int, ...],
+    src_centroids: list[np.ndarray],
+    dst_centroids: list[np.ndarray],
+) -> float:
+    if not assignment:
+        return 0.0
+    lengths = [
+        float(np.linalg.norm(dst_centroids[dst_idx] - src_centroids[src_idx]))
+        for src_idx, dst_idx in enumerate(assignment)
+    ]
+    if len(lengths) == 1:
+        return lengths[0]
+    mean_length = sum(lengths) / float(len(lengths))
+    variance = sum((length - mean_length) ** 2 for length in lengths) / float(len(lengths))
+    span = max(lengths) - min(lengths)
+    return float(variance + span)
+
+
+def _loop_centroid_world(station: PlannedStation, loop: np.ndarray) -> np.ndarray:
+    pts = np.asarray(loop, dtype=float)
+    centroid = pts.mean(axis=0)
+    return station.origin + centroid[0] * station.u + centroid[1] * station.v
+
+
+def _assignment_vectors_world(
+    prev_regions: Sequence[np.ndarray],
+    curr_regions: Sequence[np.ndarray],
+    *,
+    prev_station: PlannedStation,
+    curr_station: PlannedStation,
+    assignment: tuple[int, ...],
+) -> dict[int, np.ndarray]:
+    vectors: dict[int, np.ndarray] = {}
+    for src_idx, dst_idx in enumerate(assignment):
+        prev_point = _loop_centroid_world(prev_station, np.asarray(prev_regions[src_idx], dtype=float))
+        curr_point = _loop_centroid_world(curr_station, np.asarray(curr_regions[dst_idx], dtype=float))
+        vectors[src_idx] = curr_point - prev_point
+    return vectors
+
+
+def _select_global_region_order(
+    *,
+    prev_regions: list[np.ndarray],
+    curr_regions: list[np.ndarray],
+    prev_station: PlannedStation,
+    curr_station: PlannedStation,
+    previous_interval_vectors: dict[int, np.ndarray] | None,
+    ambiguity_cost_profile: str,
+    ambiguity_max_branches: int,
+    fairness_weight: float,
+    fairness_iterations: int,
+) -> tuple[tuple[int, ...], bool, bool]:
+    candidates, _, _ = _enumerate_subset_assignment_candidates(
+        prev_regions,
+        curr_regions,
+        entity="region",
+        ambiguity_cost_profile=ambiguity_cost_profile,
+        ambiguity_max_branches=ambiguity_max_branches,
+    )
+    if not candidates:
+        raise ValueError("Unsupported topology transition: failed to compute subset assignment.")
+
+    iteration_budget = max(1, int(fairness_iterations))
+    ranked_candidates = sorted(
+        candidates,
+        key=lambda candidate: (
+            candidate[1][0],
+            candidate[1][1],
+            candidate[1][2],
+            candidate[1][3],
+            candidate[1][4],
+            candidate[1][5],
+            candidate[1][6],
+        ),
+    )
+    candidate_pool = ranked_candidates[:iteration_budget]
+    hit_iteration_cap = len(ranked_candidates) > len(candidate_pool)
+    if not candidate_pool:
+        return candidates[0][0], False, False
+
+    if previous_interval_vectors is None or float(fairness_weight) <= 0.0 or len(ranked_candidates) <= 1:
+        return candidate_pool[0][0], False, hit_iteration_cap
+    if len(candidate_pool) == 1:
+        return candidate_pool[0][0], True, hit_iteration_cap
+
+    best_assignment = candidate_pool[0][0]
+    best_key: tuple[float, float, float, float, float, tuple[float, ...], tuple[int, ...]] | None = None
+    local_weight = max(0.0, 1.0 - float(fairness_weight))
+    assert previous_interval_vectors is not None
+
+    for assignment, score, local_fairness in candidate_pool:
+        vectors = _assignment_vectors_world(
+            prev_regions,
+            curr_regions,
+            prev_station=prev_station,
+            curr_station=curr_station,
+            assignment=assignment,
+        )
+        continuity_penalty = 0.0
+        acceleration_penalty = 0.0
+        continuity_samples = 0
+        for src_idx, prev_vec in previous_interval_vectors.items():
+            next_vec = vectors.get(src_idx)
+            if next_vec is None:
+                continue
+            prev_norm = float(np.linalg.norm(prev_vec))
+            next_norm = float(np.linalg.norm(next_vec))
+            if prev_norm <= 1e-12 or next_norm <= 1e-12:
+                continue
+            prev_dir = prev_vec / prev_norm
+            next_dir = next_vec / next_norm
+            dot = float(np.clip(np.dot(prev_dir, next_dir), -1.0, 1.0))
+            continuity_penalty += float(1.0 - dot)
+            acceleration_penalty += float(np.linalg.norm(next_vec - prev_vec))
+            continuity_samples += 1
+
+        if continuity_samples == 0:
+            global_penalty = local_fairness
+        else:
+            global_penalty = float(continuity_penalty + acceleration_penalty)
+
+        base_cost = float(score[0] + score[1] + score[3] + score[4])
+        blended_fairness = float(fairness_weight) * global_penalty + local_weight * local_fairness
+        key = (
+            global_penalty,
+            blended_fairness,
+            base_cost,
+            score[2],
+            local_fairness,
+            score[3],
+            score[4],
+            score[5],
+            score[6],
+        )
+        if best_key is None or key < best_key:
+            best_key = key
+            best_assignment = assignment
+
+    return best_assignment, True, hit_iteration_cap
+
+
+def _transition_curr_vectors(
+    *,
+    prev_station: PlannedStation,
+    curr_station: PlannedStation,
+    transitions: Sequence[_PairedSectionTransition],
+) -> dict[int, np.ndarray]:
+    vectors: dict[int, np.ndarray] = {}
+    for transition in transitions:
+        if transition.curr_region_ref.kind != "actual":
+            continue
+        if not transition.region.prev_loops or not transition.region.curr_loops:
+            continue
+        prev_point = _loop_centroid_world(prev_station, transition.region.prev_loops[0])
+        curr_point = _loop_centroid_world(curr_station, transition.region.curr_loops[0])
+        vectors[transition.curr_region_ref.index] = curr_point - prev_point
+    return vectors
+
+
+def _ambiguity_profile_weights(profile: str) -> tuple[float, float]:
+    if profile == "distance_first":
+        return 1.0, 0.8
+    if profile == "area_first":
+        return 0.8, 1.0
+    return 1.0, 1.0
+
+
+def _score_subset_assignment(
+    *,
+    assignment: tuple[int, ...],
+    dist: np.ndarray,
+    area: np.ndarray,
+    containment: np.ndarray,
+    src_centroids: list[np.ndarray],
+    dst_centroids: list[np.ndarray],
+    target_signatures: list[tuple[float, ...]],
+    distance_weight: float,
+    area_weight: float,
+) -> tuple[float, float, float, float, float, tuple[tuple[float, ...], ...], tuple[int, ...]]:
+    distance_sum = float(sum(dist[i, j] for i, j in enumerate(assignment))) * float(distance_weight)
+    area_sum = float(sum(area[i, j] for i, j in enumerate(assignment))) * float(area_weight)
+    containment_penalty = float(sum(containment[i, j] for i, j in enumerate(assignment)))
+    crossing_score = float(_assignment_crossing_score(assignment, src_centroids, dst_centroids))
+    action_complexity = 0.0
+    canonical_key = tuple(target_signatures[j] for j in assignment)
+    return (
+        distance_sum,
+        area_sum,
+        containment_penalty,
+        crossing_score,
+        action_complexity,
+        canonical_key,
+        assignment,
+    )
+
+
+def _assignment_crossing_score(
+    assignment: tuple[int, ...],
+    src_centroids: list[np.ndarray],
+    dst_centroids: list[np.ndarray],
+) -> int:
+    score = 0
+    for i in range(len(assignment)):
+        for k in range(i + 1, len(assignment)):
+            a0 = src_centroids[i]
+            a1 = dst_centroids[assignment[i]]
+            b0 = src_centroids[k]
+            b1 = dst_centroids[assignment[k]]
+            if _segments_intersect_2d(a0, a1, b0, b1):
+                score += 1
+    return score
+
+
+def _compute_fairness_objective_terms(
+    stations: Sequence[PlannedStation],
+    transitions: Sequence[PlannedTransition],
+) -> dict[str, float]:
+    terms = _zero_fairness_objective_terms()
+    if not transitions:
+        return terms
+
+    transition_vectors: list[dict[int, np.ndarray]] = []
+
+    for transition in transitions:
+        prev_idx, curr_idx = transition.interval
+        prev_station = stations[prev_idx]
+        curr_station = stations[curr_idx]
+        pairs_by_curr_actual: dict[int, np.ndarray] = {}
+
+        branch_segments_2d: list[tuple[np.ndarray, np.ndarray]] = []
+        for region_pair in transition.region_pairs:
+            start3, end3 = _region_pair_centerline_world(prev_station, curr_station, region_pair)
+            if start3 is None or end3 is None:
+                continue
+            branch_segments_2d.append((start3[:2], end3[:2]))
+            if region_pair.curr_region_ref.kind == "actual":
+                pairs_by_curr_actual[region_pair.curr_region_ref.index] = end3 - start3
+
+        terms["branch_crossing"] += float(_count_segment_crossings_2d(branch_segments_2d))
+        transition_vectors.append(pairs_by_curr_actual)
+
+        for region_pair in transition.region_pairs:
+            if region_pair.action in {"split_birth", "merge_death"} and region_pair.loop_pairs:
+                prev_area = abs(_signed_area(region_pair.loop_pairs[0].prev_loop))
+                curr_area = abs(_signed_area(region_pair.loop_pairs[0].curr_loop))
+                denom = max(prev_area, curr_area, 1e-12)
+                terms["synthetic_harshness"] += float(abs(curr_area - prev_area) / denom)
+
+            loop_count = len(region_pair.loop_pairs)
+            if loop_count == 0:
+                continue
+            for closure in region_pair.closures:
+                if closure.scope == "loop" and closure.loop_index is not None:
+                    loop_idx = closure.loop_index
+                    if 0 <= loop_idx < loop_count:
+                        loop_pair = region_pair.loop_pairs[loop_idx]
+                        terms["closure_stress"] += _normalized_loop_area_delta(loop_pair.prev_loop, loop_pair.curr_loop)
+                elif closure.scope == "region":
+                    local = 0.0
+                    for loop_pair in region_pair.loop_pairs:
+                        local += _normalized_loop_area_delta(loop_pair.prev_loop, loop_pair.curr_loop)
+                    terms["closure_stress"] += float(local / float(loop_count))
+
+    for i in range(len(transitions) - 1):
+        curr_vectors = transition_vectors[i]
+        next_transition = transitions[i + 1]
+        next_prev_idx = next_transition.interval[0]
+        next_curr_idx = next_transition.interval[1]
+        next_station_prev = stations[next_prev_idx]
+        next_station_curr = stations[next_curr_idx]
+
+        for next_pair in next_transition.region_pairs:
+            if next_pair.prev_region_ref.kind != "actual":
+                continue
+            region_idx = next_pair.prev_region_ref.index
+            prev_vec = curr_vectors.get(region_idx)
+            if prev_vec is None:
+                continue
+            start3, end3 = _region_pair_centerline_world(next_station_prev, next_station_curr, next_pair)
+            if start3 is None or end3 is None:
+                continue
+            next_vec = end3 - start3
+            prev_norm = float(np.linalg.norm(prev_vec))
+            next_norm = float(np.linalg.norm(next_vec))
+            if prev_norm <= 1e-12 or next_norm <= 1e-12:
+                continue
+            prev_dir = prev_vec / prev_norm
+            next_dir = next_vec / next_norm
+            dot = float(np.clip(np.dot(prev_dir, next_dir), -1.0, 1.0))
+            terms["curvature_continuity"] += float(1.0 - dot)
+            terms["branch_acceleration"] += float(np.linalg.norm(next_vec - prev_vec))
+
+    return {key: float(value) for key, value in terms.items()}
+
+
+def _region_pair_centerline_world(
+    prev_station: PlannedStation,
+    curr_station: PlannedStation,
+    region_pair: PlannedRegionPair,
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    if not region_pair.loop_pairs:
+        return None, None
+    outer_pair = region_pair.loop_pairs[0]
+    prev_center = np.asarray(outer_pair.prev_loop, dtype=float).mean(axis=0)
+    curr_center = np.asarray(outer_pair.curr_loop, dtype=float).mean(axis=0)
+    prev_point = prev_station.origin + prev_center[0] * prev_station.u + prev_center[1] * prev_station.v
+    curr_point = curr_station.origin + curr_center[0] * curr_station.u + curr_center[1] * curr_station.v
+    return prev_point, curr_point
+
+
+def _count_segment_crossings_2d(segments: Sequence[tuple[np.ndarray, np.ndarray]]) -> int:
+    count = 0
+    for i in range(len(segments)):
+        a0, a1 = segments[i]
+        for j in range(i + 1, len(segments)):
+            b0, b1 = segments[j]
+            if _segments_intersect_2d(a0, a1, b0, b1):
+                count += 1
+    return count
+
+
+def _normalized_loop_area_delta(prev_loop: np.ndarray, curr_loop: np.ndarray) -> float:
+    prev_area = abs(_signed_area(prev_loop))
+    curr_area = abs(_signed_area(curr_loop))
+    denom = max(prev_area, curr_area, 1e-12)
+    return float(abs(curr_area - prev_area) / denom)
+
+
+def _segments_intersect_2d(
+    p1: np.ndarray,
+    p2: np.ndarray,
+    q1: np.ndarray,
+    q2: np.ndarray,
+) -> bool:
+    def orient(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
+        return float((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))
+
+    o1 = orient(p1, p2, q1)
+    o2 = orient(p1, p2, q2)
+    o3 = orient(q1, q2, p1)
+    o4 = orient(q1, q2, p2)
+
+    return (o1 * o2 < 0.0) and (o3 * o4 < 0.0)
 
 
 def _assert_unmatched_regions_non_ambiguous(
@@ -1620,7 +2625,11 @@ def _assert_unmatched_regions_non_ambiguous(
     for candidate in unmatched_regions:
         for other in opposite_regions:
             if _is_split_merge_ambiguous(candidate, other):
-                raise ValueError("Unsupported topology transition: region split/merge ambiguity detected.")
+                raise ValueError(
+                    "Unsupported topology transition: "
+                    "unsupported_topology_ambiguity (region split/merge ambiguity detected; "
+                    "tie_break_stage=ambiguity_gate; candidate_count_after_pruning=unknown)"
+                )
 
 
 def _assert_unmatched_holes_non_ambiguous(
@@ -1631,7 +2640,153 @@ def _assert_unmatched_holes_non_ambiguous(
     for candidate in unmatched_holes:
         for other in opposite_holes:
             if _is_split_merge_ambiguous(candidate, other):
-                raise ValueError("Unsupported topology transition: hole split/merge ambiguity detected.")
+                raise ValueError(
+                    "Unsupported topology transition: "
+                    "unsupported_topology_ambiguity (hole split/merge ambiguity detected; "
+                    "tie_break_stage=ambiguity_gate; candidate_count_after_pruning=unknown)"
+                )
+
+
+def _is_many_to_many_region_transition(prev_count: int, curr_count: int) -> bool:
+    return prev_count > 1 and curr_count > 1 and prev_count != curr_count
+
+
+def _classify_region_transition_ambiguity(
+    *,
+    prev_regions: list[np.ndarray],
+    curr_regions: list[np.ndarray],
+    ambiguity_max_branches: int,
+    ambiguity_cost_profile: str,
+) -> str:
+    prev_count = len(prev_regions)
+    curr_count = len(curr_regions)
+    if prev_count <= 1 and curr_count <= 1:
+        return "none"
+    if _has_containment_ambiguity(prev_regions, curr_regions):
+        return "containment"
+    if _is_many_to_many_region_transition(prev_count, curr_count):
+        if _has_assignment_symmetry_or_permutation(
+            prev_regions=prev_regions,
+            curr_regions=curr_regions,
+            ambiguity_max_branches=ambiguity_max_branches,
+            ambiguity_cost_profile=ambiguity_cost_profile,
+        ):
+            if _is_symmetry_layout(prev_regions, curr_regions):
+                return "symmetry"
+            return "permutation"
+        # Many-to-many decomposition is branch-ambiguous by default even when a
+        # deterministic assignment exists; classify for diagnostics/metadata.
+        return "permutation"
+    if _has_assignment_symmetry_or_permutation(
+        prev_regions=prev_regions,
+        curr_regions=curr_regions,
+        ambiguity_max_branches=ambiguity_max_branches,
+        ambiguity_cost_profile=ambiguity_cost_profile,
+    ):
+        if _is_symmetry_layout(prev_regions, curr_regions):
+            return "symmetry"
+        return "permutation"
+    return "none"
+
+
+def _has_containment_ambiguity(prev_regions: list[np.ndarray], curr_regions: list[np.ndarray]) -> bool:
+    for source in prev_regions:
+        c = np.asarray(source, dtype=float).mean(axis=0)
+        contained_in = sum(1 for target in curr_regions if _point_in_polygon(c, np.asarray(target, dtype=float)))
+        if contained_in > 1:
+            return True
+    for target in curr_regions:
+        c = np.asarray(target, dtype=float).mean(axis=0)
+        contained_in = sum(1 for source in prev_regions if _point_in_polygon(c, np.asarray(source, dtype=float)))
+        if contained_in > 1:
+            return True
+    return False
+
+
+def _has_assignment_symmetry_or_permutation(
+    *,
+    prev_regions: list[np.ndarray],
+    curr_regions: list[np.ndarray],
+    ambiguity_max_branches: int,
+    ambiguity_cost_profile: str,
+) -> bool:
+    n = len(prev_regions)
+    m = len(curr_regions)
+    if n == 0 or m == 0:
+        return False
+    if n > m:
+        prev_regions, curr_regions = curr_regions, prev_regions
+        n, m = m, n
+
+    src = [np.asarray(loop, dtype=float) for loop in prev_regions]
+    dst = [np.asarray(loop, dtype=float) for loop in curr_regions]
+    src_centroids = [loop.mean(axis=0) for loop in src]
+    dst_centroids = [loop.mean(axis=0) for loop in dst]
+    src_areas = [abs(_signed_area(loop)) for loop in src]
+    dst_areas = [abs(_signed_area(loop)) for loop in dst]
+    tgt_signatures = [tuple(np.round(_anchor_loop(loop).reshape(-1), decimals=9).tolist()) for loop in dst]
+    dist = np.zeros((n, m), dtype=float)
+    area = np.zeros((n, m), dtype=float)
+    containment = np.zeros((n, m), dtype=float)
+    for i in range(n):
+        for j in range(m):
+            dist[i, j] = float(np.linalg.norm(src_centroids[i] - dst_centroids[j]))
+            area[i, j] = abs(src_areas[i] - dst_areas[j])
+            containment[i, j] = 1.0 if _is_split_merge_ambiguous(src[i], dst[j]) else 0.0
+
+    d_weight, a_weight = _ambiguity_profile_weights(ambiguity_cost_profile)
+    visited = 0
+    best_prefix: tuple[float, float, float, float, float] | None = None
+    tied_best = 0
+
+    def _recurse(i: int, used: set[int], partial: list[int]) -> None:
+        nonlocal visited, best_prefix, tied_best
+        if i == n:
+            visited += 1
+            if visited > int(ambiguity_max_branches):
+                return
+            score = _score_subset_assignment(
+                assignment=tuple(partial),
+                dist=dist,
+                area=area,
+                containment=containment,
+                src_centroids=src_centroids,
+                dst_centroids=dst_centroids,
+                target_signatures=tgt_signatures,
+                distance_weight=d_weight,
+                area_weight=a_weight,
+            )
+            prefix = score[:5]
+            if best_prefix is None or prefix < best_prefix:
+                best_prefix = prefix
+                tied_best = 1
+            elif prefix == best_prefix:
+                tied_best += 1
+            return
+        for j in range(m):
+            if j in used:
+                continue
+            used.add(j)
+            partial.append(j)
+            _recurse(i + 1, used, partial)
+            partial.pop()
+            used.remove(j)
+
+    _recurse(0, set(), [])
+    return tied_best > 1
+
+
+def _is_symmetry_layout(prev_regions: list[np.ndarray], curr_regions: list[np.ndarray]) -> bool:
+    def _spread_signature(regions: list[np.ndarray]) -> tuple[tuple[float, float], ...]:
+        centroids = [np.asarray(loop, dtype=float).mean(axis=0) for loop in regions]
+        origin = np.mean(np.vstack(centroids), axis=0)
+        offsets = sorted(
+            (round(float(c[0] - origin[0]), 6), round(float(c[1] - origin[1]), 6))
+            for c in centroids
+        )
+        return tuple(offsets)
+
+    return _spread_signature(prev_regions) == _spread_signature(curr_regions)
 
 
 def _shrunken_loop(loop: np.ndarray, scale: float) -> np.ndarray:
@@ -2006,9 +3161,120 @@ def _validate_split_merge_controls(steps: int, bias: float) -> None:
         raise ValueError("split_merge_bias must be within [0.0, 1.0].")
 
 
-def _reject_many_to_many_topology(prev_count: int, curr_count: int, *, entity: str) -> None:
-    if prev_count > 1 and curr_count > 1 and prev_count != curr_count:
-        raise ValueError(f"Unsupported topology transition: {entity} split/merge ambiguity detected.")
+def _resolve_ambiguity_mode(split_merge_mode: str, ambiguity_mode: str | None) -> str:
+    if ambiguity_mode is None:
+        return "auto" if split_merge_mode == "resolve" else "fail"
+    _validate_ambiguity_mode(ambiguity_mode)
+    return ambiguity_mode
+
+
+def _validate_ambiguity_mode(mode: str) -> None:
+    if mode not in {"fail", "auto"}:
+        raise ValueError("ambiguity_mode must be 'fail' or 'auto'.")
+
+
+def _validate_ambiguity_cost_profile(profile: str) -> None:
+    if profile not in {"balanced", "distance_first", "area_first"}:
+        raise ValueError(
+            "ambiguity_cost_profile must be one of "
+            "['area_first', 'balanced', 'distance_first']."
+        )
+
+
+def _validate_ambiguity_max_branches(max_branches: int) -> None:
+    if int(max_branches) < 1:
+        raise ValueError("ambiguity_max_branches must be >= 1.")
+
+
+def _validate_fairness_mode(mode: str) -> None:
+    if mode not in {"off", "local", "global"}:
+        raise ValueError("fairness_mode must be one of ['global', 'local', 'off'].")
+
+
+def _validate_fairness_weight(weight: float) -> None:
+    if float(weight) < 0.0:
+        raise ValueError("fairness_weight must be >= 0.0.")
+
+
+def _validate_skeleton_mode(mode: str) -> None:
+    if mode not in {"off", "auto", "required"}:
+        raise ValueError("skeleton_mode must be one of ['auto', 'off', 'required'].")
+
+
+def _validate_fairness_iterations(iterations: int) -> None:
+    if int(iterations) < 1:
+        raise ValueError("fairness_iterations must be >= 1.")
+
+
+def _zero_fairness_objective_terms() -> dict[str, float]:
+    return {
+        "curvature_continuity": 0.0,
+        "branch_crossing": 0.0,
+        "branch_acceleration": 0.0,
+        "synthetic_harshness": 0.0,
+        "closure_stress": 0.0,
+    }
+
+
+def _skeleton_guidance_available(stations: Sequence[PlannedStation]) -> bool:
+    _ = stations
+    # Skeleton extraction integration is not available yet; auto mode falls back.
+    return False
+
+
+def _count_region_topology_cases(transitions: Sequence[PlannedTransition]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for transition in transitions:
+        counts[transition.topology_case] = counts.get(transition.topology_case, 0) + 1
+    return counts
+
+
+def _count_region_actions(transitions: Sequence[PlannedTransition]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for transition in transitions:
+        for region_pair in transition.region_pairs:
+            counts[region_pair.action] = counts.get(region_pair.action, 0) + 1
+    return counts
+
+
+def _classify_region_topology_case(prev_count: int, curr_count: int) -> str:
+    if prev_count == curr_count:
+        return "one_to_one"
+    if prev_count == 1 and curr_count > 1:
+        return "one_to_many"
+    if prev_count > 1 and curr_count == 1:
+        return "many_to_one"
+    if prev_count < curr_count:
+        return "many_to_many_expand"
+    return "many_to_many_collapse"
+
+
+def _expected_region_pair_action(
+    topology_case: str,
+    prev_ref: PlannedRegionRef,
+    curr_ref: PlannedRegionRef,
+) -> str:
+    if topology_case == "one_to_one":
+        return "stable"
+    if topology_case in {"one_to_many", "many_to_many_expand"}:
+        if prev_ref.kind == "actual" and curr_ref.kind == "actual":
+            return "split_match"
+        if prev_ref.kind == "synthetic" and curr_ref.kind == "actual":
+            return "split_birth"
+        raise ValueError(
+            "Invalid loft plan region refs for expanding transition: "
+            f"prev={prev_ref.kind!r} curr={curr_ref.kind!r}."
+        )
+    if topology_case in {"many_to_one", "many_to_many_collapse"}:
+        if prev_ref.kind == "actual" and curr_ref.kind == "actual":
+            return "merge_match"
+        if prev_ref.kind == "actual" and curr_ref.kind == "synthetic":
+            return "merge_death"
+        raise ValueError(
+            "Invalid loft plan region refs for collapsing transition: "
+            f"prev={prev_ref.kind!r} curr={curr_ref.kind!r}."
+        )
+    raise ValueError(f"Invalid topology_case: {topology_case!r}")
 
 
 def _synthetic_seed_scale(split_merge_steps: int, split_merge_bias: float) -> float:

@@ -16,6 +16,10 @@
 - [Loft Spec 14: Planner/Executor Architecture (v1.0)](loft-14-planner-executor-architecture-v1_0.md)
 - [Loft Spec 15: Region 1->N and N->1 on Planner (v1.4)](loft-15-region-1n-n1-planning-v1_4.md)
 - [Loft Spec 16: Region N->M / M->N Branch Planner (v2.0)](loft-16-region-nm-mn-branch-planner-v2_0.md)
+- [Loft Spec 17: Deterministic Ambiguity Auto-Resolver (v1.0)](loft-17-deterministic-ambiguity-resolver-v1_0.md)
+- [Loft Spec 18: Probabilistic Ambiguity Disambiguation (v1.0)](loft-18-probabilistic-disambiguation-v1_0.md)
+- [Loft Spec 19: Global Fairness and Skeleton Optimization (v1.0)](loft-19-global-fairness-skeleton-optimization-v1_0.md)
+- [Loft Spec 20: Interactive Branch Picking API (v1.0)](loft-20-interactive-branch-picking-v1_0.md)
 
 ## Historical / Superseded
 

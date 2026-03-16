@@ -23,7 +23,11 @@ from impression.modeling import (
     as_section,
 )
 from impression.modeling.drawing2d import Path2D, PlanarShape2D, make_circle, make_rect
-from impression.modeling.loft import _build_stations, _minimum_cost_hole_assignment
+from impression.modeling.loft import (
+    _build_stations,
+    _minimum_cost_hole_assignment,
+    _local_assignment_fairness,
+)
 
 
 def _assert_mesh_quality(mesh) -> None:
@@ -53,15 +57,25 @@ def _plan_transition_signature(plan) -> tuple:
             )
             region_sigs.append(
                 (
+                    pair.branch_id,
                     pair.prev_region_ref.kind,
                     pair.prev_region_ref.index,
                     pair.curr_region_ref.kind,
                     pair.curr_region_ref.index,
+                    pair.action,
                     loop_sigs,
                     closure_sigs,
                 )
             )
-        signatures.append((transition.interval, tuple(region_sigs)))
+        signatures.append(
+            (
+                transition.interval,
+                transition.topology_case,
+                transition.ambiguity_class,
+                transition.branch_order,
+                tuple(region_sigs),
+            )
+        )
     return tuple(signatures)
 
 
@@ -270,6 +284,14 @@ def test_minimum_cost_hole_assignment_tiebreaks_by_target_index():
     assert assignment == (0, 1)
 
 
+def test_local_assignment_fairness_prefers_balanced_branch_lengths():
+    src = [np.array([-3.0, -3.0]), np.array([-3.0, -2.0])]
+    dst = [np.array([-3.0, -2.0]), np.array([-3.0, -1.0])]
+    balanced = _local_assignment_fairness((0, 1), src, dst)
+    imbalanced = _local_assignment_fairness((1, 0), src, dst)
+    assert balanced < imbalanced
+
+
 def test_loft_is_deterministic_for_identical_inputs():
     profiles = [
         make_rect(size=(1.0, 1.0)),
@@ -461,6 +483,94 @@ def test_loft_plan_sections_sets_plan_metadata_contract():
     plan = loft_plan_sections(stations, samples=24)
     assert plan.metadata["plan_schema_version"] == 1
     assert plan.metadata["planner"] == "loft_plan_sections"
+    assert plan.metadata["ambiguity_mode"] == "fail"
+    assert plan.metadata["ambiguity_cost_profile"] == "balanced"
+    assert plan.metadata["ambiguity_max_branches"] == 64
+    assert plan.metadata["ambiguity_resolved_intervals_count"] == 0
+    assert plan.metadata["ambiguity_failed_intervals_count"] == 0
+    assert plan.metadata["ambiguity_class_counts"] == {
+        "permutation": 0,
+        "containment": 0,
+        "symmetry": 0,
+        "closure": 0,
+    }
+    assert plan.metadata["fairness_mode"] == "local"
+    assert plan.metadata["fairness_weight"] == 0.2
+    assert plan.metadata["fairness_iterations"] == 12
+    assert plan.metadata["skeleton_mode"] == "auto"
+    assert plan.metadata["fairness_optimization_convergence_status"] == "not_run"
+    assert plan.metadata["fairness_objective_pre"] == {
+        "curvature_continuity": 0.0,
+        "branch_crossing": 0.0,
+        "branch_acceleration": 0.0,
+        "synthetic_harshness": 0.0,
+        "closure_stress": 0.0,
+    }
+    assert plan.metadata["fairness_objective_post"] == {
+        "curvature_continuity": 0.0,
+        "branch_crossing": 0.0,
+        "branch_acceleration": 0.0,
+        "synthetic_harshness": 0.0,
+        "closure_stress": 0.0,
+    }
+    assert plan.metadata["fairness_diagnostics"] == {
+        "branch_crossing_count": 0.0,
+        "continuity_score": 0.0,
+        "closure_distortion_score": 0.0,
+    }
+
+
+def test_loft_plan_sections_sets_ambiguity_mode_default_auto_in_resolve_mode():
+    base = as_section(make_rect(size=(1.0, 1.0)))
+    stations = [
+        Station(t=0.0, section=base, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=base, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(stations, samples=24, split_merge_mode="resolve")
+    assert plan.metadata["ambiguity_mode"] == "auto"
+
+
+def test_loft_plan_sections_records_explicit_ambiguity_controls_in_metadata():
+    base = as_section(make_rect(size=(1.0, 1.0)))
+    stations = [
+        Station(t=0.0, section=base, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=base, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(
+        stations,
+        samples=24,
+        split_merge_mode="resolve",
+        ambiguity_mode="fail",
+        ambiguity_cost_profile="distance_first",
+        ambiguity_max_branches=17,
+    )
+    assert plan.metadata["ambiguity_mode"] == "fail"
+    assert plan.metadata["ambiguity_cost_profile"] == "distance_first"
+    assert plan.metadata["ambiguity_max_branches"] == 17
+    assert "ambiguity_class_counts" in plan.metadata
+
+
+def test_loft_plan_sections_records_explicit_fairness_controls_in_metadata():
+    base = as_section(make_rect(size=(1.0, 1.0)))
+    stations = [
+        Station(t=0.0, section=base, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=base, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(
+        stations,
+        samples=24,
+        split_merge_mode="resolve",
+        fairness_mode="global",
+        fairness_weight=0.45,
+        skeleton_mode="auto",
+        fairness_iterations=20,
+    )
+    assert plan.metadata["fairness_mode"] == "global"
+    assert plan.metadata["fairness_weight"] == 0.45
+    assert plan.metadata["skeleton_mode"] == "auto"
+    assert plan.metadata["fairness_iterations"] == 20
+    assert plan.metadata["fairness_optimization_convergence_status"] == "not_run"
+    assert plan.metadata["fairness_objective_pre"] == plan.metadata["fairness_objective_post"]
 
 
 def test_loft_execute_plan_rejects_invalid_loop_closure_index_with_interval_context():
@@ -504,6 +614,150 @@ def test_loft_execute_plan_rejects_duplicate_closure_ownership():
     broken_plan = replace(plan, transitions=(broken_transition, *plan.transitions[1:]))
 
     with pytest.raises(ValueError, match=r"interval 0->1.*duplicate closure ownership"):
+        loft_execute_plan(broken_plan, cap_ends=True)
+
+
+def test_loft_execute_plan_rejects_invalid_branch_order_length():
+    left0 = make_rect(size=(0.8, 0.8), center=(-1.0, 0.0))
+    right0 = make_rect(size=(0.8, 0.8), center=(1.0, 0.0))
+    left1 = make_rect(size=(0.7, 0.9), center=(-1.1, 0.0))
+    right1 = make_rect(size=(0.9, 0.7), center=(1.1, 0.0))
+    s0 = Section((as_section(left0).regions[0], as_section(right0).regions[0]))
+    s1 = Section((as_section(left1).regions[0], as_section(right1).regions[0]))
+    stations = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(stations, samples=24)
+    transition = plan.transitions[0]
+    broken_transition = replace(transition, branch_order=())
+    broken_plan = replace(plan, transitions=(broken_transition, *plan.transitions[1:]))
+
+    with pytest.raises(ValueError, match=r"interval \(0, 1\): branch_order length must match region_pairs"):
+        loft_execute_plan(broken_plan, cap_ends=True)
+
+
+def test_loft_execute_plan_rejects_duplicate_branch_order_ids():
+    left0 = make_rect(size=(0.8, 0.8), center=(-1.0, 0.0))
+    right0 = make_rect(size=(0.8, 0.8), center=(1.0, 0.0))
+    left1 = make_rect(size=(0.7, 0.9), center=(-1.1, 0.0))
+    right1 = make_rect(size=(0.9, 0.7), center=(1.1, 0.0))
+    s0 = Section((as_section(left0).regions[0], as_section(right0).regions[0]))
+    s1 = Section((as_section(left1).regions[0], as_section(right1).regions[0]))
+    stations = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(stations, samples=24)
+    transition = plan.transitions[0]
+    assert len(transition.branch_order) == 2
+    broken_transition = replace(
+        transition,
+        branch_order=(transition.branch_order[0], transition.branch_order[0]),
+    )
+    broken_plan = replace(plan, transitions=(broken_transition, *plan.transitions[1:]))
+
+    with pytest.raises(ValueError, match=r"interval \(0, 1\): branch_order contains duplicate branch IDs"):
+        loft_execute_plan(broken_plan, cap_ends=True)
+
+
+def test_loft_execute_plan_rejects_branch_order_mismatch_with_region_pairs():
+    left0 = make_rect(size=(0.8, 0.8), center=(-1.0, 0.0))
+    right0 = make_rect(size=(0.8, 0.8), center=(1.0, 0.0))
+    left1 = make_rect(size=(0.7, 0.9), center=(-1.1, 0.0))
+    right1 = make_rect(size=(0.9, 0.7), center=(1.1, 0.0))
+    s0 = Section((as_section(left0).regions[0], as_section(right0).regions[0]))
+    s1 = Section((as_section(left1).regions[0], as_section(right1).regions[0]))
+    stations = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(stations, samples=24)
+    transition = plan.transitions[0]
+    broken_transition = replace(transition, branch_order=tuple(reversed(transition.branch_order)))
+    broken_plan = replace(plan, transitions=(broken_transition, *plan.transitions[1:]))
+
+    with pytest.raises(ValueError, match=r"interval \(0, 1\): branch_order must match region_pairs emission order"):
+        loft_execute_plan(broken_plan, cap_ends=True)
+
+
+def test_loft_execute_plan_rejects_split_birth_without_prev_region_closure():
+    source = make_rect(size=(1.2, 1.0), center=(0.0, 0.0))
+    left = make_rect(size=(0.8, 0.9), center=(-0.8, 0.0))
+    right = make_rect(size=(0.8, 0.9), center=(0.8, 0.0))
+    stations = [
+        Station(
+            t=0.0,
+            section=Section((as_section(source).regions[0],)),
+            origin=[0, 0, 0],
+            u=[1, 0, 0],
+            v=[0, 1, 0],
+            n=[0, 0, 1],
+        ),
+        Station(
+            t=1.0,
+            section=Section((as_section(left).regions[0], as_section(right).regions[0])),
+            origin=[0, 0, 1],
+            u=[1, 0, 0],
+            v=[0, 1, 0],
+            n=[0, 0, 1],
+        ),
+    ]
+    plan = loft_plan_sections(stations, samples=24, split_merge_mode="resolve")
+    for transition_idx, transition in enumerate(plan.transitions):
+        for region_pair_idx, pair in enumerate(transition.region_pairs):
+            if pair.action != "split_birth":
+                continue
+            broken_closures = tuple(
+                closure
+                for closure in pair.closures
+                if not (closure.scope == "region" and closure.side == "prev")
+            )
+            broken_pair = replace(pair, closures=broken_closures)
+            broken_region_pairs = list(transition.region_pairs)
+            broken_region_pairs[region_pair_idx] = broken_pair
+            broken_transition = replace(transition, region_pairs=tuple(broken_region_pairs))
+            broken_transitions = list(plan.transitions)
+            broken_transitions[transition_idx] = broken_transition
+            broken_plan = replace(plan, transitions=tuple(broken_transitions))
+            with pytest.raises(
+                ValueError,
+                match=r"split_birth requires exactly one prev region closure and zero curr region closures",
+            ):
+                loft_execute_plan(broken_plan, cap_ends=True)
+            return
+    raise AssertionError("Expected at least one split_birth region pair in resolved plan.")
+
+
+def test_loft_execute_plan_rejects_synthetic_birth_closure_on_wrong_side():
+    outer = make_rect(size=(1.2, 1.2)).outer
+    hole = make_rect(size=(0.4, 0.4)).outer
+    start = PlanarShape2D(outer=outer, holes=[])
+    end = PlanarShape2D(outer=outer, holes=[hole])
+    stations = [
+        Station(t=0.0, section=as_section(start), origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=as_section(end), origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(stations, samples=24)
+    transition = plan.transitions[0]
+    pair = transition.region_pairs[0]
+    synthetic_birth_idx = next(idx for idx, lp in enumerate(pair.loop_pairs) if lp.role == "synthetic_birth")
+    closure_idx = next(
+        idx
+        for idx, closure in enumerate(pair.closures)
+        if closure.scope == "loop" and closure.loop_index == synthetic_birth_idx
+    )
+    broken_closure = replace(pair.closures[closure_idx], side="curr")
+    broken_closures = list(pair.closures)
+    broken_closures[closure_idx] = broken_closure
+    broken_pair = replace(pair, closures=tuple(broken_closures))
+    broken_transition = replace(transition, region_pairs=(broken_pair, *transition.region_pairs[1:]))
+    broken_plan = replace(plan, transitions=(broken_transition, *plan.transitions[1:]))
+
+    with pytest.raises(
+        ValueError,
+        match=r"synthetic_birth loop pair \d+ must be closed on prev side only",
+    ):
         loft_execute_plan(broken_plan, cap_ends=True)
 
 
@@ -558,6 +812,225 @@ def test_loft_sections_rejects_invalid_split_merge_controls():
         loft_sections(stations, samples=24, split_merge_mode="resolve", split_merge_steps=0)
     with pytest.raises(ValueError, match="split_merge_bias"):
         loft_sections(stations, samples=24, split_merge_mode="resolve", split_merge_bias=2.0)
+    with pytest.raises(ValueError, match="ambiguity_mode"):
+        loft_sections(stations, samples=24, split_merge_mode="resolve", ambiguity_mode="banana")
+    with pytest.raises(ValueError, match="ambiguity_cost_profile"):
+        loft_sections(stations, samples=24, split_merge_mode="resolve", ambiguity_cost_profile="banana")
+    with pytest.raises(ValueError, match="ambiguity_max_branches"):
+        loft_sections(stations, samples=24, split_merge_mode="resolve", ambiguity_max_branches=0)
+    with pytest.raises(ValueError, match="fairness_mode"):
+        loft_sections(stations, samples=24, split_merge_mode="resolve", fairness_mode="banana")
+    with pytest.raises(ValueError, match="fairness_weight"):
+        loft_sections(stations, samples=24, split_merge_mode="resolve", fairness_weight=-0.1)
+    with pytest.raises(ValueError, match="skeleton_mode"):
+        loft_sections(stations, samples=24, split_merge_mode="resolve", skeleton_mode="banana")
+    with pytest.raises(ValueError, match="fairness_iterations"):
+        loft_sections(stations, samples=24, split_merge_mode="resolve", fairness_iterations=0)
+
+
+def test_loft_sections_accepts_fairness_and_skeleton_controls_surface():
+    base = as_section(make_rect(size=(1.0, 1.0)))
+    stations = [
+        Station(t=0.0, section=base, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=base, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    mesh = loft_sections(
+        stations,
+        samples=24,
+        cap_ends=True,
+        split_merge_mode="resolve",
+        fairness_mode="global",
+        fairness_weight=0.35,
+        skeleton_mode="auto",
+        fairness_iterations=20,
+    )
+    assert mesh.n_vertices > 0
+    assert mesh.n_faces > 0
+    _assert_mesh_quality(mesh)
+
+
+def test_loft_sections_skeleton_required_fails_when_unavailable():
+    base = as_section(make_rect(size=(1.0, 1.0)))
+    stations = [
+        Station(t=0.0, section=base, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=base, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    with pytest.raises(ValueError, match="skeleton_required_unavailable"):
+        loft_sections(
+            stations,
+            samples=24,
+            split_merge_mode="resolve",
+            fairness_mode="global",
+            skeleton_mode="required",
+        )
+
+
+def test_loft_sections_skeleton_auto_falls_back_and_preserves_mesh_quality():
+    base = as_section(make_rect(size=(1.0, 1.0)))
+    stations = [
+        Station(t=0.0, section=base, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=base, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    mesh = loft_sections(
+        stations,
+        samples=24,
+        split_merge_mode="resolve",
+        fairness_mode="global",
+        skeleton_mode="auto",
+        cap_ends=True,
+    )
+    assert mesh.n_vertices > 0
+    assert mesh.n_faces > 0
+    _assert_mesh_quality(mesh)
+
+
+def test_loft_plan_sections_reports_nonzero_fairness_terms_for_split_birth_transition():
+    base = as_section(make_rect(size=(1.0, 1.0)))
+    extra = as_section(make_rect(size=(0.5, 0.5), center=(2.0, 0.0)))
+    s0 = Section((base.regions[0],))
+    s1 = Section((base.regions[0], extra.regions[0]))
+    stations = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(
+        stations,
+        samples=28,
+        split_merge_mode="resolve",
+        fairness_mode="local",
+        fairness_weight=0.2,
+        skeleton_mode="auto",
+        fairness_iterations=12,
+    )
+    pre = plan.metadata["fairness_objective_pre"]
+    post = plan.metadata["fairness_objective_post"]
+    assert pre == post
+    assert plan.metadata["fairness_diagnostics"]["branch_crossing_count"] == pytest.approx(
+        pre["branch_crossing"]
+    )
+    assert plan.metadata["fairness_diagnostics"]["continuity_score"] == pytest.approx(
+        pre["curvature_continuity"]
+    )
+    assert plan.metadata["fairness_diagnostics"]["closure_distortion_score"] == pytest.approx(
+        pre["closure_stress"]
+    )
+    assert pre["synthetic_harshness"] > 0.0
+    assert pre["closure_stress"] > 0.0
+    assert pre["branch_crossing"] >= 0.0
+    assert pre["curvature_continuity"] >= 0.0
+    assert pre["branch_acceleration"] >= 0.0
+
+
+def test_loft_plan_sections_global_fairness_converges_on_multistation_ambiguity():
+    s0_left = make_circle(radius=0.18, center=(-0.4, -0.4))
+    s0_right = make_circle(radius=0.18, center=(0.4, -0.4))
+    s1_left = make_circle(radius=0.18, center=(-0.4, 0.0))
+    s1_right = make_circle(radius=0.18, center=(0.4, 0.0))
+    s2_bottom = make_circle(radius=0.18, center=(0.0, -0.4))
+    s2_top = make_circle(radius=0.18, center=(0.0, 0.4))
+
+    sec0 = Section((as_section(s0_left).regions[0], as_section(s0_right).regions[0]))
+    sec1 = Section((as_section(s1_left).regions[0], as_section(s1_right).regions[0]))
+    sec2 = Section((as_section(s2_bottom).regions[0], as_section(s2_top).regions[0]))
+    stations = [
+        Station(t=0.0, section=sec0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=0.5, section=sec1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=sec2, origin=[0, 0, 2], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan_a = loft_plan_sections(
+        stations,
+        samples=28,
+        split_merge_mode="resolve",
+        fairness_mode="global",
+        fairness_weight=0.4,
+        fairness_iterations=8,
+    )
+    plan_b = loft_plan_sections(
+        stations,
+        samples=28,
+        split_merge_mode="resolve",
+        fairness_mode="global",
+        fairness_weight=0.4,
+        fairness_iterations=8,
+    )
+
+    assert plan_a.metadata["fairness_optimization_convergence_status"] == "converged"
+    assert _plan_transition_signature(plan_a) == _plan_transition_signature(plan_b)
+
+
+def test_loft_plan_sections_global_fairness_reports_max_iterations_when_budget_limited():
+    s0_left = make_circle(radius=0.18, center=(-0.4, -0.4))
+    s0_right = make_circle(radius=0.18, center=(0.4, -0.4))
+    s1_left = make_circle(radius=0.18, center=(-0.4, 0.0))
+    s1_right = make_circle(radius=0.18, center=(0.4, 0.0))
+    s2_bottom = make_circle(radius=0.18, center=(0.0, -0.4))
+    s2_top = make_circle(radius=0.18, center=(0.0, 0.4))
+
+    sec0 = Section((as_section(s0_left).regions[0], as_section(s0_right).regions[0]))
+    sec1 = Section((as_section(s1_left).regions[0], as_section(s1_right).regions[0]))
+    sec2 = Section((as_section(s2_bottom).regions[0], as_section(s2_top).regions[0]))
+    stations = [
+        Station(t=0.0, section=sec0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=0.5, section=sec1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=sec2, origin=[0, 0, 2], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(
+        stations,
+        samples=28,
+        split_merge_mode="resolve",
+        fairness_mode="global",
+        fairness_weight=0.4,
+        fairness_iterations=1,
+    )
+
+    assert plan.metadata["fairness_optimization_convergence_status"] == "max_iterations"
+
+
+def test_loft_plan_sections_global_fairness_not_worse_than_off_on_fixed_fixture():
+    a0 = make_circle(radius=0.22, center=(-1.2, 0.0))
+    b0 = make_circle(radius=0.22, center=(1.2, 0.0))
+    a1 = make_circle(radius=0.22, center=(-1.5, 0.0))
+    b1 = make_circle(radius=0.22, center=(1.5, 0.0))
+    a2 = make_circle(radius=0.22, center=(-1.5, 0.0))
+    b2 = make_circle(radius=0.22, center=(1.5, 0.0))
+
+    s0 = Section((as_section(a0).regions[0], as_section(b0).regions[0]))
+    s1 = Section((as_section(a1).regions[0], as_section(b1).regions[0]))
+    s2 = Section((as_section(a2).regions[0], as_section(b2).regions[0]))
+    stations = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=0.5, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s2, origin=[0, 0, 2], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    off_plan = loft_plan_sections(
+        stations,
+        samples=24,
+        split_merge_mode="resolve",
+        fairness_mode="off",
+    )
+    global_plan = loft_plan_sections(
+        stations,
+        samples=24,
+        split_merge_mode="resolve",
+        fairness_mode="global",
+        fairness_weight=0.8,
+        fairness_iterations=12,
+    )
+
+    off_diag = off_plan.metadata["fairness_diagnostics"]
+    global_diag = global_plan.metadata["fairness_diagnostics"]
+    off_score = (
+        float(off_diag["branch_crossing_count"])
+        + float(off_diag["continuity_score"])
+        + float(off_diag["closure_distortion_score"])
+    )
+    global_score = (
+        float(global_diag["branch_crossing_count"])
+        + float(global_diag["continuity_score"])
+        + float(global_diag["closure_distortion_score"])
+    )
+    assert global_score <= off_score + 1e-9
+    assert global_plan.metadata["fairness_optimization_convergence_status"] == "converged"
 
 
 def test_loft_sections_multi_region_order_is_deterministically_matched():
@@ -589,6 +1062,49 @@ def test_loft_sections_multi_region_order_is_deterministically_matched():
     _assert_mesh_quality(mesh_b)
 
 
+def test_loft_plan_sections_region_2_to_2_symmetric_ambiguity_resolves_deterministically():
+    left0 = make_circle(radius=0.36, center=(-0.75, 0.0))
+    right0 = make_circle(radius=0.36, center=(0.75, 0.0))
+    left1 = make_circle(radius=0.36, center=(-0.75, 0.0))
+    right1 = make_circle(radius=0.36, center=(0.75, 0.0))
+
+    s0 = Section((as_section(left0).regions[0], as_section(right0).regions[0]))
+    s1_ordered = Section((as_section(left1).regions[0], as_section(right1).regions[0]))
+    s1_swapped = Section((as_section(right1).regions[0], as_section(left1).regions[0]))
+
+    stations_a = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1_ordered, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    stations_b = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1_swapped, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+
+    plan_a = loft_plan_sections(
+        stations_a,
+        samples=32,
+        split_merge_mode="resolve",
+        ambiguity_mode="auto",
+    )
+    plan_b = loft_plan_sections(
+        stations_b,
+        samples=32,
+        split_merge_mode="resolve",
+        ambiguity_mode="auto",
+    )
+
+    assert plan_a.transitions[0].topology_case == "one_to_one"
+    assert plan_b.transitions[0].topology_case == "one_to_one"
+    assert _plan_transition_signature(plan_a) == _plan_transition_signature(plan_b)
+
+    mesh_a = loft_execute_plan(plan_a, cap_ends=True)
+    mesh_b = loft_execute_plan(plan_b, cap_ends=True)
+    assert np.array_equal(mesh_a.vertices, mesh_b.vertices)
+    assert np.array_equal(mesh_a.faces, mesh_b.faces)
+    _assert_mesh_quality(mesh_a)
+
+
 def test_loft_sections_multi_hole_order_is_deterministically_matched():
     outer = make_rect(size=(2.0, 1.4)).outer
     left_hole = make_circle(radius=0.16, center=(-0.45, 0.0)).outer
@@ -610,6 +1126,44 @@ def test_loft_sections_multi_hole_order_is_deterministically_matched():
     assert mesh_a.faces.shape == mesh_b.faces.shape
     assert (mesh_a.vertices == mesh_b.vertices).all()
     assert (mesh_a.faces == mesh_b.faces).all()
+    _assert_mesh_quality(mesh_a)
+    _assert_mesh_quality(mesh_b)
+
+
+def test_loft_plan_sections_hole_2_to_2_symmetric_ambiguity_resolves_deterministically():
+    outer = make_rect(size=(2.2, 1.5)).outer
+    left_hole = make_circle(radius=0.17, center=(-0.52, 0.0)).outer
+    right_hole = make_circle(radius=0.17, center=(0.52, 0.0)).outer
+    start = PlanarShape2D(outer=outer, holes=[left_hole, right_hole])
+    end_a = PlanarShape2D(outer=outer, holes=[left_hole, right_hole])
+    end_b = PlanarShape2D(outer=outer, holes=[right_hole, left_hole])
+    stations_a = [
+        Station(t=0.0, section=as_section(start), origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=as_section(end_a), origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    stations_b = [
+        Station(t=0.0, section=as_section(start), origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=as_section(end_b), origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+
+    plan_a = loft_plan_sections(
+        stations_a,
+        samples=32,
+        split_merge_mode="resolve",
+        ambiguity_mode="auto",
+    )
+    plan_b = loft_plan_sections(
+        stations_b,
+        samples=32,
+        split_merge_mode="resolve",
+        ambiguity_mode="auto",
+    )
+    assert _plan_transition_signature(plan_a) == _plan_transition_signature(plan_b)
+
+    mesh_a = loft_execute_plan(plan_a, cap_ends=True)
+    mesh_b = loft_execute_plan(plan_b, cap_ends=True)
+    assert np.array_equal(mesh_a.vertices, mesh_b.vertices)
+    assert np.array_equal(mesh_a.faces, mesh_b.faces)
     _assert_mesh_quality(mesh_a)
     _assert_mesh_quality(mesh_b)
 
@@ -887,6 +1441,186 @@ def test_loft_sections_resolves_hole_split_transition_when_enabled():
     _assert_mesh_quality(mesh)
 
 
+def test_loft_sections_resolve_mode_supports_many_to_many_region_2_to_3():
+    left = make_rect(size=(0.85, 0.85), center=(-1.0, 0.0))
+    right = make_rect(size=(0.85, 0.85), center=(1.0, 0.0))
+    left_end = make_rect(size=(0.8, 0.8), center=(-1.0, 0.0))
+    center_end = make_rect(size=(0.7, 0.7), center=(0.0, 0.0))
+    right_end = make_rect(size=(0.8, 0.8), center=(1.0, 0.0))
+    s0 = Section((as_section(left).regions[0], as_section(right).regions[0]))
+    s1 = Section(
+        (
+            as_section(left_end).regions[0],
+            as_section(center_end).regions[0],
+            as_section(right_end).regions[0],
+        )
+    )
+    stations = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(
+        stations,
+        samples=30,
+        split_merge_mode="resolve",
+        split_merge_steps=8,
+        split_merge_bias=0.5,
+    )
+    mm_transitions = [t for t in plan.transitions if t.topology_case == "many_to_many_expand"]
+    assert len(mm_transitions) == 1
+    actions = [pair.action for pair in mm_transitions[0].region_pairs]
+    assert actions.count("split_match") == 2
+    assert actions.count("split_birth") == 1
+    assert plan.metadata["region_topology_case_counts"]["many_to_many_expand"] == 1
+    assert plan.metadata["region_action_counts"]["split_birth"] >= 1
+
+    mesh = loft_sections(
+        stations,
+        samples=30,
+        cap_ends=True,
+        split_merge_mode="resolve",
+        split_merge_steps=8,
+        split_merge_bias=0.5,
+    )
+    assert mesh.n_vertices > 0
+    assert mesh.n_faces > 0
+    _assert_mesh_quality(mesh)
+
+
+def test_loft_sections_resolve_mode_supports_many_to_many_region_3_to_2():
+    left = make_rect(size=(0.8, 0.8), center=(-1.0, 0.0))
+    center = make_rect(size=(0.7, 0.7), center=(0.0, 0.0))
+    right = make_rect(size=(0.8, 0.8), center=(1.0, 0.0))
+    left_end = make_rect(size=(0.85, 0.85), center=(-1.0, 0.0))
+    right_end = make_rect(size=(0.85, 0.85), center=(1.0, 0.0))
+    s0 = Section(
+        (
+            as_section(left).regions[0],
+            as_section(center).regions[0],
+            as_section(right).regions[0],
+        )
+    )
+    s1 = Section((as_section(left_end).regions[0], as_section(right_end).regions[0]))
+    stations = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(
+        stations,
+        samples=30,
+        split_merge_mode="resolve",
+        split_merge_steps=8,
+        split_merge_bias=0.5,
+    )
+    mm_transitions = [t for t in plan.transitions if t.topology_case == "many_to_many_collapse"]
+    assert len(mm_transitions) == 1
+    actions = [pair.action for pair in mm_transitions[0].region_pairs]
+    assert actions.count("merge_match") == 2
+    assert actions.count("merge_death") == 1
+    assert plan.metadata["region_topology_case_counts"]["many_to_many_collapse"] == 1
+    assert plan.metadata["region_action_counts"]["merge_death"] >= 1
+
+    mesh = loft_sections(
+        stations,
+        samples=30,
+        cap_ends=True,
+        split_merge_mode="resolve",
+        split_merge_steps=8,
+        split_merge_bias=0.5,
+    )
+    assert mesh.n_vertices > 0
+    assert mesh.n_faces > 0
+    _assert_mesh_quality(mesh)
+
+
+def test_loft_plan_sections_many_to_many_region_2_to_3_branch_order_is_deterministic_under_reordering():
+    left = make_rect(size=(0.85, 0.85), center=(-1.0, 0.0))
+    right = make_rect(size=(0.85, 0.85), center=(1.0, 0.0))
+    left_end = make_rect(size=(0.8, 0.8), center=(-1.0, 0.0))
+    center_end = make_rect(size=(0.7, 0.7), center=(0.0, 0.0))
+    right_end = make_rect(size=(0.8, 0.8), center=(1.0, 0.0))
+    s0_a = Section((as_section(left).regions[0], as_section(right).regions[0]))
+    s0_b = Section((as_section(right).regions[0], as_section(left).regions[0]))
+    s1_a = Section(
+        (
+            as_section(left_end).regions[0],
+            as_section(center_end).regions[0],
+            as_section(right_end).regions[0],
+        )
+    )
+    s1_b = Section(
+        (
+            as_section(right_end).regions[0],
+            as_section(center_end).regions[0],
+            as_section(left_end).regions[0],
+        )
+    )
+    stations_a = [
+        Station(t=0.0, section=s0_a, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1_a, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    stations_b = [
+        Station(t=0.0, section=s0_b, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1_b, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+
+    plan_a = loft_plan_sections(
+        stations_a,
+        samples=30,
+        split_merge_mode="resolve",
+        split_merge_steps=8,
+        split_merge_bias=0.5,
+    )
+    plan_b = loft_plan_sections(
+        stations_b,
+        samples=30,
+        split_merge_mode="resolve",
+        split_merge_steps=8,
+        split_merge_bias=0.5,
+    )
+
+    assert _plan_transition_signature(plan_a) == _plan_transition_signature(plan_b)
+    mesh_a = loft_execute_plan(plan_a, cap_ends=True)
+    mesh_b = loft_execute_plan(plan_b, cap_ends=True)
+    assert np.array_equal(mesh_a.vertices, mesh_b.vertices)
+    assert np.array_equal(mesh_a.faces, mesh_b.faces)
+    _assert_mesh_quality(mesh_a)
+
+
+def test_loft_plan_sections_classifies_many_to_many_region_ambiguity():
+    left = make_rect(size=(0.85, 0.85), center=(-1.0, 0.0))
+    right = make_rect(size=(0.85, 0.85), center=(1.0, 0.0))
+    left_end = make_rect(size=(0.8, 0.8), center=(-1.0, 0.0))
+    center_end = make_rect(size=(0.7, 0.7), center=(0.0, 0.0))
+    right_end = make_rect(size=(0.8, 0.8), center=(1.0, 0.0))
+    s0 = Section((as_section(left).regions[0], as_section(right).regions[0]))
+    s1 = Section(
+        (
+            as_section(left_end).regions[0],
+            as_section(center_end).regions[0],
+            as_section(right_end).regions[0],
+        )
+    )
+    stations = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(
+        stations,
+        samples=30,
+        split_merge_mode="resolve",
+        ambiguity_mode="auto",
+        ambiguity_cost_profile="balanced",
+        ambiguity_max_branches=64,
+    )
+    mm_transitions = [t for t in plan.transitions if t.topology_case == "many_to_many_expand"]
+    assert len(mm_transitions) == 1
+    assert mm_transitions[0].ambiguity_class in {"symmetry", "permutation"}
+    assert plan.metadata["ambiguity_resolved_intervals_count"] >= 1
+    class_counts = plan.metadata["ambiguity_class_counts"]
+    assert class_counts["symmetry"] + class_counts["permutation"] >= 1
+
+
 def test_loft_sections_resolve_mode_rejects_many_to_many_region_ambiguity():
     left = make_rect(size=(0.8, 0.8), center=(-0.8, 0.0))
     center = make_rect(size=(0.8, 0.8), center=(0.0, 0.0))
@@ -907,6 +1641,77 @@ def test_loft_sections_resolve_mode_rejects_many_to_many_region_ambiguity():
             split_merge_mode="resolve",
             split_merge_steps=8,
             split_merge_bias=0.5,
+        )
+
+
+def test_loft_plan_sections_ambiguity_mode_fail_rejects_auto_resolvable_ambiguity_with_structured_diagnostics():
+    left = make_rect(size=(0.85, 0.85), center=(-1.0, 0.0))
+    right = make_rect(size=(0.85, 0.85), center=(1.0, 0.0))
+    left_end = make_rect(size=(0.8, 0.8), center=(-1.0, 0.0))
+    center_end = make_rect(size=(0.7, 0.7), center=(0.0, 0.0))
+    right_end = make_rect(size=(0.8, 0.8), center=(1.0, 0.0))
+    s0 = Section((as_section(left).regions[0], as_section(right).regions[0]))
+    s1 = Section(
+        (
+            as_section(left_end).regions[0],
+            as_section(center_end).regions[0],
+            as_section(right_end).regions[0],
+        )
+    )
+    stations = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"unsupported_topology_ambiguity.*interval 0->1.*"
+            r"ambiguity_class=(symmetry|permutation).*"
+            r"tie_break_stage=ambiguity_mode_fail.*"
+            r"candidate_count_after_pruning=unknown"
+        ),
+    ):
+        loft_plan_sections(
+            stations,
+            samples=30,
+            split_merge_mode="resolve",
+            ambiguity_mode="fail",
+        )
+
+
+def test_loft_plan_sections_reports_structured_residual_ambiguity_diagnostics_for_branch_budget_exhaustion():
+    left = make_rect(size=(0.85, 0.85), center=(-1.0, 0.0))
+    right = make_rect(size=(0.85, 0.85), center=(1.0, 0.0))
+    left_end = make_rect(size=(0.8, 0.8), center=(-1.0, 0.0))
+    center_end = make_rect(size=(0.7, 0.7), center=(0.0, 0.0))
+    right_end = make_rect(size=(0.8, 0.8), center=(1.0, 0.0))
+    s0 = Section((as_section(left).regions[0], as_section(right).regions[0]))
+    s1 = Section(
+        (
+            as_section(left_end).regions[0],
+            as_section(center_end).regions[0],
+            as_section(right_end).regions[0],
+        )
+    )
+    stations = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"unsupported_topology_ambiguity.*interval 0->1.*"
+            r"ambiguity_class=(symmetry|permutation).*"
+            r"tie_break_stage=candidate_enumeration_limit.*"
+            r"candidate_count_after_pruning=\d+"
+        ),
+    ):
+        loft_plan_sections(
+            stations,
+            samples=30,
+            split_merge_mode="resolve",
+            ambiguity_mode="auto",
+            ambiguity_max_branches=1,
         )
 
 
@@ -933,28 +1738,80 @@ def test_loft_sections_fail_mode_rejects_many_to_many_region_ambiguity():
         )
 
 
-def test_loft_sections_resolve_mode_rejects_many_to_many_hole_ambiguity():
+def test_loft_sections_resolve_mode_supports_many_to_many_hole_3_to_2():
     outer = make_rect(size=(2.0, 1.5)).outer
-    h0 = make_rect(size=(0.25, 0.25), center=(-0.6, 0.0)).outer
-    h1 = make_rect(size=(0.25, 0.25), center=(0.0, 0.0)).outer
-    h2 = make_rect(size=(0.25, 0.25), center=(0.6, 0.0)).outer
-    k0 = make_rect(size=(0.45, 0.3), center=(-0.3, 0.0)).outer
-    k1 = make_rect(size=(0.45, 0.3), center=(0.3, 0.0)).outer
+    h0 = make_circle(radius=0.15, center=(-0.55, 0.0)).outer
+    h1 = make_circle(radius=0.15, center=(0.0, 0.0)).outer
+    h2 = make_circle(radius=0.15, center=(0.55, 0.0)).outer
+    k0 = make_circle(radius=0.24, center=(-0.28, 0.0)).outer
+    k1 = make_circle(radius=0.24, center=(0.28, 0.0)).outer
     start = PlanarShape2D(outer=outer, holes=[h0, h1, h2])
     end = PlanarShape2D(outer=outer, holes=[k0, k1])
     stations = [
         Station(t=0.0, section=as_section(start), origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
         Station(t=1.0, section=as_section(end), origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
     ]
-    with pytest.raises(ValueError, match="hole split/merge ambiguity"):
-        loft_sections(
-            stations,
-            samples=28,
-            cap_ends=True,
-            split_merge_mode="resolve",
-            split_merge_steps=8,
-            split_merge_bias=0.5,
-        )
+    plan = loft_plan_sections(
+        stations,
+        samples=28,
+        split_merge_mode="resolve",
+        split_merge_steps=1,
+        split_merge_bias=0.5,
+        ambiguity_mode="auto",
+    )
+    assert len(plan.transitions) == 1
+    pair = plan.transitions[0].region_pairs[0]
+    roles = [loop_pair.role for loop_pair in pair.loop_pairs]
+    assert roles.count("stable") == 3  # outer + 2 matched holes
+    assert roles.count("synthetic_death") == 1  # collapsed unmatched hole
+    mesh = loft_sections(
+        stations,
+        samples=28,
+        cap_ends=True,
+        split_merge_mode="resolve",
+        split_merge_steps=8,
+        split_merge_bias=0.5,
+        ambiguity_mode="auto",
+    )
+    _assert_mesh_quality(mesh)
+
+
+def test_loft_sections_resolve_mode_supports_many_to_many_hole_2_to_3():
+    outer = make_rect(size=(2.0, 1.5)).outer
+    h0 = make_circle(radius=0.24, center=(-0.28, 0.0)).outer
+    h1 = make_circle(radius=0.24, center=(0.28, 0.0)).outer
+    k0 = make_circle(radius=0.15, center=(-0.55, 0.0)).outer
+    k1 = make_circle(radius=0.15, center=(0.0, 0.0)).outer
+    k2 = make_circle(radius=0.15, center=(0.55, 0.0)).outer
+    start = PlanarShape2D(outer=outer, holes=[h0, h1])
+    end = PlanarShape2D(outer=outer, holes=[k0, k1, k2])
+    stations = [
+        Station(t=0.0, section=as_section(start), origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=as_section(end), origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(
+        stations,
+        samples=28,
+        split_merge_mode="resolve",
+        split_merge_steps=1,
+        split_merge_bias=0.5,
+        ambiguity_mode="auto",
+    )
+    assert len(plan.transitions) == 1
+    pair = plan.transitions[0].region_pairs[0]
+    roles = [loop_pair.role for loop_pair in pair.loop_pairs]
+    assert roles.count("stable") == 3  # outer + 2 matched holes
+    assert roles.count("synthetic_birth") == 1  # synthetic seed for new hole
+    mesh = loft_sections(
+        stations,
+        samples=28,
+        cap_ends=True,
+        split_merge_mode="resolve",
+        split_merge_steps=8,
+        split_merge_bias=0.5,
+        ambiguity_mode="auto",
+    )
+    _assert_mesh_quality(mesh)
 
 
 def test_loft_sections_resolve_mode_is_deterministic_for_identical_inputs():
@@ -1078,5 +1935,19 @@ def test_loft_split_merge_resolve_example_meshes_are_watertight():
     scene = module.build()
     meshes = scene if isinstance(scene, list) else [scene]
     assert meshes, "Expected at least one mesh from resolve demo build()."
+    for mesh in meshes:
+        _assert_mesh_quality(mesh)
+
+
+def test_loft_real_world_splitter_manifold_example_meshes_are_watertight():
+    module_path = Path("docs/examples/loft/real_world/loft_splitter_manifold_example.py")
+    spec = importlib.util.spec_from_file_location("loft_splitter_manifold_example", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    scene = module.build()
+    meshes = scene if isinstance(scene, list) else [scene]
+    assert meshes, "Expected at least one mesh from splitter manifold build()."
     for mesh in meshes:
         _assert_mesh_quality(mesh)
