@@ -105,12 +105,14 @@ def test_loft_requires_two_profiles():
         loft([make_rect(size=(1.0, 1.0))])
 
 
-def test_loft_hole_mismatch():
-    a = make_rect(size=(1.0, 1.0))
-    b = make_rect(size=(1.0, 1.0))
-    b.holes.append(a.outer)
-    with pytest.raises(ValueError, match="Unsupported topology transition"):
-        loft([a, b])
+def test_loft_supports_hole_birth():
+    outer = make_rect(size=(1.2, 1.2)).outer
+    hole = make_rect(size=(0.4, 0.4)).outer
+    start = PlanarShape2D(outer=outer, holes=[])
+    end = PlanarShape2D(outer=outer, holes=[hole])
+    mesh = loft([start, end], samples=28, cap_ends=True)
+    assert mesh.n_faces > 0
+    _assert_mesh_quality(mesh)
 
 
 def test_loft_rotates_profiles_along_path():
@@ -175,6 +177,16 @@ def test_loft_invalid_hole_containment_reports_topology_transition():
     b.holes.append(make_rect(size=(0.2, 0.2), center=(3.0, 0.0)).outer)
     with pytest.raises(ValueError, match="Unsupported topology transition"):
         loft([a, b], samples=40)
+
+
+def test_loft_supports_region_split():
+    start = Section((as_section(make_rect(size=(1.4, 1.0))).regions[0],))
+    left = as_section(make_rect(size=(0.5, 0.8), center=(-0.55, 0.0))).regions[0]
+    right = as_section(make_rect(size=(0.5, 0.8), center=(0.55, 0.0))).regions[0]
+    end = Section((left, right))
+    mesh = loft([start, end], samples=28, cap_ends=True, split_merge_mode="resolve")
+    assert mesh.n_faces > 0
+    _assert_mesh_quality(mesh)
 
 
 def test_loft_endcaps_legacy_amount_compatibility():

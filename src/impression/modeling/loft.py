@@ -177,6 +177,16 @@ def loft_profiles(
     start_cap_length: float | None = None,
     end_cap_length: float | None = None,
     cap_scale_dims: str = "both",
+    split_merge_mode: str = "fail",
+    split_merge_steps: int = 8,
+    split_merge_bias: float = 0.5,
+    ambiguity_mode: str | None = None,
+    ambiguity_cost_profile: str = "balanced",
+    ambiguity_max_branches: int = 64,
+    fairness_mode: str = "local",
+    fairness_weight: float = 0.2,
+    skeleton_mode: str = "auto",
+    fairness_iterations: int = 12,
 ) -> Mesh:
     """Loft a sequence of planar sections/profiles, optionally along a path."""
 
@@ -192,13 +202,6 @@ def loft_profiles(
         bezier_samples=bezier_samples,
     )
 
-    _validate_profile_topology_input(
-        normalized_profiles,
-        fn_name="loft_profiles",
-        segments_per_circle=segments_per_circle,
-        bezier_samples=bezier_samples,
-    )
-
     positions = _resolve_positions(path, len(normalized_profiles))
     if start_cap != "none" or end_cap != "none":
         cap_ends = True
@@ -208,7 +211,7 @@ def loft_profiles(
         end_cap = "flat"
     _validate_scale_dims(cap_scale_dims)
     _validate_caps(start_cap, end_cap)
-    loops_per_profile, positions = _apply_caps(
+    loft_sections_input, positions = _prepare_profile_sections_for_loft(
         profiles=normalized_profiles,
         positions=positions,
         start_cap=start_cap,
@@ -221,51 +224,22 @@ def loft_profiles(
         segments_per_circle=segments_per_circle,
         bezier_samples=bezier_samples,
     )
-    loops_per_profile = _align_loops_for_loft(loops_per_profile)
-    stations = _build_stations(positions)
-
-    loop_count = len(loops_per_profile[0]) if loops_per_profile else 0
-
-    vertices = []
-    offsets = []
-    for profile_idx, loops in enumerate(loops_per_profile):
-        profile_offsets = []
-        station = stations[profile_idx]
-        for loop in loops:
-            profile_offsets.append(len(vertices))
-            pts3 = (
-                station.origin
-                + loop[:, 0:1] * station.u
-                + loop[:, 1:2] * station.v
-            )
-            vertices.extend(pts3)
-        offsets.append(profile_offsets)
-
-    vertices = np.asarray(vertices, dtype=float)
-
-    faces = []
-    for idx in range(len(loops_per_profile) - 1):
-        for loop_idx in range(loop_count):
-            start_a = offsets[idx][loop_idx]
-            start_b = offsets[idx + 1][loop_idx]
-            for i in range(samples):
-                j = (i + 1) % samples
-                a0 = start_a + i
-                a1 = start_a + j
-                b0 = start_b + i
-                b1 = start_b + j
-                faces.append([a0, a1, b1])
-                faces.append([a0, b1, b0])
-
-    if cap_ends:
-        base_vertices, base_faces = _triangulate_loops(loops_per_profile[0])
-        if base_faces.size:
-            start_offset = offsets[0][0]
-            end_offset = offsets[-1][0]
-            faces.extend((base_faces + start_offset).tolist())
-            faces.extend((base_faces[:, [0, 2, 1]] + end_offset).tolist())
-
-    mesh = Mesh(vertices, np.asarray(faces, dtype=int))
+    stations = _build_profile_section_stations(loft_sections_input, positions)
+    mesh = loft_sections(
+        stations,
+        samples=samples,
+        cap_ends=cap_ends,
+        split_merge_mode=split_merge_mode,
+        split_merge_steps=split_merge_steps,
+        split_merge_bias=split_merge_bias,
+        ambiguity_mode=ambiguity_mode,
+        ambiguity_cost_profile=ambiguity_cost_profile,
+        ambiguity_max_branches=ambiguity_max_branches,
+        fairness_mode=fairness_mode,
+        fairness_weight=fairness_weight,
+        skeleton_mode=skeleton_mode,
+        fairness_iterations=fairness_iterations,
+    )
     color = getattr(normalized_profiles[0], "color", None)
     if color is not None:
         set_mesh_color(mesh, color)
@@ -286,8 +260,18 @@ def loft(
     start_cap_length: float | None = None,
     end_cap_length: float | None = None,
     cap_scale_dims: str = "both",
+    split_merge_mode: str = "fail",
+    split_merge_steps: int = 8,
+    split_merge_bias: float = 0.5,
+    ambiguity_mode: str | None = None,
+    ambiguity_cost_profile: str = "balanced",
+    ambiguity_max_branches: int = 64,
+    fairness_mode: str = "local",
+    fairness_weight: float = 0.2,
+    skeleton_mode: str = "auto",
+    fairness_iterations: int = 12,
 ) -> Mesh:
-    """Alias for loft_profiles."""
+    """Loft sections/profiles using the topology-aware planner/executor pipeline."""
 
     return loft_profiles(
         profiles=profiles,
@@ -303,6 +287,16 @@ def loft(
         start_cap_length=start_cap_length,
         end_cap_length=end_cap_length,
         cap_scale_dims=cap_scale_dims,
+        split_merge_mode=split_merge_mode,
+        split_merge_steps=split_merge_steps,
+        split_merge_bias=split_merge_bias,
+        ambiguity_mode=ambiguity_mode,
+        ambiguity_cost_profile=ambiguity_cost_profile,
+        ambiguity_max_branches=ambiguity_max_branches,
+        fairness_mode=fairness_mode,
+        fairness_weight=fairness_weight,
+        skeleton_mode=skeleton_mode,
+        fairness_iterations=fairness_iterations,
     )
 
 
@@ -1456,13 +1450,13 @@ def _normalize_profile_inputs(
             segments_per_circle=segments_per_circle,
             bezier_samples=bezier_samples,
         ).normalized()
-        if len(section.regions) != 1:
-            raise ValueError(
-                "loft currently requires one connected region per profile "
-                f"(profile index {idx} has {len(section.regions)} regions)."
-            )
         if not section.regions:
             raise ValueError(f"Profile at index {idx} resolved to empty topology.")
+        if any(not region.is_valid() for region in section.regions):
+            raise ValueError(
+                "Unsupported topology transition: invalid region containment "
+                f"or degenerate loop in loft input (profile index {idx})."
+            )
         normalized.append(section)
     return normalized
 
@@ -1477,6 +1471,12 @@ def _validate_profile_topology_input(
     if len(profiles) < 2:
         raise ValueError(f"{fn_name} requires at least two profiles.")
 
+    for idx, section in enumerate(profiles):
+        if len(section.regions) != 1:
+            raise ValueError(
+                f"{fn_name} currently requires one connected region per profile "
+                f"(profile index {idx} has {len(section.regions)} regions)."
+            )
     expected_holes = len(profiles[0].regions[0].holes)
     for idx, section in enumerate(profiles):
         region = section.regions[0]
@@ -1587,6 +1587,69 @@ def _build_stations(positions: np.ndarray) -> list[Station]:
             )
         )
     return stations
+
+
+def _build_profile_section_stations(
+    sections: Sequence[Section],
+    positions: np.ndarray,
+) -> list[Station]:
+    base_stations = _build_stations(positions)
+    if len(base_stations) != len(sections):
+        raise ValueError("profile/station count mismatch during loft preparation.")
+    return [
+        Station(
+            t=station.t,
+            origin=station.origin,
+            u=station.u,
+            v=station.v,
+            n=station.n,
+            section=section,
+        )
+        for station, section in zip(base_stations, sections, strict=True)
+    ]
+
+
+def _prepare_profile_sections_for_loft(
+    *,
+    profiles: Sequence[Section],
+    positions: np.ndarray,
+    start_cap: str,
+    end_cap: str,
+    cap_steps: int,
+    start_cap_length: float | None,
+    end_cap_length: float | None,
+    cap_scale_dims: str,
+    samples: int,
+    segments_per_circle: int,
+    bezier_samples: int,
+) -> tuple[list[Section], np.ndarray]:
+    if start_cap in {"none", "flat"} and end_cap in {"none", "flat"}:
+        return list(profiles), positions
+
+    if any(len(section.regions) != 1 for section in profiles):
+        raise ValueError(
+            "Non-flat loft caps currently require one connected region per profile."
+        )
+
+    loops_per_profile, capped_positions = _apply_caps(
+        profiles=profiles,
+        positions=positions,
+        start_cap=start_cap,
+        end_cap=end_cap,
+        cap_steps=cap_steps,
+        start_cap_length=start_cap_length,
+        end_cap_length=end_cap_length,
+        cap_scale_dims=cap_scale_dims,
+        samples=samples,
+        segments_per_circle=segments_per_circle,
+        bezier_samples=bezier_samples,
+    )
+
+    loft_sections_input = [
+        _section_from_region_loops([loops], color=profiles[min(idx, len(profiles) - 1)].color)
+        for idx, loops in enumerate(loops_per_profile)
+    ]
+    return loft_sections_input, capped_positions
 
 
 def _normalized_path_parameters(positions: np.ndarray) -> np.ndarray:

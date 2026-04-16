@@ -1,7 +1,7 @@
 # Modeling — Loft
 
-Loft creates a surface between a series of profiles. Profiles must share the
-same hole topology. If a path is provided, profiles are translated to sampled
+Loft creates a surface between a series of profiles. If a path is provided,
+profiles are translated to sampled
 positions and rotated to follow the path direction (parallel-transport frames
 to minimize twist).
 Station frames are normalized to a right-handed orthonormal basis (`u`, `v`, `n`).
@@ -14,16 +14,14 @@ split/merge-like events.
 Given identical inputs and parameters, loft output is deterministic
 (identical vertex/face ordering).
 When costs tie, correspondence falls back to deterministic index ordering.
-Loft currently requires a stable hole topology across profiles (no hole
-birth/death, split, or merge). Unsupported transitions fail early with explicit
-errors.
-Invalid profile containment (for example, holes outside the outer loop) is also
+Invalid profile containment (for example, holes outside the outer loop) is still
 rejected as an unsupported topology transition.
 
-Important distinction:
+Canonical API:
 
-- `loft(...)` and `loft_profiles(...)` are profile-sequence loft APIs and require stable topology.
-- `loft_sections(...)` is the topology-aware station API and supports region/hole birth/death and resolve-mode `1->N` / `N->1` split/merge decomposition.
+- `loft(...)` is the canonical topology-aware loft API.
+- `loft_sections(...)` is the explicit-station form of the same planner/executor pipeline.
+- `loft_profiles(...)` remains as a compatibility alias for `loft(...)`.
 
 ```python
 from impression.modeling import Station, loft, loft_sections
@@ -72,6 +70,8 @@ Example: `docs/examples/loft/loft_example.py`
 ## loft_sections(stations)
 
 `loft_sections(...)` accepts explicit station frames and topology-native sections.
+It is the low-level explicit-station form of the same topology-aware loft pipeline
+used by `loft(...)`.
 
 ```python
 from impression.modeling import Station, loft_sections, as_section
@@ -107,12 +107,13 @@ Current constraints:
 
 - stations must be strictly ordered by `t`
 - frames must be right-handed orthonormal bases
-- sections support multiple regions with deterministic minimum-cost region matching
+- `loft(...)` and `loft_sections(...)` support multiple regions with deterministic minimum-cost region matching
 - region and hole birth/death are supported via bounded synthetic transition loops
-- split/merge behavior is controlled by `split_merge_mode`:
+- split/merge behavior is controlled by `split_merge_mode` on both `loft(...)` and `loft_sections(...)`:
   - `fail` (default): reject split/merge-like ambiguity early
   - `resolve`: allow deterministic 1->N / N->1 decomposition using bounded synthetic loops
 - true many-to-many (`N->M`, where `N>1` and `M>1`) remains unsupported and fails explicitly
+- non-flat cap shaping on `loft(...)` currently requires one connected region per profile
 
 Split/merge controls:
 
