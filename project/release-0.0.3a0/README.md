@@ -129,6 +129,25 @@ This release is centered on three visible outcomes:
 - [Model Output Reference Verification](../architecture/model-output-reference-verification.md)
 - [Computer Vision Verification Architecture](../architecture/computer-vision-verification-architecture.md)
 
+## Planned UI Definitions
+
+This release does not introduce a standalone app UI-definition branch.
+
+The primary user-visible surface in `0.0.3a0` is instead:
+
+- the modeling API and its examples
+- the surfaced reference fixtures and diagnostic artifacts
+- the updated documentation and tutorials that describe the supported lanes
+
+In practice that means the visible behavior for this release is expressed
+through:
+
+- [docs/modeling/loft.md](../../docs/modeling/loft.md)
+- [docs/modeling/csg.md](../../docs/modeling/csg.md)
+- [docs/modeling/text.md](../../docs/modeling/text.md)
+- [docs/tutorials/getting-started.md](../../docs/tutorials/getting-started.md)
+- [docs/tutorials/serious-modeling.md](../../docs/tutorials/serious-modeling.md)
+
 ## Planned Specifications
 
 This release is primarily represented by the completed surfaced, loft, and
@@ -167,3 +186,6 @@ Latest full-suite result at release definition time:
 - future loft ideas such as control-station inference and spanwise
   consolidation were intentionally preserved in `project/future-features/`
   rather than mixed into the active delivered branch
+- this is an alpha release: it meaningfully expands the surfaced contract, but
+  it should still be read as a migration-forward build rather than a claim that
+  every historical mesh-era workflow is already replaced
