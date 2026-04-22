@@ -1,48 +1,22 @@
-# Modeling — Extrusions
+# Modeling - Extrusions
 
-Extrusions convert 2D profiles into 3D meshes. Profiles are defined with the 2D
-drawing API and may include holes. Extrusion uses sampled curves and triangulates
-profile caps with `mapbox_earcut`.
+Public extrusion modeling is being retired and should not be presented as an
+active modeling path for Impression.
 
-Dependency: `pip install mapbox_earcut`
+This page remains only as a tombstone so older links fail honestly instead of
+silently presenting stale guidance.
 
-Import helpers:
+Current direction:
 
-```python
-from impression.modeling import linear_extrude, rotate_extrude
-from impression.modeling.drawing2d import make_rect, make_circle
-```
+- use surface-first primitives and loft for active 3D modeling guidance
+- treat legacy public `linear_extrude()` and `rotate_extrude()` usage as
+  removal work, not recommended workflow
+- avoid adding new public examples, tutorials, or tests that depend on
+  extrusion as a supported modeling capability
 
-## Linear Extrude
+Scoped follow-up outside this file:
 
-- **Function:** `linear_extrude(profile, height=1.0, direction=(0,0,1))`
-- **Returns:** `Mesh`
-
-```python
-from impression.modeling import linear_extrude
-from impression.modeling.drawing2d import make_rect
-
-def build():
-    profile = make_rect(size=(2.0, 1.0))
-    return linear_extrude(profile, height=1.5)
-```
-
-Example: `docs/examples/extrusions/linear_extrude_example.py`
-
-## Rotate Extrude
-
-- **Function:** `rotate_extrude(profile, angle_deg=360, axis_origin=(0,0,0), axis_direction=(0,0,1))`
-- **Returns:** `Mesh`
-- **Notes:** profile is interpreted in a plane containing the axis; set `plane_normal`
-  to control orientation (default `(0,1,0)` gives an XZ profile for a Z axis).
-
-```python
-from impression.modeling import rotate_extrude
-from impression.modeling.drawing2d import make_polygon
-
-def build():
-    profile = make_polygon([(0.4, -0.6), (0.8, 0.0), (0.4, 0.6), (0.2, 0.2)])
-    return rotate_extrude(profile, angle_deg=360)
-```
-
-Example: `docs/examples/extrusions/rotate_extrude_example.py`
+- remove or redirect remaining references from general docs indexes and
+  tutorials that still point here
+- remove the public extrusion exports once the implementation removal track is
+  ready

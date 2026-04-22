@@ -47,7 +47,7 @@ from impression.modeling import Path3D
 - generic profile inset topology policy
 
 Those reusable topology concerns live in [`topology`](topology.md) and are
-consumed by loft. See [Topology Spec 08](../specs/topology-08-loft-module-narrowing.md).
+consumed by loft. See [Topology Spec 08](../../project/specifications/topology-08-loft-module-narrowing.md).
 
 ## loft(profiles, path=None)
 
@@ -114,6 +114,18 @@ Current constraints:
   - `resolve`: allow deterministic 1->N / N->1 decomposition using bounded synthetic loops
 - true many-to-many (`N->M`, where `N>1` and `M>1`) remains unsupported and fails explicitly
 - non-flat cap shaping on `loft(...)` currently requires one connected region per profile
+
+## Correspondence Regression Fixtures
+
+The loft test suite includes simple correspondence fixtures intended to reveal
+twist or deformation regressions quickly:
+
+- a rectangular station sequence that should preserve strong cross-section anisotropy through the mid-body
+- a circular station sequence that should remain round through the mid-body
+
+Those fixtures live in the loft test/showcase layer and are paired with
+reference images and STL artifacts so correspondence regressions show up both
+numerically and visually.
 
 Split/merge controls:
 

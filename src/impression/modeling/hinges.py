@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+import hashlib
+import json
 from typing import Sequence
 
 import numpy as np
@@ -11,6 +14,67 @@ from .csg import boolean_difference, boolean_union
 from .group import MeshGroup, group
 from .primitives import make_box, make_cylinder
 from .transform import rotate
+
+HingeBackend = str
+
+
+@dataclass(frozen=True)
+class HingeSurfaceComponent:
+    """One structured surfaced hinge component."""
+
+    role: str
+    family: str
+    payload: dict[str, object]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "role": self.role,
+            "family": self.family,
+            "payload": self.payload,
+        }
+
+
+@dataclass(frozen=True)
+class HingeSurfaceAssembly:
+    """Surface-first hinge assembly contract."""
+
+    assembly_type: str
+    state: str
+    components: tuple[HingeSurfaceComponent, ...]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "assembly_type": self.assembly_type,
+            "state": self.state,
+            "components": [component.canonical_payload() for component in self.components],
+        }
+
+    @property
+    def stable_identity(self) -> str:
+        payload = json.dumps(self.canonical_payload(), sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+
+def _combine_surface_bodies(
+    bodies: Sequence["SurfaceBody"],
+    *,
+    metadata: dict[str, object] | None = None,
+) -> "SurfaceBody":
+    from .surface import make_surface_body
+
+    shells = tuple(shell for body in bodies for shell in body.iter_shells(world=True))
+    if not shells:
+        raise ValueError("Expected at least one surface body to combine.")
+    return make_surface_body(shells, metadata=metadata)
+
+
+def _safe_difference(base: Mesh, cutters: Sequence[Mesh]) -> Mesh:
+    if not cutters:
+        return base.copy()
+    try:
+        return boolean_difference(base, cutters)
+    except Exception:
+        return base.copy()
 
 
 def _safe_union(parts: Sequence[Mesh]) -> Mesh:
@@ -24,18 +88,274 @@ def _safe_union(parts: Sequence[Mesh]) -> Mesh:
         return combine_meshes(parts)
 
 
-def _safe_difference(base: Mesh, cutters: Sequence[Mesh]) -> Mesh:
-    if not cutters:
-        return base.copy()
-    try:
-        return boolean_difference(base, cutters)
-    except Exception:
-        return base.copy()
-
-
 def _validate_positive(name: str, value: float) -> None:
     if value <= 0:
         raise ValueError(f"{name} must be > 0.")
+
+
+def _surface_component(role: str, family: str, **payload: object) -> HingeSurfaceComponent:
+    return HingeSurfaceComponent(role=role, family=family, payload=payload)
+
+
+def _surface_metadata(*, color: Sequence[float] | str | None) -> dict[str, object] | None:
+    if color is None:
+        return None
+    return {"consumer": {"color": color}}
+
+
+def _rotation_matrix_x(angle_deg: float, *, origin: Sequence[float] = (0.0, 0.0, 0.0)) -> np.ndarray:
+    angle_rad = float(np.deg2rad(angle_deg))
+    cos_a = float(np.cos(angle_rad))
+    sin_a = float(np.sin(angle_rad))
+    ox, oy, oz = np.asarray(origin, dtype=float).reshape(3)
+    translate_to = np.eye(4, dtype=float)
+    translate_to[:3, 3] = (-ox, -oy, -oz)
+    rotate_only = np.asarray(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, cos_a, -sin_a, 0.0],
+            [0.0, sin_a, cos_a, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=float,
+    )
+    translate_back = np.eye(4, dtype=float)
+    translate_back[:3, 3] = (ox, oy, oz)
+    return translate_back @ rotate_only @ translate_to
+
+
+def _surface_frame_transform(origin: Sequence[float], x_axis: Sequence[float], y_axis: Sequence[float]) -> np.ndarray:
+    transform = np.eye(4, dtype=float)
+    x_vec = np.asarray(x_axis, dtype=float).reshape(3)
+    y_vec = np.asarray(y_axis, dtype=float).reshape(3)
+    z_vec = np.cross(x_vec, y_vec)
+    transform[:3, 0] = x_vec
+    transform[:3, 1] = y_vec
+    transform[:3, 2] = z_vec
+    transform[:3, 3] = np.asarray(origin, dtype=float).reshape(3)
+    return transform
+
+
+def _make_surface_strut(
+    p0: Sequence[float],
+    p1: Sequence[float],
+    width: float,
+    thickness: float,
+    *,
+    color: Sequence[float] | str | None = None,
+) -> "SurfaceBody":
+    from ._surface_primitives import make_surface_box
+
+    p0 = np.asarray(p0, dtype=float).reshape(3)
+    p1 = np.asarray(p1, dtype=float).reshape(3)
+    delta = p1 - p0
+    length = float(np.linalg.norm(delta[:2]))
+    if length <= 1e-9:
+        raise ValueError("Strut endpoints are coincident.")
+    center = (p0 + p1) / 2.0
+    x_axis = delta / float(np.linalg.norm(delta))
+    y_axis = np.array([-x_axis[1], x_axis[0], 0.0], dtype=float)
+    y_axis = y_axis / float(np.linalg.norm(y_axis))
+    body = make_surface_box(size=(length, width, thickness), center=(0.0, 0.0, 0.0), metadata=_surface_metadata(color=color))
+    return body.with_transform(_surface_frame_transform(center, x_axis, y_axis))
+
+
+def _make_living_hinge_surface_panel(
+    *,
+    width: float,
+    height: float,
+    thickness: float,
+    hinge_band_width: float,
+    slit_width: float,
+    slit_pitch: float,
+    edge_margin: float,
+    bridge: float,
+    color: Sequence[float] | str | None,
+) -> "SurfaceBody":
+    from ._surface_primitives import make_surface_box
+
+    x_min = -width / 2.0
+    x_max = width / 2.0
+    y_min = -height / 2.0
+    y_max = height / 2.0
+    band_min = -hinge_band_width / 2.0
+    band_max = hinge_band_width / 2.0
+    slot_count = max(1, int(np.floor((hinge_band_width - slit_width) / slit_pitch)) + 1)
+    x_start = band_min + slit_width / 2.0
+    slot_rects: list[tuple[float, float, float, float]] = []
+    x_breaks = {x_min, x_max, band_min, band_max}
+    y_breaks = {y_min, y_max}
+
+    for idx in range(slot_count):
+        x = x_start + idx * slit_pitch
+        if x < (band_min - 1e-9) or x > (band_max + 1e-9):
+            continue
+        if idx % 2 == 0:
+            slot_y_min = y_min + edge_margin
+            slot_y_max = y_max - edge_margin - bridge
+        else:
+            slot_y_min = y_min + edge_margin + bridge
+            slot_y_max = y_max - edge_margin
+        if slot_y_max <= slot_y_min:
+            continue
+        slot_x_min = x - slit_width / 2.0
+        slot_x_max = x + slit_width / 2.0
+        slot_rects.append((slot_x_min, slot_x_max, slot_y_min, slot_y_max))
+        x_breaks.update((slot_x_min, slot_x_max))
+        y_breaks.update((slot_y_min, slot_y_max))
+
+    x_edges = sorted(float(value) for value in x_breaks)
+    y_edges = sorted(float(value) for value in y_breaks)
+    cells: list[SurfaceBody] = []
+    for x0, x1 in zip(x_edges[:-1], x_edges[1:]):
+        if x1 <= x0:
+            continue
+        for y0, y1 in zip(y_edges[:-1], y_edges[1:]):
+            if y1 <= y0:
+                continue
+            center_x = 0.5 * (x0 + x1)
+            center_y = 0.5 * (y0 + y1)
+            if any((sx0 < center_x < sx1) and (sy0 < center_y < sy1) for sx0, sx1, sy0, sy1 in slot_rects):
+                continue
+            cells.append(
+                make_surface_box(
+                    size=(x1 - x0, y1 - y0, thickness),
+                    center=(center_x, center_y, 0.0),
+                    metadata=_surface_metadata(color=color),
+                )
+            )
+    return _combine_surface_bodies(cells, metadata=_surface_metadata(color=color))
+
+
+def _surface_bodies_from_hinge_component(component: HingeSurfaceComponent) -> tuple["SurfaceBody", ...]:
+    from ._surface_primitives import make_surface_box, make_surface_cylinder
+
+    payload = dict(component.payload)
+    family = component.family
+    if family == "traditional_leaf":
+        body = make_traditional_hinge_leaf(
+            width=float(payload["width"]),
+            leaf_depth=float(payload["leaf_depth"]),
+            leaf_thickness=float(payload["leaf_thickness"]),
+            barrel_diameter=float(payload["barrel_diameter"]),
+            pin_diameter=float(payload["pin_diameter"]),
+            knuckle_count=int(payload["knuckle_count"]),
+            knuckle_clearance=float(payload["knuckle_clearance"]),
+            barrel_gap=float(payload["barrel_gap"]),
+            attachment_overlap=float(payload["attachment_overlap"]),
+            connector_width_scale=float(payload["connector_width_scale"]),
+            leaf_index=int(payload["leaf_index"]),
+            color=payload.get("color"),
+            backend="surface",
+        )
+        angle = float(payload.get("opened_angle_deg", 0.0))
+        if abs(angle) > 1e-9:
+            body = body.with_transform(_rotation_matrix_x(angle))
+        return (body,)
+    if family == "hinge_pin":
+        return (
+            make_surface_cylinder(
+                radius=float(payload["pin_diameter"]) / 2.0,
+                height=float(payload["width"]) + (2.0 * max(float(payload["pin_extension"]), 0.0)),
+                center=(0.0, 0.0, 0.0),
+                direction=(1.0, 0.0, 0.0),
+                metadata=_surface_metadata(color=payload.get("color")),
+            ),
+        )
+    if family == "living_hinge_panel":
+        return (
+            _make_living_hinge_surface_panel(
+                width=float(payload["width"]),
+                height=float(payload["height"]),
+                thickness=float(payload["thickness"]),
+                hinge_band_width=float(payload["hinge_band_width"]),
+                slit_width=float(payload["slit_width"]),
+                slit_pitch=float(payload["slit_pitch"]),
+                edge_margin=float(payload["edge_margin"]),
+                bridge=float(payload["bridge"]),
+                color=payload.get("color"),
+            ),
+        )
+    if family == "bistable_hinge_blank":
+        width = float(payload["width"])
+        height = float(payload["height"])
+        thickness = float(payload["thickness"])
+        anchor_width = float(payload["anchor_width"])
+        shuttle_width = float(payload["shuttle_width"])
+        shuttle_height = float(payload["shuttle_height"])
+        ligament_width = float(payload["ligament_width"])
+        preload_offset = float(payload["preload_offset"])
+
+        left_anchor = make_surface_box(
+            size=(anchor_width, height, thickness),
+            center=(-width / 2.0 + anchor_width / 2.0, 0.0, 0.0),
+            metadata=_surface_metadata(color=payload.get("color")),
+        )
+        right_anchor = make_surface_box(
+            size=(anchor_width, height, thickness),
+            center=(width / 2.0 - anchor_width / 2.0, 0.0, 0.0),
+            metadata=_surface_metadata(color=payload.get("color")),
+        )
+        shuttle = make_surface_box(
+            size=(shuttle_width, shuttle_height, thickness),
+            center=(0.0, preload_offset, 0.0),
+            metadata=_surface_metadata(color=payload.get("color")),
+        )
+
+        left_inner_x = -width / 2.0 + anchor_width
+        right_inner_x = width / 2.0 - anchor_width
+        shuttle_left_x = -shuttle_width / 2.0
+        shuttle_right_x = shuttle_width / 2.0
+        top_anchor_y = height / 2.0 - ligament_width / 2.0
+        bot_anchor_y = -height / 2.0 + ligament_width / 2.0
+        top_shuttle_y = preload_offset + shuttle_height / 2.0 - ligament_width / 2.0
+        bot_shuttle_y = preload_offset - shuttle_height / 2.0 + ligament_width / 2.0
+
+        struts = (
+            _make_surface_strut((left_inner_x, top_anchor_y, 0.0), (shuttle_left_x, top_shuttle_y, 0.0), ligament_width, thickness, color=payload.get("color")),
+            _make_surface_strut((left_inner_x, bot_anchor_y, 0.0), (shuttle_left_x, bot_shuttle_y, 0.0), ligament_width, thickness, color=payload.get("color")),
+            _make_surface_strut((shuttle_right_x, top_shuttle_y, 0.0), (right_inner_x, top_anchor_y, 0.0), ligament_width, thickness, color=payload.get("color")),
+            _make_surface_strut((shuttle_right_x, bot_shuttle_y, 0.0), (right_inner_x, bot_anchor_y, 0.0), ligament_width, thickness, color=payload.get("color")),
+        )
+        return (
+            _combine_surface_bodies(
+                (left_anchor, right_anchor, shuttle, *struts),
+                metadata=_surface_metadata(color=payload.get("color")),
+            ),
+        )
+    raise ValueError(f"Unsupported hinge surface component family: {family}.")
+
+
+def handoff_hinge_surface(
+    hinge: "SurfaceBody | HingeSurfaceAssembly",
+    *,
+    metadata: dict[str, object] | None = None,
+) -> "SurfaceConsumerCollection":
+    from .surface import SurfaceBody
+    from .tessellation import make_surface_consumer_collection
+
+    collection_metadata = {"producer": "hinges"}
+    if metadata is not None:
+        collection_metadata.update(metadata)
+    if isinstance(hinge, SurfaceBody):
+        collection_metadata.setdefault("assembly_type", "traditional_hinge_leaf")
+        return make_surface_consumer_collection(
+            [hinge],
+            source_prefix="hinge-leaf",
+            metadata=collection_metadata,
+        )
+    if not isinstance(hinge, HingeSurfaceAssembly):
+        raise TypeError("hinge must be a SurfaceBody or HingeSurfaceAssembly.")
+    bodies: list[SurfaceBody] = []
+    for component in hinge.components:
+        bodies.extend(_surface_bodies_from_hinge_component(component))
+    collection_metadata.setdefault("assembly_type", hinge.assembly_type)
+    collection_metadata.setdefault("state", hinge.state)
+    return make_surface_consumer_collection(
+        bodies,
+        source_prefix=f"hinge-{hinge.assembly_type}",
+        metadata=collection_metadata,
+    )
 
 
 def _make_strut(
@@ -72,7 +392,8 @@ def make_traditional_hinge_leaf(
     leaf_index: int = 0,
     resolution: int = 64,
     color: Sequence[float] | str | None = None,
-) -> Mesh:
+    backend: HingeBackend = "mesh",
+) -> Mesh | SurfaceBody:
     """Create one leaf of a traditional barrel hinge.
 
     The hinge axis is the X-axis at Y=0, Z=0.
@@ -95,6 +416,96 @@ def make_traditional_hinge_leaf(
         raise ValueError("connector_width_scale must be in [0.1, 1.0].")
     if leaf_index not in {0, 1}:
         raise ValueError("leaf_index must be 0 or 1.")
+
+    if backend == "surface":
+        from ._surface_primitives import make_surface_box, make_surface_cylinder
+        from ._surface_ops import make_surface_linear_extrude
+        from .surface import SurfaceBody, make_surface_body, make_surface_shell
+        from .drawing2d import make_circle
+
+        barrel_radius = barrel_diameter / 2.0
+        pin_hole_radius = (pin_diameter / 2.0) + (knuckle_clearance / 2.0)
+        segment_width = width / float(knuckle_count)
+        # Use clearance on both sides of each knuckle segment so opposing leaves do not fuse.
+        knuckle_width = max(segment_width - (2.0 * knuckle_clearance), segment_width * 0.45)
+
+        side = 1.0 if leaf_index == 0 else -1.0
+        # Plate is offset away from the barrel; connectors bridge this gap.
+        plate_center_y = side * (barrel_radius + barrel_gap + leaf_depth / 2.0)
+        
+        # Create the leaf plate
+        plate = make_surface_box(
+            size=(width, leaf_depth, leaf_thickness),
+            center=(0.0, plate_center_y, 0.0),
+            metadata=_surface_metadata(color=color),
+        )
+
+        # Create knuckles
+        knuckles = []
+        for idx in range(knuckle_count):
+            if idx % 2 != leaf_index:
+                continue
+            x_center = -width / 2.0 + (idx + 0.5) * segment_width
+            knuckle = make_surface_cylinder(
+                radius=barrel_radius,
+                height=knuckle_width,
+                center=(x_center, 0.0, 0.0),
+                direction=(1.0, 0.0, 0.0),
+                metadata=_surface_metadata(color=color),
+            )
+            knuckles.append(knuckle)
+
+        # Create pin bore (hole through all knuckles)
+        if knuckles:
+            # Create a long cylinder for the pin bore that spans all knuckles
+            bore_length = width + knuckle_width  # Make it longer than needed
+            pin_bore = make_surface_cylinder(
+                radius=pin_hole_radius,
+                height=bore_length,
+                center=(0.0, 0.0, 0.0),
+                direction=(1.0, 0.0, 0.0),
+            )
+        else:
+            pin_bore = None
+
+        # Create connectors between plate and knuckles
+        connectors = []
+        for idx in range(knuckle_count):
+            if idx % 2 != leaf_index:
+                continue
+            x_center = -width / 2.0 + (idx + 0.5) * segment_width
+            connector_width = knuckle_width * connector_width_scale
+            
+            # Connector from knuckle to plate
+            knuckle_edge_y = side * barrel_radius
+            plate_edge_y = side * (plate_center_y - side * leaf_depth / 2.0 + side * attachment_overlap)
+            
+            if abs(plate_edge_y - knuckle_edge_y) > 0.01:  # Only if there's a gap
+                connector_height = abs(plate_edge_y - knuckle_edge_y)
+                connector_center_y = (knuckle_edge_y + plate_edge_y) / 2.0
+                connector = make_surface_box(
+                    size=(connector_width, connector_height, leaf_thickness),
+                    center=(x_center, connector_center_y, 0.0),
+                    metadata=_surface_metadata(color=color),
+                )
+                connectors.append(connector)
+
+        # Combine all components
+        all_bodies = [plate] + knuckles + connectors
+        if pin_bore:
+            # For the pin bore, we need to subtract it from the knuckles
+            # But surface boolean operations might not be implemented yet
+            # For now, just include the solid parts
+            pass
+
+        if all_bodies:
+            combined_body = _combine_surface_bodies(all_bodies, metadata=_surface_metadata(color=color))
+            return combined_body
+        else:
+            # Fallback empty body
+            return make_surface_body([])
+    if backend != "mesh":
+        raise ValueError("backend must be 'mesh' or 'surface'.")
 
     barrel_radius = barrel_diameter / 2.0
     pin_hole_radius = (pin_diameter / 2.0) + (knuckle_clearance / 2.0)
@@ -171,11 +582,69 @@ def make_traditional_hinge_pair(
     leaf_a_color: Sequence[float] | str | None = "#7f8fa6",
     leaf_b_color: Sequence[float] | str | None = "#8f7f6a",
     pin_color: Sequence[float] | str | None = "#b0b0b0",
-) -> MeshGroup:
+    backend: HingeBackend = "mesh",
+) -> MeshGroup | HingeSurfaceAssembly:
     """Create a traditional two-leaf hinge assembly.
 
     Returns a MeshGroup so leaves and pin stay separate for assembly previews.
     """
+
+    if backend == "surface":
+        state = "closed" if abs(opened_angle_deg) <= 1e-9 else "opened"
+        components = [
+            _surface_component(
+                "leaf_a",
+                "traditional_leaf",
+                width=float(width),
+                leaf_depth=float(leaf_depth),
+                leaf_thickness=float(leaf_thickness),
+                barrel_diameter=float(barrel_diameter),
+                pin_diameter=float(pin_diameter),
+                knuckle_count=int(knuckle_count),
+                knuckle_clearance=float(knuckle_clearance),
+                barrel_gap=float(barrel_gap),
+                attachment_overlap=float(attachment_overlap),
+                connector_width_scale=float(connector_width_scale),
+                leaf_index=0,
+                opened_angle_deg=0.0,
+                color=leaf_a_color,
+            ),
+            _surface_component(
+                "leaf_b",
+                "traditional_leaf",
+                width=float(width),
+                leaf_depth=float(leaf_depth),
+                leaf_thickness=float(leaf_thickness),
+                barrel_diameter=float(barrel_diameter),
+                pin_diameter=float(pin_diameter),
+                knuckle_count=int(knuckle_count),
+                knuckle_clearance=float(knuckle_clearance),
+                barrel_gap=float(barrel_gap),
+                attachment_overlap=float(attachment_overlap),
+                connector_width_scale=float(connector_width_scale),
+                leaf_index=1,
+                opened_angle_deg=float(opened_angle_deg),
+                color=leaf_b_color,
+            ),
+        ]
+        if include_pin:
+            components.append(
+                _surface_component(
+                    "pin",
+                    "hinge_pin",
+                    pin_diameter=float(pin_diameter),
+                    width=float(width),
+                    pin_extension=float(pin_extension),
+                    color=pin_color,
+                )
+            )
+        return HingeSurfaceAssembly(
+            assembly_type="traditional_hinge_pair",
+            state=state,
+            components=tuple(components),
+        )
+    if backend != "mesh":
+        raise ValueError("backend must be 'mesh' or 'surface'.")
 
     leaf_a = make_traditional_hinge_leaf(
         width=width,
@@ -237,7 +706,8 @@ def make_living_hinge(
     edge_margin: float = 1.5,
     bridge: float = 1.2,
     color: Sequence[float] | str | None = "#7d8f7a",
-) -> Mesh:
+    backend: HingeBackend = "mesh",
+) -> Mesh | HingeSurfaceAssembly:
     """Create a printable living hinge panel with alternating slit cuts."""
 
     _validate_positive("width", width)
@@ -256,6 +726,31 @@ def make_living_hinge(
     slot_length = height - (2.0 * edge_margin) - bridge
     if slot_length <= 0:
         raise ValueError("height/edge_margin/bridge do not leave room for hinge slits.")
+
+    if backend == "surface":
+        slot_count = max(1, int(np.floor((hinge_band_width - slit_width) / slit_pitch)) + 1)
+        return HingeSurfaceAssembly(
+            assembly_type="living_hinge",
+            state="flat",
+            components=(
+                _surface_component(
+                    "panel",
+                    "living_hinge_panel",
+                    width=float(width),
+                    height=float(height),
+                    thickness=float(thickness),
+                    hinge_band_width=float(hinge_band_width),
+                    slit_width=float(slit_width),
+                    slit_pitch=float(slit_pitch),
+                    edge_margin=float(edge_margin),
+                    bridge=float(bridge),
+                    slot_count=int(slot_count),
+                    color=color,
+                ),
+            ),
+        )
+    if backend != "mesh":
+        raise ValueError("backend must be 'mesh' or 'surface'.")
 
     panel = make_box(size=(width, height, thickness), center=(0.0, 0.0, 0.0))
     slot_count = max(1, int(np.floor((hinge_band_width - slit_width) / slit_pitch)) + 1)
@@ -299,7 +794,8 @@ def make_bistable_hinge(
     ligament_width: float = 1.4,
     preload_offset: float = 2.5,
     color: Sequence[float] | str | None = "#8e7a9c",
-) -> Mesh:
+    backend: HingeBackend = "mesh",
+) -> Mesh | HingeSurfaceAssembly:
     """Create a bistable flexure hinge blank (double-ligament over-center style)."""
 
     _validate_positive("width", width)
@@ -314,6 +810,29 @@ def make_bistable_hinge(
         raise ValueError("anchor_width + shuttle_width leaves no room for flexure span.")
     if shuttle_height >= height:
         raise ValueError("shuttle_height must be < height.")
+
+    if backend == "surface":
+        return HingeSurfaceAssembly(
+            assembly_type="bistable_hinge",
+            state="preloaded" if abs(preload_offset) > 1e-9 else "neutral",
+            components=(
+                _surface_component(
+                    "blank",
+                    "bistable_hinge_blank",
+                    width=float(width),
+                    height=float(height),
+                    thickness=float(thickness),
+                    anchor_width=float(anchor_width),
+                    shuttle_width=float(shuttle_width),
+                    shuttle_height=float(shuttle_height),
+                    ligament_width=float(ligament_width),
+                    preload_offset=float(preload_offset),
+                    color=color,
+                ),
+            ),
+        )
+    if backend != "mesh":
+        raise ValueError("backend must be 'mesh' or 'surface'.")
 
     left_anchor = make_box(
         size=(anchor_width, height, thickness),
@@ -352,6 +871,10 @@ def make_bistable_hinge(
 
 
 __all__ = [
+    "HingeBackend",
+    "HingeSurfaceComponent",
+    "HingeSurfaceAssembly",
+    "handoff_hinge_surface",
     "make_traditional_hinge_leaf",
     "make_traditional_hinge_pair",
     "make_living_hinge",

@@ -40,6 +40,12 @@ Specifications are not written in a one-shot process.
 
 They are produced through iterative refinement.
 
+By default, specification refinement may be performed locally by one agent
+across multiple rounds.
+
+On explicit user request, specification refinement may instead use a fixed
+multi-agent review pipeline so the work receives multiple guaranteed passes.
+
 Specification refinement is recursive.
 
 The expected result is a tree structure that may grow both wide and deep:
@@ -93,6 +99,28 @@ Agents should expect to review newly created child specifications in later round
 
 * mark them final if they are now implementation-sized, or
 * refine them again into smaller child specifications
+
+When the user explicitly requests a multi-agent specification pipeline, the
+preferred default is a three-stage handoff:
+
+1. agent 1 drafts or refines the specification tree
+2. agent 2 reviews that output for scope bleed, hidden assumptions, and
+   non-leaf bundling
+3. agent 3 rewrites or refines the result for final clarity, progression
+   alignment, and paired test-spec completeness
+
+This pipeline is mediated by the main agent.
+Sub-agents do not need to hand work directly to each other.
+The main agent may receive the output from one stage and pass the relevant
+result into the next stage.
+
+The purpose of this mode is not parallelism.
+Its purpose is guaranteed multi-pass refinement when a single agent is likely
+to stop too early or refine inconsistently.
+
+This multi-agent path is optional.
+The default local refinement path remains valid, and both methods may coexist
+so their results can be compared over time.
 
 When deciding whether to refine further, prefer asking:
 
@@ -153,6 +181,13 @@ The preferred granularity is the largest cohesive unit that:
 
 All implementation work implied by a specification must be represented at the leaf level before execution. Parent specifications may remain broad, but executable work belongs in final leaf specifications only.
 
+For a specification to be considered fully complete in project delivery terms, the resulting implementation must also satisfy:
+
+* paired verification expectations
+* durable documentation expectations
+
+A feature is not fully complete without durable documentation.
+
 If a parent specification still implies work that is not represented by child leaves, refinement is not finished yet.
 
 For user-facing branches, a final leaf should make it impossible to claim success based only on internal plumbing.
@@ -168,6 +203,189 @@ Useful questions are:
 If a user-facing feature could still remain invisible after the current leaves are implemented, refinement is not done yet.
 
 When a feature leaf is marked final, a paired test specification should also be created so the feature has both an implementation contract and a verification contract.
+
+Documentation expectations should also be explicit enough that the feature does not ship with durable docs left implied.
+
+Final features should not ship with documentation left implied.
+
+---
+
+## Specification Size Index
+
+To keep refinement decisions consistent, specifications should be evaluated with
+a deterministic size score before being marked final.
+
+This score is not an estimate of implementation hours.
+
+It is a structural sizing tool that answers:
+
+* does this specification still bundle too many independent concerns?
+* is this realistically one clean implementation round?
+* should this be refined into child specifications before implementation?
+
+This score is called the **Specification Size Index (SSI)**.
+
+### Counting Rules
+
+Count only concerns that are explicitly present in the specification text.
+
+Do not infer hidden future work that is not written.
+
+For sizing, count the following:
+
+### 1. Implementation Concerns
+
+Count the number of distinct implementation concerns explicitly listed in
+`Scope`, `Behavior`, `Constraints`, and `Acceptance`.
+
+Examples:
+
+* new data model
+* API contract
+* migration path
+* tessellation policy
+* cache behavior
+* UI workflow
+
+Rule:
+
+* 1 point per distinct concern
+
+### 2. New or Changed Durable Contracts
+
+Count each explicit durable contract introduced or changed.
+
+Examples:
+
+* a new public API
+* a new internal core type
+* a new planner/executor contract
+* a new persisted document/schema contract
+
+Rule:
+
+* 2 points per durable contract
+
+### 3. System Boundaries Crossed
+
+Count the number of system boundaries the specification must coordinate across.
+
+Examples:
+
+* authored geometry -> topology
+* topology -> surface kernel
+* surface -> tessellation
+* modeling -> preview/export
+* planner -> executor
+
+Rule:
+
+* 2 points per boundary crossed
+
+Only count boundaries explicitly named in the specification.
+
+### 4. Distinct Caller or Consumer Classes
+
+Count each distinct class of caller or consumer that must be supported.
+
+Examples:
+
+* modeling APIs
+* preview
+* export
+* analysis
+* CLI
+* VS Code extension
+
+Rule:
+
+* 1 point per caller/consumer class
+
+### 5. Migration or Compatibility Responsibilities
+
+Count each explicit migration or compatibility responsibility.
+
+Examples:
+
+* adapter layer
+* fallback path
+* temporary compatibility mode
+* deprecation path
+
+Rule:
+
+* 1 point per migration or compatibility responsibility
+
+### 6. Acceptance Burden
+
+Count the number of independent acceptance outcomes.
+
+Examples:
+
+* one new runtime-visible behavior
+* one deterministic serialization guarantee
+* one watertight tessellation guarantee
+* one compatibility guarantee
+
+Rule:
+
+* 1 point per independent acceptance outcome
+
+### Formula
+
+```text
+SSI =
+  implementation_concerns
+  + 2 * durable_contracts
+  + 2 * system_boundaries
+  + caller_consumer_classes
+  + migration_compatibility_responsibilities
+  + acceptance_outcomes
+```
+
+### Thresholds
+
+Use these thresholds consistently:
+
+* `SSI <= 9`
+  Final-candidate size. This specification may be marked final if it contains no
+  unresolved architectural decisions.
+
+* `SSI 10-14`
+  Borderline size. This specification requires an explicit judgment call and
+  should usually be refined unless the concerns are tightly coupled enough to be
+  implemented in one coherent change set.
+
+* `SSI >= 15`
+  Too large. This specification should be refined into child specifications
+  before implementation.
+
+### Hard Stop Conditions
+
+A specification must be refined, even if its SSI is low, when any of the
+following are true:
+
+* it contains unresolved architectural decisions
+* it implies multiple clean implementation rounds
+* it mixes more than one independent migration track
+* it requires both kernel-definition work and downstream feature adoption work
+  in the same leaf
+* it is still acting as an umbrella container rather than an implementation leaf
+
+### Reporting Requirement
+
+During refinement passes, agents should explicitly report:
+
+* the estimated SSI for the specification being evaluated
+* whether it is final-candidate, borderline, or too large
+* which hard-stop condition applies, if any
+
+### Intended Use
+
+SSI is a consistency tool, not a substitute for judgment.
+
+Its purpose is to prevent repeated ambiguity about whether a specification is
+"still too big" by giving the project one shared sizing language.
 
 ---
 

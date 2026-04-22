@@ -1,7 +1,8 @@
 # Impression Agent Usage Guide
 
 This guide is for agents that need to **use Impression to build models**.
-Repository-development instructions are maintained in `AIgents/`.
+Repository-development instructions are maintained in `agents/` and the
+project-level planning workspace under `project/`.
 
 ## First Steps
 
@@ -17,8 +18,8 @@ Repository-development instructions are maintained in `AIgents/`.
 - Use CLI preview/export for fast feedback loops:
   - `impression preview path/to/model.py`
   - `impression export path/to/model.py --output out.stl`
-- Reuse existing capabilities (primitives, CSG, drawing2d, extrude, loft, morph,
-  threading, hinges, transforms, groups, drafting) before inventing new approaches.
+- Reuse existing capabilities (primitives, CSG, drawing2d, loft, threading,
+  hinges, transforms, groups, drafting, text) before inventing new approaches.
 
 ## Documentation Navigation
 

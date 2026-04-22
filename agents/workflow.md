@@ -34,6 +34,12 @@ agents/git-and-github.md
 
 Agents should satisfy those branch and PR requirements before making code changes.
 
+When work is executed through sub-agents, the delegation model, ownership boundaries, waiting rules, and review requirements are defined in:
+
+```text
+agents/delegation.md
+```
+
 Implementation work must not begin without a durable planning anchor:
 
 * an issue for bug-fix work, or
@@ -251,6 +257,18 @@ The goal is not to atomize work into the smallest possible leaves.
 Specification refinement should usually stop at the largest cohesive unit that can still be implemented cleanly in one round without hiding another full round of work.
 
 For user-facing feature branches, specification refinement must continue until surfaced running-app outcomes are also represented by final leaves.
+
+When the user explicitly requests multi-agent specification refinement, this
+loop may be executed as a fixed staged pipeline rather than by one agent
+iterating alone.
+
+In that mode, the main agent should relay the current specification output
+through distinct refinement stages so the work receives multiple guaranteed
+passes before being treated as settled.
+
+That staged pipeline does not replace the standard refinement loop.
+It is an optional operating mode for comparison when the user wants stronger
+review discipline.
 
 If a running-app surface such as a sheet, dialog, panel, or settings surface already exists, the tree should also include a named parent UI/specification branch for that surface rather than only isolated behavior leaves.
 

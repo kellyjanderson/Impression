@@ -20,15 +20,14 @@ library, the tools, and the examples.
 
 - [Primitives](modeling/primitives.md) - boxes, cylinders, spheres, torus utilities, code snippets, and rendered examples.
 - [CSG Helpers](modeling/csg.md) - union/difference/intersection helpers with CLI-ready sample modules.
-- [Extrusions](modeling/extrusions.md) - linear and rotate extrude of 2D profiles.
+- [Mesh Analysis Tools](modeling/mesh-tools.md) - explicit mesh QA and plane-section tools retained for analysis and repair workflows.
 - [Paths](modeling/paths.md) - polyline/spline utilities for sweeps and visualization.
 - [Path3D](modeling/path3d.md) - true-curve 3D paths (line/arc/bezier).
 - [2D Drawing](modeling/drawing2d.md) - profile and path primitives for vector-style modeling.
 - [Topology](modeling/topology.md) - shared planar loop/region/section helpers used across modeling features.
-- [Morph](modeling/morph.md) - profile interpolation between two shapes.
 - [Loft](modeling/loft.md) - surface lofting between multiple profiles.
 - [Heightmaps](modeling/heightmaps.md) - heightfield generation and image-based displacement.
-- [Text](modeling/text.md) - extruded or flat glyphs (including emoji) with full color support.
+- [Text](modeling/text.md) - topology-native glyph outlines and surfaced text bodies with full color support.
 - [Threading](modeling/threading.md) - standards-based thread specs, fit presets, and part generators.
 - [Hinges](modeling/hinges.md) - traditional, living, and bistable hinge generators.
 - [Drafting Helpers](modeling/drafting.md) - lines, planes, arrows, and dimensions for 2.5D annotations.
@@ -57,10 +56,11 @@ scripts/run_stl_tests.py
 
 ## Planning & Roadmap
 
-- [Project DNA](project-dna.md) - core values and quality bar for every feature, example, and workflow.
-- [Project Plan](project-plan.md) - roadmap, open questions, and future features.
-- [Feature Pipeline](feature-pipeline.md) - current implementation order.
-- [Implementation Specs](specs/README.md) - detailed implementation plans for major refactors/features.
+- [Project Workspace](../project/README.md) - planning, architecture, specifications, and project records.
+- [Project DNA](../project/project-dna.md) - core values and quality bar for every feature, example, and workflow.
+- [Project Plan](../project/planning/README.md) - roadmap, open questions, and future features.
+- [Feature Pipeline](../project/planning/feature-pipeline.md) - current implementation order.
+- [Implementation Specs](../project/specifications/README.md) - detailed implementation plans for major refactors/features.
 - [Changelog](../CHANGELOG.md) - release notes and supported/unsupported feature classes.
 
 ## Project Records
@@ -68,10 +68,10 @@ scripts/run_stl_tests.py
 - [Brand Guide](brand/brand-guide.md)
 - [Design System Notes](brand/design-system.md)
 - [Style Guide](brand/style-guide.md)
-- [Issue: Preview hot reload fails](issues/impression-preview-hot-reload-fails.md)
-- [Issue: Camera resets on hot reload](issues/camera-reset-on-hot-reload.md)
-- [PR: Hot reload resilience](prs/bugfix-impression-preview-hot-reload.md)
-- [PR: Camera reset on reload](prs/bugfix-camera-reset-on-hot-reload.md)
-- [PR: Configurable units](prs/feature-config-unit-defaults.md)
-- [Meeting Notes (2025-11-11)](meetings/2025-11-11.md)
-- [Findings (2025-11-11)](findings/2025-11-11.md)
+- [Issue: Preview hot reload fails](../project/issues/impression-preview-hot-reload-fails.md)
+- [Issue: Camera resets on hot reload](../project/issues/camera-reset-on-hot-reload.md)
+- [PR: Hot reload resilience](../project/prs/bugfix-impression-preview-hot-reload.md)
+- [PR: Camera reset on reload](../project/prs/bugfix-camera-reset-on-hot-reload.md)
+- [PR: Configurable units](../project/prs/feature-config-unit-defaults.md)
+- [Meeting Notes (2025-11-11)](../project/meetings/2025-11-11.md)
+- [Findings (2025-11-11)](../project/research/2025-11-11.md)

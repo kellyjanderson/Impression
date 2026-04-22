@@ -22,6 +22,9 @@ Key ideas:
 
 - `build()` returns internal meshes, not PyVista objects.
 - All dimensions use your configured units (default: millimeters).
+- Public CSG is still executable on the mesh lane today. The surfaced CSG lane
+  exists as a migration contract and returns structured surfaced results rather
+  than renderable boolean geometry.
 
 ## 2) Preview
 
@@ -55,6 +58,8 @@ def build():
 
 - Learn the modeling toolkit in [`docs/modeling/primitives.md`](../modeling/primitives.md) and
   [`docs/modeling/csg.md`](../modeling/csg.md).
-- Try 2D profiles and extrusions in [`docs/modeling/drawing2d.md`](../modeling/drawing2d.md) and
-  [`docs/modeling/extrusions.md`](../modeling/extrusions.md).
+- Try 2D profiles, text outlines, and loft workflows in
+  [`docs/modeling/drawing2d.md`](../modeling/drawing2d.md),
+  [`docs/modeling/text.md`](../modeling/text.md), and
+  [`docs/modeling/loft.md`](../modeling/loft.md).
 - Explore the example library under [`docs/examples/`](../examples/).

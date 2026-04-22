@@ -46,6 +46,9 @@ def hull(shapes: Iterable[Mesh | MeshGroup | Section | Region | Path2D]) -> Mesh
 
     - planar inputs (`Section`, `Region`, `Path2D`) -> `_ops_planar`
     - mesh inputs (`Mesh`, `MeshGroup`) -> `_ops_mesh`
+
+    Mesh hull behavior is retained as an explicit standalone utility. It is not
+    canonical surfaced modeling truth.
     """
 
     items = list(shapes)

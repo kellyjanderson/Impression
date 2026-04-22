@@ -9,7 +9,7 @@ Impression aims for more than functional correctness. We build features, docs, a
 solve real modeling problems, bridge mechanical and organic design, and help users dream bigger
 about what they can create.
 
-See: [Project DNA](docs/project-dna.md)
+See: [Project DNA](project/project-dna.md)
 
 ## Quickstart
 
@@ -87,12 +87,13 @@ Full CLI reference: [`docs/cli.md`](docs/cli.md)
 ## Documentation Map
 
 - [`docs/index.md`](docs/index.md) - documentation portal
-- [`docs/modeling/`](docs/modeling/) - primitives, CSG, drawing2d, paths, extrusions, loft, threading, hinges, morph, text
+- [`docs/modeling/`](docs/modeling/) - primitives, CSG, mesh analysis tools, drawing2d, paths, loft, threading, hinges, text
 - [`docs/examples/`](docs/examples/) - runnable scripts that power the docs
 - [`docs/tutorials/`](docs/tutorials/) - guided walkthroughs for new and advanced users
 - [`docs/agents.md`](docs/agents.md) - agent usage guide for building with Impression
-- [`docs/project-dna.md`](docs/project-dna.md) - core product values and quality bar
-- [`docs/project-plan.md`](docs/project-plan.md) - roadmap and open questions
+- [`project/README.md`](project/README.md) - project workspace for planning, architecture, and records
+- [`project/project-dna.md`](project/project-dna.md) - core product values and quality bar
+- [`project/planning/README.md`](project/planning/README.md) - roadmap and open questions
 
 ## Helper Scripts
 
@@ -101,6 +102,12 @@ Full CLI reference: [`docs/cli.md`](docs/cli.md)
 - `scripts/dev/reset_impression_env.sh` - remove the auto-installed CLI (`~/.impression-cli`),
   delete `~/.impression/env`, strip the sourcing line from your shell rc files, and clear VS Code
   global state so the extension behaves like a first-time install.
+- `scripts/dev/run_full_coverage.sh` - run full-repo coverage and write terminal, XML, and HTML
+  reports under `project/coverage/`.
+- `scripts/dev/run_surface_coverage.sh` - run the surface-body coverage slice and write reports
+  under `project/coverage/surface/`.
+- `scripts/dev/run_loft_coverage.sh` - run the loft-focused coverage slice over the dedicated loft
+  planner, API, and showcase suites, writing reports under `project/coverage/loft/`.
 
 ## Development
 

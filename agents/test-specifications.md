@@ -160,6 +160,47 @@ Paired feature test specifications may also appear in `project/planning/progress
 
 ---
 
+## Coverage Artifacts
+
+When coverage is run for this repository, it should emit more than terminal output.
+
+Coverage runs should write:
+
+* an XML report for tooling and CI consumption
+* an HTML report for local browsing and inspection
+
+Repository-wide coverage artifacts should live in:
+
+```text
+project/coverage/
+```
+
+Focused subsystem coverage may use a scoped subdirectory under that folder.
+
+Example:
+
+```text
+project/coverage/loft/
+```
+
+Coverage helpers and scripts should prefer stable output paths so agents and humans can rerun coverage without having to rediscover where artifacts were written.
+
+When an implementation pass finishes, agents should run coverage for at least
+the code they just changed.
+
+When the final remaining item in `project/planning/progression.md` is checked
+off, agents should also run a full repository coverage pass so the top-level
+coverage reports are fresh at the point of claimed completion.
+
+When a feature depends on visual or geometric references, the verification contract should also describe durable reference artifacts such as:
+
+* reference images
+* reference STL files
+
+Project-specific lifecycle rules for those artifacts should live in `project/agents/`.
+
+---
+
 ## Guiding Principle
 
 A final feature specification should have a durable verification contract, not only an implementation contract.

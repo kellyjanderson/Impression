@@ -24,7 +24,7 @@ Start here before taking action.
   Defines how architecture is refined into implementable specification units.
 
 * **test-specifications.md**
-  Defines how final feature leaf specifications gain paired manual and automated verification documents.
+  Defines how final feature leaf specifications gain paired manual and automated verification documents, including durable coverage artifact expectations.
 
 * **planning.md**
   Defines how specifications are sequenced and tracked for implementation.
@@ -34,6 +34,12 @@ Start here before taking action.
 
 * **workflow.md**
   Defines how agents move through product definition, architecture, specification refinement, and implementation.
+
+* **delegation.md**
+  Defines how the main agent delegates bounded work, assigns ownership, waits when needed, and reviews sub-agent output.
+
+* **documentation.md**
+  Defines documentation quality expectations and the rule that durable docs are a required part of completion.
 
 * **git-and-github.md**
   Defines branching and pull request rules for bug fixes and feature work.
@@ -67,6 +73,8 @@ project/agents/
 
 That folder is the canonical place for instructions that apply specifically to this project, while the root `agents/` folder remains the shared process guidance for the repository.
 
+Project-specific testing and rendering rules, such as reference-image lifecycle policy, should be documented there rather than in the shared root agent docs.
+
 ---
 
 ## Starting Point
@@ -81,6 +89,7 @@ When beginning work:
 6. review `ui-ux-invariants.md` for interface work
 7. review relevant architecture
 8. follow the workflow defined in `workflow.md`
+9. if using sub-agents, review `delegation.md` before assigning work
 
 ---
 
