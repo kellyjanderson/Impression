@@ -9,7 +9,8 @@ library, the tools, and the examples.
 - **Quickstart**: [README](../README.md)
 - **CLI Reference**: [CLI](cli.md)
 - **Examples**: [`docs/examples/`](examples/) (every file has a `build()` function)
-- **Agent Usage Guide**: [Agent Guide](agents.md)
+- **Agent Usage Guide**: [Agent Guide](agents/index.md)
+- **Installable Skills**: [Skills](skills/index.md)
 
 ## Tutorials
 
@@ -25,7 +26,7 @@ library, the tools, and the examples.
 - [Path3D](modeling/path3d.md) - true-curve 3D paths (line/arc/bezier).
 - [2D Drawing](modeling/drawing2d.md) - profile and path primitives for vector-style modeling.
 - [Topology](modeling/topology.md) - shared planar loop/region/section helpers used across modeling features.
-- [Loft](modeling/loft.md) - surface lofting between multiple profiles.
+- [Loft](modeling/loft.md) - surface-first lofting, explicit station planning, ambiguity diagnostics, and public loft handoff APIs.
 - [Heightmaps](modeling/heightmaps.md) - heightfield generation and image-based displacement.
 - [Text](modeling/text.md) - topology-native glyph outlines and surfaced text bodies with full color support.
 - [Threading](modeling/threading.md) - standards-based thread specs, fit presets, and part generators.

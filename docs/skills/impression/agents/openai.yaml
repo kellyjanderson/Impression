@@ -1,0 +1,4 @@
+interface:
+  display_name: "Impression"
+  short_description: "Build models with Impression"
+  default_prompt: "Use $impression to build or revise a model with the Impression framework."
