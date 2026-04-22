@@ -1,26 +1,26 @@
 # Modeling — Morph
 
-Morphing blends two 2D profiles into a new profile using a parameter `t`.
-Profiles must have the same number of holes (topology match).
+The legacy profile morph capability has been removed from Impression.
 
-```python
-from impression.modeling import morph
-from impression.modeling.drawing2d import make_circle, make_ngon
-```
+This page remains as a tombstone until shared navigation and public exports are
+updated to stop advertising `morph`.
 
-## morph(profile_a, profile_b, t)
+## Status
 
-- `t=0.0` → first profile
-- `t=1.0` → second profile
+- `morph(...)` is no longer a supported modeling capability.
+- `morph_profiles(...)` is no longer a supported modeling capability.
+- Calls now fail immediately with a removal error.
 
-```python
-from impression.modeling import morph
-from impression.modeling.drawing2d import make_circle, make_ngon
+## Migration Direction
 
-def build():
-    a = make_circle(radius=1.0)
-    b = make_ngon(sides=6, radius=1.0)
-    return morph(a, b, t=0.5)
-```
+Use a supported surface-first workflow instead. In practice that means choosing
+an explicit modeling path such as:
 
-Example: `docs/examples/morph/morph_example.py`
+- loft planning and execution for shape transitions
+- direct section construction followed by lofting
+- surface-body operations where the intended result is not a profile blend
+
+## Shared Follow-Up
+
+This tombstone document can be deleted once shared integration files are
+updated to remove the remaining public references to `morph`.

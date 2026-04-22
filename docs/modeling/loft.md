@@ -1,7 +1,7 @@
 # Modeling — Loft
 
-Loft creates a surface between a series of profiles. Profiles must share the
-same hole topology. If a path is provided, profiles are translated to sampled
+Loft creates a surface between a series of profiles. If a path is provided,
+profiles are translated to sampled
 positions and rotated to follow the path direction (parallel-transport frames
 to minimize twist).
 Station frames are normalized to a right-handed orthonormal basis (`u`, `v`, `n`).
@@ -14,22 +14,45 @@ split/merge-like events.
 Given identical inputs and parameters, loft output is deterministic
 (identical vertex/face ordering).
 When costs tie, correspondence falls back to deterministic index ordering.
-Loft currently requires a stable hole topology across profiles (no hole
-birth/death, split, or merge). Unsupported transitions fail early with explicit
-errors.
-Invalid profile containment (for example, holes outside the outer loop) is also
+Invalid profile containment (for example, holes outside the outer loop) is still
 rejected as an unsupported topology transition.
 
-Important distinction:
+Canonical API:
 
-- `loft(...)` and `loft_profiles(...)` are profile-sequence loft APIs and require stable topology.
-- `loft_sections(...)` is the topology-aware station API and supports region/hole birth/death and resolve-mode `1->N` / `N->1` split/merge decomposition.
+- `Loft(...)` is the canonical surfaced `SurfaceBody` entrypoint using explicit progression, stations, and topology.
+- `loft(...)` is the profile/path convenience API over the same surface-first planner.
+- `loft_sections(...)` is the explicit-station convenience form of that same planner/executor pipeline.
+- `loft_plan_sections(...)` builds a deterministic `LoftPlan` without executing it.
+- `loft_execute_plan(...)` executes a previously built `LoftPlan`.
+- `loft_plan_ambiguities(...)` reports ambiguous intervals and candidate IDs without executing geometry.
+- `loft_profiles(...)` remains as a compatibility alias for `loft(...)`.
 
 ```python
-from impression.modeling import Station, loft, loft_sections
+from impression.modeling import Loft, Station, loft, loft_execute_plan, loft_plan_ambiguities, loft_plan_sections, loft_sections
 from impression.modeling.drawing2d import make_rect
 from impression.modeling import Path3D
 ```
+
+## Choosing a Loft Lane
+
+Use the loft API that matches the representation you want to own:
+
+- `Loft(...)`
+  - canonical surface-first loft with explicit progression, stations, and topology
+  - best when downstream work should stay in `SurfaceBody` form
+  - returns `SurfaceBody`
+- `loft(...)`
+  - easiest path-oriented convenience API
+  - best when you have profiles and optionally a `Path3D`
+  - uses the same planner, then hands off to the current public consumer path
+- `loft_sections(...)`
+  - explicit station frames with topology-aware sections
+  - best when you want to author station placement yourself
+  - uses the same planner, then hands off to the current public consumer path
+- `loft_plan_sections(...)` + `loft_execute_plan(...)`
+  - best when you need to inspect or persist planner output before execution
+- `loft_plan_ambiguities(...)`
+  - best when you want a report of ambiguous intervals/candidate IDs before choosing interactive selections
 
 ## Ownership Boundary
 
@@ -49,9 +72,13 @@ from impression.modeling import Path3D
 - generic profile inset topology policy
 
 Those reusable topology concerns live in [`topology`](topology.md) and are
-consumed by loft. See [Topology Spec 08](../specs/topology-08-loft-module-narrowing.md).
+consumed by loft. See [Topology Spec 08](../../project/specifications/topology-08-loft-module-narrowing.md).
 
 ## loft(profiles, path=None)
+
+`loft(...)` is the profile/path convenience API. It uses the same surface-first
+planner as `Loft(...)`, then hands the result to the current public loft
+consumer path.
 
 ```python
 from impression.modeling import loft, Path3D, Line3D
@@ -72,6 +99,8 @@ Example: `docs/examples/loft/loft_example.py`
 ## loft_sections(stations)
 
 `loft_sections(...)` accepts explicit station frames and topology-native sections.
+It is the low-level explicit-station form of the same topology-aware loft pipeline
+used by `loft(...)`, with the same current public handoff posture.
 
 ```python
 from impression.modeling import Station, loft_sections, as_section
@@ -99,6 +128,112 @@ def build():
 
 Example: `docs/examples/loft/loft_sections_example.py`
 
+## Loft(progression, stations, topology)
+
+`Loft(...)` is the surfaced loft lane. It runs the same planner concepts as the
+public loft convenience APIs, but it returns a `SurfaceBody` so the result can stay app-owned
+and platform-agnostic until a consumer explicitly tessellates it.
+
+```python
+from impression.modeling import Loft, tessellate_surface_body
+from impression.modeling.drawing2d import make_rect
+
+def build():
+    progression = [0.0, 0.5, 1.0]
+    stations = [
+        (0.0, 0.0, 0.0),
+        (0.0, 0.1, 1.0),
+        (0.0, 0.0, 2.0),
+    ]
+    topology = [
+        make_rect(size=(1.0, 1.0)),
+        make_rect(size=(0.8, 1.3)),
+        make_rect(size=(0.6, 0.9)),
+    ]
+    body = Loft(progression=progression, stations=stations, topology=topology, cap_ends=True)
+    return tessellate_surface_body(body).mesh
+```
+
+`stations` may be provided as:
+
+- `Station` objects
+- 3D origins, letting loft derive station frames from the progression path
+- `(origin, u, v, n)` tuples when you want to supply the full frame explicitly
+
+`topology` accepts the same kinds of profile inputs as `loft(...)`: sections,
+regions, paths, and other topology-normalizable profile objects.
+
+## Planner / Executor / Ambiguity Tools
+
+The loft planner is public. Use it when you want deterministic inspection or
+interactive control instead of a single black-box loft call.
+
+Build a plan without executing it:
+
+```python
+from impression.modeling import loft_execute_plan, loft_plan_sections
+
+plan = loft_plan_sections(stations, samples=48, split_merge_mode="resolve")
+loft_output = loft_execute_plan(plan, cap_ends=True)
+```
+
+Inspect ambiguity candidates without generating geometry:
+
+```python
+from impression.modeling import loft_plan_ambiguities
+
+report = loft_plan_ambiguities(stations, samples=48, split_merge_mode="resolve")
+for interval in report.intervals:
+    print(interval.interval, [candidate.candidate_id for candidate in interval.candidates])
+```
+
+That ambiguity report is the input to interactive disambiguation:
+
+- call `loft_plan_ambiguities(...)`
+- choose one `candidate_id` per interval you want to control
+- pass `ambiguity_mode="interactive"` and
+  `ambiguity_selection={(start_index, end_index): candidate_id}` into
+  `loft(...)`, `loft_sections(...)`, `Loft(...)`, or `loft_plan_sections(...)`
+
+## Advanced Transition Controls
+
+The public loft convenience APIs, surfaced `Loft(...)`, and planner helpers share the same
+core transition controls.
+
+Split / merge controls:
+
+- `split_merge_mode="fail" | "resolve"`
+- `split_merge_steps`
+- `split_merge_bias`
+
+Ambiguity controls:
+
+- `ambiguity_mode="fail" | "auto" | "interactive"`
+- `ambiguity_selection`
+- `ambiguity_selection_policy="required" | "best_effort"`
+- `ambiguity_cost_profile="balanced" | "distance_first" | "area_first"`
+- `ambiguity_max_branches`
+- `disambiguation_mode="deterministic" | "probabilistic"`
+- `disambiguation_seed`
+- `probabilistic_trials`
+- `probabilistic_temperature`
+- `probabilistic_min_confidence`
+- `probabilistic_fallback="deterministic" | "fail"`
+
+Fairness and skeleton controls:
+
+- `fairness_mode="off" | "local" | "global"`
+- `fairness_weight`
+- `fairness_iterations`
+- `skeleton_mode="off" | "auto" | "required"`
+
+Current posture:
+
+- `skeleton_mode="auto"` falls back cleanly when skeleton guidance is unavailable
+- `skeleton_mode="required"` fails explicitly if skeleton guidance is unavailable
+- `fairness_mode="local"` is the default posture for bounded ambiguity smoothing
+- `fairness_mode="global"` enables multi-interval optimization over ambiguous transitions
+
 Resolve-mode split/merge demo:
 
 - `docs/examples/loft/loft_split_merge_resolve_example.py`
@@ -107,12 +242,27 @@ Current constraints:
 
 - stations must be strictly ordered by `t`
 - frames must be right-handed orthonormal bases
-- sections support multiple regions with deterministic minimum-cost region matching
+- `loft(...)` and `loft_sections(...)` support multiple regions with deterministic minimum-cost region matching
 - region and hole birth/death are supported via bounded synthetic transition loops
-- split/merge behavior is controlled by `split_merge_mode`:
+- split/merge behavior is controlled by `split_merge_mode` on both `loft(...)` and `loft_sections(...)`:
   - `fail` (default): reject split/merge-like ambiguity early
   - `resolve`: allow deterministic 1->N / N->1 decomposition using bounded synthetic loops
 - true many-to-many (`N->M`, where `N>1` and `M>1`) remains unsupported and fails explicitly
+- non-flat cap shaping on `loft(...)` currently requires one connected region per profile
+- surfaced `Loft(...)` is the canonical direct `SurfaceBody` lane
+- `loft(...)` and `loft_sections(...)` remain convenience handoffs over the same planner
+
+## Correspondence Regression Fixtures
+
+The loft test suite includes simple correspondence fixtures intended to reveal
+twist or deformation regressions quickly:
+
+- a rectangular station sequence that should preserve strong cross-section anisotropy through the mid-body
+- a circular station sequence that should remain round through the mid-body
+
+Those fixtures live in the loft test/showcase layer and are paired with
+reference images and STL artifacts so correspondence regressions show up both
+numerically and visually.
 
 Split/merge controls:
 

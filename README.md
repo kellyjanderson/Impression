@@ -9,18 +9,22 @@ Impression aims for more than functional correctness. We build features, docs, a
 solve real modeling problems, bridge mechanical and organic design, and help users dream bigger
 about what they can create.
 
-See: [Project DNA](docs/project-dna.md)
+See: [Project DNA](project/project-dna.md)
 
 ## Quickstart
 
 ```bash
 git clone https://github.com/kellyjanderson/Impression.git
 cd Impression
-install impression
+scripts/dev/install_impression.sh
 source .venv/bin/activate
 ```
 
 After installation you can run `impression --help` from anywhere in that virtual environment.
+
+The canonical installer is the repo-local script above. If you keep a local
+wrapper such as `install impression` on your machine, it should delegate to
+`scripts/dev/install_impression.sh`.
 
 By default the installer pulls the latest tagged release. To see available releases run:
 
@@ -87,20 +91,30 @@ Full CLI reference: [`docs/cli.md`](docs/cli.md)
 ## Documentation Map
 
 - [`docs/index.md`](docs/index.md) - documentation portal
-- [`docs/modeling/`](docs/modeling/) - primitives, CSG, drawing2d, paths, extrusions, loft, threading, hinges, morph, text
+- [`docs/modeling/`](docs/modeling/) - primitives, CSG, mesh analysis tools, drawing2d, paths, loft, threading, hinges, text
 - [`docs/examples/`](docs/examples/) - runnable scripts that power the docs
 - [`docs/tutorials/`](docs/tutorials/) - guided walkthroughs for new and advanced users
-- [`docs/agents.md`](docs/agents.md) - agent usage guide for building with Impression
-- [`docs/project-dna.md`](docs/project-dna.md) - core product values and quality bar
-- [`docs/project-plan.md`](docs/project-plan.md) - roadmap and open questions
+- [`docs/agents/`](docs/agents/) - agent usage guide for building with Impression
+- [`docs/skills/`](docs/skills/) - installable Codex skills that ship with the docs
+- [`project/README.md`](project/README.md) - project workspace for planning, architecture, and records
+- [`project/project-dna.md`](project/project-dna.md) - core product values and quality bar
+- [`project/planning/README.md`](project/planning/README.md) - roadmap and open questions
 
 ## Helper Scripts
 
 - `scripts/dev/setup_dev_env.sh` - create/update the repo virtual environment, install the package,
   and append the `source ~/.impression/env` line to your shell configuration files.
+- `scripts/dev/install_impression.sh` - install the latest tagged release or the local repo into a
+  target virtual environment.
 - `scripts/dev/reset_impression_env.sh` - remove the auto-installed CLI (`~/.impression-cli`),
   delete `~/.impression/env`, strip the sourcing line from your shell rc files, and clear VS Code
   global state so the extension behaves like a first-time install.
+- `scripts/dev/run_full_coverage.sh` - run full-repo coverage and write terminal, XML, and HTML
+  reports under `project/coverage/`.
+- `scripts/dev/run_surface_coverage.sh` - run the surface-body coverage slice and write reports
+  under `project/coverage/surface/`.
+- `scripts/dev/run_loft_coverage.sh` - run the loft-focused coverage slice over the dedicated loft
+  planner, API, and showcase suites, writing reports under `project/coverage/loft/`.
 
 ## Development
 
@@ -121,7 +135,7 @@ creates a venv with **Python 3.13 by default** to avoid 3.14 wheel gaps.
 
 How it works:
 
-- `install impression` creates a `./.venv` in the current folder.
+- `scripts/dev/install_impression.sh` creates a `./.venv` in the current folder by default.
 - It prefers `uv` to provision Python 3.13 automatically.
 - If `uv` is missing, it falls back to Homebrew (`python@3.13`).
 - Existing venvs are reused only if they match the expected Python version.

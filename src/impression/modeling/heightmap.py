@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Sequence
+from typing import TYPE_CHECKING, Literal, Sequence
 
 import numpy as np
 from PIL import Image
@@ -10,8 +10,14 @@ from impression.mesh import Mesh
 from impression.cache import LRUCache
 from impression.mesh_quality import MeshQuality, apply_lod
 
+from ._legacy_mesh_deprecation import warn_mesh_primary_api
+
+if TYPE_CHECKING:
+    from .surface import SurfaceBody
+
 
 ArrayLike = np.ndarray
+Backend = Literal["mesh", "surface"]
 
 _HEIGHTMAP_CACHE = LRUCache(max_size=32)
 
@@ -71,21 +77,72 @@ def _load_heightmap(image: str | Path | Image.Image | ArrayLike) -> tuple[np.nda
     raise TypeError("heightmap expects a file path, PIL image, or numpy array.")
 
 
-def heightmap(
+def _triangle_surface_body_from_mesh(mesh: Mesh, *, metadata: dict[str, object] | None = None) -> "SurfaceBody":
+    from .surface import ParameterDomain, PlanarSurfacePatch, TrimLoop, make_surface_body, make_surface_shell
+
+    if mesh.n_faces == 0:
+        from ._surface_primitives import make_surface_box
+
+        return make_surface_box(size=(1e-6, 1e-6, 1e-6), metadata={"consumer": {"hidden_placeholder": True}})
+
+    patches = []
+    for face_index, tri in enumerate(mesh.faces):
+        points = np.asarray(mesh.vertices[np.asarray(tri, dtype=int)], dtype=float).reshape(3, 3)
+        origin = points[0]
+        u_seed = points[1] - origin
+        u_norm = float(np.linalg.norm(u_seed))
+        if u_norm == 0.0:
+            continue
+        u_dir = u_seed / u_norm
+        normal = np.cross(points[1] - origin, points[2] - origin)
+        normal_norm = float(np.linalg.norm(normal))
+        if normal_norm == 0.0:
+            continue
+        normal = normal / normal_norm
+        v_dir = np.cross(normal, u_dir)
+        v_dir = v_dir / float(np.linalg.norm(v_dir))
+        uv_points = np.asarray(
+            [
+                (
+                    float(np.dot(point - origin, u_dir)),
+                    float(np.dot(point - origin, v_dir)),
+                )
+                for point in points
+            ],
+            dtype=float,
+        )
+        xmin, ymin = uv_points.min(axis=0)
+        xmax, ymax = uv_points.max(axis=0)
+        if np.isclose(xmax, xmin):
+            xmax = xmin + 1e-9
+        if np.isclose(ymax, ymin):
+            ymax = ymin + 1e-9
+        patches.append(
+            PlanarSurfacePatch(
+                family="planar",
+                domain=ParameterDomain((xmin, xmax), (ymin, ymax)),
+                trim_loops=(TrimLoop(uv_points, category="outer"),),
+                origin=origin,
+                u_axis=u_dir,
+                v_axis=v_dir,
+                metadata={"kernel": {"producer": "heightmap", "triangle_face_index": face_index}},
+            )
+        )
+    return make_surface_body(
+        (make_surface_shell(tuple(patches), connected=False, metadata={"kernel": {"producer": "heightmap"}}),),
+        metadata=metadata,
+    )
+
+
+def _heightmap_mesh_impl(
     image: str | Path | Image.Image | ArrayLike,
-    height: float = 1.0,
-    xy_scale: float | Sequence[float] = 1.0,
-    center: Sequence[float] = (0.0, 0.0, 0.0),
-    alpha_mode: str = "mask",
-    quality: MeshQuality | None = None,
+    *,
+    height: float,
+    xy_scale: float | Sequence[float],
+    center: Sequence[float],
+    alpha_mode: str,
+    quality: MeshQuality | None,
 ) -> Mesh:
-    """Create a heightfield mesh from an image.
-
-    alpha_mode:
-        - "mask": skip faces that touch fully transparent pixels (holes).
-        - "ignore": treat transparent pixels as zero height (no holes).
-    """
-
     cache_key = _heightmap_cache_key(image, height, xy_scale, center, alpha_mode, quality)
     cached = _HEIGHTMAP_CACHE.get(cache_key) if cache_key is not None else None
     if cached is not None:
@@ -136,6 +193,51 @@ def heightmap(
     if cache_key is not None:
         _HEIGHTMAP_CACHE.set(cache_key, mesh.copy())
     return mesh
+
+
+def heightmap(
+    image: str | Path | Image.Image | ArrayLike,
+    height: float = 1.0,
+    xy_scale: float | Sequence[float] = 1.0,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    alpha_mode: str = "mask",
+    quality: MeshQuality | None = None,
+    backend: Backend = "mesh",
+) -> Mesh | SurfaceBody:
+    """Create a heightfield mesh from an image.
+
+    alpha_mode:
+        - "mask": skip faces that touch fully transparent pixels (holes).
+        - "ignore": treat transparent pixels as zero height (no holes).
+    """
+    if backend not in {"mesh", "surface"}:
+        raise ValueError("backend must be 'mesh' or 'surface'.")
+    if backend == "surface":
+        mesh = _heightmap_mesh_impl(
+            image,
+            height=height,
+            xy_scale=xy_scale,
+            center=center,
+            alpha_mode=alpha_mode,
+            quality=quality,
+        )
+        return _triangle_surface_body_from_mesh(
+            mesh,
+            metadata={"kernel": {"producer": "heightmap"}, "consumer": {"source": "heightmap"}},
+        )
+
+    warn_mesh_primary_api(
+        "heightmap",
+        replacement="a future surface-native heightfield path",
+    )
+    return _heightmap_mesh_impl(
+        image,
+        height=height,
+        xy_scale=xy_scale,
+        center=center,
+        alpha_mode=alpha_mode,
+        quality=quality,
+    )
 
 
 def _vertex_normals(mesh: Mesh) -> np.ndarray:
@@ -235,7 +337,7 @@ def _mask_faces(mesh: Mesh, masked_vertices: np.ndarray) -> Mesh:
 
 
 def displace_heightmap(
-    mesh: Mesh,
+    mesh: Mesh | SurfaceBody,
     image: str | Path | Image.Image | ArrayLike,
     height: float = 1.0,
     projection: str = "planar",
@@ -244,14 +346,65 @@ def displace_heightmap(
     alpha_mode: str = "ignore",
     bounds: Sequence[float] | None = None,
     quality: MeshQuality | None = None,
-) -> Mesh:
+    backend: Backend = "mesh",
+) -> Mesh | SurfaceBody:
     """Displace a mesh using a heightmap with planar projection.
 
     alpha_mode:
         - "ignore": transparent pixels cause no displacement.
         - "mask": faces touching transparent samples are removed.
     """
+    if backend not in {"mesh", "surface"}:
+        raise ValueError("backend must be 'mesh' or 'surface'.")
+    if backend == "surface":
+        from .tessellation import tessellate_surface_body
 
+        input_mesh = tessellate_surface_body(mesh).mesh if not isinstance(mesh, Mesh) else mesh
+        displaced_mesh = _displace_heightmap_mesh_impl(
+            input_mesh,
+            image=image,
+            height=height,
+            projection=projection,
+            plane=plane,
+            direction=direction,
+            alpha_mode=alpha_mode,
+            bounds=bounds,
+            quality=quality,
+        )
+        return _triangle_surface_body_from_mesh(
+            displaced_mesh,
+            metadata={"kernel": {"producer": "heightmap", "operation": "displace"}, "consumer": {"source": "heightmap"}},
+        )
+
+    warn_mesh_primary_api(
+        "displace_heightmap",
+        replacement="surface-native displacement once SurfaceBody deformation lands",
+    )
+    return _displace_heightmap_mesh_impl(
+        mesh,
+        image=image,
+        height=height,
+        projection=projection,
+        plane=plane,
+        direction=direction,
+        alpha_mode=alpha_mode,
+        bounds=bounds,
+        quality=quality,
+    )
+
+
+def _displace_heightmap_mesh_impl(
+    mesh: Mesh,
+    *,
+    image: str | Path | Image.Image | ArrayLike,
+    height: float,
+    projection: str,
+    plane: str,
+    direction: str | Sequence[float],
+    alpha_mode: str,
+    bounds: Sequence[float] | None,
+    quality: MeshQuality | None,
+) -> Mesh:
     if projection != "planar":
         raise ValueError("Only planar projection is supported in this build.")
     plane = plane.lower()

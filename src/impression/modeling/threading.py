@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from typing import Callable, Literal, Sequence
+import json
+import hashlib
 
 import numpy as np
 
@@ -16,6 +18,7 @@ from impression.modeling.primitives import make_cylinder, make_ngon
 
 ThreadHand = Literal["right", "left"]
 ThreadKind = Literal["external", "internal"]
+ThreadBackend = Literal["mesh", "surface"]
 ThreadProfileName = Literal[
     "iso",
     "unified",
@@ -46,6 +49,115 @@ class InvalidFitSpec(ThreadingError):
 
 class MeshBudgetExceeded(ThreadingError):
     """Raised when generated mesh exceeds the configured budget."""
+
+
+@dataclass(frozen=True)
+class ThreadSurfaceRepresentation:
+    """Canonical surface-first thread representation prior to tessellation."""
+
+    spec: ThreadSpec
+    kind: ThreadKind
+    hand: ThreadHand
+    profile: ThreadProfileName
+    starts: int
+    major_diameter: float
+    minor_diameter: float
+    pitch: float
+    thread_depth: float
+    length: float
+    threaded_length: float
+    thread_offset: float
+    taper_diameter_per_length: float
+    axis_origin: tuple[float, float, float]
+    axis_direction: tuple[float, float, float]
+    axis_basis: tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]
+    turn_count: float
+    shell_only: bool
+    start_treatment: EndTreatment
+    end_treatment: EndTreatment
+    runout_length: float
+    runout_depth: float
+    pitch_schedule: tuple[tuple[float, float], ...]
+    profile_samples: tuple[tuple[float, float], ...]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "spec": {
+                "major_diameter": self.spec.major_diameter,
+                "pitch": self.spec.pitch,
+                "length": self.spec.length,
+                "profile": self.spec.profile,
+                "hand": self.spec.hand,
+                "starts": self.spec.starts,
+                "taper_diameter_per_length": self.spec.taper_diameter_per_length,
+                "kind": self.spec.kind,
+            },
+            "kind": self.kind,
+            "hand": self.hand,
+            "profile": self.profile,
+            "starts": self.starts,
+            "major_diameter": self.major_diameter,
+            "minor_diameter": self.minor_diameter,
+            "pitch": self.pitch,
+            "thread_depth": self.thread_depth,
+            "length": self.length,
+            "threaded_length": self.threaded_length,
+            "thread_offset": self.thread_offset,
+            "taper_diameter_per_length": self.taper_diameter_per_length,
+            "axis_origin": self.axis_origin,
+            "axis_direction": self.axis_direction,
+            "axis_basis": self.axis_basis,
+            "turn_count": self.turn_count,
+            "shell_only": self.shell_only,
+            "start_treatment": self.start_treatment,
+            "end_treatment": self.end_treatment,
+            "runout_length": self.runout_length,
+            "runout_depth": self.runout_depth,
+            "pitch_schedule": self.pitch_schedule,
+            "profile_samples": self.profile_samples,
+        }
+
+    @property
+    def stable_identity(self) -> str:
+        payload = json.dumps(self.canonical_payload(), sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+
+@dataclass(frozen=True)
+class ThreadSurfaceOperand:
+    """One surfaced operand inside a thread-derived assembly."""
+
+    role: str
+    kind: Literal["thread", "primitive"]
+    payload: dict[str, object]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "role": self.role,
+            "kind": self.kind,
+            "payload": self.payload,
+        }
+
+
+@dataclass(frozen=True)
+class ThreadSurfaceAssembly:
+    """Structured surfaced output for thread convenience builders."""
+
+    assembly_type: str
+    operation: Literal["standalone", "union", "difference"]
+    operands: tuple[ThreadSurfaceOperand, ...]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "assembly_type": self.assembly_type,
+            "operation": self.operation,
+            "operands": [operand.canonical_payload() for operand in self.operands],
+        }
+
+    @property
+    def stable_identity(self) -> str:
+        payload = json.dumps(self.canonical_payload(), sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -328,14 +440,101 @@ def estimate_mesh_cost(spec: ThreadSpec, quality: MeshQuality = MeshQuality()) -
     )
 
 
+def prepare_surface_thread_representation(
+    spec: ThreadSpec,
+    *,
+    kind: ThreadKind | None = None,
+    profile_sample_count: int = 17,
+) -> ThreadSurfaceRepresentation:
+    """Build a deterministic surface-first representation for a thread spec."""
+
+    resolved = validate_thread(replace(spec, kind=(kind or spec.kind)))
+    if profile_sample_count < 5:
+        raise InvalidThreadSpec("profile_sample_count must be at least 5.")
+
+    axis_direction = np.asarray(resolved.axis_direction, dtype=float)
+    axis_direction = axis_direction / np.linalg.norm(axis_direction)
+    axis_basis = _build_axis_basis(axis_direction)
+    thread_depth = _resolve_thread_depth(resolved)
+    minor_diameter = float(resolved.major_diameter - (2.0 * thread_depth))
+    threaded_length = float(resolved.thread_length if resolved.thread_length is not None else resolved.length)
+
+    pitch_fn = _build_pitch_function(resolved)
+    z_values = np.linspace(float(resolved.thread_offset), float(resolved.thread_offset + threaded_length), 65, dtype=float)
+    integrated_turns = _integrate_turns(z_values, pitch_fn)
+    turn_count = float(integrated_turns[-1]) if integrated_turns.size else 0.0
+
+    if resolved.pitch_profile is None:
+        pitch_schedule = (
+            (0.0, float(resolved.pitch)),
+            (float(resolved.length), float(resolved.pitch)),
+        )
+    else:
+        pitch_schedule = tuple(
+            (float(z), float(pitch))
+            for z, pitch in sorted(resolved.pitch_profile, key=lambda item: float(item[0]))
+        )
+
+    profile_fn = _build_profile_function(resolved)
+    phases = np.linspace(0.0, 1.0, int(profile_sample_count), dtype=float)
+    profile_samples = tuple((float(phase), float(np.clip(profile_fn(float(phase)), 0.0, 1.0))) for phase in phases)
+
+    return ThreadSurfaceRepresentation(
+        spec=resolved,
+        kind=resolved.kind,
+        hand=resolved.hand,
+        profile=resolved.profile,
+        starts=resolved.starts,
+        major_diameter=float(resolved.major_diameter),
+        minor_diameter=minor_diameter,
+        pitch=float(resolved.pitch),
+        thread_depth=float(thread_depth),
+        length=float(resolved.length),
+        threaded_length=threaded_length,
+        thread_offset=float(resolved.thread_offset),
+        taper_diameter_per_length=float(resolved.taper_diameter_per_length),
+        axis_origin=tuple(float(value) for value in resolved.axis_origin),
+        axis_direction=tuple(float(value) for value in axis_direction),
+        axis_basis=tuple(tuple(float(value) for value in axis_basis[:, index]) for index in range(3)),
+        turn_count=turn_count,
+        shell_only=bool(resolved.shell_only),
+        start_treatment=resolved.start_treatment,
+        end_treatment=resolved.end_treatment,
+        runout_length=float(resolved.runout_length),
+        runout_depth=float(resolved.runout_depth),
+        pitch_schedule=pitch_schedule,
+        profile_samples=profile_samples,
+    )
+
+
+def _thread_surface_operand(
+    role: str,
+    representation: ThreadSurfaceRepresentation,
+) -> ThreadSurfaceOperand:
+    return ThreadSurfaceOperand(role=role, kind="thread", payload=representation.canonical_payload())
+
+
+def _primitive_surface_operand(
+    role: str,
+    family: str,
+    **payload: object,
+) -> ThreadSurfaceOperand:
+    return ThreadSurfaceOperand(role=role, kind="primitive", payload={"family": family, **payload})
+
+
 def make_external_thread(
     spec: ThreadSpec,
     *,
     quality: MeshQuality = MeshQuality(),
     color: Sequence[float] | str | None = None,
-) -> Mesh:
+    backend: ThreadBackend = "mesh",
+) -> Mesh | ThreadSurfaceRepresentation:
     """Generate a manifold external thread solid."""
 
+    if backend == "surface":
+        return prepare_surface_thread_representation(spec, kind="external")
+    if backend != "mesh":
+        raise InvalidThreadSpec("backend must be 'mesh' or 'surface'.")
     resolved = replace(spec, kind="external")
     return _build_thread_mesh(resolved, quality=quality, color=color)
 
@@ -345,9 +544,14 @@ def make_internal_thread(
     *,
     quality: MeshQuality = MeshQuality(),
     color: Sequence[float] | str | None = None,
-) -> Mesh:
+    backend: ThreadBackend = "mesh",
+) -> Mesh | ThreadSurfaceRepresentation:
     """Generate a manifold internal-thread cutter solid."""
 
+    if backend == "surface":
+        return prepare_surface_thread_representation(spec, kind="internal")
+    if backend != "mesh":
+        raise InvalidThreadSpec("backend must be 'mesh' or 'surface'.")
     resolved = replace(spec, kind="internal")
     return _build_thread_mesh(resolved, quality=quality, color=color)
 
@@ -357,9 +561,19 @@ def make_threaded_rod(
     *,
     quality: MeshQuality = MeshQuality(),
     color: Sequence[float] | str | None = None,
-) -> Mesh:
+    backend: ThreadBackend = "mesh",
+) -> Mesh | ThreadSurfaceAssembly:
     """Convenience generator for a threaded rod section."""
 
+    if backend == "surface":
+        thread = prepare_surface_thread_representation(replace(spec, kind="external"), kind="external")
+        return ThreadSurfaceAssembly(
+            assembly_type="threaded_rod",
+            operation="standalone",
+            operands=(_thread_surface_operand("thread", thread),),
+        )
+    if backend != "mesh":
+        raise InvalidThreadSpec("backend must be 'mesh' or 'surface'.")
     return make_external_thread(replace(spec, kind="external"), quality=quality, color=color)
 
 
@@ -369,7 +583,8 @@ def make_tapped_hole_cutter(
     quality: MeshQuality = MeshQuality(),
     overshoot: float = 0.5,
     color: Sequence[float] | str | None = None,
-) -> Mesh:
+    backend: ThreadBackend = "mesh",
+) -> Mesh | ThreadSurfaceAssembly:
     """Generate negative-volume cutter geometry for tapped holes."""
 
     if overshoot < 0:
@@ -380,6 +595,15 @@ def make_tapped_hole_cutter(
         length=spec.length + 2.0 * overshoot,
         axis_origin=(spec.axis_origin[0], spec.axis_origin[1], spec.axis_origin[2] - overshoot),
     )
+    if backend == "surface":
+        cutter = prepare_surface_thread_representation(cutter_spec, kind="internal")
+        return ThreadSurfaceAssembly(
+            assembly_type="tapped_hole_cutter",
+            operation="standalone",
+            operands=(_thread_surface_operand("cutter", cutter),),
+        )
+    if backend != "mesh":
+        raise InvalidThreadSpec("backend must be 'mesh' or 'surface'.")
     return make_internal_thread(cutter_spec, quality=quality, color=color)
 
 
@@ -390,12 +614,41 @@ def make_hex_nut(
     across_flats: float,
     quality: MeshQuality = MeshQuality(),
     color: Sequence[float] | str | None = None,
-) -> Mesh:
+    backend: ThreadBackend = "mesh",
+) -> Mesh | ThreadSurfaceAssembly:
     """Create a simple hex nut by subtracting an internal thread cutter from a hex prism."""
 
     if thickness <= 0 or across_flats <= 0:
         raise InvalidThreadSpec("thickness and across_flats must be positive.")
 
+    if backend == "surface":
+        circ_radius = across_flats / np.sqrt(3.0)
+        cutter_spec = replace(
+            spec,
+            kind="internal",
+            length=thickness + 1.0,
+            axis_origin=(spec.axis_origin[0], spec.axis_origin[1], spec.axis_origin[2] - 0.5),
+        )
+        cutter = prepare_surface_thread_representation(cutter_spec, kind="internal")
+        body = _primitive_surface_operand(
+            "nut_body",
+            "ngon_prism",
+            sides=6,
+            radius=float(circ_radius),
+            height=float(thickness),
+            center=(
+                float(spec.axis_origin[0]),
+                float(spec.axis_origin[1]),
+                float(spec.axis_origin[2] + thickness / 2.0),
+            ),
+        )
+        return ThreadSurfaceAssembly(
+            assembly_type="hex_nut",
+            operation="difference",
+            operands=(body, _thread_surface_operand("thread_cutter", cutter)),
+        )
+    if backend != "mesh":
+        raise InvalidThreadSpec("backend must be 'mesh' or 'surface'.")
     epsilon = max(0.0, quality.boolean_epsilon)
     adjusted_thickness = thickness + epsilon * 2.0
     circ_radius = across_flats / np.sqrt(3.0)
@@ -430,12 +683,40 @@ def make_round_nut(
     outer_diameter: float,
     quality: MeshQuality = MeshQuality(),
     color: Sequence[float] | str | None = None,
-) -> Mesh:
+    backend: ThreadBackend = "mesh",
+) -> Mesh | ThreadSurfaceAssembly:
     """Create a round nut by subtracting an internal thread cutter from a cylinder."""
 
     if thickness <= 0 or outer_diameter <= 0:
         raise InvalidThreadSpec("thickness and outer_diameter must be positive.")
 
+    if backend == "surface":
+        cutter_spec = replace(
+            spec,
+            kind="internal",
+            length=thickness + 1.0,
+            axis_origin=(spec.axis_origin[0], spec.axis_origin[1], spec.axis_origin[2] - 0.5),
+        )
+        cutter = prepare_surface_thread_representation(cutter_spec, kind="internal")
+        body = _primitive_surface_operand(
+            "nut_body",
+            "cylinder",
+            radius=float(outer_diameter / 2.0),
+            height=float(thickness),
+            center=(
+                float(spec.axis_origin[0]),
+                float(spec.axis_origin[1]),
+                float(spec.axis_origin[2] + thickness / 2.0),
+            ),
+            direction=tuple(float(value) for value in spec.axis_direction),
+        )
+        return ThreadSurfaceAssembly(
+            assembly_type="round_nut",
+            operation="difference",
+            operands=(body, _thread_surface_operand("thread_cutter", cutter)),
+        )
+    if backend != "mesh":
+        raise InvalidThreadSpec("backend must be 'mesh' or 'surface'.")
     epsilon = max(0.0, quality.boolean_epsilon)
     adjusted_thickness = thickness + epsilon * 2.0
     nut_body = make_cylinder(
@@ -465,7 +746,8 @@ def make_runout_relief(
     *,
     quality: MeshQuality = MeshQuality(),
     color: Sequence[float] | str | None = None,
-) -> Mesh:
+    backend: ThreadBackend = "mesh",
+) -> Mesh | ThreadSurfaceAssembly:
     """Create explicit runout relief (undercut) at thread ends."""
 
     validate_thread(spec, quality)
@@ -492,6 +774,28 @@ def make_runout_relief(
             resolution=quality.circumferential_segments or 64,
         )
 
+    if backend == "surface":
+        def _operand(role: str, z_center: float) -> ThreadSurfaceOperand:
+            center = axis_origin + axis_basis @ np.array([0.0, 0.0, z_center], dtype=float)
+            return _primitive_surface_operand(
+                role,
+                "cylinder",
+                radius=float(relief_radius),
+                height=float(spec.runout_length),
+                center=(float(center[0]), float(center[1]), float(center[2])),
+                direction=tuple(float(value) for value in spec.axis_direction),
+            )
+
+        return ThreadSurfaceAssembly(
+            assembly_type="runout_relief",
+            operation="union",
+            operands=(
+                _operand("start_relief", spec.runout_length / 2.0),
+                _operand("end_relief", spec.length - spec.runout_length / 2.0),
+            ),
+        )
+    if backend != "mesh":
+        raise InvalidThreadSpec("backend must be 'mesh' or 'surface'.")
     start = _make_relief_at(spec.runout_length / 2.0)
     end = _make_relief_at(spec.length - spec.runout_length / 2.0)
     relief = boolean_union([start, end])
@@ -1027,9 +1331,13 @@ __all__ = [
     "InvalidThreadSpec",
     "MeshBudgetExceeded",
     "MeshQuality",
+    "ThreadBackend",
     "ThreadFitPreset",
     "ThreadMeshEstimate",
     "ThreadSpec",
+    "ThreadSurfaceOperand",
+    "ThreadSurfaceAssembly",
+    "ThreadSurfaceRepresentation",
     "ThreadingError",
     "apply_fit",
     "estimate_mesh_cost",
@@ -1041,6 +1349,7 @@ __all__ = [
     "make_tapped_hole_cutter",
     "make_threaded_rod",
     "make_runout_relief",
+    "prepare_surface_thread_representation",
     "clear_thread_cache",
     "paired_fit",
     "validate_thread",

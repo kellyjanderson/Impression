@@ -6,15 +6,13 @@ Run with:
 
 from __future__ import annotations
 
-from impression.modeling.drawing2d import round_corners, PlanarShape2D
-from impression.modeling import linear_extrude
+from impression.modeling.drawing2d import PlanarShape2D, round_corners
 
 
 def build():
     pts = [(0, 0), (2, 0), (2, 1), (0, 1)]
     rounded_path = round_corners(pts, radius=0.2, closed=True)
-    profile = PlanarShape2D(outer=rounded_path)
-    return linear_extrude(profile, height=0.2)
+    return PlanarShape2D(outer=rounded_path)
 
 
 if __name__ == "__main__":

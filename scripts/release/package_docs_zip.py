@@ -16,7 +16,7 @@ def _iter_docs_files(root: pathlib.Path):
             continue
         if any(part.startswith(".") for part in path.parts):
             continue
-            yield path
+        yield path
 
 
 def main() -> int:

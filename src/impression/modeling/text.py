@@ -7,7 +7,7 @@ delegated to ``impression.modeling.topology``.
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import TYPE_CHECKING, Literal, Sequence
 from pathlib import Path
 import math
 import warnings
@@ -18,12 +18,18 @@ from fontTools.pens.recordingPen import RecordingPen
 
 from impression.mesh import Mesh, combine_meshes
 
+from ._surface_ops import make_surface_linear_extrude
 from .drawing2d import Path2D, Line2D, Bezier2D
 from ._color import _normalize_color, set_mesh_color
-from .extrude import linear_extrude
-from .topology import Section, sections_from_paths
+from ._legacy_mesh_deprecation import warn_mesh_primary_api
+from .topology import Section, sections_from_paths, triangulate_loops
 
 _WARNED_TEXT_PROFILE_COLOR = False
+
+if TYPE_CHECKING:
+    from .surface import SurfaceBody
+
+Backend = Literal["mesh", "surface"]
 
 
 def make_text(
@@ -39,8 +45,12 @@ def make_text(
     font: str = "Arial",
     font_path: str | None = None,
     color: Sequence[float] | str | None = None,
-) -> Mesh:
+    backend: Backend = "mesh",
+) -> Mesh | SurfaceBody:
     """Return 3D text built by extruding text profiles."""
+
+    if backend not in {"mesh", "surface"}:
+        raise ValueError("backend must be 'mesh' or 'surface'.")
 
     depth = float(depth)
     if depth <= 0:
@@ -56,7 +66,30 @@ def make_text(
         font=font,
         font_path=font_path,
     )
-    meshes = [linear_extrude(section, height=depth) for section in profiles]
+
+    if backend == "surface":
+        if not profiles:
+            from ._surface_primitives import make_surface_box
+
+            return make_surface_box(
+                size=(1e-6, 1e-6, 1e-6),
+                metadata={"consumer": {"hidden_placeholder": True}},
+            )
+        bodies = [_surface_text_extrude(section, height=depth) for section in profiles]
+        from .surface import make_surface_body
+
+        combined = make_surface_body(
+            tuple(shell for body in bodies for shell in body.iter_shells(world=True)),
+            metadata={"consumer": {"color": color}} if color is not None else None,
+        )
+        transform = _orientation_transform(center, direction)
+        return combined.with_transform(transform)
+
+    warn_mesh_primary_api(
+        "make_text",
+        replacement="text_profiles()/text_sections() with surface-native downstream modeling",
+    )
+    meshes = [_mesh_text_extrude(section, height=depth) for section in profiles]
     if not meshes:
         return Mesh(np.zeros((0, 3), dtype=float), np.zeros((0, 3), dtype=int))
     mesh = combine_meshes(meshes)
@@ -91,9 +124,15 @@ def text(
     font: str = "Arial",
     font_path: str | None = None,
     color: Sequence[float] | str | None = None,
-) -> Mesh:
+    backend: Backend = "mesh",
+) -> Mesh | SurfaceBody:
     """Alias for make_text."""
 
+    if backend == "mesh":
+        warn_mesh_primary_api(
+            "text",
+            replacement="text_profiles()/text_sections() with surface-native downstream modeling",
+        )
     return make_text(
         content=content,
         depth=depth,
@@ -107,6 +146,7 @@ def text(
         font=font,
         font_path=font_path,
         color=color,
+        backend=backend,
     )
 
 
@@ -365,6 +405,121 @@ def _normalize_vec(vector: Sequence[float]) -> np.ndarray:
     if norm == 0:
         raise ValueError("direction must be non-zero.")
     return arr / norm
+
+
+def _axis_angle_matrix(axis: np.ndarray, angle_rad: float) -> np.ndarray:
+    x, y, z = np.asarray(axis, dtype=float).reshape(3)
+    c = float(np.cos(angle_rad))
+    s = float(np.sin(angle_rad))
+    t = 1.0 - c
+    return np.array(
+        [
+            [t * x * x + c, t * x * y - s * z, t * x * z + s * y, 0.0],
+            [t * x * y + s * z, t * y * y + c, t * y * z - s * x, 0.0],
+            [t * x * z - s * y, t * y * z + s * x, t * z * z + c, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=float,
+    )
+
+
+def _orientation_transform(center: Sequence[float], direction: Sequence[float]) -> np.ndarray:
+    direction_vec = _normalize_vec(direction)
+    base_vec = np.array([0.0, 0.0, 1.0], dtype=float)
+    if np.allclose(direction_vec, base_vec):
+        transform = np.eye(4, dtype=float)
+    elif np.allclose(direction_vec, -base_vec):
+        transform = np.array(
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, -1.0, 0.0, 0.0],
+                [0.0, 0.0, -1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            dtype=float,
+        )
+    else:
+        axis = np.cross(base_vec, direction_vec)
+        axis = axis / float(np.linalg.norm(axis))
+        angle = math.acos(float(np.clip(np.dot(base_vec, direction_vec), -1.0, 1.0)))
+        transform = _axis_angle_matrix(axis, angle)
+    transform[:3, 3] = np.asarray(center, dtype=float).reshape(3)
+    return transform
+
+
+def _surface_text_extrude(section: Section, *, height: float):
+    return make_surface_linear_extrude(section, height=height)
+
+
+def _mesh_text_extrude(section: Section, *, height: float) -> Mesh:
+    height = float(height)
+    if height <= 0.0:
+        raise ValueError("height must be positive.")
+    if not section.regions:
+        return Mesh(np.zeros((0, 3), dtype=float), np.zeros((0, 3), dtype=int))
+
+    direction_vec = np.array([0.0, 0.0, height], dtype=float)
+    meshes: list[Mesh] = []
+    for region in section.normalized().regions:
+        loops = [region.outer.points, *(hole.points for hole in region.holes)]
+        vertices_2d, faces_2d = triangulate_loops(loops)
+        if vertices_2d.size == 0:
+            continue
+        meshes.append(_extrude_region_loops(vertices_2d, faces_2d, loops, direction_vec))
+    if not meshes:
+        return Mesh(np.zeros((0, 3), dtype=float), np.zeros((0, 3), dtype=int))
+    return meshes[0] if len(meshes) == 1 else combine_meshes(meshes)
+
+
+def _extrude_region_loops(
+    vertices_2d: np.ndarray,
+    faces_2d: np.ndarray,
+    loops: list[np.ndarray],
+    direction_vec: np.ndarray,
+) -> Mesh:
+    base = np.column_stack([vertices_2d[:, 0], vertices_2d[:, 1], np.zeros(len(vertices_2d))])
+    top = base + direction_vec
+    vertices = np.vstack([base, top])
+
+    plane_normal = np.array([0.0, 0.0, 1.0], dtype=float)
+    bottom_faces = _orient_cap_faces(base, faces_2d, expected_normal=-plane_normal)
+    top_faces = _orient_cap_faces(top, faces_2d, expected_normal=plane_normal) + len(base)
+    faces = [bottom_faces, top_faces]
+
+    offset = 0
+    for loop in loops:
+        count = loop.shape[0]
+        if count < 2:
+            offset += count
+            continue
+        for i in range(count):
+            j = (i + 1) % count
+            b0 = offset + i
+            b1 = offset + j
+            t0 = b0 + len(base)
+            t1 = b1 + len(base)
+            faces.append(np.array([[b0, b1, t1], [b0, t1, t0]], dtype=int))
+        offset += count
+
+    return Mesh(vertices, np.vstack(faces))
+
+
+def _orient_cap_faces(
+    vertices: np.ndarray,
+    faces: np.ndarray,
+    *,
+    expected_normal: np.ndarray,
+) -> np.ndarray:
+    if faces.size == 0:
+        return faces
+    oriented = faces.copy()
+    v1 = vertices[oriented[:, 1]] - vertices[oriented[:, 0]]
+    v2 = vertices[oriented[:, 2]] - vertices[oriented[:, 0]]
+    normals = np.cross(v1, v2)
+    flip = np.einsum("ij,j->i", normals, expected_normal) < 0
+    if np.any(flip):
+        oriented[flip] = oriented[flip][:, [0, 2, 1]]
+    return oriented
 
 
 __all__ = ["make_text", "text", "text_profiles", "text_sections"]

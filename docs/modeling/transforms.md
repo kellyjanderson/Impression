@@ -65,7 +65,9 @@ def build():
 
 ## 3D Hulls
 
-`hull([mesh_a, mesh_b, ...])` uses manifold3d to compute convex hulls for meshes.
+`hull([mesh_a, mesh_b, ...])` uses manifold3d to compute convex hulls for
+meshes. This mesh-input hull path is retained as an explicit standalone utility
+tool, not canonical surfaced modeling truth.
 
 - Accepts `Mesh` or `MeshGroup` values.
 - Returns a single `Mesh` representing the convex hull.

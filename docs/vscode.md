@@ -27,7 +27,8 @@ After installation, open the Impression workspace. Each command opens an `Impres
   in your shell (`source ~/.impression/env`) so the IDE knows which interpreter owns the CLI.
 - If the extension cannot find the CLI, it offers `Install Local` or `Install Global`.
   It prefers `scripts/dev/install_impression.sh` in the workspace when available; otherwise it
-  runs `install impression` from your PATH. It also updates `~/.impression/env`.
+  runs `install impression` from your PATH if you have installed a local wrapper for that command.
+  It also updates `~/.impression/env`.
 - Declining the auto-install option opens the [Getting Started guide](../README.md#quickstart)
   with manual clone/install instructions.
 - You can also use `scripts/dev/setup_dev_env.sh` to configure a development environment and

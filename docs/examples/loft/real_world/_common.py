@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Iterable
+import warnings
 
 from impression.modeling import make_circle, make_rect, make_text, translate
 from impression.modeling.drawing2d import PlanarShape2D
@@ -32,16 +33,18 @@ def make_label(
     depth: float = 0.8,
     direction: tuple[float, float, float] = DEFAULT_LABEL_DIRECTION,
 ):
-    label = make_text(
-        text,
-        depth=depth,
-        center=center,
-        direction=direction,
-        font_size=font_size,
-        justify="center",
-        valign="middle",
-        color=LABEL_COLOR,
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        label = make_text(
+            text,
+            depth=depth,
+            center=center,
+            direction=direction,
+            font_size=font_size,
+            justify="center",
+            valign="middle",
+            color=LABEL_COLOR,
+        )
     if hasattr(label, "face_colors"):
         label.face_colors = None
     if hasattr(label, "color"):

@@ -3,6 +3,10 @@
 Impression can generate text outlines and turn them into meshes. Under the hood
 the text is converted to 2D profiles and then extruded to 3D.
 
+The text API also supports a surface-first path with `backend="surface"`, which
+preserves the topology-native outline stage and terminates in surfaced text
+before preview/export tessellation.
+
 ```python
 from impression.modeling import make_text, text, text_profiles, text_sections
 ```
@@ -15,16 +19,23 @@ from impression.modeling import make_text, text, text_profiles, text_sections
 - glyph outline extraction
 - character/line layout
 - conversion of glyph commands into authored `Path2D` values
+- text-local extrusion assembly for mesh output
+- dispatch to the private surfaced linear-extrude builder for surfaced output
 
 `text.py` does not own:
 
 - generic path nesting (outer/hole detection)
 - loop containment/classification policy
 - winding normalization/triangulation behavior
+- the public `extrude` module surface area
 
 Those topology concerns are handled by [`topology`](topology.md) via shared
 helpers (currently `sections_from_paths` in the text pipeline). See
-[Topology Spec 07](../specs/topology-07-text-boundary.md).
+[Topology Spec 07](../../project/specifications/topology-07-text-boundary.md).
+
+The current implementation intentionally does not route text through the public
+`linear_extrude(...)` API. Text keeps its extrusion path local so surface-first
+text can evolve without inheriting public extrude-module coupling.
 
 ## Options
 
@@ -40,10 +51,15 @@ helpers (currently `sections_from_paths` in the text pipeline). See
 - `font`: family name (defaults to `"Arial"`).
 - `font_path`: explicit font file (recommended for reproducible results).
 - `color`: RGB/RGBA tuple or color string (propagates through previews/exports).
+- `backend`: `"mesh"` for legacy mesh-primary output, or `"surface"` for surfaced output.
 
 Text uses FontTools to convert glyph outlines into Bezier segments. The helper
 `text_profiles(...)`/`text_sections(...)` return a list of topology-native `Section` values you
 can reuse for custom extrusions or lofts.
+
+Current regression coverage checks more than non-empty output. The text tests
+verify profile alignment/layout, requested extrusion depth, direction-axis
+reorientation, and surfaced alias parity.
 
 ## Examples
 
@@ -51,6 +67,15 @@ can reuse for custom extrusions or lofts.
 def build():
     brand = make_text("Impression", depth=0.15, font_size=0.4, color="#d07a5c")
     brand.translate((0, 0.1, 0), inplace=True)
+    surfaced = make_text(
+        "Surface",
+        depth=0.12,
+        font_size=0.32,
+        center=(0, -0.35, 0),
+        color="#7b8aa6",
+        font_path="assets/fonts/NotoSansSymbols2-Regular.ttf",
+        backend="surface",
+    )
     tagline = text(
         "Parametric playground",
         depth=0.08,
@@ -58,7 +83,7 @@ def build():
         center=(0, -0.25, 0),
         color="#7b8aa6",
     )
-    return [brand, tagline]
+    return [brand, tagline, surfaced]
 
 
 def build_emoji():

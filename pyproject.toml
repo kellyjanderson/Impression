@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "impression"
-version = "0.0.2a2"
+version = "0.0.3a2"
 description = "Parametric modeling playground with real-time preview and STL export goals."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -26,8 +26,36 @@ dependencies = [
 [project.scripts]
 impression = "impression.cli:app"
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.0",
+    "pytest-cov>=6.0.0",
+    "coverage[toml]>=7.6.0",
+    "scikit-image>=0.24.0",
+]
+
 [tool.setuptools]
 package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.coverage.run]
+branch = true
+source = ["src/impression"]
+
+[tool.coverage.report]
+skip_covered = true
+show_missing = true
+precision = 1
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]
+
+[tool.coverage.html]
+directory = "project/coverage/html"
+
+[tool.coverage.xml]
+output = "project/coverage/coverage.xml"

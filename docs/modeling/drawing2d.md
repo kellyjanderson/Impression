@@ -33,7 +33,7 @@ Not owned by `drawing2d`:
 See:
 
 - [Topology](topology.md) for loop/region/section ownership and kernel helpers
-- [Topology Spec 05](../specs/topology-05-drawing2d-boundary.md) for the boundary contract
+- [Topology Spec 05](../../project/specifications/topology-05-drawing2d-boundary.md) for the boundary contract
 
 ### Example Catalog
 
