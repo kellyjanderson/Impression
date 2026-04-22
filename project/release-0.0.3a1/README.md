@@ -1,8 +1,24 @@
-# Release 0.0.3a0
+# Release 0.0.3a1
 
 ## Intent
 
-`0.0.3a0` is the release that turns Impression into a much more explicit
+`0.0.3a1` is the repaired release that preserves the `0.0.3a0` feature tranche
+while fixing the release-distribution path.
+
+It includes the full `0.0.3a0` surface-first and testing-architecture tranche,
+plus the release-critical corrections needed so installation and version
+reporting behave correctly in a fresh environment.
+
+## Release Repair
+
+- the installer now bootstraps `pip` into a newly created venv when `uv venv`
+  creates an environment without it
+- the package `__version__` constant now matches the released version, so the
+  CLI no longer reports the stale `0.0.2a2` value after install
+
+## Inherited Release Intent
+
+`0.0.3a0` was the release that turned Impression into a much more explicit
 surface-first system while making its verification story durable enough to
 trust the migration work.
 
@@ -133,7 +149,7 @@ This release is centered on three visible outcomes:
 
 This release does not introduce a standalone app UI-definition branch.
 
-The primary user-visible surface in `0.0.3a0` is instead:
+The primary user-visible surface in `0.0.3a1` is instead:
 
 - the modeling API and its examples
 - the surfaced reference fixtures and diagnostic artifacts

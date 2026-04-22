@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.0.3a1
+
+### Release Repair
+
+- Fixed the installer so a freshly created venv without `pip` is repaired with
+  `ensurepip` before build/install steps run.
+- Fixed the package `__version__` constant so the CLI reports the actual
+  released version instead of the stale `0.0.2a2` value.
+
 ## 0.0.3a0
 
 ### Surface-First Modeling

@@ -273,6 +273,24 @@ create_venv() {
     exit 1
 }
 
+ensure_venv_pip() {
+    local py_bin="$1"
+    if "$py_bin" -m pip --version >/dev/null 2>&1; then
+        return 0
+    fi
+
+    log "Bootstrapping pip into the target venv"
+    if ! "$py_bin" -m ensurepip --upgrade >/dev/null 2>&1; then
+        echo "Failed to bootstrap pip into $venv_path." >&2
+        exit 1
+    fi
+
+    if ! "$py_bin" -m pip --version >/dev/null 2>&1; then
+        echo "pip is still unavailable in $venv_path after ensurepip." >&2
+        exit 1
+    fi
+}
+
 if [[ -x "$venv_path/bin/python" ]]; then
     if ! "$venv_path/bin/python" - <<PY
 import sys
@@ -294,6 +312,7 @@ else
 fi
 
 py="$venv_path/bin/python"
+ensure_venv_pip "$py"
 
 "$py" - <<'PY' > /tmp/impression_installed_version.txt 2>/dev/null || true
 import importlib.metadata
