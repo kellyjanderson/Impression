@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.0.3a2
+
+### Release Correction
+
+- Merged the rearchitecture branch to `main` as the real release baseline.
+- Fixed release docs packaging so docs bundles include the shipped files rather
+  than producing an empty zip.
+- Added the folder-based `docs/agents/` guide and the installable
+  `docs/skills/impression/` skill to the distributed docs tree.
+
 ## 0.0.3a1
 
 ### Release Repair
