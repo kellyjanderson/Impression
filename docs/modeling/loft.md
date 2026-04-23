@@ -163,6 +163,13 @@ def build():
 `topology` accepts the same kinds of profile inputs as `loft(...)`: sections,
 regions, paths, and other topology-normalizable profile objects.
 
+Real-world surfaced example:
+
+- `docs/examples/loft/real_world/loft_hourglass_vessel_example.py`
+  - multi-region hourglass with inner cavity, three pillar regions, and explicit
+    `loft_plan_ambiguities(...)` candidate selection fed back through
+    `ambiguity_mode="interactive"`
+
 ## Planner / Executor / Ambiguity Tools
 
 The loft planner is public. Use it when you want deterministic inspection or
