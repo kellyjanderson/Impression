@@ -2991,3 +2991,17 @@ def test_loft_real_world_splitter_manifold_example_meshes_are_watertight():
     assert meshes, "Expected at least one mesh from splitter manifold build()."
     for mesh in meshes:
         _assert_mesh_quality(mesh)
+
+
+def test_loft_real_world_hourglass_vessel_example_meshes_are_watertight():
+    module_path = Path("docs/examples/loft/real_world/loft_hourglass_vessel_example.py")
+    spec = importlib.util.spec_from_file_location("loft_hourglass_vessel_example", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    scene = module.build()
+    meshes = scene if isinstance(scene, list) else [scene]
+    assert meshes, "Expected at least one mesh from hourglass vessel build()."
+    for mesh in meshes:
+        _assert_mesh_quality(mesh)
