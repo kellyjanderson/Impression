@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 import sys
 
@@ -42,6 +43,16 @@ from tests.reference_images import (
 
 REFERENCE_ROOT = PROJECT_ROOT / "project" / "reference-images"
 REFERENCE_STL_ROOT = PROJECT_ROOT / "project" / "reference-stl"
+
+
+def _load_docs_example_module(module_name: str, relative_path: str):
+    module_path = PROJECT_ROOT / relative_path
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load docs example module from {module_path}.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _as_sections(profiles: list[object]):
@@ -235,6 +246,23 @@ def main() -> None:
     write_surface_body_stl(
         branching,
         dirty_reference_stl_path(REFERENCE_STL_ROOT, "loft/branching_manifold"),
+    )
+
+    hourglass_module = _load_docs_example_module(
+        "loft_hourglass_vessel_example",
+        "docs/examples/loft/real_world/loft_hourglass_vessel_example.py",
+    )
+    hourglass_body = hourglass_module.build_surface_body(
+        hourglass_module.TEST_PARAMETERS,
+        hourglass_module.TEST_QUALITY,
+    )
+    render_surface_body_image(
+        hourglass_body,
+        dirty_reference_path(REFERENCE_ROOT, "loft/hourglass_vessel"),
+    )
+    write_surface_body_stl(
+        hourglass_body,
+        dirty_reference_stl_path(REFERENCE_STL_ROOT, "loft/hourglass_vessel"),
     )
 
     square_profiles, square_path = build_square_correspondence_profiles()

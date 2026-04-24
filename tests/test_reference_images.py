@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 import numpy as np
@@ -99,6 +100,17 @@ def _require_text_cv_font() -> Path:
         return require_glyph_capable_font("SURFACETEST")
     except FileNotFoundError as exc:
         pytest.skip(str(exc))
+
+
+def _load_docs_example_module(module_name: str, relative_path: str):
+    module_path = Path(relative_path)
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 SURFACE_CSG_PROMOTION_MATRIX = (
     "surfacebody/csg_union_box_post",
     "surfacebody/csg_difference_slot",
@@ -1016,6 +1028,40 @@ def test_loft_branching_manifold_reference_image(
         reference_image_root=reference_image_root,
         reference_stl_root=reference_stl_root,
         name="loft/branching_manifold",
+        update_dirty_reference_images=update_dirty_reference_images,
+    )
+
+
+@pytest.mark.loft
+@pytest.mark.reference_image
+def test_loft_hourglass_vessel_reference_image(
+    reference_image_root: Path,
+    reference_stl_root: Path,
+    tmp_path: Path,
+    update_dirty_reference_images: bool,
+) -> None:
+    module = _load_docs_example_module(
+        "loft_hourglass_vessel_example",
+        "docs/examples/loft/real_world/loft_hourglass_vessel_example.py",
+    )
+    body = module.build_surface_body(module.TEST_PARAMETERS, module.TEST_QUALITY)
+    render_path = tmp_path / "loft-hourglass-vessel.png"
+    stl_path = tmp_path / "loft-hourglass-vessel.stl"
+    render_surface_body_image(body, render_path)
+    write_surface_body_stl(body, stl_path)
+    stats = image_signal_stats(render_path)
+    stl_stats = stl_signal_stats(stl_path)
+    assert stats["occupancy"] > 0.04
+    assert stats["std_luma"] > 10.0
+    assert stl_stats["facet_count"] > 2000
+    assert stl_stats["vertex_count"] > 6000
+    assert stl_stats["file_size"] > 250000
+    _ensure_model_reference_fixture(
+        render_path=render_path,
+        stl_path=stl_path,
+        reference_image_root=reference_image_root,
+        reference_stl_root=reference_stl_root,
+        name="loft/hourglass_vessel",
         update_dirty_reference_images=update_dirty_reference_images,
     )
 

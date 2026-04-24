@@ -166,9 +166,9 @@ regions, paths, and other topology-normalizable profile objects.
 Real-world surfaced example:
 
 - `docs/examples/loft/real_world/loft_hourglass_vessel_example.py`
-  - multi-region hourglass with inner cavity, three pillar regions, and explicit
-    `loft_plan_ambiguities(...)` candidate selection fed back through
-    `ambiguity_mode="interactive"`
+  - parametric multi-region hourglass with inner cavity, three pillar regions,
+    top-of-file parameter presets, and explicit `loft_plan_ambiguities(...)`
+    candidate selection fed back through `ambiguity_mode="interactive"`
 
 ## Planner / Executor / Ambiguity Tools
 
