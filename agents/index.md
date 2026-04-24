@@ -56,6 +56,7 @@ project/
   ui/
   product-definition.md
   architecture/
+  adhoc/
   specifications/
   test-specifications/
   planning/
@@ -88,8 +89,9 @@ When beginning work:
 5. review relevant UI definitions
 6. review `ui-ux-invariants.md` for interface work
 7. review relevant architecture
-8. follow the workflow defined in `workflow.md`
-9. if using sub-agents, review `delegation.md` before assigning work
+8. determine whether the work is following the feature path or the ad hoc path
+9. follow the workflow defined in `workflow.md`
+10. if using sub-agents, review `delegation.md` before assigning work
 
 ---
 

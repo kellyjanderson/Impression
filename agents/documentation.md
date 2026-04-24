@@ -83,3 +83,25 @@ A feature or system area is not fully complete if:
 - but the durable documentation remains missing or stale
 
 Documentation completion is part of the delivery contract, not optional polish.
+
+## Durable Planning Note
+
+When work is proceeding on the ad hoc path instead of the feature/specification
+path, documentation still needs a durable project-facing record.
+
+That record should live under:
+
+```text
+project/adhoc/
+```
+
+Ad hoc documentation should capture the developer/project perspective on:
+
+* what changed
+* why it changed
+* what boundaries the change intentionally did not cross
+* how the change was verified
+
+Ad hoc notes are not public feature docs. They are the lightweight durable
+planning/implementation record for bounded work that is not using the full
+feature path.

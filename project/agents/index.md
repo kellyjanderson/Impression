@@ -20,3 +20,9 @@ Current project-specific rules:
 - [session-handoff.md](session-handoff.md)
   - end-of-work handoff phrase
   - when the agent should explicitly signal that deeper re-engagement is required
+
+Project planning spaces also include:
+
+- [../adhoc/README.md](../adhoc/README.md)
+  - lightweight durable planning for bounded ad hoc work
+  - required choice between feature-path work and ad-hoc-path work before implementation
