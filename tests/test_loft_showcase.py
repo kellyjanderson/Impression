@@ -108,12 +108,13 @@ def test_hourglass_vessel_showcase_uses_interactive_selection_and_is_watertight(
         "docs/examples/loft/real_world/loft_hourglass_vessel_example.py",
     )
 
-    stations = module.build_stations()
-    selections = module.build_ambiguity_selection(stations)
+    stations = module.build_stations(module.TEST_PARAMETERS, module.TEST_QUALITY)
+    selections = module.build_ambiguity_selection(stations, module.TEST_PARAMETERS, module.TEST_QUALITY)
     assert selections
-    assert set(selections.values()) == {module.PILLAR_CANDIDATE_ID}
+    expected_candidate_id = module._pillar_candidate_id(module.TEST_PARAMETERS)
+    assert set(selections.values()) == {expected_candidate_id}
 
-    body = module.build_surface_body()
+    body = module.build_surface_body(module.TEST_PARAMETERS, module.TEST_QUALITY)
     mesh = tessellate_surface_body(body, export_tessellation_request()).mesh
 
     assert mesh.n_vertices > 0

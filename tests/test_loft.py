@@ -3000,7 +3000,7 @@ def test_loft_real_world_hourglass_vessel_example_meshes_are_watertight():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    scene = module.build()
+    scene = module.build(module.TEST_PARAMETERS, module.TEST_QUALITY)
     meshes = scene if isinstance(scene, list) else [scene]
     assert meshes, "Expected at least one mesh from hourglass vessel build()."
     for mesh in meshes:

@@ -96,6 +96,16 @@ For the current team shape:
 
 This keeps branch history, issue or spec linkage, and merge boundaries visible without adding unnecessary process overhead.
 
+For this workspace, "deliver the work" means the full merge path is complete:
+
+1. commit the intended change set on the feature or bug-fix branch
+2. push that branch to the remote
+3. create a pull request
+4. merge the pull request
+
+Agents should not treat implementation as delivered while it exists only as
+local unpushed commits or as an open unmerged pull request.
+
 ---
 
 ## Agent Expectations
@@ -110,6 +120,13 @@ Before making code changes, agents should ensure that:
 6. issue-driven work is back-referenced into the architecture/specification tree
 
 If those conditions are not met, agents should stop and create or switch to the correct branching context before proceeding with code changes.
+
+When the user asks to "deliver" work, agents should also ensure that:
+
+7. the intended change set is committed
+8. the branch is pushed
+9. a pull request is created
+10. the pull request is merged
 
 ---
 

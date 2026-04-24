@@ -34,6 +34,14 @@ agents/git-and-github.md
 
 Agents should satisfy those branch and PR requirements before making code changes.
 
+When a user asks for delivery rather than only local implementation, the work is
+not complete until the repository workflow has also been finished:
+
+* commit the intended change set
+* push the branch
+* create a pull request
+* merge the pull request
+
 When work is executed through sub-agents, the delegation model, ownership boundaries, waiting rules, and review requirements are defined in:
 
 ```text
