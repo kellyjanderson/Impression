@@ -12,6 +12,7 @@ and developer-facing product documentation.
 - [Future Features](future-features.md)
 - [Planning](planning/README.md)
 - [Architecture](architecture/README.md)
+- [Ad Hoc Work](adhoc/README.md)
 - [Specifications](specifications/README.md)
 - [Research](research/)
 - [Issues](issues/)

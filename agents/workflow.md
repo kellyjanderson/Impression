@@ -26,6 +26,15 @@ project/agents/
 
 Agents should consult that folder before substantial work begins and keep project-specific operating rules there rather than scattering them through transient discussion.
 
+Project ad hoc planning documents live in:
+
+```text
+project/adhoc/
+```
+
+That folder is the lightweight durable-planning path for bounded work that does
+not need full feature-branch specification refinement first.
+
 Repository-wide branching and pull request rules are defined in:
 
 ```text
@@ -34,13 +43,15 @@ agents/git-and-github.md
 
 Agents should satisfy those branch and PR requirements before making code changes.
 
-When a user asks for delivery rather than only local implementation, the work is
-not complete until the repository workflow has also been finished:
+For this workspace, repository delivery should be understood as a staged flow:
 
-* commit the intended change set
-* push the branch
-* create a pull request
-* merge the pull request
+* work on a feature branch, not `main`
+* commit in reasonable units as progress stabilizes
+* push when a unit of work is complete or when explicitly asked
+* create a pull request when explicitly asked
+* merge the pull request when explicitly asked
+
+Merging the pull request is the completion of that feature branch's work.
 
 When work is executed through sub-agents, the delegation model, ownership boundaries, waiting rules, and review requirements are defined in:
 
@@ -52,6 +63,7 @@ Implementation work must not begin without a durable planning anchor:
 
 * an issue for bug-fix work, or
 * a specification for feature work
+* an ad hoc work document for ad-hoc-path work
 
 UI definition guidance is defined in:
 
@@ -94,6 +106,14 @@ Project test specification documents should live in:
 ```text
 project/test-specifications/
 ```
+
+Before implementation begins, the user should specify which path is being used:
+
+* feature path
+* ad hoc path
+
+If the user does not specify, agents should ask a short disambiguating question
+before implementation begins.
 
 ---
 
@@ -257,6 +277,37 @@ Agents should expect to:
 * create child specifications where needed
 * review those children in later rounds
 * continue refining downward until the tree consists of implementation-sized final leaves
+
+---
+
+## Ad Hoc Path
+
+The ad hoc path exists for small, real implementation work that should still
+gain durable project-facing documentation without being blocked on heavy feature
+spec refinement.
+
+Use the ad hoc path when:
+
+* the work is bounded and concrete
+* the work needs more durable context than chat history
+* the work does not justify full architecture-to-specification expansion first
+
+Ad hoc work should be recorded under:
+
+```text
+project/adhoc/
+```
+
+Each ad hoc document should describe:
+
+* what is changing
+* why it is changing
+* the scope boundary
+* expected verification
+* any maintenance or usage notes that matter later
+
+Ad hoc work is not a substitute for the feature path when the change truly
+needs architecture/specification refinement.
 
 The intended result is a specification tree, not a flat one-pass list.
 
