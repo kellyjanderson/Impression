@@ -51,10 +51,10 @@ with the implementation.
 
 ## Tranche 06: Diagnostics and Explainability
 
-- [ ] [Feature Spec 09A1: Shared Inference Diagnostic Bundle Schema](specifications/feature-09a1-shared-inference-diagnostic-bundle-schema-v1_0.md)
-- [ ] [Feature Spec 09A2: Inference Diagnostic Bundle Population and Reuse Posture](specifications/feature-09a2-inference-diagnostic-bundle-population-and-reuse-posture-v1_0.md)
-- [ ] [Feature Spec 09B1: Developer-Facing Inference Explainability and Inspection Contract](specifications/feature-09b1-developer-facing-inference-explainability-and-inspection-contract-v1_0.md)
-- [ ] [Feature Spec 09B2: Downstream Inference Reporting and Uncertainty Communication Contract](specifications/feature-09b2-downstream-inference-reporting-and-uncertainty-communication-contract-v1_0.md)
+- [x] [Feature Spec 09A1: Shared Inference Diagnostic Bundle Schema](specifications/feature-09a1-shared-inference-diagnostic-bundle-schema-v1_0.md)
+- [x] [Feature Spec 09A2: Inference Diagnostic Bundle Population and Reuse Posture](specifications/feature-09a2-inference-diagnostic-bundle-population-and-reuse-posture-v1_0.md)
+- [x] [Feature Spec 09B1: Developer-Facing Inference Explainability and Inspection Contract](specifications/feature-09b1-developer-facing-inference-explainability-and-inspection-contract-v1_0.md)
+- [x] [Feature Spec 09B2: Downstream Inference Reporting and Uncertainty Communication Contract](specifications/feature-09b2-downstream-inference-reporting-and-uncertainty-communication-contract-v1_0.md)
 
 ## Ordering Rationale
 
