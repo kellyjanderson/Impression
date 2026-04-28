@@ -294,6 +294,26 @@ That keeps the second guidance milestone explicit too:
 - guidance stays bounded to in-between travel semantics
 - topology-owned planning truth remains primary
 
+Control-station inference can also emit a reduced progression bundle as a
+replayable result:
+
+```python
+from impression.modeling import ReducedProgressionBundle
+
+bundle = ReducedProgressionBundle.from_progression(
+    bundle_id="reduction-0",
+    progression=progression,
+    retained_progression_values=(0.0, 0.5, 1.0),
+    hidden_control_station_ids=("control-0",),
+)
+```
+
+That bundle contract keeps:
+
+- reduced progression output replayable
+- bundle-local provenance explicit
+- bundle shape stable for identical inputs
+
 Confidence and refusal are then handled by a separate posture layer:
 
 ```python
