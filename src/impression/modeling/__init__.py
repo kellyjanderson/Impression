@@ -69,6 +69,11 @@ from .control_stations import (
     HiddenControlStationRecord,
     HiddenControlStationSource,
 )
+from .inference_descriptors import (
+    DenseLoftDescriptorBand,
+    DenseLoftStationDescriptor,
+    prepare_dense_loft_fit_descriptors,
+)
 from .bspline import BSpline2D, BSpline3D
 from .fit_records import (
     FitApproximationPosture,
@@ -241,6 +246,9 @@ __all__ = [
     "HiddenControlStationPlannerConsumption",
     "HiddenControlStationPlannerStage",
     "HiddenControlStationSource",
+    "DenseLoftDescriptorBand",
+    "DenseLoftStationDescriptor",
+    "prepare_dense_loft_fit_descriptors",
     "ProgressionStationAttachment",
     "ProgressionProvenanceKind",
     "ProgressionProvenanceRecord",
