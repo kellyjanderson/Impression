@@ -43,11 +43,11 @@ with the implementation.
 
 ## Tranche 05: Guidance and Control-Station Inference Results
 
-- [ ] [Feature Spec 07B1: Explicit Shared Guidance Attachment Record Contract](specifications/feature-07b1-explicit-shared-guidance-attachment-record-contract-v1_0.md)
-- [ ] [Feature Spec 07B2: Planner Consumption Boundaries for Explicit Shared Guidance](specifications/feature-07b2-planner-consumption-boundaries-for-explicit-shared-guidance-v1_0.md)
-- [ ] [Feature Spec 05A1: Reduced Progression Bundle Shape and Replay Contract](specifications/feature-05a1-reduced-progression-bundle-shape-and-replay-contract-v1_0.md)
-- [ ] [Feature Spec 05A2: Retained Station Classification and Diagnostic Association Contract](specifications/feature-05a2-retained-station-classification-and-diagnostic-association-contract-v1_0.md)
-- [ ] [Feature Spec 05B: Structural Preservation and Inference Refusal Posture](specifications/feature-05b-structural-preservation-and-inference-refusal-posture-v1_0.md)
+- [x] [Feature Spec 07B1: Explicit Shared Guidance Attachment Record Contract](specifications/feature-07b1-explicit-shared-guidance-attachment-record-contract-v1_0.md)
+- [x] [Feature Spec 07B2: Planner Consumption Boundaries for Explicit Shared Guidance](specifications/feature-07b2-planner-consumption-boundaries-for-explicit-shared-guidance-v1_0.md)
+- [x] [Feature Spec 05A1: Reduced Progression Bundle Shape and Replay Contract](specifications/feature-05a1-reduced-progression-bundle-shape-and-replay-contract-v1_0.md)
+- [x] [Feature Spec 05A2: Retained Station Classification and Diagnostic Association Contract](specifications/feature-05a2-retained-station-classification-and-diagnostic-association-contract-v1_0.md)
+- [x] [Feature Spec 05B: Structural Preservation and Inference Refusal Posture](specifications/feature-05b-structural-preservation-and-inference-refusal-posture-v1_0.md)
 
 ## Tranche 06: Diagnostics and Explainability
 
