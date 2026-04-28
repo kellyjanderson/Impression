@@ -19,11 +19,11 @@ with the implementation.
 
 ## Tranche 02: Progression Core and Fit Outcomes
 
-- [ ] [Feature Spec 02B: Fit Residual, Acceptance, and Refusal Reporting](specifications/feature-02b-fit-residual-acceptance-and-refusal-reporting-v1_0.md)
-- [ ] [Feature Spec 08A: Path-Backed Progression Object and Provenance Contract](specifications/feature-08a-path-backed-progression-object-and-provenance-contract-v1_0.md)
-- [ ] [Feature Spec 08B1: Station Attachment to Path-Backed Progression](specifications/feature-08b1-station-attachment-to-path-backed-progression-v1_0.md)
-- [ ] [Feature Spec 08B2: Progression Transport Semantics Contract](specifications/feature-08b2-progression-transport-semantics-contract-v1_0.md)
-- [ ] [Feature Spec 08B3: Progression Twist and Scale Semantic Slots](specifications/feature-08b3-progression-twist-and-scale-semantic-slots-v1_0.md)
+- [x] [Feature Spec 02B: Fit Residual, Acceptance, and Refusal Reporting](specifications/feature-02b-fit-residual-acceptance-and-refusal-reporting-v1_0.md)
+- [x] [Feature Spec 08A: Path-Backed Progression Object and Provenance Contract](specifications/feature-08a-path-backed-progression-object-and-provenance-contract-v1_0.md)
+- [x] [Feature Spec 08B1: Station Attachment to Path-Backed Progression](specifications/feature-08b1-station-attachment-to-path-backed-progression-v1_0.md)
+- [x] [Feature Spec 08B2: Progression Transport Semantics Contract](specifications/feature-08b2-progression-transport-semantics-contract-v1_0.md)
+- [x] [Feature Spec 08B3: Progression Twist and Scale Semantic Slots](specifications/feature-08b3-progression-twist-and-scale-semantic-slots-v1_0.md)
 
 ## Tranche 03: Hidden Control Structure and Evidence Inputs
 
