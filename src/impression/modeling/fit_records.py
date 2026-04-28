@@ -6,6 +6,8 @@ from typing import Literal, Sequence
 import numpy as np
 
 ParameterizationMethod = Literal["uniform", "chord_length", "centripetal"]
+KnotCountStrategy = Literal["fixed"]
+KnotPlacementMethod = Literal["uniform_internal", "average_parameter"]
 
 
 def _require_ordered_points(points: Sequence[Sequence[float]]) -> np.ndarray:
@@ -40,6 +42,29 @@ def _normalize_method(value: str) -> ParameterizationMethod:
     method = str(value)
     if method not in allowed:
         raise ValueError("method must be one of: uniform, chord_length, centripetal.")
+    return method  # type: ignore[return-value]
+
+
+def _normalize_knot_count_strategy(value: str) -> KnotCountStrategy:
+    allowed: set[str] = {"fixed"}
+    strategy = str(value)
+    if strategy not in allowed:
+        raise ValueError("strategy must be one of: fixed.")
+    return strategy  # type: ignore[return-value]
+
+
+def _normalize_positive_int(value: int, *, label: str) -> int:
+    normalized = int(value)
+    if normalized < 1:
+        raise ValueError(f"{label} must be >= 1.")
+    return normalized
+
+
+def _normalize_knot_placement_method(value: str) -> KnotPlacementMethod:
+    allowed: set[str] = {"uniform_internal", "average_parameter"}
+    method = str(value)
+    if method not in allowed:
+        raise ValueError("placement_method must be one of: uniform_internal, average_parameter.")
     return method  # type: ignore[return-value]
 
 
@@ -82,4 +107,101 @@ class ParameterizationPolicyRecord:
         return cumulative / total
 
 
-__all__ = ["ParameterizationMethod", "ParameterizationPolicyRecord"]
+@dataclass(frozen=True)
+class KnotCountPolicyRecord:
+    strategy: KnotCountStrategy = "fixed"
+    control_point_count: int = 4
+
+    def __init__(
+        self,
+        strategy: KnotCountStrategy = "fixed",
+        control_point_count: int = 4,
+    ) -> None:
+        normalized_strategy = _normalize_knot_count_strategy(strategy)
+        normalized_count = _normalize_positive_int(
+            control_point_count,
+            label="control_point_count",
+        )
+        object.__setattr__(self, "strategy", normalized_strategy)
+        object.__setattr__(self, "control_point_count", normalized_count)
+
+    def resolve_control_point_count(self, *, sample_count: int, degree: int) -> int:
+        sample_total = _normalize_positive_int(sample_count, label="sample_count")
+        deg = _normalize_positive_int(degree, label="degree")
+        if self.control_point_count <= deg:
+            raise ValueError("control_point_count must be greater than degree.")
+        if self.control_point_count > sample_total:
+            raise ValueError("control_point_count must not exceed sample_count.")
+        return self.control_point_count
+
+
+@dataclass(frozen=True)
+class KnotPlacementPolicyRecord:
+    placement_method: KnotPlacementMethod = "uniform_internal"
+
+    def __init__(self, placement_method: KnotPlacementMethod = "uniform_internal") -> None:
+        object.__setattr__(
+            self,
+            "placement_method",
+            _normalize_knot_placement_method(placement_method),
+        )
+
+    def build_knot_vector(
+        self,
+        parameters: Sequence[float],
+        *,
+        control_point_count: int,
+        degree: int,
+    ) -> tuple[float, ...]:
+        params = np.asarray(parameters, dtype=float).reshape(-1)
+        if params.size < 2:
+            raise ValueError("parameters must contain at least two values.")
+        if not np.all(np.isfinite(params)):
+            raise ValueError("parameters must be finite.")
+        if np.any(np.diff(params) < 0):
+            raise ValueError("parameters must be nondecreasing.")
+
+        ctrl_count = _normalize_positive_int(control_point_count, label="control_point_count")
+        deg = _normalize_positive_int(degree, label="degree")
+        if ctrl_count <= deg:
+            raise ValueError("control_point_count must be greater than degree.")
+
+        expected_knots = ctrl_count + deg + 1
+        internal_count = expected_knots - 2 * (deg + 1)
+        start = float(params[0])
+        end = float(params[-1])
+        if end <= start:
+            raise ValueError("parameter domain must be increasing.")
+
+        internal: np.ndarray
+        if internal_count <= 0:
+            internal = np.zeros((0,), dtype=float)
+        elif self.placement_method == "uniform_internal":
+            internal = np.linspace(start, end, internal_count + 2, dtype=float)[1:-1]
+        else:
+            internal = np.array(
+                [
+                    float(np.mean(params[j + 1 : j + deg + 1]))
+                    for j in range(internal_count)
+                ],
+                dtype=float,
+            )
+
+        knots = np.concatenate(
+            [
+                np.full(deg + 1, start, dtype=float),
+                internal,
+                np.full(deg + 1, end, dtype=float),
+            ]
+        )
+        return tuple(float(v) for v in knots)
+
+
+__all__ = [
+    "KnotCountPolicyRecord",
+    "KnotCountStrategy",
+    "KnotPlacementMethod",
+    "KnotPlacementPolicyRecord",
+    "ParameterizationMethod",
+    "ParameterizationPolicyRecord",
+]
