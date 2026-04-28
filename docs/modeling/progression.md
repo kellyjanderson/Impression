@@ -388,6 +388,21 @@ fit_bundle = SharedInferenceDiagnosticBundle.from_station_fit(
 This keeps bundle population consistent across branches instead of letting each
 feature invent its own reporting shape.
 
+Developer-facing inspection can then consume the shared bundle through a
+structured inspection record:
+
+```python
+from impression.modeling import DeveloperInferenceInspection
+
+inspection = DeveloperInferenceInspection.from_bundle(bundle)
+```
+
+That keeps developer-facing explainability honest:
+
+- retained and dropped structure stay inspectable
+- drift stays visible for debugging and review
+- inferred provenance is visible instead of being silently treated as certainty
+
 Confidence and refusal are then handled by a separate posture layer:
 
 ```python
