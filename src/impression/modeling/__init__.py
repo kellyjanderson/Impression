@@ -70,8 +70,13 @@ from .control_stations import (
     HiddenControlStationSource,
 )
 from .inference_descriptors import (
+    CorrespondenceTrackDescriptor,
+    CurveIntentDescriptorFamilies,
     DenseLoftDescriptorBand,
     DenseLoftStationDescriptor,
+    LoopCurveIntentDescriptor,
+    SectionCurveIntentDescriptor,
+    build_curve_intent_descriptor_families,
     prepare_dense_loft_fit_descriptors,
 )
 from .bspline import BSpline2D, BSpline3D
@@ -248,6 +253,11 @@ __all__ = [
     "HiddenControlStationSource",
     "DenseLoftDescriptorBand",
     "DenseLoftStationDescriptor",
+    "SectionCurveIntentDescriptor",
+    "LoopCurveIntentDescriptor",
+    "CorrespondenceTrackDescriptor",
+    "CurveIntentDescriptorFamilies",
+    "build_curve_intent_descriptor_families",
     "prepare_dense_loft_fit_descriptors",
     "ProgressionStationAttachment",
     "ProgressionProvenanceKind",

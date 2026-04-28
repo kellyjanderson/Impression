@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from impression.modeling import Station, as_section, prepare_dense_loft_fit_descriptors
+from impression.modeling import (
+    Station,
+    as_section,
+    build_curve_intent_descriptor_families,
+    prepare_dense_loft_fit_descriptors,
+)
 from impression.modeling.drawing2d import make_circle, make_rect
 
 
@@ -65,3 +70,52 @@ def test_prepared_evidence_is_consumable_by_later_candidate_fit_branches() -> No
     band = prepare_dense_loft_fit_descriptors(_dense_fixture())
 
     assert all(descriptor.identity[0] == "dense_loft_station_descriptor" for descriptor in band.descriptors)
+
+
+def test_section_loop_and_correspondence_track_descriptor_records_emit_in_deterministic_order() -> None:
+    families = build_curve_intent_descriptor_families(
+        prepare_dense_loft_fit_descriptors(_dense_fixture())
+    )
+
+    assert [descriptor.station_index for descriptor in families.section_descriptors] == [0, 1, 2]
+    assert [descriptor.station_index for descriptor in families.loop_descriptors] == [0, 1, 2]
+    assert [descriptor.station_index for descriptor in families.correspondence_track_descriptors] == [0, 1, 2]
+
+
+def test_family_level_descriptor_fields_remain_inspectable() -> None:
+    families = build_curve_intent_descriptor_families(
+        prepare_dense_loft_fit_descriptors(_dense_fixture())
+    )
+
+    assert families.section_descriptors[1].progression_value == 0.5
+    assert families.loop_descriptors[1].loop_count == 1
+    assert families.correspondence_track_descriptors[1].correspondence_track_count == 1
+
+
+def test_descriptor_families_are_durable_enough_for_replay_and_comparison() -> None:
+    first = build_curve_intent_descriptor_families(
+        prepare_dense_loft_fit_descriptors(_dense_fixture())
+    )
+    second = build_curve_intent_descriptor_families(
+        prepare_dense_loft_fit_descriptors(_dense_fixture())
+    )
+
+    assert first == second
+
+
+def test_family_boundaries_remain_stable_for_identical_inputs() -> None:
+    families = build_curve_intent_descriptor_families(
+        prepare_dense_loft_fit_descriptors(_dense_fixture())
+    )
+
+    assert len(families.section_descriptors) == 3
+    assert len(families.loop_descriptors) == 3
+    assert len(families.correspondence_track_descriptors) == 3
+
+
+def test_descriptor_families_remain_reusable_by_later_evidence_assembly() -> None:
+    families = build_curve_intent_descriptor_families(
+        prepare_dense_loft_fit_descriptors(_dense_fixture())
+    )
+
+    assert tuple(descriptor.station_index for descriptor in families.section_descriptors) == (0, 1, 2)
