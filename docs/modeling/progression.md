@@ -185,3 +185,14 @@ The initial families are:
 - section descriptors
 - loop descriptors
 - correspondence-track descriptors
+
+Span-local curve-intent evidence can then be assembled from those families:
+
+```python
+from impression.modeling import assemble_span_local_curve_intent_evidence
+
+evidence = assemble_span_local_curve_intent_evidence(families)
+```
+
+That assembled evidence keeps ordering explicit and gives later candidate
+classification a stable downstream shape to consume.

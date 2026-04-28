@@ -76,6 +76,8 @@ from .inference_descriptors import (
     DenseLoftStationDescriptor,
     LoopCurveIntentDescriptor,
     SectionCurveIntentDescriptor,
+    SpanLocalCurveIntentEvidence,
+    assemble_span_local_curve_intent_evidence,
     build_curve_intent_descriptor_families,
     prepare_dense_loft_fit_descriptors,
 )
@@ -257,6 +259,8 @@ __all__ = [
     "LoopCurveIntentDescriptor",
     "CorrespondenceTrackDescriptor",
     "CurveIntentDescriptorFamilies",
+    "SpanLocalCurveIntentEvidence",
+    "assemble_span_local_curve_intent_evidence",
     "build_curve_intent_descriptor_families",
     "prepare_dense_loft_fit_descriptors",
     "ProgressionStationAttachment",

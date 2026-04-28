@@ -97,6 +97,15 @@ class CurveIntentDescriptorFamilies:
     correspondence_track_descriptors: tuple[CorrespondenceTrackDescriptor, ...]
 
 
+@dataclass(frozen=True)
+class SpanLocalCurveIntentEvidence:
+    span_start_station_index: int
+    span_end_station_index: int
+    section_region_counts: tuple[int, ...]
+    loop_counts: tuple[int, ...]
+    correspondence_track_counts: tuple[int, ...]
+
+
 def prepare_dense_loft_fit_descriptors(
     stations: list[_StationLike] | tuple[_StationLike, ...],
 ) -> DenseLoftDescriptorBand:
@@ -142,6 +151,35 @@ def build_curve_intent_descriptor_families(
     )
 
 
+def assemble_span_local_curve_intent_evidence(
+    descriptor_families: CurveIntentDescriptorFamilies,
+) -> tuple[SpanLocalCurveIntentEvidence, ...]:
+    if not descriptor_families.section_descriptors:
+        return ()
+    evidence: list[SpanLocalCurveIntentEvidence] = []
+    for left, right in zip(
+        descriptor_families.section_descriptors,
+        descriptor_families.section_descriptors[1:],
+        strict=False,
+    ):
+        start_index = left.station_index
+        end_index = right.station_index
+        loop_slice = descriptor_families.loop_descriptors[start_index : end_index + 1]
+        track_slice = descriptor_families.correspondence_track_descriptors[start_index : end_index + 1]
+        evidence.append(
+            SpanLocalCurveIntentEvidence(
+                span_start_station_index=start_index,
+                span_end_station_index=end_index,
+                section_region_counts=(left.region_count, right.region_count),
+                loop_counts=tuple(descriptor.loop_count for descriptor in loop_slice),
+                correspondence_track_counts=tuple(
+                    descriptor.correspondence_track_count for descriptor in track_slice
+                ),
+            )
+        )
+    return tuple(evidence)
+
+
 __all__ = [
     "CorrespondenceTrackDescriptor",
     "CurveIntentDescriptorFamilies",
@@ -149,6 +187,8 @@ __all__ = [
     "DenseLoftStationDescriptor",
     "LoopCurveIntentDescriptor",
     "SectionCurveIntentDescriptor",
+    "SpanLocalCurveIntentEvidence",
+    "assemble_span_local_curve_intent_evidence",
     "build_curve_intent_descriptor_families",
     "prepare_dense_loft_fit_descriptors",
 ]
