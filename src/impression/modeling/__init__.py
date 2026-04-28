@@ -52,6 +52,7 @@ from .loft import (
 from .path3d import Arc3D, Bezier3D, Line3D, Path3D
 from .progression import (
     PathBackedProgression,
+    ProgressionStationAttachment,
     ProgressionProvenanceKind,
     ProgressionProvenanceRecord,
 )
@@ -222,6 +223,7 @@ __all__ = [
     "Bezier3D",
     "Path3D",
     "PathBackedProgression",
+    "ProgressionStationAttachment",
     "ProgressionProvenanceKind",
     "ProgressionProvenanceRecord",
     "BSpline2D",
