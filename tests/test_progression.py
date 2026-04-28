@@ -4,9 +4,12 @@ from impression.modeling import (
     Line3D,
     Path3D,
     PathBackedProgression,
+    ProgressionScaleSemanticSlot,
+    ProgressionSemanticSlotStatus,
     ProgressionStationAttachment,
     ProgressionProvenanceRecord,
     ProgressionTransportPolicy,
+    ProgressionTwistSemanticSlot,
     Station,
     as_section,
 )
@@ -266,3 +269,58 @@ def test_transport_ownership_is_durable_enough_for_replay_and_diagnostics() -> N
     second = progression.loft_transport_contract
 
     assert first == second
+
+
+def test_progression_records_expose_explicit_twist_and_scale_semantic_slots() -> None:
+    progression = PathBackedProgression(
+        path=Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.0, 1.0)]),
+        twist_semantics=ProgressionTwistSemanticSlot(status="deferred"),
+        scale_semantics=ProgressionScaleSemanticSlot(status="deferred"),
+    )
+
+    assert progression.twist_semantics.status == "deferred"
+    assert progression.scale_semantics.status == "deferred"
+
+
+def test_semantic_slots_remain_inspectable_even_when_some_execution_remains_deferred() -> None:
+    progression = PathBackedProgression(
+        path=Path3D.from_points([(0.0, 0.0, 0.0), (0.2, 0.0, 1.0)]),
+    )
+
+    assert isinstance(progression.twist_semantics.status, str)
+    assert isinstance(progression.scale_semantics.status, str)
+
+
+def test_twist_semantics_are_not_hidden_inside_transport_policy() -> None:
+    progression = PathBackedProgression(
+        path=Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.0, 1.0)]),
+    )
+
+    assert progression.transport_policy.kind == "parallel_transport"
+    assert progression.twist_semantics.status == "deferred"
+    assert not hasattr(progression.transport_policy, "twist_semantics")
+
+
+def test_scale_semantics_are_not_hidden_inside_transport_policy() -> None:
+    progression = PathBackedProgression(
+        path=Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.0, 1.0)]),
+    )
+
+    assert progression.transport_policy.kind == "parallel_transport"
+    assert progression.scale_semantics.status == "deferred"
+    assert not hasattr(progression.transport_policy, "scale_semantics")
+
+
+def test_deferred_execution_does_not_erase_semantic_slot_ownership() -> None:
+    twist_slot = ProgressionTwistSemanticSlot(status="deferred")
+    scale_slot = ProgressionScaleSemanticSlot(status="deferred")
+    progression = PathBackedProgression(
+        path=Path3D.from_points([(0.0, 0.0, 0.0), (0.3, 0.1, 1.0)]),
+        twist_semantics=twist_slot,
+        scale_semantics=scale_slot,
+    )
+
+    assert progression.twist_semantics == twist_slot
+    assert progression.scale_semantics == scale_slot
+    assert progression.twist_semantics.status == "deferred"
+    assert progression.scale_semantics.status == "deferred"

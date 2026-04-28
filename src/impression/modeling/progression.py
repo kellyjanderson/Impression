@@ -9,6 +9,7 @@ from .path3d import Arc3D, Bezier3D, Line3D, Path3D
 
 ProgressionProvenanceKind = Literal["explicit", "inferred"]
 ProgressionTransportKind = Literal["parallel_transport"]
+ProgressionSemanticSlotStatus = Literal["deferred"]
 
 
 class _StationLike(Protocol):
@@ -39,6 +40,14 @@ def _normalize_progression_transport_kind(value: str) -> ProgressionTransportKin
     if kind not in allowed:
         raise ValueError("kind must be one of: parallel_transport.")
     return kind  # type: ignore[return-value]
+
+
+def _normalize_progression_semantic_slot_status(value: str) -> ProgressionSemanticSlotStatus:
+    allowed: set[str] = {"deferred"}
+    status = str(value)
+    if status not in allowed:
+        raise ValueError("status must be one of: deferred.")
+    return status  # type: ignore[return-value]
 
 
 def _segment_signature(segment: Line3D | Arc3D | Bezier3D) -> tuple[object, ...]:
@@ -100,12 +109,30 @@ class ProgressionTransportContract:
 
 
 @dataclass(frozen=True)
+class ProgressionTwistSemanticSlot:
+    status: ProgressionSemanticSlotStatus = "deferred"
+
+    def __init__(self, status: ProgressionSemanticSlotStatus = "deferred") -> None:
+        object.__setattr__(self, "status", _normalize_progression_semantic_slot_status(status))
+
+
+@dataclass(frozen=True)
+class ProgressionScaleSemanticSlot:
+    status: ProgressionSemanticSlotStatus = "deferred"
+
+    def __init__(self, status: ProgressionSemanticSlotStatus = "deferred") -> None:
+        object.__setattr__(self, "status", _normalize_progression_semantic_slot_status(status))
+
+
+@dataclass(frozen=True)
 class PathBackedProgression:
     path: Path3D
     domain_start: float = 0.0
     domain_end: float = 1.0
     provenance: ProgressionProvenanceRecord = ProgressionProvenanceRecord()
     transport_policy: ProgressionTransportPolicy = ProgressionTransportPolicy()
+    twist_semantics: ProgressionTwistSemanticSlot = ProgressionTwistSemanticSlot()
+    scale_semantics: ProgressionScaleSemanticSlot = ProgressionScaleSemanticSlot()
 
     def __init__(
         self,
@@ -115,6 +142,8 @@ class PathBackedProgression:
         domain_end: float = 1.0,
         provenance: ProgressionProvenanceRecord | None = None,
         transport_policy: ProgressionTransportPolicy | None = None,
+        twist_semantics: ProgressionTwistSemanticSlot | None = None,
+        scale_semantics: ProgressionScaleSemanticSlot | None = None,
     ) -> None:
         if not isinstance(path, Path3D):
             raise ValueError("path must be a Path3D.")
@@ -138,6 +167,16 @@ class PathBackedProgression:
             self,
             "transport_policy",
             transport_policy if transport_policy is not None else ProgressionTransportPolicy(),
+        )
+        object.__setattr__(
+            self,
+            "twist_semantics",
+            twist_semantics if twist_semantics is not None else ProgressionTwistSemanticSlot(),
+        )
+        object.__setattr__(
+            self,
+            "scale_semantics",
+            scale_semantics if scale_semantics is not None else ProgressionScaleSemanticSlot(),
         )
 
     @property
@@ -237,7 +276,10 @@ __all__ = [
     "ProgressionStationAttachment",
     "ProgressionProvenanceKind",
     "ProgressionProvenanceRecord",
+    "ProgressionScaleSemanticSlot",
+    "ProgressionSemanticSlotStatus",
     "ProgressionTransportContract",
     "ProgressionTransportKind",
     "ProgressionTransportPolicy",
+    "ProgressionTwistSemanticSlot",
 ]

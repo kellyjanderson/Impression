@@ -55,9 +55,12 @@ from .progression import (
     ProgressionStationAttachment,
     ProgressionProvenanceKind,
     ProgressionProvenanceRecord,
+    ProgressionScaleSemanticSlot,
+    ProgressionSemanticSlotStatus,
     ProgressionTransportContract,
     ProgressionTransportKind,
     ProgressionTransportPolicy,
+    ProgressionTwistSemanticSlot,
 )
 from .bspline import BSpline2D, BSpline3D
 from .fit_records import (
@@ -229,9 +232,12 @@ __all__ = [
     "ProgressionStationAttachment",
     "ProgressionProvenanceKind",
     "ProgressionProvenanceRecord",
+    "ProgressionScaleSemanticSlot",
+    "ProgressionSemanticSlotStatus",
     "ProgressionTransportContract",
     "ProgressionTransportKind",
     "ProgressionTransportPolicy",
+    "ProgressionTwistSemanticSlot",
     "BSpline2D",
     "BSpline3D",
     "FitApproximationPosture",

@@ -90,3 +90,27 @@ In this milestone:
 - transport ownership is explicit on progression
 - loft-facing consumption is represented by an inspectable contract object
 - transport policy stays separate from later twist and scale semantic slots
+
+## Twist and Scale Slots
+
+Twist and scale semantics now have explicit owned slots on progression, even
+though first-milestone execution remains deferred:
+
+```python
+from impression.modeling import (
+    ProgressionScaleSemanticSlot,
+    ProgressionTwistSemanticSlot,
+)
+
+progression = PathBackedProgression(
+    path=path,
+    twist_semantics=ProgressionTwistSemanticSlot(status="deferred"),
+    scale_semantics=ProgressionScaleSemanticSlot(status="deferred"),
+)
+```
+
+That keeps the contract honest:
+
+- twist semantics are not hidden inside transport policy
+- scale semantics are not hidden inside transport policy
+- deferred execution does not erase the owned semantic slots
