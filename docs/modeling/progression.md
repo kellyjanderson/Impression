@@ -314,6 +314,26 @@ That bundle contract keeps:
 - bundle-local provenance explicit
 - bundle shape stable for identical inputs
 
+Retained station classes and diagnostic references can then be carried
+explicitly beside that bundle:
+
+```python
+from impression.modeling import RetainedStationRecord
+
+retained = RetainedStationRecord(
+    station_id="topo-0",
+    kind="topology",
+    progression_value=0.0,
+    diagnostic_references=("diag-0",),
+)
+```
+
+That result layer keeps:
+
+- topology and hidden-control station classes distinct
+- diagnostic references inspectable
+- retained structure explicit after reduction
+
 Confidence and refusal are then handled by a separate posture layer:
 
 ```python

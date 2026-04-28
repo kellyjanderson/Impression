@@ -1,8 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
-from .progression import PathBackedProgression
+from .control_stations import HiddenControlStationRecord
+from .progression import PathBackedProgression, ProgressionStationAttachment
+
+RetainedStationKind = Literal["topology", "hidden_control"]
+
+
+def _normalize_retained_station_kind(value: str) -> RetainedStationKind:
+    allowed: set[str] = {"topology", "hidden_control"}
+    kind = str(value)
+    if kind not in allowed:
+        raise ValueError("kind must be one of: topology, hidden_control.")
+    return kind  # type: ignore[return-value]
 
 
 @dataclass(frozen=True)
@@ -88,6 +100,74 @@ class ReducedProgressionBundle:
         )
 
 
+@dataclass(frozen=True)
+class RetainedStationRecord:
+    station_id: str
+    kind: RetainedStationKind
+    progression_value: float
+    diagnostic_references: tuple[str, ...] = ()
+
+    def __init__(
+        self,
+        *,
+        station_id: str,
+        kind: RetainedStationKind,
+        progression_value: float,
+        diagnostic_references: tuple[str, ...] | list[str] = (),
+    ) -> None:
+        normalized_station_id = str(station_id).strip()
+        normalized_diagnostics = tuple(str(value).strip() for value in diagnostic_references)
+        if not normalized_station_id:
+            raise ValueError("station_id must be non-empty.")
+        if any(not value for value in normalized_diagnostics):
+            raise ValueError("diagnostic_references must be non-empty strings.")
+        object.__setattr__(self, "station_id", normalized_station_id)
+        object.__setattr__(self, "kind", _normalize_retained_station_kind(kind))
+        object.__setattr__(self, "progression_value", float(progression_value))
+        object.__setattr__(self, "diagnostic_references", normalized_diagnostics)
+
+    @classmethod
+    def from_attachment(
+        cls,
+        *,
+        station_id: str,
+        attachment: ProgressionStationAttachment,
+        diagnostic_references: tuple[str, ...] | list[str] = (),
+    ) -> "RetainedStationRecord":
+        return cls(
+            station_id=station_id,
+            kind="topology",
+            progression_value=attachment.progression_value,
+            diagnostic_references=diagnostic_references,
+        )
+
+    @classmethod
+    def from_hidden_control(
+        cls,
+        *,
+        record: HiddenControlStationRecord,
+        progression_value: float,
+        diagnostic_references: tuple[str, ...] | list[str] = (),
+    ) -> "RetainedStationRecord":
+        return cls(
+            station_id=record.station_id,
+            kind="hidden_control",
+            progression_value=progression_value,
+            diagnostic_references=diagnostic_references,
+        )
+
+    @property
+    def identity(self) -> tuple[object, ...]:
+        return (
+            "retained_station_record",
+            self.station_id,
+            self.kind,
+            self.progression_value,
+        )
+
+
 __all__ = [
     "ReducedProgressionBundle",
+    "RetainedStationKind",
+    "RetainedStationRecord",
 ]

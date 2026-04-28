@@ -71,6 +71,8 @@ from .control_stations import (
 )
 from .control_station_inference import (
     ReducedProgressionBundle,
+    RetainedStationKind,
+    RetainedStationRecord,
 )
 from .inference_descriptors import (
     CorrespondenceTrackDescriptor,
@@ -282,6 +284,8 @@ __all__ = [
     "HiddenControlStationPlannerStage",
     "HiddenControlStationSource",
     "ReducedProgressionBundle",
+    "RetainedStationKind",
+    "RetainedStationRecord",
     "DenseLoftDescriptorBand",
     "DenseLoftStationDescriptor",
     "SectionCurveIntentDescriptor",
