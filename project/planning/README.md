@@ -4,6 +4,28 @@ This document tracks the near-term roadmap for Impression’s modeling toolkit. 
 
 Current execution order is captured in [`feature-pipeline.md`](feature-pipeline.md) and should be reviewed each planning cycle.
 
+Version-specific planning containers may also live under:
+
+- [`0.1.0.a/`](0.1.0.a/README.md)
+
+Those folders are used when the project is setting up an isolated planning area
+that will later hold version-scoped architecture and specification work.
+
+When a planned release is actively underway, the intended repository workflow is:
+
+- merge the release planning branch into `main`
+- create a release working branch from updated `main`
+- merge feature branches into the working branch through pull requests
+- merge the working branch back into `main` when that planned release is ready
+
+Recommended working-branch naming pattern:
+
+- `working/<release>`
+
+Example:
+
+- `working/0.1.0.a`
+
 Project value baseline: [`Project DNA`](../project-dna.md). Roadmap execution should prioritize
 solutions that are both technically rigorous and clearly compelling in real-world use.
 
