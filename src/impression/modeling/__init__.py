@@ -81,6 +81,11 @@ from .inference_descriptors import (
     build_curve_intent_descriptor_families,
     prepare_dense_loft_fit_descriptors,
 )
+from .inference_candidates import (
+    StationDerivedCurveFitCandidate,
+    compare_station_derived_curve_fit_candidates,
+    generate_station_derived_curve_fit_candidates,
+)
 from .bspline import BSpline2D, BSpline3D
 from .fit_records import (
     FitApproximationPosture,
@@ -263,6 +268,9 @@ __all__ = [
     "assemble_span_local_curve_intent_evidence",
     "build_curve_intent_descriptor_families",
     "prepare_dense_loft_fit_descriptors",
+    "StationDerivedCurveFitCandidate",
+    "generate_station_derived_curve_fit_candidates",
+    "compare_station_derived_curve_fit_candidates",
     "ProgressionStationAttachment",
     "ProgressionProvenanceKind",
     "ProgressionProvenanceRecord",
