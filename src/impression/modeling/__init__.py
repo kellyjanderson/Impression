@@ -63,6 +63,8 @@ from .progression import (
     ProgressionTwistSemanticSlot,
 )
 from .control_stations import (
+    HiddenControlStationPlannerConsumption,
+    HiddenControlStationPlannerStage,
     HiddenControlStationProvenanceRecord,
     HiddenControlStationRecord,
     HiddenControlStationSource,
@@ -236,6 +238,8 @@ __all__ = [
     "PathBackedProgression",
     "HiddenControlStationProvenanceRecord",
     "HiddenControlStationRecord",
+    "HiddenControlStationPlannerConsumption",
+    "HiddenControlStationPlannerStage",
     "HiddenControlStationSource",
     "ProgressionStationAttachment",
     "ProgressionProvenanceKind",

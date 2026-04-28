@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from impression.modeling import (
+    HiddenControlStationPlannerConsumption,
     HiddenControlStationProvenanceRecord,
     HiddenControlStationRecord,
     Station,
@@ -92,3 +93,68 @@ def test_hidden_control_stations_do_not_collapse_into_stealth_public_authored_in
 
     assert not hasattr(record, "section")
     assert record.identity[0] == "hidden_control_station"
+
+
+def test_planner_stages_that_consume_hidden_control_stations_are_explicit_and_inspectable() -> None:
+    consumption = HiddenControlStationPlannerConsumption(
+        planner_stage="fit_guidance",
+        topology_station_ids=("topo-0", "topo-1"),
+        hidden_control_station_ids=("control-0",),
+    )
+
+    assert consumption.planner_stage == "fit_guidance"
+    assert consumption.hidden_control_station_ids == ("control-0",)
+
+
+def test_topology_owned_truth_remains_visible_alongside_hidden_control_consumption() -> None:
+    consumption = HiddenControlStationPlannerConsumption(
+        planner_stage="trajectory_guidance",
+        topology_station_ids=("topo-0", "topo-1"),
+        hidden_control_station_ids=("control-1", "control-2"),
+    )
+
+    assert consumption.topology_station_ids == ("topo-0", "topo-1")
+    assert consumption.hidden_control_station_ids == ("control-1", "control-2")
+
+
+def test_hidden_control_stations_do_not_override_topology_truth() -> None:
+    try:
+        HiddenControlStationPlannerConsumption(
+            planner_stage="fit_guidance",
+            topology_station_ids=("shared-id",),
+            hidden_control_station_ids=("shared-id",),
+        )
+    except ValueError as exc:
+        assert "must not override topology station identity" in str(exc)
+    else:
+        raise AssertionError("Expected overlapping topology/control identities to fail.")
+
+
+def test_planner_consumption_boundaries_remain_explicit_and_deterministic() -> None:
+    first = HiddenControlStationPlannerConsumption(
+        planner_stage="fit_guidance",
+        topology_station_ids=("topo-0", "topo-1"),
+        hidden_control_station_ids=("control-0",),
+    )
+    second = HiddenControlStationPlannerConsumption(
+        planner_stage="fit_guidance",
+        topology_station_ids=("topo-0", "topo-1"),
+        hidden_control_station_ids=("control-0",),
+    )
+
+    assert first == second
+    assert first.identity == second.identity
+
+
+def test_public_api_posture_remains_non_user_facing() -> None:
+    try:
+        HiddenControlStationPlannerConsumption(
+            planner_stage="fit_guidance",
+            topology_station_ids=("topo-0",),
+            hidden_control_station_ids=("control-0",),
+            public_authored_inputs_exposed=True,
+        )
+    except ValueError as exc:
+        assert "must remain non-user-facing" in str(exc)
+    else:
+        raise AssertionError("Expected public exposure flag to fail.")
