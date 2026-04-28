@@ -69,6 +69,163 @@ def _validate_shape(
         )
 
 
+def _parameter_range(degree: int, knots: tuple[float, ...]) -> tuple[float, float]:
+    start = float(knots[degree])
+    end = float(knots[-degree - 1])
+    if not np.isfinite(start) or not np.isfinite(end) or end <= start:
+        raise ValueError("parameter range must be finite and increasing.")
+    return start, end
+
+
+def _normalize_parameter(
+    value: float,
+    *,
+    degree: int,
+    knots: tuple[float, ...],
+    closure: ClosurePolicy,
+) -> float:
+    start, end = _parameter_range(degree, knots)
+    t = float(value)
+    if not np.isfinite(t):
+        raise ValueError("parameter value must be finite.")
+    if closure == "periodic":
+        span = end - start
+        if span <= 0:
+            raise ValueError("periodic curves require a positive parameter span.")
+        return start + ((t - start) % span)
+    if closure == "closed" and np.isclose(t, end):
+        return start
+    if t <= start:
+        return start
+    if t >= end:
+        return end
+    return t
+
+
+def _find_span(
+    *,
+    degree: int,
+    knots: tuple[float, ...],
+    control_point_count: int,
+    parameter: float,
+) -> int:
+    n = control_point_count - 1
+    if parameter >= knots[n + 1]:
+        return n
+    if parameter <= knots[degree]:
+        return degree
+    low = degree
+    high = n + 1
+    mid = (low + high) // 2
+    while parameter < knots[mid] or parameter >= knots[mid + 1]:
+        if parameter < knots[mid]:
+            high = mid
+        else:
+            low = mid
+        mid = (low + high) // 2
+    return mid
+
+
+def _basis_functions(span: int, parameter: float, degree: int, knots: tuple[float, ...]) -> np.ndarray:
+    left = np.zeros(degree + 1, dtype=float)
+    right = np.zeros(degree + 1, dtype=float)
+    basis = np.zeros(degree + 1, dtype=float)
+    basis[0] = 1.0
+    for j in range(1, degree + 1):
+        left[j] = parameter - knots[span + 1 - j]
+        right[j] = knots[span + j] - parameter
+        saved = 0.0
+        for r in range(j):
+            denom = right[r + 1] + left[j - r]
+            term = 0.0 if denom == 0.0 else basis[r] / denom
+            basis[r] = saved + right[r + 1] * term
+            saved = left[j - r] * term
+        basis[j] = saved
+    return basis
+
+
+def _evaluate_point(
+    *,
+    control_points: tuple[np.ndarray, ...],
+    degree: int,
+    knots: tuple[float, ...],
+    parameter: float,
+) -> np.ndarray:
+    span = _find_span(
+        degree=degree,
+        knots=knots,
+        control_point_count=len(control_points),
+        parameter=parameter,
+    )
+    basis = _basis_functions(span, parameter, degree, knots)
+    point = np.zeros_like(control_points[0], dtype=float)
+    for j in range(degree + 1):
+        point = point + basis[j] * control_points[span - degree + j]
+    return point
+
+
+def _derivative_curve(
+    *,
+    control_points: tuple[np.ndarray, ...],
+    degree: int,
+    knots: tuple[float, ...],
+) -> tuple[tuple[np.ndarray, ...], int, tuple[float, ...]]:
+    derived: list[np.ndarray] = []
+    for i in range(len(control_points) - 1):
+        denom = knots[i + degree + 1] - knots[i + 1]
+        if denom == 0.0:
+            derived.append(np.zeros_like(control_points[i], dtype=float))
+        else:
+            derived.append((degree / denom) * (control_points[i + 1] - control_points[i]))
+    return tuple(derived), degree - 1, knots[1:-1]
+
+
+def _evaluate_derivative(
+    *,
+    control_points: tuple[np.ndarray, ...],
+    degree: int,
+    knots: tuple[float, ...],
+    parameter: float,
+) -> np.ndarray:
+    if degree == 1:
+        derived_points, derived_degree, derived_knots = _derivative_curve(
+            control_points=control_points,
+            degree=degree,
+            knots=knots,
+        )
+        return _evaluate_point(
+            control_points=derived_points,
+            degree=derived_degree,
+            knots=derived_knots,
+            parameter=parameter,
+        )
+    derived_points, derived_degree, derived_knots = _derivative_curve(
+        control_points=control_points,
+        degree=degree,
+        knots=knots,
+    )
+    return _evaluate_point(
+        control_points=derived_points,
+        degree=derived_degree,
+        knots=derived_knots,
+        parameter=parameter,
+    )
+
+
+def _sample_parameters(
+    *,
+    degree: int,
+    knots: tuple[float, ...],
+    closure: ClosurePolicy,
+    n_samples: int,
+) -> np.ndarray:
+    if n_samples < 2:
+        raise ValueError("sample requires at least two points.")
+    start, end = _parameter_range(degree, knots)
+    endpoint = closure == "open"
+    return np.linspace(start, end, n_samples, endpoint=endpoint, dtype=float)
+
+
 @dataclass(frozen=True)
 class BSpline2D:
     control_points: tuple[np.ndarray, ...]
@@ -92,6 +249,59 @@ class BSpline2D:
         object.__setattr__(self, "degree", deg)
         object.__setattr__(self, "knots", knot_vector)
         object.__setattr__(self, "closure", close)
+
+    @property
+    def parameter_range(self) -> tuple[float, float]:
+        return _parameter_range(self.degree, self.knots)
+
+    def evaluate(self, parameter: float) -> np.ndarray:
+        t = _normalize_parameter(
+            parameter,
+            degree=self.degree,
+            knots=self.knots,
+            closure=self.closure,
+        )
+        if self.closure == "open" and np.isclose(t, self.parameter_range[1]):
+            return np.array(self.control_points[-1], dtype=float)
+        return _evaluate_point(
+            control_points=self.control_points,
+            degree=self.degree,
+            knots=self.knots,
+            parameter=t,
+        )
+
+    def derivative(self, parameter: float) -> np.ndarray:
+        t = _normalize_parameter(
+            parameter,
+            degree=self.degree,
+            knots=self.knots,
+            closure=self.closure,
+        )
+        return _evaluate_derivative(
+            control_points=self.control_points,
+            degree=self.degree,
+            knots=self.knots,
+            parameter=t,
+        )
+
+    def tangent(self, parameter: float) -> np.ndarray:
+        derivative = self.derivative(parameter)
+        norm = float(np.linalg.norm(derivative))
+        if norm == 0.0:
+            raise ValueError("tangent is undefined when derivative magnitude is zero.")
+        return derivative / norm
+
+    def sample(self, n_samples: int = 200) -> np.ndarray:
+        params = _sample_parameters(
+            degree=self.degree,
+            knots=self.knots,
+            closure=self.closure,
+            n_samples=n_samples,
+        )
+        points = np.vstack([self.evaluate(float(t)) for t in params])
+        if self.closure != "open":
+            points = np.vstack([points, points[0]])
+        return points
 
 
 @dataclass(frozen=True)
@@ -117,6 +327,59 @@ class BSpline3D:
         object.__setattr__(self, "degree", deg)
         object.__setattr__(self, "knots", knot_vector)
         object.__setattr__(self, "closure", close)
+
+    @property
+    def parameter_range(self) -> tuple[float, float]:
+        return _parameter_range(self.degree, self.knots)
+
+    def evaluate(self, parameter: float) -> np.ndarray:
+        t = _normalize_parameter(
+            parameter,
+            degree=self.degree,
+            knots=self.knots,
+            closure=self.closure,
+        )
+        if self.closure == "open" and np.isclose(t, self.parameter_range[1]):
+            return np.array(self.control_points[-1], dtype=float)
+        return _evaluate_point(
+            control_points=self.control_points,
+            degree=self.degree,
+            knots=self.knots,
+            parameter=t,
+        )
+
+    def derivative(self, parameter: float) -> np.ndarray:
+        t = _normalize_parameter(
+            parameter,
+            degree=self.degree,
+            knots=self.knots,
+            closure=self.closure,
+        )
+        return _evaluate_derivative(
+            control_points=self.control_points,
+            degree=self.degree,
+            knots=self.knots,
+            parameter=t,
+        )
+
+    def tangent(self, parameter: float) -> np.ndarray:
+        derivative = self.derivative(parameter)
+        norm = float(np.linalg.norm(derivative))
+        if norm == 0.0:
+            raise ValueError("tangent is undefined when derivative magnitude is zero.")
+        return derivative / norm
+
+    def sample(self, n_samples: int = 200) -> np.ndarray:
+        params = _sample_parameters(
+            degree=self.degree,
+            knots=self.knots,
+            closure=self.closure,
+            n_samples=n_samples,
+        )
+        points = np.vstack([self.evaluate(float(t)) for t in params])
+        if self.closure != "open":
+            points = np.vstack([points, points[0]])
+        return points
 
 
 __all__ = ["BSpline2D", "BSpline3D", "ClosurePolicy"]
