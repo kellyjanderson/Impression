@@ -115,3 +115,26 @@ Initial knot-policy scope:
 - fixed control-point count selection
 - uniform internal knot placement
 - average-parameter knot placement
+
+Fit configuration is bundled explicitly too:
+
+```python
+from impression.modeling import (
+    FitConfigurationRecord,
+    KnotCountPolicyRecord,
+    KnotPlacementPolicyRecord,
+    ParameterizationPolicyRecord,
+)
+
+fit_config = FitConfigurationRecord(
+    parameterization_policy=ParameterizationPolicyRecord(method="chord_length"),
+    knot_count_policy=KnotCountPolicyRecord(strategy="fixed", control_point_count=6),
+    knot_placement_policy=KnotPlacementPolicyRecord(
+        placement_method="average_parameter"
+    ),
+)
+```
+
+`FitConfigurationRecord` gives later inference and diagnostics branches one
+durable object and one stable identity to point back to when they need to say
+exactly which fit-policy bundle produced a candidate curve.

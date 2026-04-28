@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from impression.modeling import (
+    FitConfigurationRecord,
     KnotCountPolicyRecord,
     KnotPlacementPolicyRecord,
     ParameterizationPolicyRecord,
@@ -90,3 +91,84 @@ def test_knot_placement_policy_is_durable_and_replayable():
 
     assert first == second
     assert first == (0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0)
+
+
+def test_fit_configuration_record_references_parameterization_and_knot_policies():
+    parameterization = ParameterizationPolicyRecord(method="centripetal")
+    knot_count = KnotCountPolicyRecord(strategy="fixed", control_point_count=6)
+    knot_placement = KnotPlacementPolicyRecord(placement_method="average_parameter")
+
+    config = FitConfigurationRecord(
+        parameterization_policy=parameterization,
+        knot_count_policy=knot_count,
+        knot_placement_policy=knot_placement,
+    )
+
+    assert config.parameterization_policy is parameterization
+    assert config.knot_count_policy is knot_count
+    assert config.knot_placement_policy is knot_placement
+
+
+def test_fit_configuration_identity_is_inspectable_from_later_fit_results():
+    config = FitConfigurationRecord(
+        parameterization_policy=ParameterizationPolicyRecord(method="uniform"),
+        knot_count_policy=KnotCountPolicyRecord(strategy="fixed", control_point_count=5),
+        knot_placement_policy=KnotPlacementPolicyRecord(
+            placement_method="uniform_internal"
+        ),
+    )
+    later_fit_result = {"fit_configuration_identity": config.identity}
+
+    assert later_fit_result["fit_configuration_identity"] == config.identity
+
+
+def test_fit_configuration_is_durable_and_replayable():
+    config = FitConfigurationRecord(
+        parameterization_policy=ParameterizationPolicyRecord(
+            method="chord_length",
+            domain_start=2.0,
+            domain_end=3.0,
+        ),
+        knot_count_policy=KnotCountPolicyRecord(strategy="fixed", control_point_count=7),
+        knot_placement_policy=KnotPlacementPolicyRecord(
+            placement_method="average_parameter"
+        ),
+    )
+
+    first = config.identity
+    second = config.identity
+
+    assert first == second
+
+
+def test_later_inference_branches_can_link_to_the_exact_fit_configuration_used():
+    config = FitConfigurationRecord(
+        parameterization_policy=ParameterizationPolicyRecord(method="centripetal"),
+        knot_count_policy=KnotCountPolicyRecord(strategy="fixed", control_point_count=4),
+        knot_placement_policy=KnotPlacementPolicyRecord(
+            placement_method="uniform_internal"
+        ),
+    )
+    inference_branch_record = {
+        "fit_configuration": config,
+        "fit_configuration_identity": config.identity,
+    }
+
+    assert inference_branch_record["fit_configuration"] == config
+    assert inference_branch_record["fit_configuration_identity"] == config.identity
+
+
+def test_fit_configuration_comparison_remains_stable_across_identical_inputs():
+    kwargs = dict(
+        parameterization_policy=ParameterizationPolicyRecord(method="uniform"),
+        knot_count_policy=KnotCountPolicyRecord(strategy="fixed", control_point_count=5),
+        knot_placement_policy=KnotPlacementPolicyRecord(
+            placement_method="average_parameter"
+        ),
+    )
+
+    first = FitConfigurationRecord(**kwargs)
+    second = FitConfigurationRecord(**kwargs)
+
+    assert first == second
+    assert first.identity == second.identity
