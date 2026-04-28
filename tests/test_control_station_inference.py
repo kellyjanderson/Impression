@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from impression.modeling import (
+    ControlStationInferenceAssessment,
     HiddenControlStationProvenanceRecord,
     HiddenControlStationRecord,
     Path3D,
@@ -9,6 +10,7 @@ from impression.modeling import (
     ReducedProgressionBundle,
     RetainedStationRecord,
     Station,
+    assess_control_station_inference,
     as_section,
 )
 from impression.modeling.drawing2d import make_rect
@@ -171,3 +173,116 @@ def test_retained_structure_remains_inspectable_after_reduction() -> None:
 
     assert record.identity[0] == "retained_station_record"
     assert record.progression_value == 0.25
+
+
+def test_representative_reductions_emit_structural_preservation_reports() -> None:
+    bundle = ReducedProgressionBundle.from_progression(
+        bundle_id="reduction-5",
+        progression=_progression(),
+        retained_progression_values=(0.0, 0.5, 1.0),
+        hidden_control_station_ids=("control-6",),
+    )
+    retained = (
+        RetainedStationRecord(
+            station_id="topo-0",
+            kind="topology",
+            progression_value=0.0,
+            diagnostic_references=("diag-topo",),
+        ),
+        RetainedStationRecord(
+            station_id="control-6",
+            kind="hidden_control",
+            progression_value=0.5,
+            diagnostic_references=("diag-control",),
+        ),
+    )
+
+    assessment = assess_control_station_inference(
+        bundle=bundle,
+        retained_station_records=retained,
+        required_topology_station_ids=("topo-0",),
+    )
+
+    assert isinstance(assessment, ControlStationInferenceAssessment)
+    assert assessment.structural_preservation.retained_topology_station_ids == ("topo-0",)
+
+
+def test_unsafe_reductions_emit_explicit_refusal_outcomes() -> None:
+    bundle = ReducedProgressionBundle.from_progression(
+        bundle_id="reduction-6",
+        progression=_progression(),
+        retained_progression_values=(0.0, 1.0),
+        hidden_control_station_ids=("control-7",),
+    )
+
+    assessment = assess_control_station_inference(
+        bundle=bundle,
+        retained_station_records=(),
+        required_topology_station_ids=("topo-0",),
+    )
+
+    assert assessment.posture == "refused"
+    assert assessment.bundle is None
+
+
+def test_topology_critical_structure_is_not_dropped_silently() -> None:
+    bundle = ReducedProgressionBundle.from_progression(
+        bundle_id="reduction-7",
+        progression=_progression(),
+        retained_progression_values=(0.0, 1.0),
+        hidden_control_station_ids=("control-8",),
+    )
+
+    assessment = assess_control_station_inference(
+        bundle=bundle,
+        retained_station_records=(),
+        required_topology_station_ids=("topo-0", "topo-1"),
+    )
+
+    assert assessment.structural_preservation.dropped_topology_station_ids == ("topo-0", "topo-1")
+
+
+def test_refusal_causes_remain_durable_and_inspectable() -> None:
+    bundle = ReducedProgressionBundle.from_progression(
+        bundle_id="reduction-8",
+        progression=_progression(),
+        retained_progression_values=(0.0, 1.0),
+        hidden_control_station_ids=("control-9",),
+    )
+
+    assessment = assess_control_station_inference(
+        bundle=bundle,
+        retained_station_records=(),
+        required_topology_station_ids=("topo-2",),
+    )
+
+    assert assessment.reason == "missing_topology_critical_structure"
+
+
+def test_structural_preservation_and_refusal_remain_first_class_valid_outcomes() -> None:
+    accepted_bundle = ReducedProgressionBundle.from_progression(
+        bundle_id="reduction-9",
+        progression=_progression(),
+        retained_progression_values=(0.0, 1.0),
+        hidden_control_station_ids=("control-10",),
+    )
+    accepted = assess_control_station_inference(
+        bundle=accepted_bundle,
+        retained_station_records=(
+            RetainedStationRecord(
+                station_id="topo-4",
+                kind="topology",
+                progression_value=0.0,
+                diagnostic_references=("diag-ok",),
+            ),
+        ),
+        required_topology_station_ids=("topo-4",),
+    )
+    refused = assess_control_station_inference(
+        bundle=accepted_bundle,
+        retained_station_records=(),
+        required_topology_station_ids=("topo-4",),
+    )
+
+    assert accepted.posture == "accepted"
+    assert refused.posture == "refused"

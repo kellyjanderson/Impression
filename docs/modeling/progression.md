@@ -334,6 +334,24 @@ That result layer keeps:
 - diagnostic references inspectable
 - retained structure explicit after reduction
 
+Structural preservation and refusal are then assessed explicitly:
+
+```python
+from impression.modeling import assess_control_station_inference
+
+assessment = assess_control_station_inference(
+    bundle=bundle,
+    retained_station_records=(retained,),
+    required_topology_station_ids=("topo-0",),
+)
+```
+
+That assessment keeps:
+
+- topology-critical drops explicit
+- refusal a first-class valid outcome
+- structural preservation inspectable even when a reduction is refused
+
 Confidence and refusal are then handled by a separate posture layer:
 
 ```python

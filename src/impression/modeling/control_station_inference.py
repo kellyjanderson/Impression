@@ -7,6 +7,7 @@ from .control_stations import HiddenControlStationRecord
 from .progression import PathBackedProgression, ProgressionStationAttachment
 
 RetainedStationKind = Literal["topology", "hidden_control"]
+ControlStationInferencePosture = Literal["accepted", "refused"]
 
 
 def _normalize_retained_station_kind(value: str) -> RetainedStationKind:
@@ -15,6 +16,14 @@ def _normalize_retained_station_kind(value: str) -> RetainedStationKind:
     if kind not in allowed:
         raise ValueError("kind must be one of: topology, hidden_control.")
     return kind  # type: ignore[return-value]
+
+
+def _normalize_control_station_inference_posture(value: str) -> ControlStationInferencePosture:
+    allowed: set[str] = {"accepted", "refused"}
+    posture = str(value)
+    if posture not in allowed:
+        raise ValueError("posture must be one of: accepted, refused.")
+    return posture  # type: ignore[return-value]
 
 
 @dataclass(frozen=True)
@@ -166,8 +175,91 @@ class RetainedStationRecord:
         )
 
 
+@dataclass(frozen=True)
+class StructuralPreservationReport:
+    required_topology_station_ids: tuple[str, ...]
+    retained_topology_station_ids: tuple[str, ...]
+    dropped_topology_station_ids: tuple[str, ...]
+    supporting_diagnostic_references: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ControlStationInferenceAssessment:
+    bundle: ReducedProgressionBundle | None
+    structural_preservation: StructuralPreservationReport
+    posture: ControlStationInferencePosture
+    reason: str
+
+    def __init__(
+        self,
+        *,
+        bundle: ReducedProgressionBundle | None,
+        structural_preservation: StructuralPreservationReport,
+        posture: ControlStationInferencePosture,
+        reason: str,
+    ) -> None:
+        normalized_reason = str(reason).strip()
+        if not normalized_reason:
+            raise ValueError("reason must be non-empty.")
+        object.__setattr__(self, "bundle", bundle)
+        object.__setattr__(self, "structural_preservation", structural_preservation)
+        object.__setattr__(self, "posture", _normalize_control_station_inference_posture(posture))
+        object.__setattr__(self, "reason", normalized_reason)
+
+
+def assess_control_station_inference(
+    *,
+    bundle: ReducedProgressionBundle,
+    retained_station_records: tuple[RetainedStationRecord, ...] | list[RetainedStationRecord],
+    required_topology_station_ids: tuple[str, ...] | list[str],
+) -> ControlStationInferenceAssessment:
+    normalized_required = tuple(str(value).strip() for value in required_topology_station_ids)
+    if any(not value for value in normalized_required):
+        raise ValueError("required_topology_station_ids must be non-empty strings.")
+
+    retained_topology = tuple(
+        record.station_id
+        for record in retained_station_records
+        if record.kind == "topology"
+    )
+    retained_topology_set = set(retained_topology)
+    dropped_topology = tuple(
+        station_id for station_id in normalized_required if station_id not in retained_topology_set
+    )
+    diagnostic_references = tuple(
+        dict.fromkeys(
+            diagnostic
+            for record in retained_station_records
+            for diagnostic in record.diagnostic_references
+        )
+    )
+    structural_report = StructuralPreservationReport(
+        required_topology_station_ids=normalized_required,
+        retained_topology_station_ids=retained_topology,
+        dropped_topology_station_ids=dropped_topology,
+        supporting_diagnostic_references=diagnostic_references,
+    )
+    if dropped_topology:
+        return ControlStationInferenceAssessment(
+            bundle=None,
+            structural_preservation=structural_report,
+            posture="refused",
+            reason="missing_topology_critical_structure",
+        )
+    return ControlStationInferenceAssessment(
+        bundle=bundle,
+        structural_preservation=structural_report,
+        posture="accepted",
+        reason="topology_critical_structure_preserved",
+    )
+
+
 __all__ = [
+    "ControlStationInferenceAssessment",
+    "ControlStationInferencePosture",
     "ReducedProgressionBundle",
     "RetainedStationKind",
     "RetainedStationRecord",
+    "StructuralPreservationReport",
+    "assess_control_station_inference",
 ]
