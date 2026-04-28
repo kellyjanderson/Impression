@@ -59,6 +59,33 @@ This idea can be pursued in three distinct ways:
 - [Spanwise Loft Postprocessing Optimization Architecture](future-features/spanwise-loft-postprocessing-optimization-architecture.md)
 - [Spanwise Loft Repair Tool Architecture](future-features/spanwise-loft-repair-tool-architecture.md)
 
+## Trajectory-Guided Loft
+
+### Idea
+
+Add a loft direction that can represent vertical curve intent more explicitly
+than station-to-station linear interpolation.
+
+That idea has two complementary forms:
+
+- explicit trajectory guidance, such as a shared `Path3D` or a per-region /
+  per-track 3D path
+- inferred curve intent from dense faceted station input, where station
+  frequency over distance and the resulting shape imply a smooth curve rather
+  than unrelated tiny linear spans
+
+### Why It Matters
+
+- gives loft a richer way to represent vertical curvature
+- reduces the need to brute-force curved results with many small stations
+- preserves author intent that is currently only implied by dense progression
+  samples
+- complements control-station inference and spanwise consolidation
+
+### Architecture Note
+
+- [Trajectory-Guided Loft Architecture](future-features/trajectory-guided-loft-architecture.md)
+
 ## Model-Assisted Mesh Repair
 
 ### Idea

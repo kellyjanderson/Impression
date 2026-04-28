@@ -29,6 +29,22 @@ For this workspace, repository delivery is staged:
 
 Merging the pull request is the completion of that feature branch's work.
 
+## Planned Release Integration
+
+When a versioned release is being developed through a release working branch:
+
+* merge planning structure into `main` first
+* create a working branch from that `main` state
+* integrate all feature branches into the working branch through pull requests
+* treat the working branch as the release integration surface until the release is done
+* merge the working branch into `main` when the planned release is complete
+
+This keeps:
+
+* feature branches isolated
+* release integration visible
+* `main` reserved for completed release states
+
 ## Delegation Link
 
 When sub-agents are used, follow the local `delegation` Skill for ownership boundaries, waiting, and review.
