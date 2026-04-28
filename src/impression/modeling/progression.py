@@ -8,6 +8,7 @@ import numpy as np
 from .path3d import Arc3D, Bezier3D, Line3D, Path3D
 
 ProgressionProvenanceKind = Literal["explicit", "inferred"]
+ProgressionTransportKind = Literal["parallel_transport"]
 
 
 class _StationLike(Protocol):
@@ -29,6 +30,14 @@ def _normalize_progression_provenance_kind(value: str) -> ProgressionProvenanceK
     kind = str(value)
     if kind not in allowed:
         raise ValueError("kind must be one of: explicit, inferred.")
+    return kind  # type: ignore[return-value]
+
+
+def _normalize_progression_transport_kind(value: str) -> ProgressionTransportKind:
+    allowed: set[str] = {"parallel_transport"}
+    kind = str(value)
+    if kind not in allowed:
+        raise ValueError("kind must be one of: parallel_transport.")
     return kind  # type: ignore[return-value]
 
 
@@ -77,11 +86,26 @@ class ProgressionProvenanceRecord:
 
 
 @dataclass(frozen=True)
+class ProgressionTransportPolicy:
+    kind: ProgressionTransportKind = "parallel_transport"
+
+    def __init__(self, kind: ProgressionTransportKind = "parallel_transport") -> None:
+        object.__setattr__(self, "kind", _normalize_progression_transport_kind(kind))
+
+
+@dataclass(frozen=True)
+class ProgressionTransportContract:
+    progression_identity: tuple[object, ...]
+    transport_policy: ProgressionTransportPolicy
+
+
+@dataclass(frozen=True)
 class PathBackedProgression:
     path: Path3D
     domain_start: float = 0.0
     domain_end: float = 1.0
     provenance: ProgressionProvenanceRecord = ProgressionProvenanceRecord()
+    transport_policy: ProgressionTransportPolicy = ProgressionTransportPolicy()
 
     def __init__(
         self,
@@ -90,6 +114,7 @@ class PathBackedProgression:
         domain_start: float = 0.0,
         domain_end: float = 1.0,
         provenance: ProgressionProvenanceRecord | None = None,
+        transport_policy: ProgressionTransportPolicy | None = None,
     ) -> None:
         if not isinstance(path, Path3D):
             raise ValueError("path must be a Path3D.")
@@ -108,6 +133,11 @@ class PathBackedProgression:
             self,
             "provenance",
             provenance if provenance is not None else ProgressionProvenanceRecord(),
+        )
+        object.__setattr__(
+            self,
+            "transport_policy",
+            transport_policy if transport_policy is not None else ProgressionTransportPolicy(),
         )
 
     @property
@@ -129,6 +159,13 @@ class PathBackedProgression:
             self.path_signature,
             self.parameter_domain,
             self.provenance,
+        )
+
+    @property
+    def loft_transport_contract(self) -> ProgressionTransportContract:
+        return ProgressionTransportContract(
+            progression_identity=self.identity,
+            transport_policy=self.transport_policy,
         )
 
     def attach_stations(
@@ -200,4 +237,7 @@ __all__ = [
     "ProgressionStationAttachment",
     "ProgressionProvenanceKind",
     "ProgressionProvenanceRecord",
+    "ProgressionTransportContract",
+    "ProgressionTransportKind",
+    "ProgressionTransportPolicy",
 ]
