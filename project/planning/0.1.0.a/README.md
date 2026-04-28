@@ -13,6 +13,7 @@ planning work.
 - [specifications/](specifications/README.md)
 - [test-specifications/](test-specifications/README.md)
 - [Feature List](feature-list.md)
+- [Progression](progression.md)
 
 Initial architecture set:
 
@@ -53,3 +54,11 @@ Use this folder to:
 
 This folder is itself the durable planning record for the planning-structure
 path that created it.
+
+Implementation sequencing for the release is tracked in:
+
+- [progression.md](progression.md)
+
+That progression orders only final leaf specifications and groups them into
+five-spec implementation tranches so each delivery prompt can target one bounded
+set at a time.
