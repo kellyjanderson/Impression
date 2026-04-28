@@ -89,6 +89,11 @@ from .inference_candidates import (
     compare_station_derived_curve_fit_candidates,
     generate_station_derived_curve_fit_candidates,
 )
+from .curve_intent import (
+    CurveIntentCandidateReport,
+    CurveIntentPosture,
+    classify_curve_intent_candidate,
+)
 from .bspline import BSpline2D, BSpline3D
 from .fit_records import (
     FitApproximationPosture,
@@ -277,6 +282,9 @@ __all__ = [
     "SharedTrajectoryCurveFitCandidate",
     "generate_shared_trajectory_curve_fit_candidates",
     "compare_shared_trajectory_curve_fit_candidates",
+    "CurveIntentCandidateReport",
+    "CurveIntentPosture",
+    "classify_curve_intent_candidate",
     "ProgressionStationAttachment",
     "ProgressionProvenanceKind",
     "ProgressionProvenanceRecord",
