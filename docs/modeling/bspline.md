@@ -76,3 +76,27 @@ Closure handling is explicit:
 - `"closed"` closes sampled output without guessing closure from repeated
   endpoints alone
 - `"periodic"` wraps parameter evaluation through the authored domain
+
+## Fit Policy Records
+
+Fit-backed workflows should keep parameterization policy explicit rather than
+burying it in helper behavior.
+
+```python
+from impression.modeling import ParameterizationPolicyRecord
+
+policy = ParameterizationPolicyRecord(
+    method="chord_length",
+    domain_start=0.0,
+    domain_end=1.0,
+)
+```
+
+Current initial scope:
+
+- `"uniform"`
+- `"chord_length"`
+- `"centripetal"`
+
+These policy records assign replayable parameter values to ordered evidence
+before later knot and fit-configuration stages run.
