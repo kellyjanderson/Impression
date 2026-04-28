@@ -40,3 +40,33 @@ This first milestone keeps the contract intentionally small:
 - progression identity is stable and replayable
 - progression is distinct from the raw path primitive
 - later station-attachment and transport semantics can build on this object
+
+## Station Attachment
+
+Stations can now attach to progression explicitly instead of only living beside
+parallel scalar progression arrays:
+
+```python
+from impression.modeling import ProgressionStationAttachment, Station, as_section
+from impression.modeling.drawing2d import make_rect
+
+station = Station(
+    t=0.5,
+    section=as_section(make_rect(size=(1.0, 1.0))),
+    origin=(0.0, 0.0, 0.5),
+    u=(1.0, 0.0, 0.0),
+    v=(0.0, 1.0, 0.0),
+    n=(0.0, 0.0, 1.0),
+)
+attachment = ProgressionStationAttachment.from_station(
+    progression=progression,
+    station=station,
+    station_index=0,
+)
+```
+
+That attachment contract keeps:
+
+- progression identity explicit
+- attachment ordering durable
+- station-owned topology truth intact
