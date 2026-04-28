@@ -154,3 +154,20 @@ consumption = HiddenControlStationPlannerConsumption(
 
 That contract keeps hidden control stations on the planner side of the boundary
 without letting them override topology truth or become public authored inputs.
+
+## Dense Loft Descriptor Preparation
+
+Fit-backed loft analysis can prepare dense descriptor bands deterministically
+from ordered stations:
+
+```python
+from impression.modeling import prepare_dense_loft_fit_descriptors
+
+descriptor_band = prepare_dense_loft_fit_descriptors(stations)
+```
+
+The initial descriptor band keeps:
+
+- station ordering intact
+- simple structural meaning such as region counts
+- replayable records for later candidate-fit comparison
