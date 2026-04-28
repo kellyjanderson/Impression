@@ -372,6 +372,22 @@ That shared schema keeps:
 - retained/dropped, drift, and structural fields reusable
 - replay payload durable enough for later reporting layers
 
+Later inference branches can then populate that same bundle contract through
+shared helper entry points:
+
+```python
+from impression.modeling import SharedInferenceDiagnosticBundle
+
+fit_bundle = SharedInferenceDiagnosticBundle.from_station_fit(
+    assessment=assessment,
+    evidence_reference="station_polyline_exact",
+    provenance_reference="inferred:dense_station_inference",
+)
+```
+
+This keeps bundle population consistent across branches instead of letting each
+feature invent its own reporting shape.
+
 Confidence and refusal are then handled by a separate posture layer:
 
 ```python

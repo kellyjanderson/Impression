@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .control_station_inference import StructuralPreservationReport
+from .control_station_inference import (
+    ControlStationInferenceAssessment,
+    RetainedStationRecord,
+    StructuralPreservationReport,
+)
 from .fit_records import FitAssessmentReport
+from .shared_trajectory import SharedWholeLoftTrajectoryAssessment
 
 
 def _normalize_station_entries(
@@ -157,6 +162,66 @@ class SharedInferenceDiagnosticBundle:
             structural_payload,
             self.evidence_references,
             self.provenance_references,
+        )
+
+    @classmethod
+    def from_station_fit(
+        cls,
+        *,
+        assessment: FitAssessmentReport,
+        evidence_reference: str,
+        provenance_reference: str,
+    ) -> "SharedInferenceDiagnosticBundle":
+        return cls(
+            fit_drift=InferenceFitDriftSummary.from_fit_assessment(assessment),
+            evidence_references=(evidence_reference,),
+            provenance_references=(provenance_reference,),
+        )
+
+    @classmethod
+    def from_shared_trajectory_assessment(
+        cls,
+        *,
+        assessment: SharedWholeLoftTrajectoryAssessment,
+        provenance_reference: str,
+    ) -> "SharedInferenceDiagnosticBundle":
+        evidence_reference = assessment.reason
+        if assessment.candidate is not None:
+            evidence_reference = assessment.candidate.candidate_id
+        return cls(
+            fit_drift=None,
+            evidence_references=(evidence_reference,),
+            provenance_references=(provenance_reference,),
+        )
+
+    @classmethod
+    def from_control_station_inference(
+        cls,
+        *,
+        assessment: ControlStationInferenceAssessment,
+        retained_station_records: tuple[RetainedStationRecord, ...] | list[RetainedStationRecord],
+        provenance_reference: str,
+    ) -> "SharedInferenceDiagnosticBundle":
+        retained_entries = tuple(
+            (record.station_id, record.kind) for record in retained_station_records
+        )
+        dropped_entries = tuple(
+            (station_id, "topology")
+            for station_id in assessment.structural_preservation.dropped_topology_station_ids
+        )
+        return cls(
+            retained_station_entries=retained_entries,
+            dropped_station_entries=dropped_entries,
+            structural_preservation=InferenceStructuralPreservationSummary.from_report(
+                StructuralPreservationReport(
+                    required_topology_station_ids=assessment.structural_preservation.required_topology_station_ids,
+                    retained_topology_station_ids=assessment.structural_preservation.retained_topology_station_ids,
+                    dropped_topology_station_ids=assessment.structural_preservation.dropped_topology_station_ids,
+                    supporting_diagnostic_references=assessment.structural_preservation.supporting_diagnostic_references,
+                )
+            ),
+            evidence_references=assessment.structural_preservation.supporting_diagnostic_references,
+            provenance_references=(provenance_reference,),
         )
 
 
