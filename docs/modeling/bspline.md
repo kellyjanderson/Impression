@@ -100,3 +100,18 @@ Current initial scope:
 
 These policy records assign replayable parameter values to ordered evidence
 before later knot and fit-configuration stages run.
+
+Knot policy is also explicit:
+
+```python
+from impression.modeling import KnotCountPolicyRecord, KnotPlacementPolicyRecord
+
+count_policy = KnotCountPolicyRecord(strategy="fixed", control_point_count=6)
+placement_policy = KnotPlacementPolicyRecord(placement_method="average_parameter")
+```
+
+Initial knot-policy scope:
+
+- fixed control-point count selection
+- uniform internal knot placement
+- average-parameter knot placement
