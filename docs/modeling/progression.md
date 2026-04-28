@@ -196,3 +196,20 @@ evidence = assemble_span_local_curve_intent_evidence(families)
 
 That assembled evidence keeps ordering explicit and gives later candidate
 classification a stable downstream shape to consume.
+
+Station-derived candidate fits can then be generated and compared explicitly:
+
+```python
+from impression.modeling import (
+    compare_station_derived_curve_fit_candidates,
+    generate_station_derived_curve_fit_candidates,
+)
+
+candidates = generate_station_derived_curve_fit_candidates(descriptor_band)
+selected, assessment = compare_station_derived_curve_fit_candidates(candidates)
+```
+
+The comparison contract always returns either:
+
+- an accepted candidate with residual diagnostics
+- or an explicit refusal
