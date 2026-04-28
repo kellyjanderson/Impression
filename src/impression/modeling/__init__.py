@@ -103,6 +103,11 @@ from .curve_intent import (
     CurveIntentPosture,
     classify_curve_intent_candidate,
 )
+from .inference_diagnostics import (
+    InferenceFitDriftSummary,
+    InferenceStructuralPreservationSummary,
+    SharedInferenceDiagnosticBundle,
+)
 from .shared_trajectory import (
     SharedWholeLoftTrajectoryAssessment,
     SharedWholeLoftTrajectoryCandidate,
@@ -313,6 +318,9 @@ __all__ = [
     "CurveIntentCandidateReport",
     "CurveIntentPosture",
     "classify_curve_intent_candidate",
+    "InferenceFitDriftSummary",
+    "InferenceStructuralPreservationSummary",
+    "SharedInferenceDiagnosticBundle",
     "SharedWholeLoftTrajectoryAssessment",
     "ExplicitSharedGuidanceAttachmentRecord",
     "ExplicitSharedGuidancePlannerConsumption",

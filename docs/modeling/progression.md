@@ -352,6 +352,26 @@ That assessment keeps:
 - refusal a first-class valid outcome
 - structural preservation inspectable even when a reduction is refused
 
+Inference features can also share one diagnostic bundle schema for retained and
+dropped structure, drift, structural preservation, and evidence references:
+
+```python
+from impression.modeling import SharedInferenceDiagnosticBundle
+
+bundle = SharedInferenceDiagnosticBundle(
+    retained_station_entries=(("topo-0", "topology"),),
+    dropped_station_entries=(("topo-1", "topology"),),
+    evidence_references=("fit-a",),
+    provenance_references=("inferred:dense_station_inference",),
+)
+```
+
+That shared schema keeps:
+
+- bundle shape stable across inference branches
+- retained/dropped, drift, and structural fields reusable
+- replay payload durable enough for later reporting layers
+
 Confidence and refusal are then handled by a separate posture layer:
 
 ```python
