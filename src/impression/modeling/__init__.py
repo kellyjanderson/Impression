@@ -111,6 +111,8 @@ from .inference_diagnostics import (
 from .inference_reporting import (
     DeveloperInferenceCertaintyPosture,
     DeveloperInferenceInspection,
+    DownstreamInferenceOutcome,
+    DownstreamInferenceReport,
 )
 from .shared_trajectory import (
     SharedWholeLoftTrajectoryAssessment,
@@ -327,6 +329,8 @@ __all__ = [
     "SharedInferenceDiagnosticBundle",
     "DeveloperInferenceCertaintyPosture",
     "DeveloperInferenceInspection",
+    "DownstreamInferenceOutcome",
+    "DownstreamInferenceReport",
     "SharedWholeLoftTrajectoryAssessment",
     "ExplicitSharedGuidanceAttachmentRecord",
     "ExplicitSharedGuidancePlannerConsumption",
