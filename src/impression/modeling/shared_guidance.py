@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from .progression import PathBackedProgression
 from .shared_trajectory import SharedWholeLoftTrajectoryCandidate
+
+ExplicitSharedGuidancePlannerStage = Literal["in_between_travel"]
 
 
 def _normalize_metadata_entries(
@@ -21,6 +24,14 @@ def _normalize_metadata_entries(
             raise ValueError("metadata values must be non-empty.")
         normalized.append((normalized_key, normalized_value))
     return tuple(normalized)
+
+
+def _normalize_planner_stage(value: str) -> ExplicitSharedGuidancePlannerStage:
+    allowed: set[str] = {"in_between_travel"}
+    stage = str(value)
+    if stage not in allowed:
+        raise ValueError("planner_stage must be one of: in_between_travel.")
+    return stage  # type: ignore[return-value]
 
 
 @dataclass(frozen=True)
@@ -98,6 +109,48 @@ class ExplicitSharedGuidanceAttachmentRecord:
         )
 
 
+@dataclass(frozen=True)
+class ExplicitSharedGuidancePlannerConsumption:
+    planner_stage: ExplicitSharedGuidancePlannerStage
+    topology_station_ids: tuple[str, ...]
+    attachment_identity: tuple[object, ...]
+    bounded_to_in_between_travel: bool = True
+    overrides_topology_truth: bool = False
+
+    def __init__(
+        self,
+        *,
+        planner_stage: ExplicitSharedGuidancePlannerStage,
+        topology_station_ids: tuple[str, ...] | list[str],
+        attachment_identity: tuple[object, ...],
+        bounded_to_in_between_travel: bool = True,
+        overrides_topology_truth: bool = False,
+    ) -> None:
+        normalized_topology = tuple(str(value).strip() for value in topology_station_ids)
+        if any(not value for value in normalized_topology):
+            raise ValueError("topology_station_ids must be non-empty strings.")
+        object.__setattr__(self, "planner_stage", _normalize_planner_stage(planner_stage))
+        object.__setattr__(self, "topology_station_ids", normalized_topology)
+        object.__setattr__(self, "attachment_identity", attachment_identity)
+        object.__setattr__(self, "bounded_to_in_between_travel", bool(bounded_to_in_between_travel))
+        object.__setattr__(self, "overrides_topology_truth", bool(overrides_topology_truth))
+        if not self.bounded_to_in_between_travel:
+            raise ValueError("explicit shared guidance must remain bounded to in-between travel.")
+        if self.overrides_topology_truth:
+            raise ValueError("explicit shared guidance must not override topology truth.")
+
+    @property
+    def identity(self) -> tuple[object, ...]:
+        return (
+            "explicit_shared_guidance_planner_consumption",
+            self.planner_stage,
+            self.topology_station_ids,
+            self.attachment_identity,
+        )
+
+
 __all__ = [
     "ExplicitSharedGuidanceAttachmentRecord",
+    "ExplicitSharedGuidancePlannerConsumption",
+    "ExplicitSharedGuidancePlannerStage",
 ]

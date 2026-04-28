@@ -276,6 +276,24 @@ That first guidance milestone keeps:
 - replay payload shape stable
 - attachment metadata durable for later diagnostics
 
+Planner consumption of explicit shared guidance is then represented separately:
+
+```python
+from impression.modeling import ExplicitSharedGuidancePlannerConsumption
+
+consumption = ExplicitSharedGuidancePlannerConsumption(
+    planner_stage="in_between_travel",
+    topology_station_ids=("topo-0", "topo-1"),
+    attachment_identity=attachment.identity,
+)
+```
+
+That keeps the second guidance milestone explicit too:
+
+- planner consumption remains deterministic
+- guidance stays bounded to in-between travel semantics
+- topology-owned planning truth remains primary
+
 Confidence and refusal are then handled by a separate posture layer:
 
 ```python

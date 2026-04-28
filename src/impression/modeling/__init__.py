@@ -103,6 +103,8 @@ from .shared_trajectory import (
 )
 from .shared_guidance import (
     ExplicitSharedGuidanceAttachmentRecord,
+    ExplicitSharedGuidancePlannerConsumption,
+    ExplicitSharedGuidancePlannerStage,
 )
 from .bspline import BSpline2D, BSpline3D
 from .fit_records import (
@@ -297,6 +299,8 @@ __all__ = [
     "classify_curve_intent_candidate",
     "SharedWholeLoftTrajectoryAssessment",
     "ExplicitSharedGuidanceAttachmentRecord",
+    "ExplicitSharedGuidancePlannerConsumption",
+    "ExplicitSharedGuidancePlannerStage",
     "SharedWholeLoftTrajectoryCandidate",
     "SharedWholeLoftTrajectoryPosture",
     "assess_shared_whole_loft_trajectory_candidates",
