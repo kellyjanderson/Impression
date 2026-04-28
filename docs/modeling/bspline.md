@@ -61,9 +61,18 @@ Closure is explicit and must be one of:
 
 Impression does not infer closure from repeated endpoints alone.
 
-## Current Scope
+## Evaluation and Sampling
 
-This initial primitive layer is about durable authored ownership.
+Both primitives now provide:
 
-Evaluation, derivative access, and deterministic sampling are defined in the
-next B-spline execution layer.
+- `evaluate(t)` for deterministic point evaluation
+- `derivative(t)` for first-derivative access
+- `tangent(t)` for normalized tangent access
+- `sample(n_samples=...)` for deterministic ordered sampling
+
+Closure handling is explicit:
+
+- `"open"` samples the authored parameter range directly
+- `"closed"` closes sampled output without guessing closure from repeated
+  endpoints alone
+- `"periodic"` wraps parameter evaluation through the authored domain
