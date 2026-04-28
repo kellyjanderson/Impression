@@ -50,6 +50,7 @@ from .loft import (
     loft_endcaps,
 )
 from .path3d import Arc3D, Bezier3D, Line3D, Path3D
+from .bspline import BSpline2D, BSpline3D
 from .csg import (
     BooleanOperationError,
     SurfaceBooleanCutCurve,
@@ -205,6 +206,8 @@ __all__ = [
     "Arc3D",
     "Bezier3D",
     "Path3D",
+    "BSpline2D",
+    "BSpline3D",
     "Loft",
     "loft",
     "loft_profiles",
