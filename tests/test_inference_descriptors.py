@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from impression.modeling import (
     Station,
+    assemble_span_local_curve_intent_evidence,
     as_section,
     build_curve_intent_descriptor_families,
     prepare_dense_loft_fit_descriptors,
@@ -119,3 +120,58 @@ def test_descriptor_families_remain_reusable_by_later_evidence_assembly() -> Non
     )
 
     assert tuple(descriptor.station_index for descriptor in families.section_descriptors) == (0, 1, 2)
+
+
+def test_span_local_evidence_records_remain_inspectable() -> None:
+    evidence = assemble_span_local_curve_intent_evidence(
+        build_curve_intent_descriptor_families(
+            prepare_dense_loft_fit_descriptors(_dense_fixture())
+        )
+    )
+
+    assert evidence[0].span_start_station_index == 0
+    assert evidence[0].span_end_station_index == 1
+
+
+def test_identical_descriptor_inputs_produce_identical_evidence_ordering() -> None:
+    families = build_curve_intent_descriptor_families(
+        prepare_dense_loft_fit_descriptors(_dense_fixture())
+    )
+
+    first = assemble_span_local_curve_intent_evidence(families)
+    second = assemble_span_local_curve_intent_evidence(families)
+
+    assert first == second
+
+
+def test_span_local_evidence_shape_is_stable_for_identical_inputs() -> None:
+    evidence = assemble_span_local_curve_intent_evidence(
+        build_curve_intent_descriptor_families(
+            prepare_dense_loft_fit_descriptors(_dense_fixture())
+        )
+    )
+
+    assert len(evidence) == 2
+    assert evidence[0].section_region_counts == (1, 1)
+
+
+def test_normalization_and_ordering_remain_explicit() -> None:
+    evidence = assemble_span_local_curve_intent_evidence(
+        build_curve_intent_descriptor_families(
+            prepare_dense_loft_fit_descriptors(_dense_fixture())
+        )
+    )
+
+    assert tuple(item.span_start_station_index for item in evidence) == (0, 1)
+    assert tuple(item.span_end_station_index for item in evidence) == (1, 2)
+
+
+def test_later_candidate_classification_branches_can_consume_the_same_evidence_shape() -> None:
+    evidence = assemble_span_local_curve_intent_evidence(
+        build_curve_intent_descriptor_families(
+            prepare_dense_loft_fit_descriptors(_dense_fixture())
+        )
+    )
+
+    assert all(isinstance(item.loop_counts, tuple) for item in evidence)
+    assert all(isinstance(item.correspondence_track_counts, tuple) for item in evidence)
