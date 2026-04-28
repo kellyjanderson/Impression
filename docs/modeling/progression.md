@@ -139,3 +139,18 @@ record = HiddenControlStationRecord(
 
 These records are planner-owned and keep provenance explicit, but they are not
 the same thing as public topology stations.
+
+Planner consumption stays explicit too:
+
+```python
+from impression.modeling import HiddenControlStationPlannerConsumption
+
+consumption = HiddenControlStationPlannerConsumption(
+    planner_stage="fit_guidance",
+    topology_station_ids=("topo-0", "topo-1"),
+    hidden_control_station_ids=("control-0",),
+)
+```
+
+That contract keeps hidden control stations on the planner side of the boundary
+without letting them override topology truth or become public authored inputs.

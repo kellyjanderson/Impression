@@ -6,6 +6,7 @@ from typing import Literal, Protocol
 import numpy as np
 
 HiddenControlStationSource = Literal["dense_station_fit", "shared_trajectory_fit"]
+HiddenControlStationPlannerStage = Literal["fit_guidance", "trajectory_guidance"]
 
 
 class _StationLike(Protocol):
@@ -22,6 +23,14 @@ def _normalize_hidden_control_station_source(value: str) -> HiddenControlStation
     if source not in allowed:
         raise ValueError("source must be one of: dense_station_fit, shared_trajectory_fit.")
     return source  # type: ignore[return-value]
+
+
+def _normalize_hidden_control_station_planner_stage(value: str) -> HiddenControlStationPlannerStage:
+    allowed: set[str] = {"fit_guidance", "trajectory_guidance"}
+    stage = str(value)
+    if stage not in allowed:
+        raise ValueError("planner_stage must be one of: fit_guidance, trajectory_guidance.")
+    return stage  # type: ignore[return-value]
 
 
 @dataclass(frozen=True)
@@ -103,7 +112,50 @@ class HiddenControlStationRecord:
         )
 
 
+@dataclass(frozen=True)
+class HiddenControlStationPlannerConsumption:
+    planner_stage: HiddenControlStationPlannerStage
+    topology_station_ids: tuple[str, ...]
+    hidden_control_station_ids: tuple[str, ...]
+    public_authored_inputs_exposed: bool = False
+
+    def __init__(
+        self,
+        *,
+        planner_stage: HiddenControlStationPlannerStage,
+        topology_station_ids: tuple[str, ...] | list[str],
+        hidden_control_station_ids: tuple[str, ...] | list[str],
+        public_authored_inputs_exposed: bool = False,
+    ) -> None:
+        normalized_topology = tuple(str(value).strip() for value in topology_station_ids)
+        normalized_hidden = tuple(str(value).strip() for value in hidden_control_station_ids)
+        if any(not value for value in normalized_topology):
+            raise ValueError("topology_station_ids must be non-empty strings.")
+        if any(not value for value in normalized_hidden):
+            raise ValueError("hidden_control_station_ids must be non-empty strings.")
+        object.__setattr__(self, "planner_stage", _normalize_hidden_control_station_planner_stage(planner_stage))
+        object.__setattr__(self, "topology_station_ids", normalized_topology)
+        object.__setattr__(self, "hidden_control_station_ids", normalized_hidden)
+        object.__setattr__(self, "public_authored_inputs_exposed", bool(public_authored_inputs_exposed))
+        if self.public_authored_inputs_exposed:
+            raise ValueError("hidden control station consumption must remain non-user-facing.")
+        overlap = set(self.topology_station_ids) & set(self.hidden_control_station_ids)
+        if overlap:
+            raise ValueError("hidden control stations must not override topology station identity.")
+
+    @property
+    def identity(self) -> tuple[object, ...]:
+        return (
+            "hidden_control_station_planner_consumption",
+            self.planner_stage,
+            self.topology_station_ids,
+            self.hidden_control_station_ids,
+        )
+
+
 __all__ = [
+    "HiddenControlStationPlannerConsumption",
+    "HiddenControlStationPlannerStage",
     "HiddenControlStationProvenanceRecord",
     "HiddenControlStationRecord",
     "HiddenControlStationSource",
