@@ -197,7 +197,35 @@ class KnotPlacementPolicyRecord:
         return tuple(float(v) for v in knots)
 
 
+@dataclass(frozen=True)
+class FitConfigurationRecord:
+    parameterization_policy: ParameterizationPolicyRecord
+    knot_count_policy: KnotCountPolicyRecord
+    knot_placement_policy: KnotPlacementPolicyRecord
+
+    def __init__(
+        self,
+        *,
+        parameterization_policy: ParameterizationPolicyRecord,
+        knot_count_policy: KnotCountPolicyRecord,
+        knot_placement_policy: KnotPlacementPolicyRecord,
+    ) -> None:
+        object.__setattr__(self, "parameterization_policy", parameterization_policy)
+        object.__setattr__(self, "knot_count_policy", knot_count_policy)
+        object.__setattr__(self, "knot_placement_policy", knot_placement_policy)
+
+    @property
+    def identity(self) -> tuple[object, ...]:
+        return (
+            "fit_configuration",
+            self.parameterization_policy,
+            self.knot_count_policy,
+            self.knot_placement_policy,
+        )
+
+
 __all__ = [
+    "FitConfigurationRecord",
     "KnotCountPolicyRecord",
     "KnotCountStrategy",
     "KnotPlacementMethod",
