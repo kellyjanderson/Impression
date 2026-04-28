@@ -256,3 +256,17 @@ Those candidate records keep the boundary honest:
 - candidate scope remains limited to whole-loft shared trajectories
 - source fit candidate identity remains explicit
 - source residual evidence remains attached for later posture decisions
+
+Confidence and refusal are then handled by a separate posture layer:
+
+```python
+from impression.modeling import assess_shared_whole_loft_trajectory_candidates
+
+assessment = assess_shared_whole_loft_trajectory_candidates(whole_loft_candidates)
+```
+
+That assessment returns one of three explicit outcomes:
+
+- `accepted` when exact whole-loft shared trajectory evidence is within threshold
+- `uncertain` when only approximate-but-acceptable shared trajectory evidence remains
+- `refused` when no whole-loft shared trajectory candidate is trustworthy
