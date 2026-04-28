@@ -6,6 +6,7 @@ from typing import Literal
 from .inference_diagnostics import SharedInferenceDiagnosticBundle
 
 DeveloperInferenceCertaintyPosture = Literal["certain", "uncertain", "refused"]
+DownstreamInferenceOutcome = Literal["accepted", "uncertain", "refused"]
 
 
 def _normalize_developer_certainty_posture(value: str) -> DeveloperInferenceCertaintyPosture:
@@ -14,6 +15,14 @@ def _normalize_developer_certainty_posture(value: str) -> DeveloperInferenceCert
     if posture not in allowed:
         raise ValueError("certainty_posture must be one of: certain, uncertain, refused.")
     return posture  # type: ignore[return-value]
+
+
+def _normalize_downstream_inference_outcome(value: str) -> DownstreamInferenceOutcome:
+    allowed: set[str] = {"accepted", "uncertain", "refused"}
+    outcome = str(value)
+    if outcome not in allowed:
+        raise ValueError("outcome must be one of: accepted, uncertain, refused.")
+    return outcome  # type: ignore[return-value]
 
 
 @dataclass(frozen=True)
@@ -86,7 +95,68 @@ class DeveloperInferenceInspection:
         )
 
 
+@dataclass(frozen=True)
+class DownstreamInferenceReport:
+    outcome: DownstreamInferenceOutcome
+    refusal_summary: str | None
+    uncertainty_summary: str | None
+    provenance_references: tuple[str, ...]
+    retained_station_count: int
+    dropped_station_count: int
+
+    def __init__(
+        self,
+        *,
+        outcome: DownstreamInferenceOutcome,
+        refusal_summary: str | None,
+        uncertainty_summary: str | None,
+        provenance_references: tuple[str, ...],
+        retained_station_count: int,
+        dropped_station_count: int,
+    ) -> None:
+        object.__setattr__(self, "outcome", _normalize_downstream_inference_outcome(outcome))
+        object.__setattr__(self, "refusal_summary", refusal_summary)
+        object.__setattr__(self, "uncertainty_summary", uncertainty_summary)
+        object.__setattr__(self, "provenance_references", provenance_references)
+        object.__setattr__(self, "retained_station_count", int(retained_station_count))
+        object.__setattr__(self, "dropped_station_count", int(dropped_station_count))
+
+    @classmethod
+    def from_bundle(
+        cls,
+        bundle: SharedInferenceDiagnosticBundle,
+    ) -> "DownstreamInferenceReport":
+        if bundle.dropped_station_entries:
+            return cls(
+                outcome="refused",
+                refusal_summary="topology_critical_structure_dropped",
+                uncertainty_summary=None,
+                provenance_references=bundle.provenance_references,
+                retained_station_count=len(bundle.retained_station_entries),
+                dropped_station_count=len(bundle.dropped_station_entries),
+            )
+        if any(reference.startswith("inferred:") for reference in bundle.provenance_references):
+            return cls(
+                outcome="uncertain",
+                refusal_summary=None,
+                uncertainty_summary="inferred_result_requires_consumer_caution",
+                provenance_references=bundle.provenance_references,
+                retained_station_count=len(bundle.retained_station_entries),
+                dropped_station_count=len(bundle.dropped_station_entries),
+            )
+        return cls(
+            outcome="accepted",
+            refusal_summary=None,
+            uncertainty_summary=None,
+            provenance_references=bundle.provenance_references,
+            retained_station_count=len(bundle.retained_station_entries),
+            dropped_station_count=len(bundle.dropped_station_entries),
+        )
+
+
 __all__ = [
     "DeveloperInferenceCertaintyPosture",
     "DeveloperInferenceInspection",
+    "DownstreamInferenceOutcome",
+    "DownstreamInferenceReport",
 ]

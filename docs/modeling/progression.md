@@ -403,6 +403,21 @@ That keeps developer-facing explainability honest:
 - drift stays visible for debugging and review
 - inferred provenance is visible instead of being silently treated as certainty
 
+Downstream consumers can then receive a smaller report that still preserves
+uncertainty, refusal, and provenance:
+
+```python
+from impression.modeling import DownstreamInferenceReport
+
+report = DownstreamInferenceReport.from_bundle(bundle)
+```
+
+That keeps downstream reporting honest too:
+
+- refusal and uncertainty remain first-class outputs
+- inferred provenance remains visible where it matters
+- downstream consumers do not need the full internal inspection record
+
 Confidence and refusal are then handled by a separate posture layer:
 
 ```python
