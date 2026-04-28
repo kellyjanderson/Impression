@@ -3,7 +3,9 @@ from __future__ import annotations
 import numpy as np
 
 from impression.modeling import (
+    FitAssessmentReport,
     FitConfigurationRecord,
+    FitResidualReport,
     KnotCountPolicyRecord,
     KnotPlacementPolicyRecord,
     ParameterizationPolicyRecord,
@@ -172,3 +174,92 @@ def test_fit_configuration_comparison_remains_stable_across_identical_inputs():
 
     assert first == second
     assert first.identity == second.identity
+
+
+def test_representative_fits_emit_residual_reports_and_a_decision_outcome():
+    residual = FitResidualReport(
+        metric_name="max_distance",
+        residual_value=0.02,
+        acceptance_threshold=0.05,
+        approximation_posture="approximate",
+        exact_threshold=0.0,
+    )
+
+    assessment = FitAssessmentReport.from_residual(residual)
+
+    assert assessment.residual_report == residual
+    assert assessment.decision_outcome == "accepted"
+    assert assessment.decision_reason == "approximate_within_threshold"
+
+
+def test_refusal_remains_inspectable_as_a_first_class_outcome():
+    residual = FitResidualReport(
+        metric_name="max_distance",
+        residual_value=0.2,
+        acceptance_threshold=0.05,
+        approximation_posture="approximate",
+    )
+
+    assessment = FitAssessmentReport.from_residual(residual)
+
+    assert assessment.decision_outcome == "refused"
+    assert assessment.decision_reason == "residual_above_threshold"
+
+
+def test_fit_drift_is_reported_using_durable_metrics():
+    residual = FitResidualReport(
+        metric_name="rms_distance",
+        residual_value=0.03,
+        acceptance_threshold=0.04,
+        approximation_posture="approximate",
+        exact_threshold=0.01,
+    )
+
+    assert residual.metric_name == "rms_distance"
+    assert residual.residual_value == 0.03
+    assert residual.acceptance_threshold == 0.04
+    assert residual.exact_threshold == 0.01
+    assert residual.approximation_posture == "approximate"
+
+
+def test_acceptance_and_refusal_remain_distinguishable_and_replayable():
+    accepted = FitAssessmentReport.from_residual(
+        FitResidualReport(
+            metric_name="max_distance",
+            residual_value=0.01,
+            acceptance_threshold=0.05,
+            approximation_posture="exact",
+            exact_threshold=0.01,
+        )
+    )
+    refused = FitAssessmentReport.from_residual(
+        FitResidualReport(
+            metric_name="max_distance",
+            residual_value=0.08,
+            acceptance_threshold=0.05,
+            approximation_posture="approximate",
+        )
+    )
+
+    assert accepted.decision_outcome == "accepted"
+    assert refused.decision_outcome == "refused"
+    assert accepted != refused
+
+
+def test_weak_fits_are_not_silently_promoted_to_accepted_outputs():
+    residual = FitResidualReport(
+        metric_name="max_distance",
+        residual_value=0.11,
+        acceptance_threshold=0.05,
+        approximation_posture="approximate",
+    )
+
+    with np.testing.assert_raises_regex(
+        ValueError,
+        "accepted outcomes require a residual within the acceptance threshold.",
+    ):
+        FitAssessmentReport(
+            residual_report=residual,
+            decision_outcome="accepted",
+            decision_reason="should_fail",
+        )

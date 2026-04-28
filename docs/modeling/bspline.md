@@ -138,3 +138,24 @@ fit_config = FitConfigurationRecord(
 `FitConfigurationRecord` gives later inference and diagnostics branches one
 durable object and one stable identity to point back to when they need to say
 exactly which fit-policy bundle produced a candidate curve.
+
+Fit-backed workflows should also report residuals and the decision outcome
+explicitly:
+
+```python
+from impression.modeling import FitAssessmentReport, FitResidualReport
+
+residual = FitResidualReport(
+    metric_name="max_distance",
+    residual_value=0.02,
+    acceptance_threshold=0.05,
+    approximation_posture="approximate",
+)
+assessment = FitAssessmentReport.from_residual(residual)
+```
+
+That contract makes the initial scope explicit:
+
+- residual metrics are durable data, not only ad hoc logs
+- acceptance vs refusal is a first-class outcome
+- weak fits are refused explicitly instead of being silently promoted

@@ -8,6 +8,8 @@ import numpy as np
 ParameterizationMethod = Literal["uniform", "chord_length", "centripetal"]
 KnotCountStrategy = Literal["fixed"]
 KnotPlacementMethod = Literal["uniform_internal", "average_parameter"]
+FitDecisionOutcome = Literal["accepted", "refused"]
+FitApproximationPosture = Literal["exact", "approximate"]
 
 
 def _require_ordered_points(points: Sequence[Sequence[float]]) -> np.ndarray:
@@ -68,6 +70,22 @@ def _normalize_knot_placement_method(value: str) -> KnotPlacementMethod:
     return method  # type: ignore[return-value]
 
 
+def _normalize_fit_decision_outcome(value: str) -> FitDecisionOutcome:
+    allowed: set[str] = {"accepted", "refused"}
+    outcome = str(value)
+    if outcome not in allowed:
+        raise ValueError("decision_outcome must be one of: accepted, refused.")
+    return outcome  # type: ignore[return-value]
+
+
+def _normalize_fit_approximation_posture(value: str) -> FitApproximationPosture:
+    allowed: set[str] = {"exact", "approximate"}
+    posture = str(value)
+    if posture not in allowed:
+        raise ValueError("approximation_posture must be one of: exact, approximate.")
+    return posture  # type: ignore[return-value]
+
+
 @dataclass(frozen=True)
 class ParameterizationPolicyRecord:
     method: ParameterizationMethod = "chord_length"
@@ -105,6 +123,106 @@ class ParameterizationPolicyRecord:
         if total == 0.0:
             return np.linspace(0.0, 1.0, len(points), dtype=float)
         return cumulative / total
+
+
+@dataclass(frozen=True)
+class FitResidualReport:
+    metric_name: str
+    residual_value: float
+    acceptance_threshold: float
+    approximation_posture: FitApproximationPosture = "approximate"
+    exact_threshold: float = 0.0
+
+    def __init__(
+        self,
+        *,
+        metric_name: str,
+        residual_value: float,
+        acceptance_threshold: float,
+        approximation_posture: FitApproximationPosture = "approximate",
+        exact_threshold: float = 0.0,
+    ) -> None:
+        metric = str(metric_name).strip()
+        if not metric:
+            raise ValueError("metric_name must be non-empty.")
+        residual = float(residual_value)
+        threshold = float(acceptance_threshold)
+        exact = float(exact_threshold)
+        if not np.isfinite(residual) or residual < 0.0:
+            raise ValueError("residual_value must be finite and >= 0.")
+        if not np.isfinite(threshold) or threshold < 0.0:
+            raise ValueError("acceptance_threshold must be finite and >= 0.")
+        if not np.isfinite(exact) or exact < 0.0:
+            raise ValueError("exact_threshold must be finite and >= 0.")
+        if exact > threshold:
+            raise ValueError("exact_threshold must not exceed acceptance_threshold.")
+        posture = _normalize_fit_approximation_posture(approximation_posture)
+        if posture == "exact" and residual > exact:
+            raise ValueError("exact posture requires residual_value <= exact_threshold.")
+        if posture == "approximate" and residual <= exact:
+            posture = "exact"
+        object.__setattr__(self, "metric_name", metric)
+        object.__setattr__(self, "residual_value", residual)
+        object.__setattr__(self, "acceptance_threshold", threshold)
+        object.__setattr__(self, "approximation_posture", posture)
+        object.__setattr__(self, "exact_threshold", exact)
+
+    @property
+    def within_acceptance_threshold(self) -> bool:
+        return self.residual_value <= self.acceptance_threshold
+
+
+@dataclass(frozen=True)
+class FitAssessmentReport:
+    residual_report: FitResidualReport
+    decision_outcome: FitDecisionOutcome
+    decision_reason: str
+    fit_configuration_identity: tuple[object, ...] | None = None
+
+    def __init__(
+        self,
+        *,
+        residual_report: FitResidualReport,
+        decision_outcome: FitDecisionOutcome,
+        decision_reason: str,
+        fit_configuration_identity: tuple[object, ...] | None = None,
+    ) -> None:
+        outcome = _normalize_fit_decision_outcome(decision_outcome)
+        reason = str(decision_reason).strip()
+        if not reason:
+            raise ValueError("decision_reason must be non-empty.")
+        if outcome == "accepted" and not residual_report.within_acceptance_threshold:
+            raise ValueError("accepted outcomes require a residual within the acceptance threshold.")
+        if outcome == "refused" and residual_report.within_acceptance_threshold:
+            raise ValueError("refused outcomes require a residual above the acceptance threshold.")
+        object.__setattr__(self, "residual_report", residual_report)
+        object.__setattr__(self, "decision_outcome", outcome)
+        object.__setattr__(self, "decision_reason", reason)
+        object.__setattr__(self, "fit_configuration_identity", fit_configuration_identity)
+
+    @classmethod
+    def from_residual(
+        cls,
+        residual_report: FitResidualReport,
+        *,
+        fit_configuration_identity: tuple[object, ...] | None = None,
+    ) -> "FitAssessmentReport":
+        if residual_report.within_acceptance_threshold:
+            reason = (
+                "exact_within_threshold"
+                if residual_report.approximation_posture == "exact"
+                else "approximate_within_threshold"
+            )
+            outcome: FitDecisionOutcome = "accepted"
+        else:
+            reason = "residual_above_threshold"
+            outcome = "refused"
+        return cls(
+            residual_report=residual_report,
+            decision_outcome=outcome,
+            decision_reason=reason,
+            fit_configuration_identity=fit_configuration_identity,
+        )
 
 
 @dataclass(frozen=True)
@@ -225,7 +343,11 @@ class FitConfigurationRecord:
 
 
 __all__ = [
+    "FitApproximationPosture",
+    "FitAssessmentReport",
     "FitConfigurationRecord",
+    "FitDecisionOutcome",
+    "FitResidualReport",
     "KnotCountPolicyRecord",
     "KnotCountStrategy",
     "KnotPlacementMethod",
