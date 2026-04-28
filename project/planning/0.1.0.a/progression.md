@@ -27,11 +27,11 @@ with the implementation.
 
 ## Tranche 03: Hidden Control Structure and Evidence Inputs
 
-- [ ] [Feature Spec 04A: Internal Control-Station Representation and Provenance](specifications/feature-04a-internal-control-station-representation-and-provenance-v1_0.md)
-- [ ] [Feature Spec 04B: Planner Consumption Boundary for Hidden Control Stations](specifications/feature-04b-planner-consumption-boundary-for-hidden-control-stations-v1_0.md)
-- [ ] [Feature Spec 03A: Dense Loft Evidence Descriptor Preparation for Curve Fitting](specifications/feature-03a-dense-loft-evidence-descriptor-preparation-for-curve-fitting-v1_0.md)
-- [ ] [Feature Spec 06A1: Descriptor Record Families for Curve-Intent Inference](specifications/feature-06a1-descriptor-record-families-for-curve-intent-inference-v1_0.md)
-- [ ] [Feature Spec 06A2: Span-Local Evidence Assembly and Ordering for Curve-Intent Inference](specifications/feature-06a2-span-local-evidence-assembly-and-ordering-for-curve-intent-inference-v1_0.md)
+- [x] [Feature Spec 04A: Internal Control-Station Representation and Provenance](specifications/feature-04a-internal-control-station-representation-and-provenance-v1_0.md)
+- [x] [Feature Spec 04B: Planner Consumption Boundary for Hidden Control Stations](specifications/feature-04b-planner-consumption-boundary-for-hidden-control-stations-v1_0.md)
+- [x] [Feature Spec 03A: Dense Loft Evidence Descriptor Preparation for Curve Fitting](specifications/feature-03a-dense-loft-evidence-descriptor-preparation-for-curve-fitting-v1_0.md)
+- [x] [Feature Spec 06A1: Descriptor Record Families for Curve-Intent Inference](specifications/feature-06a1-descriptor-record-families-for-curve-intent-inference-v1_0.md)
+- [x] [Feature Spec 06A2: Span-Local Evidence Assembly and Ordering for Curve-Intent Inference](specifications/feature-06a2-span-local-evidence-assembly-and-ordering-for-curve-intent-inference-v1_0.md)
 
 ## Tranche 04: Candidate Fitting and Shared-Trajectory Inference
 
