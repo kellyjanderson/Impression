@@ -25,6 +25,7 @@ library, the tools, and the examples.
 - [Paths](modeling/paths.md) - polyline/spline utilities for sweeps and visualization.
 - [Path3D](modeling/path3d.md) - true-curve 3D paths (line/arc/bezier).
 - [B-Spline Curves](modeling/bspline.md) - first-class authored 2D and 3D B-spline curve ownership.
+- [Progression](modeling/progression.md) - path-backed loft travel semantics with explicit provenance.
 - [2D Drawing](modeling/drawing2d.md) - profile and path primitives for vector-style modeling.
 - [Topology](modeling/topology.md) - shared planar loop/region/section helpers used across modeling features.
 - [Loft](modeling/loft.md) - surface-first lofting, explicit station planning, ambiguity diagnostics, and public loft handoff APIs.

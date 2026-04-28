@@ -50,6 +50,11 @@ from .loft import (
     loft_endcaps,
 )
 from .path3d import Arc3D, Bezier3D, Line3D, Path3D
+from .progression import (
+    PathBackedProgression,
+    ProgressionProvenanceKind,
+    ProgressionProvenanceRecord,
+)
 from .bspline import BSpline2D, BSpline3D
 from .fit_records import (
     FitApproximationPosture,
@@ -216,6 +221,9 @@ __all__ = [
     "Arc3D",
     "Bezier3D",
     "Path3D",
+    "PathBackedProgression",
+    "ProgressionProvenanceKind",
+    "ProgressionProvenanceRecord",
     "BSpline2D",
     "BSpline3D",
     "FitApproximationPosture",
