@@ -171,3 +171,17 @@ The initial descriptor band keeps:
 - station ordering intact
 - simple structural meaning such as region counts
 - replayable records for later candidate-fit comparison
+
+Curve-intent inference then builds explicit descriptor families from that band:
+
+```python
+from impression.modeling import build_curve_intent_descriptor_families
+
+families = build_curve_intent_descriptor_families(descriptor_band)
+```
+
+The initial families are:
+
+- section descriptors
+- loop descriptors
+- correspondence-track descriptors

@@ -71,6 +71,32 @@ class DenseLoftDescriptorBand:
         return tuple(descriptor.progression_value for descriptor in self.descriptors)
 
 
+@dataclass(frozen=True)
+class SectionCurveIntentDescriptor:
+    station_index: int
+    progression_value: float
+    region_count: int
+
+
+@dataclass(frozen=True)
+class LoopCurveIntentDescriptor:
+    station_index: int
+    loop_count: int
+
+
+@dataclass(frozen=True)
+class CorrespondenceTrackDescriptor:
+    station_index: int
+    correspondence_track_count: int
+
+
+@dataclass(frozen=True)
+class CurveIntentDescriptorFamilies:
+    section_descriptors: tuple[SectionCurveIntentDescriptor, ...]
+    loop_descriptors: tuple[LoopCurveIntentDescriptor, ...]
+    correspondence_track_descriptors: tuple[CorrespondenceTrackDescriptor, ...]
+
+
 def prepare_dense_loft_fit_descriptors(
     stations: list[_StationLike] | tuple[_StationLike, ...],
 ) -> DenseLoftDescriptorBand:
@@ -84,8 +110,45 @@ def prepare_dense_loft_fit_descriptors(
     return DenseLoftDescriptorBand(descriptors=descriptors)
 
 
+def build_curve_intent_descriptor_families(
+    descriptor_band: DenseLoftDescriptorBand,
+) -> CurveIntentDescriptorFamilies:
+    section_descriptors = tuple(
+        SectionCurveIntentDescriptor(
+            station_index=descriptor.station_index,
+            progression_value=descriptor.progression_value,
+            region_count=descriptor.region_count,
+        )
+        for descriptor in descriptor_band.descriptors
+    )
+    loop_descriptors = tuple(
+        LoopCurveIntentDescriptor(
+            station_index=descriptor.station_index,
+            loop_count=descriptor.region_count,
+        )
+        for descriptor in descriptor_band.descriptors
+    )
+    correspondence_track_descriptors = tuple(
+        CorrespondenceTrackDescriptor(
+            station_index=descriptor.station_index,
+            correspondence_track_count=descriptor.directional_correspondence_count,
+        )
+        for descriptor in descriptor_band.descriptors
+    )
+    return CurveIntentDescriptorFamilies(
+        section_descriptors=section_descriptors,
+        loop_descriptors=loop_descriptors,
+        correspondence_track_descriptors=correspondence_track_descriptors,
+    )
+
+
 __all__ = [
+    "CorrespondenceTrackDescriptor",
+    "CurveIntentDescriptorFamilies",
     "DenseLoftDescriptorBand",
     "DenseLoftStationDescriptor",
+    "LoopCurveIntentDescriptor",
+    "SectionCurveIntentDescriptor",
+    "build_curve_intent_descriptor_families",
     "prepare_dense_loft_fit_descriptors",
 ]
