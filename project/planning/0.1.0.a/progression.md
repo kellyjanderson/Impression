@@ -35,11 +35,11 @@ with the implementation.
 
 ## Tranche 04: Candidate Fitting and Shared-Trajectory Inference
 
-- [ ] [Feature Spec 03B: Station-Derived Candidate Curve-Fit Generation, Comparison, and Refusal Posture](specifications/feature-03b-station-derived-candidate-curve-fit-generation-comparison-and-refusal-posture-v1_0.md)
-- [ ] [Feature Spec 03C: Shared-Trajectory Candidate Curve-Fit Generation, Comparison, and Refusal Posture](specifications/feature-03c-shared-trajectory-candidate-curve-fit-generation-comparison-and-refusal-posture-v1_0.md)
-- [ ] [Feature Spec 06B: Curve-Intent Candidate Classification and Confidence Posture](specifications/feature-06b-curve-intent-candidate-classification-and-confidence-posture-v1_0.md)
-- [ ] [Feature Spec 07A1: Shared Whole-Loft Trajectory Candidate Generation](specifications/feature-07a1-shared-whole-loft-trajectory-candidate-generation-v1_0.md)
-- [ ] [Feature Spec 07A2: Shared Whole-Loft Trajectory Confidence and Refusal Posture](specifications/feature-07a2-shared-whole-loft-trajectory-confidence-and-refusal-posture-v1_0.md)
+- [x] [Feature Spec 03B: Station-Derived Candidate Curve-Fit Generation, Comparison, and Refusal Posture](specifications/feature-03b-station-derived-candidate-curve-fit-generation-comparison-and-refusal-posture-v1_0.md)
+- [x] [Feature Spec 03C: Shared-Trajectory Candidate Curve-Fit Generation, Comparison, and Refusal Posture](specifications/feature-03c-shared-trajectory-candidate-curve-fit-generation-comparison-and-refusal-posture-v1_0.md)
+- [x] [Feature Spec 06B: Curve-Intent Candidate Classification and Confidence Posture](specifications/feature-06b-curve-intent-candidate-classification-and-confidence-posture-v1_0.md)
+- [x] [Feature Spec 07A1: Shared Whole-Loft Trajectory Candidate Generation](specifications/feature-07a1-shared-whole-loft-trajectory-candidate-generation-v1_0.md)
+- [x] [Feature Spec 07A2: Shared Whole-Loft Trajectory Confidence and Refusal Posture](specifications/feature-07a2-shared-whole-loft-trajectory-confidence-and-refusal-posture-v1_0.md)
 
 ## Tranche 05: Guidance and Control-Station Inference Results
 
