@@ -6,6 +6,7 @@ from impression.modeling import (
     PathBackedProgression,
     ProgressionStationAttachment,
     ProgressionProvenanceRecord,
+    ProgressionTransportPolicy,
     Station,
     as_section,
 )
@@ -212,3 +213,56 @@ def test_station_attachment_remains_durable_enough_for_replay() -> None:
     )
 
     assert first.identity == second.identity
+
+
+def test_progression_records_expose_explicit_transport_semantics() -> None:
+    progression = PathBackedProgression(
+        path=Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.0, 1.0)]),
+        transport_policy=ProgressionTransportPolicy(kind="parallel_transport"),
+    )
+
+    assert progression.transport_policy.kind == "parallel_transport"
+
+
+def test_loft_consumes_transport_semantics_through_an_inspectable_contract() -> None:
+    progression = PathBackedProgression(
+        path=Path3D.from_points([(0.0, 0.0, 0.0), (0.2, 0.0, 1.0)]),
+    )
+    contract = progression.loft_transport_contract
+
+    assert contract.progression_identity == progression.identity
+    assert contract.transport_policy == progression.transport_policy
+
+
+def test_transport_semantics_remain_deterministic_for_identical_inputs() -> None:
+    kwargs = dict(
+        path=Path3D.from_points([(0.0, 0.0, 0.0), (0.2, 0.0, 1.0)]),
+        transport_policy=ProgressionTransportPolicy(kind="parallel_transport"),
+    )
+
+    first = PathBackedProgression(**kwargs)
+    second = PathBackedProgression(**kwargs)
+
+    assert first.loft_transport_contract == second.loft_transport_contract
+
+
+def test_transport_policy_remains_separate_from_twist_and_scale_semantic_slots() -> None:
+    progression = PathBackedProgression(
+        path=Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.0, 1.0)]),
+    )
+
+    assert progression.transport_policy.kind == "parallel_transport"
+    assert not hasattr(progression.transport_policy, "twist")
+    assert not hasattr(progression.transport_policy, "scale")
+
+
+def test_transport_ownership_is_durable_enough_for_replay_and_diagnostics() -> None:
+    progression = PathBackedProgression(
+        path=Path3D.from_points([(0.0, 0.0, 0.0), (0.2, 0.1, 1.0)]),
+        transport_policy=ProgressionTransportPolicy(kind="parallel_transport"),
+    )
+
+    first = progression.loft_transport_contract
+    second = progression.loft_transport_contract
+
+    assert first == second

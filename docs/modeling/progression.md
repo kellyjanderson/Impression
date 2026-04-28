@@ -70,3 +70,23 @@ That attachment contract keeps:
 - progression identity explicit
 - attachment ordering durable
 - station-owned topology truth intact
+
+## Transport Semantics
+
+Transport semantics now live explicitly on the progression object too:
+
+```python
+from impression.modeling import ProgressionTransportPolicy
+
+progression = PathBackedProgression(
+    path=path,
+    transport_policy=ProgressionTransportPolicy(kind="parallel_transport"),
+)
+contract = progression.loft_transport_contract
+```
+
+In this milestone:
+
+- transport ownership is explicit on progression
+- loft-facing consumption is represented by an inspectable contract object
+- transport policy stays separate from later twist and scale semantic slots
