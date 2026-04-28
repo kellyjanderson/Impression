@@ -241,3 +241,18 @@ selected, assessment = compare_shared_trajectory_curve_fit_candidates(candidates
 
 This keeps the shared-trajectory fit path using the same explicit residual and
 refusal posture as the station-derived lane.
+
+That fitted shared-trajectory evidence can then be lifted into whole-loft
+trajectory candidates:
+
+```python
+from impression.modeling import generate_shared_whole_loft_trajectory_candidates
+
+whole_loft_candidates = generate_shared_whole_loft_trajectory_candidates(descriptor_band)
+```
+
+Those candidate records keep the boundary honest:
+
+- candidate scope remains limited to whole-loft shared trajectories
+- source fit candidate identity remains explicit
+- source residual evidence remains attached for later posture decisions

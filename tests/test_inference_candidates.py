@@ -8,6 +8,7 @@ from impression.modeling import (
     ParameterizationPolicyRecord,
     compare_shared_trajectory_curve_fit_candidates,
     compare_station_derived_curve_fit_candidates,
+    generate_shared_whole_loft_trajectory_candidates,
     generate_shared_trajectory_curve_fit_candidates,
     generate_station_derived_curve_fit_candidates,
     prepare_dense_loft_fit_descriptors,
@@ -227,3 +228,64 @@ def test_weak_trajectory_fits_are_not_silently_promoted() -> None:
 
     assert selected is None
     assert assessment.decision_outcome == "refused"
+
+
+def test_representative_loft_evidence_produces_shared_whole_loft_trajectory_candidates() -> None:
+    candidates = generate_shared_whole_loft_trajectory_candidates(
+        prepare_dense_loft_fit_descriptors(_dense_fixture()),
+        fit_configuration=_fit_config(),
+    )
+
+    assert len(candidates) == 2
+    assert candidates[0].candidate_id.startswith("whole_loft_")
+
+
+def test_candidate_outputs_remain_inspectable_and_durable() -> None:
+    candidates = generate_shared_whole_loft_trajectory_candidates(
+        prepare_dense_loft_fit_descriptors(_dense_fixture()),
+        fit_configuration=_fit_config(),
+    )
+
+    assert candidates[0].source_fit_candidate_id == "shared_trajectory_polyline"
+    assert candidates[0].source_residual_report.metric_name.startswith("max_distance")
+    assert candidates[0].fit_configuration_identity == _fit_config().identity
+
+
+def test_generation_remains_limited_to_whole_loft_shared_trajectories() -> None:
+    candidates = generate_shared_whole_loft_trajectory_candidates(
+        prepare_dense_loft_fit_descriptors(_dense_fixture()),
+        fit_configuration=_fit_config(),
+    )
+
+    assert all(candidate.evidence_lane == "shared_trajectory_curve_fit" for candidate in candidates)
+
+
+def test_candidate_output_shape_remains_stable_for_identical_inputs() -> None:
+    first = generate_shared_whole_loft_trajectory_candidates(
+        prepare_dense_loft_fit_descriptors(_dense_fixture()),
+        fit_configuration=_fit_config(),
+    )
+    second = generate_shared_whole_loft_trajectory_candidates(
+        prepare_dense_loft_fit_descriptors(_dense_fixture()),
+        fit_configuration=_fit_config(),
+    )
+
+    assert tuple(candidate.candidate_id for candidate in first) == tuple(
+        candidate.candidate_id for candidate in second
+    )
+    assert tuple(candidate.source_fit_candidate_id for candidate in first) == tuple(
+        candidate.source_fit_candidate_id for candidate in second
+    )
+    assert tuple(candidate.fit_configuration_identity for candidate in first) == tuple(
+        candidate.fit_configuration_identity for candidate in second
+    )
+
+
+def test_fitted_curve_evidence_contribution_remains_explicit() -> None:
+    candidates = generate_shared_whole_loft_trajectory_candidates(
+        prepare_dense_loft_fit_descriptors(_dense_fixture()),
+        fit_configuration=_fit_config(),
+    )
+
+    assert all(candidate.source_fit_candidate_id for candidate in candidates)
+    assert all(candidate.source_residual_report.metric_name for candidate in candidates)
