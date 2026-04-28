@@ -213,3 +213,18 @@ The comparison contract always returns either:
 
 - an accepted candidate with residual diagnostics
 - or an explicit refusal
+
+There is also a parallel shared-trajectory candidate lane:
+
+```python
+from impression.modeling import (
+    compare_shared_trajectory_curve_fit_candidates,
+    generate_shared_trajectory_curve_fit_candidates,
+)
+
+candidates = generate_shared_trajectory_curve_fit_candidates(descriptor_band)
+selected, assessment = compare_shared_trajectory_curve_fit_candidates(candidates)
+```
+
+This keeps the shared-trajectory fit path using the same explicit residual and
+refusal posture as the station-derived lane.

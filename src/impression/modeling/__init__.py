@@ -82,6 +82,9 @@ from .inference_descriptors import (
     prepare_dense_loft_fit_descriptors,
 )
 from .inference_candidates import (
+    SharedTrajectoryCurveFitCandidate,
+    compare_shared_trajectory_curve_fit_candidates,
+    generate_shared_trajectory_curve_fit_candidates,
     StationDerivedCurveFitCandidate,
     compare_station_derived_curve_fit_candidates,
     generate_station_derived_curve_fit_candidates,
@@ -271,6 +274,9 @@ __all__ = [
     "StationDerivedCurveFitCandidate",
     "generate_station_derived_curve_fit_candidates",
     "compare_station_derived_curve_fit_candidates",
+    "SharedTrajectoryCurveFitCandidate",
+    "generate_shared_trajectory_curve_fit_candidates",
+    "compare_shared_trajectory_curve_fit_candidates",
     "ProgressionStationAttachment",
     "ProgressionProvenanceKind",
     "ProgressionProvenanceRecord",
