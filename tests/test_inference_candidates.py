@@ -6,6 +6,7 @@ from impression.modeling import (
     KnotCountPolicyRecord,
     KnotPlacementPolicyRecord,
     ParameterizationPolicyRecord,
+    assess_shared_whole_loft_trajectory_candidates,
     compare_shared_trajectory_curve_fit_candidates,
     compare_station_derived_curve_fit_candidates,
     generate_shared_whole_loft_trajectory_candidates,
@@ -289,3 +290,78 @@ def test_fitted_curve_evidence_contribution_remains_explicit() -> None:
 
     assert all(candidate.source_fit_candidate_id for candidate in candidates)
     assert all(candidate.source_residual_report.metric_name for candidate in candidates)
+
+
+def test_weak_or_conflicting_evidence_produces_explicit_confidence_or_refusal_posture() -> None:
+    assessment = assess_shared_whole_loft_trajectory_candidates(
+        generate_shared_whole_loft_trajectory_candidates(
+            prepare_dense_loft_fit_descriptors(_dense_fixture()),
+            fit_configuration=_fit_config(),
+        )
+    )
+
+    assert assessment.posture in {"accepted", "uncertain", "refused"}
+    assert assessment.reason
+
+
+def test_confidence_posture_is_attached_to_generated_shared_trajectory_candidates() -> None:
+    candidates = generate_shared_whole_loft_trajectory_candidates(
+        prepare_dense_loft_fit_descriptors(_dense_fixture()),
+        fit_configuration=_fit_config(),
+    )
+    assessment = assess_shared_whole_loft_trajectory_candidates(candidates)
+
+    assert assessment.candidate is not None
+    assert assessment.candidate.candidate_id.startswith("whole_loft_")
+
+
+def test_weak_evidence_is_not_silently_promoted_to_accepted_trajectory_truth() -> None:
+    candidates = generate_shared_whole_loft_trajectory_candidates(
+        prepare_dense_loft_fit_descriptors(_dense_fixture()),
+        fit_configuration=_fit_config(),
+    )
+    weak_candidates = tuple(
+        type(candidate)(
+            candidate_id=candidate.candidate_id,
+            trajectory_curve=candidate.trajectory_curve,
+            source_fit_candidate_id=candidate.source_fit_candidate_id,
+            source_residual_report=type(candidate.source_residual_report)(
+                metric_name=candidate.source_residual_report.metric_name,
+                residual_value=1.0,
+                acceptance_threshold=0.1,
+                approximation_posture="approximate",
+                exact_threshold=0.0,
+            ),
+            fit_configuration_identity=candidate.fit_configuration_identity,
+            evidence_lane=candidate.evidence_lane,
+        )
+        for candidate in candidates
+    )
+
+    assessment = assess_shared_whole_loft_trajectory_candidates(weak_candidates)
+
+    assert assessment.candidate is None
+    assert assessment.posture == "refused"
+
+
+def test_refusal_or_uncertainty_remain_first_class_outputs() -> None:
+    approximate_candidates = generate_shared_whole_loft_trajectory_candidates(
+        prepare_dense_loft_fit_descriptors(_dense_fixture()),
+        fit_configuration=_fit_config(),
+    )[1:]
+
+    assessment = assess_shared_whole_loft_trajectory_candidates(approximate_candidates)
+
+    assert assessment.posture == "uncertain"
+    assert assessment.candidate is not None
+
+
+def test_scope_remains_limited_to_whole_loft_shared_trajectories() -> None:
+    assessment = assess_shared_whole_loft_trajectory_candidates(
+        generate_shared_whole_loft_trajectory_candidates(
+            prepare_dense_loft_fit_descriptors(_dense_fixture()),
+            fit_configuration=_fit_config(),
+        )
+    )
+
+    assert assessment.evidence_lane == "shared_trajectory_curve_fit"

@@ -95,7 +95,10 @@ from .curve_intent import (
     classify_curve_intent_candidate,
 )
 from .shared_trajectory import (
+    SharedWholeLoftTrajectoryAssessment,
     SharedWholeLoftTrajectoryCandidate,
+    SharedWholeLoftTrajectoryPosture,
+    assess_shared_whole_loft_trajectory_candidates,
     generate_shared_whole_loft_trajectory_candidates,
 )
 from .bspline import BSpline2D, BSpline3D
@@ -289,7 +292,10 @@ __all__ = [
     "CurveIntentCandidateReport",
     "CurveIntentPosture",
     "classify_curve_intent_candidate",
+    "SharedWholeLoftTrajectoryAssessment",
     "SharedWholeLoftTrajectoryCandidate",
+    "SharedWholeLoftTrajectoryPosture",
+    "assess_shared_whole_loft_trajectory_candidates",
     "generate_shared_whole_loft_trajectory_candidates",
     "ProgressionStationAttachment",
     "ProgressionProvenanceKind",
