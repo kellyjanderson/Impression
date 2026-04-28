@@ -257,6 +257,25 @@ Those candidate records keep the boundary honest:
 - source fit candidate identity remains explicit
 - source residual evidence remains attached for later posture decisions
 
+Explicit shared guidance can then attach to a progression through a durable
+attachment record:
+
+```python
+from impression.modeling import ExplicitSharedGuidanceAttachmentRecord
+
+attachment = ExplicitSharedGuidanceAttachmentRecord.from_candidate(
+    guidance_id="guidance-0",
+    progression=progression,
+    candidate=whole_loft_candidates[0],
+)
+```
+
+That first guidance milestone keeps:
+
+- attachment identity deterministic and inspectable
+- replay payload shape stable
+- attachment metadata durable for later diagnostics
+
 Confidence and refusal are then handled by a separate posture layer:
 
 ```python
