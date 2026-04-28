@@ -114,3 +114,28 @@ That keeps the contract honest:
 - twist semantics are not hidden inside transport policy
 - scale semantics are not hidden inside transport policy
 - deferred execution does not erase the owned semantic slots
+
+## Hidden Control Stations
+
+The planner can also carry hidden control stations as internal records without
+promoting them to public authored API:
+
+```python
+from impression.modeling import (
+    HiddenControlStationProvenanceRecord,
+    HiddenControlStationRecord,
+)
+
+record = HiddenControlStationRecord(
+    station_id="control-0",
+    origin=(0.0, 0.0, 0.5),
+    u=(1.0, 0.0, 0.0),
+    v=(0.0, 1.0, 0.0),
+    n=(0.0, 0.0, 1.0),
+    topology_reference=None,
+    provenance=HiddenControlStationProvenanceRecord(),
+)
+```
+
+These records are planner-owned and keep provenance explicit, but they are not
+the same thing as public topology stations.

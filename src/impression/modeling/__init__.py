@@ -62,6 +62,11 @@ from .progression import (
     ProgressionTransportPolicy,
     ProgressionTwistSemanticSlot,
 )
+from .control_stations import (
+    HiddenControlStationProvenanceRecord,
+    HiddenControlStationRecord,
+    HiddenControlStationSource,
+)
 from .bspline import BSpline2D, BSpline3D
 from .fit_records import (
     FitApproximationPosture,
@@ -229,6 +234,9 @@ __all__ = [
     "Bezier3D",
     "Path3D",
     "PathBackedProgression",
+    "HiddenControlStationProvenanceRecord",
+    "HiddenControlStationRecord",
+    "HiddenControlStationSource",
     "ProgressionStationAttachment",
     "ProgressionProvenanceKind",
     "ProgressionProvenanceRecord",
