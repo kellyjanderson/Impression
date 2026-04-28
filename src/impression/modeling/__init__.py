@@ -51,6 +51,7 @@ from .loft import (
 )
 from .path3d import Arc3D, Bezier3D, Line3D, Path3D
 from .bspline import BSpline2D, BSpline3D
+from .fit_records import ParameterizationPolicyRecord
 from .csg import (
     BooleanOperationError,
     SurfaceBooleanCutCurve,
@@ -208,6 +209,7 @@ __all__ = [
     "Path3D",
     "BSpline2D",
     "BSpline3D",
+    "ParameterizationPolicyRecord",
     "Loft",
     "loft",
     "loft_profiles",
