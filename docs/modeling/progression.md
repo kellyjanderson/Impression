@@ -197,6 +197,19 @@ evidence = assemble_span_local_curve_intent_evidence(families)
 That assembled evidence keeps ordering explicit and gives later candidate
 classification a stable downstream shape to consume.
 
+Curve-intent candidate posture can then be classified explicitly:
+
+```python
+from impression.modeling import classify_curve_intent_candidate
+
+report = classify_curve_intent_candidate(evidence)
+```
+
+The initial posture stays conservative:
+
+- strong evidence yields a candidate report
+- weak or conflicting evidence yields an explicit indeterminate posture
+
 Station-derived candidate fits can then be generated and compared explicitly:
 
 ```python

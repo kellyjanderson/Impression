@@ -5,6 +5,7 @@ from impression.modeling import (
     assemble_span_local_curve_intent_evidence,
     as_section,
     build_curve_intent_descriptor_families,
+    classify_curve_intent_candidate,
     prepare_dense_loft_fit_descriptors,
 )
 from impression.modeling.drawing2d import make_circle, make_rect
@@ -175,3 +176,67 @@ def test_later_candidate_classification_branches_can_consume_the_same_evidence_s
 
     assert all(isinstance(item.loop_counts, tuple) for item in evidence)
     assert all(isinstance(item.correspondence_track_counts, tuple) for item in evidence)
+
+
+def test_representative_evidence_produces_candidate_intent_reports_or_explicit_indeterminate_posture() -> None:
+    evidence = assemble_span_local_curve_intent_evidence(
+        build_curve_intent_descriptor_families(
+            prepare_dense_loft_fit_descriptors(_dense_fixture())
+        )
+    )
+
+    report = classify_curve_intent_candidate(evidence)
+
+    assert report.posture in {"candidate", "indeterminate"}
+
+
+def test_confidence_or_uncertainty_remains_inspectable() -> None:
+    evidence = assemble_span_local_curve_intent_evidence(
+        build_curve_intent_descriptor_families(
+            prepare_dense_loft_fit_descriptors(_dense_fixture())
+        )
+    )
+    report = classify_curve_intent_candidate(evidence)
+
+    assert isinstance(report.confidence, float)
+    assert isinstance(report.reason, str)
+
+
+def test_weak_evidence_is_not_overstated_as_strong_inferred_intent() -> None:
+    weak_evidence = (
+        type(
+            assemble_span_local_curve_intent_evidence(
+                build_curve_intent_descriptor_families(
+                    prepare_dense_loft_fit_descriptors(_dense_fixture())
+                )
+            )[0]
+        )(
+            span_start_station_index=0,
+            span_end_station_index=1,
+            section_region_counts=(1, 2),
+            loop_counts=(1, 2),
+            correspondence_track_counts=(0, 0),
+        ),
+    )
+
+    report = classify_curve_intent_candidate(weak_evidence)
+
+    assert report.posture == "indeterminate"
+
+
+def test_indeterminate_or_refusal_posture_remains_a_first_class_output() -> None:
+    report = classify_curve_intent_candidate(())
+
+    assert report.posture == "indeterminate"
+    assert report.reason == "missing_span_local_evidence"
+
+
+def test_candidate_reporting_stays_aligned_with_descriptor_evidence() -> None:
+    evidence = assemble_span_local_curve_intent_evidence(
+        build_curve_intent_descriptor_families(
+            prepare_dense_loft_fit_descriptors(_dense_fixture())
+        )
+    )
+    report = classify_curve_intent_candidate(evidence)
+
+    assert report.evidence_count == len(evidence)
