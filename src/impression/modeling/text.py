@@ -1,8 +1,16 @@
+"""Text modeling built from font outlines and layout.
+
+This module owns font resolution, glyph extraction, and text layout. Generic
+planar topology assembly (outer/hole classification and winding policy) is
+delegated to ``impression.modeling.topology``.
+"""
+
 from __future__ import annotations
 
-from typing import Iterable, Sequence
+from typing import TYPE_CHECKING, Literal, Sequence
 from pathlib import Path
 import math
+import warnings
 
 import numpy as np
 from fontTools.ttLib import TTFont, TTLibFileIsCollectionError
@@ -10,9 +18,18 @@ from fontTools.pens.recordingPen import RecordingPen
 
 from impression.mesh import Mesh, combine_meshes
 
-from .drawing2d import Path2D, Profile2D, Line2D, Bezier2D
-from .extrude import linear_extrude
-from ._color import _normalize_color
+from ._surface_ops import make_surface_linear_extrude
+from .drawing2d import Path2D, Line2D, Bezier2D
+from ._color import _normalize_color, set_mesh_color
+from ._legacy_mesh_deprecation import warn_mesh_primary_api
+from .topology import Section, sections_from_paths, triangulate_loops
+
+_WARNED_TEXT_PROFILE_COLOR = False
+
+if TYPE_CHECKING:
+    from .surface import SurfaceBody
+
+Backend = Literal["mesh", "surface"]
 
 
 def make_text(
@@ -28,8 +45,12 @@ def make_text(
     font: str = "Arial",
     font_path: str | None = None,
     color: Sequence[float] | str | None = None,
-) -> Mesh:
+    backend: Backend = "mesh",
+) -> Mesh | SurfaceBody:
     """Return 3D text built by extruding text profiles."""
+
+    if backend not in {"mesh", "surface"}:
+        raise ValueError("backend must be 'mesh' or 'surface'.")
 
     depth = float(depth)
     if depth <= 0:
@@ -44,9 +65,31 @@ def make_text(
         line_height=line_height,
         font=font,
         font_path=font_path,
-        color=color,
     )
-    meshes = [linear_extrude(profile, height=depth) for profile in profiles]
+
+    if backend == "surface":
+        if not profiles:
+            from ._surface_primitives import make_surface_box
+
+            return make_surface_box(
+                size=(1e-6, 1e-6, 1e-6),
+                metadata={"consumer": {"hidden_placeholder": True}},
+            )
+        bodies = [_surface_text_extrude(section, height=depth) for section in profiles]
+        from .surface import make_surface_body
+
+        combined = make_surface_body(
+            tuple(shell for body in bodies for shell in body.iter_shells(world=True)),
+            metadata={"consumer": {"color": color}} if color is not None else None,
+        )
+        transform = _orientation_transform(center, direction)
+        return combined.with_transform(transform)
+
+    warn_mesh_primary_api(
+        "make_text",
+        replacement="text_profiles()/text_sections() with surface-native downstream modeling",
+    )
+    meshes = [_mesh_text_extrude(section, height=depth) for section in profiles]
     if not meshes:
         return Mesh(np.zeros((0, 3), dtype=float), np.zeros((0, 3), dtype=int))
     mesh = combine_meshes(meshes)
@@ -63,6 +106,8 @@ def make_text(
             mesh.rotate_vector((1.0, 0.0, 0.0), 180.0, point=(0.0, 0.0, 0.0), inplace=True)
 
     mesh.translate(center, inplace=True)
+    if color is not None:
+        set_mesh_color(mesh, color)
     return mesh
 
 
@@ -79,9 +124,15 @@ def text(
     font: str = "Arial",
     font_path: str | None = None,
     color: Sequence[float] | str | None = None,
-) -> Mesh:
+    backend: Backend = "mesh",
+) -> Mesh | SurfaceBody:
     """Alias for make_text."""
 
+    if backend == "mesh":
+        warn_mesh_primary_api(
+            "text",
+            replacement="text_profiles()/text_sections() with surface-native downstream modeling",
+        )
     return make_text(
         content=content,
         depth=depth,
@@ -95,6 +146,7 @@ def text(
         font=font,
         font_path=font_path,
         color=color,
+        backend=backend,
     )
 
 
@@ -108,8 +160,13 @@ def text_profiles(
     font: str = "Arial",
     font_path: str | None = None,
     color: Sequence[float] | str | None = None,
-) -> list[Profile2D]:
-    """Return Profile2D objects for the given text string."""
+) -> list[Section]:
+    """Return topology-native Section objects for the given text string.
+
+    Topology ownership note: glyph path nesting and profile assembly are routed
+    through ``sections_from_paths`` so text does not maintain duplicate
+    topology logic.
+    """
 
     if not content:
         return []
@@ -172,12 +229,45 @@ def text_profiles(
         for path in paths:
             aligned_paths.append(_translate_path(path, (x_offset, y_offset)))
 
-    profiles = _profiles_from_paths(aligned_paths)
+    sections = sections_from_paths(aligned_paths)
     if color is not None:
-        rgba = _normalize_color(color)
-        for profile in profiles:
-            profile.color = rgba
-    return profiles
+        global _WARNED_TEXT_PROFILE_COLOR
+        _normalize_color(color)  # keep validation behavior for callers
+        if not _WARNED_TEXT_PROFILE_COLOR:
+            _WARNED_TEXT_PROFILE_COLOR = True
+            warnings.warn(
+                "text_profiles(..., color=...) no longer annotates profile colors; "
+                "apply color at mesh stage (e.g., make_text color=...).",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+    return sections
+
+
+def text_sections(
+    content: str,
+    font_size: float = 1.0,
+    justify: str = "left",
+    valign: str = "baseline",
+    letter_spacing: float = 0.0,
+    line_height: float = 1.2,
+    font: str = "Arial",
+    font_path: str | None = None,
+    color: Sequence[float] | str | None = None,
+) -> list[Section]:
+    """Alias for text_profiles with topology-native naming."""
+
+    return text_profiles(
+        content=content,
+        font_size=font_size,
+        justify=justify,
+        valign=valign,
+        letter_spacing=letter_spacing,
+        line_height=line_height,
+        font=font,
+        font_path=font_path,
+        color=color,
+    )
 
 
 def _resolve_font_path(font_path: str | None, font: str) -> str:
@@ -309,54 +399,6 @@ def _translate_path(path: Path2D, offset: Sequence[float]) -> Path2D:
     return Path2D(segments=segments, closed=path.closed, color=path.color, metadata=dict(path.metadata))
 
 
-def _profiles_from_paths(paths: Iterable[Path2D]) -> list[Profile2D]:
-    info = []
-    for path in paths:
-        pts = path.sample()
-        if len(pts) < 3:
-            continue
-        area = _polygon_area(pts)
-        info.append({"path": path, "abs_area": abs(area), "pts": pts})
-    info.sort(key=lambda x: x["abs_area"], reverse=True)
-    outers = []
-    for item in info:
-        path = item["path"]
-        pts = item["pts"]
-        candidate = None
-        for outer in outers:
-            if _point_in_polygon(pts[0], outer["pts"]):
-                if candidate is None or outer["abs_area"] < candidate["abs_area"]:
-                    candidate = outer
-        if candidate is None:
-            item["holes"] = []
-            outers.append(item)
-        else:
-            candidate["holes"].append(path)
-    profiles = []
-    for outer in outers:
-        profiles.append(Profile2D(outer=outer["path"], holes=outer.get("holes", [])))
-    return profiles
-
-
-def _polygon_area(points: np.ndarray) -> float:
-    if len(points) < 3:
-        return 0.0
-    x = points[:, 0]
-    y = points[:, 1]
-    return 0.5 * float(np.dot(x[:-1], y[1:]) - np.dot(x[1:], y[:-1]))
-
-
-def _point_in_polygon(point: np.ndarray, polygon: np.ndarray) -> bool:
-    x, y = point
-    inside = False
-    for i in range(len(polygon) - 1):
-        x0, y0 = polygon[i]
-        x1, y1 = polygon[i + 1]
-        if ((y0 > y) != (y1 > y)) and (x < (x1 - x0) * (y - y0) / (y1 - y0 + 1e-9) + x0):
-            inside = not inside
-    return inside
-
-
 def _normalize_vec(vector: Sequence[float]) -> np.ndarray:
     arr = np.asarray(vector, dtype=float).reshape(3)
     norm = np.linalg.norm(arr)
@@ -365,4 +407,119 @@ def _normalize_vec(vector: Sequence[float]) -> np.ndarray:
     return arr / norm
 
 
-__all__ = ["make_text", "text", "text_profiles"]
+def _axis_angle_matrix(axis: np.ndarray, angle_rad: float) -> np.ndarray:
+    x, y, z = np.asarray(axis, dtype=float).reshape(3)
+    c = float(np.cos(angle_rad))
+    s = float(np.sin(angle_rad))
+    t = 1.0 - c
+    return np.array(
+        [
+            [t * x * x + c, t * x * y - s * z, t * x * z + s * y, 0.0],
+            [t * x * y + s * z, t * y * y + c, t * y * z - s * x, 0.0],
+            [t * x * z - s * y, t * y * z + s * x, t * z * z + c, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=float,
+    )
+
+
+def _orientation_transform(center: Sequence[float], direction: Sequence[float]) -> np.ndarray:
+    direction_vec = _normalize_vec(direction)
+    base_vec = np.array([0.0, 0.0, 1.0], dtype=float)
+    if np.allclose(direction_vec, base_vec):
+        transform = np.eye(4, dtype=float)
+    elif np.allclose(direction_vec, -base_vec):
+        transform = np.array(
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, -1.0, 0.0, 0.0],
+                [0.0, 0.0, -1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            dtype=float,
+        )
+    else:
+        axis = np.cross(base_vec, direction_vec)
+        axis = axis / float(np.linalg.norm(axis))
+        angle = math.acos(float(np.clip(np.dot(base_vec, direction_vec), -1.0, 1.0)))
+        transform = _axis_angle_matrix(axis, angle)
+    transform[:3, 3] = np.asarray(center, dtype=float).reshape(3)
+    return transform
+
+
+def _surface_text_extrude(section: Section, *, height: float):
+    return make_surface_linear_extrude(section, height=height)
+
+
+def _mesh_text_extrude(section: Section, *, height: float) -> Mesh:
+    height = float(height)
+    if height <= 0.0:
+        raise ValueError("height must be positive.")
+    if not section.regions:
+        return Mesh(np.zeros((0, 3), dtype=float), np.zeros((0, 3), dtype=int))
+
+    direction_vec = np.array([0.0, 0.0, height], dtype=float)
+    meshes: list[Mesh] = []
+    for region in section.normalized().regions:
+        loops = [region.outer.points, *(hole.points for hole in region.holes)]
+        vertices_2d, faces_2d = triangulate_loops(loops)
+        if vertices_2d.size == 0:
+            continue
+        meshes.append(_extrude_region_loops(vertices_2d, faces_2d, loops, direction_vec))
+    if not meshes:
+        return Mesh(np.zeros((0, 3), dtype=float), np.zeros((0, 3), dtype=int))
+    return meshes[0] if len(meshes) == 1 else combine_meshes(meshes)
+
+
+def _extrude_region_loops(
+    vertices_2d: np.ndarray,
+    faces_2d: np.ndarray,
+    loops: list[np.ndarray],
+    direction_vec: np.ndarray,
+) -> Mesh:
+    base = np.column_stack([vertices_2d[:, 0], vertices_2d[:, 1], np.zeros(len(vertices_2d))])
+    top = base + direction_vec
+    vertices = np.vstack([base, top])
+
+    plane_normal = np.array([0.0, 0.0, 1.0], dtype=float)
+    bottom_faces = _orient_cap_faces(base, faces_2d, expected_normal=-plane_normal)
+    top_faces = _orient_cap_faces(top, faces_2d, expected_normal=plane_normal) + len(base)
+    faces = [bottom_faces, top_faces]
+
+    offset = 0
+    for loop in loops:
+        count = loop.shape[0]
+        if count < 2:
+            offset += count
+            continue
+        for i in range(count):
+            j = (i + 1) % count
+            b0 = offset + i
+            b1 = offset + j
+            t0 = b0 + len(base)
+            t1 = b1 + len(base)
+            faces.append(np.array([[b0, b1, t1], [b0, t1, t0]], dtype=int))
+        offset += count
+
+    return Mesh(vertices, np.vstack(faces))
+
+
+def _orient_cap_faces(
+    vertices: np.ndarray,
+    faces: np.ndarray,
+    *,
+    expected_normal: np.ndarray,
+) -> np.ndarray:
+    if faces.size == 0:
+        return faces
+    oriented = faces.copy()
+    v1 = vertices[oriented[:, 1]] - vertices[oriented[:, 0]]
+    v2 = vertices[oriented[:, 2]] - vertices[oriented[:, 0]]
+    normals = np.cross(v1, v2)
+    flip = np.einsum("ij,j->i", normals, expected_normal) < 0
+    if np.any(flip):
+        oriented[flip] = oriented[flip][:, [0, 2, 1]]
+    return oriented
+
+
+__all__ = ["make_text", "text", "text_profiles", "text_sections"]

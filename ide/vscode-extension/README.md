@@ -1,10 +1,14 @@
 # Impression VS Code Helpers
 
-A lightweight VS Code extension that shells out to the `impression` CLI so you can preview models, export STL files, and run regression tests without leaving the editor.
+A lightweight VS Code extension that shells out to the installer + `impression` CLI so you can install on demand, preview models, and export STL files without leaving the editor.
 
 ## Features
 
-- **Impression: Preview Model** – prompts for a Python module (defaults to the active file) and launches `impression preview` in an integrated terminal.
+- **Impression: Install Local** – installs Impression into the workspace `.venv` and creates it if missing.
+- **Impression: Install Global** – installs Impression into `~/.impression/global-venv`.
+- **Impression: Init** – runs local install, downloads docs to `./impression-docs`, and prints/copies the agent bootstrap prompt.
+- **Impression: Preview** – launches `impression preview` for the active Python file (reuses existing project preview window).
+- **Impression: Preview in New Window** – same as Preview but passes `--force-window=true`.
 - **Impression: Export STL** – prompts for the model and destination path, then runs `impression export --overwrite`.
 - **Impression: Run Preview Tests** – executes `scripts/run_preview_tests.py` using your workspace Python interpreter.
 
@@ -13,7 +17,7 @@ Each command opens a dedicated `Impression` terminal so you can see live CLI log
 ## Interpreter detection
 
 The extension prefers `impression.pythonPath`, then checks `IMPRESSION_PY`, `~/.impression/env`, the VS Code Python interpreter
-setting, common workspace venvs, and the CLI shebang. If nothing is found, it offers a one-click install into `~/.impression-cli`.
+setting, common workspace venvs, and the CLI shebang. If nothing is found, it offers local/global installer commands.
 
 ## Settings
 

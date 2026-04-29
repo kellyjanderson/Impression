@@ -1,3 +1,10 @@
+"""Authored 2D geometry surface for Impression.
+
+This module owns user-facing curve/path construction (lines, arcs, beziers,
+Path2D, and convenience factories). Kernel planar-topology algorithms live in
+``impression.modeling.topology`` and must not be reintroduced here.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -308,7 +315,9 @@ def round_path(path: Path2D, radius: float, clamp: bool = True) -> Path2D:
 
 
 @dataclass
-class Profile2D:
+class PlanarShape2D:
+    """Closed 2D filled shape with one outer boundary and optional holes."""
+
     outer: Path2D
     holes: List[Path2D] = field(default_factory=list)
     color: tuple[float, float, float, float] | None = None
@@ -316,10 +325,10 @@ class Profile2D:
 
     def __post_init__(self) -> None:
         if not self.outer.closed:
-            raise ValueError("Profile2D outer path must be closed.")
+            raise ValueError("PlanarShape2D outer path must be closed.")
         for hole in self.holes:
             if not hole.closed:
-                raise ValueError("Profile2D hole paths must be closed.")
+                raise ValueError("PlanarShape2D hole paths must be closed.")
 
     def to_polylines(
         self,
@@ -337,7 +346,7 @@ class Profile2D:
             polylines.append(poly)
         return polylines
 
-    def with_color(self, color: Sequence[float] | str | None) -> "Profile2D":
+    def with_color(self, color: Sequence[float] | str | None) -> "PlanarShape2D":
         if color is None:
             self.color = None
             return self
@@ -349,7 +358,7 @@ def make_rect(
     size: Sequence[float] = (1.0, 1.0),
     center: Sequence[float] = (0.0, 0.0),
     color: Sequence[float] | str | None = None,
-) -> Profile2D:
+) -> PlanarShape2D:
     sx, sy = float(size[0]), float(size[1])
     if sx <= 0 or sy <= 0:
         raise ValueError("size must be positive.")
@@ -362,26 +371,26 @@ def make_rect(
         (cx - hx, cy + hy),
     ]
     outer = Path2D.from_points(points, closed=True)
-    profile = Profile2D(outer=outer)
+    shape = PlanarShape2D(outer=outer)
     if color is not None:
-        profile.with_color(color)
-    return profile
+        shape.with_color(color)
+    return shape
 
 
 def make_circle(
     radius: float = 0.5,
     center: Sequence[float] = (0.0, 0.0),
     color: Sequence[float] | str | None = None,
-) -> Profile2D:
+) -> PlanarShape2D:
     if radius <= 0:
         raise ValueError("radius must be positive.")
     center_vec = _to_vec2(center)
     arc = Arc2D(center=center_vec, radius=float(radius), start_angle_deg=0.0, end_angle_deg=360.0)
     outer = Path2D(segments=[arc], closed=True)
-    profile = Profile2D(outer=outer)
+    shape = PlanarShape2D(outer=outer)
     if color is not None:
-        profile.with_color(color)
-    return profile
+        shape.with_color(color)
+    return shape
 
 
 def make_ngon(
@@ -391,7 +400,7 @@ def make_ngon(
     color: Sequence[float] | str | None = None,
     *,
     side_length: float | None = None,
-) -> Profile2D:
+) -> PlanarShape2D:
     sides = int(sides)
     if sides < 3:
         raise ValueError("sides must be >= 3.")
@@ -408,24 +417,24 @@ def make_ngon(
     points = np.column_stack([np.cos(angles), np.sin(angles)]) * radius
     points = points + center_vec
     outer = Path2D.from_points(points, closed=True)
-    profile = Profile2D(outer=outer)
+    shape = PlanarShape2D(outer=outer)
     if color is not None:
-        profile.with_color(color)
-    return profile
+        shape.with_color(color)
+    return shape
 
 
 def make_polygon(
     points: Iterable[Sequence[float]],
     color: Sequence[float] | str | None = None,
-) -> Profile2D:
+) -> PlanarShape2D:
     pts = list(points)
     if len(pts) < 3:
         raise ValueError("make_polygon requires at least three points.")
     outer = Path2D.from_points(pts, closed=True)
-    profile = Profile2D(outer=outer)
+    shape = PlanarShape2D(outer=outer)
     if color is not None:
-        profile.with_color(color)
-    return profile
+        shape.with_color(color)
+    return shape
 
 
 def make_polyline(
@@ -444,7 +453,7 @@ __all__ = [
     "Bezier2D",
     "Line2D",
     "Path2D",
-    "Profile2D",
+    "PlanarShape2D",
     "make_circle",
     "make_ngon",
     "make_polyline",

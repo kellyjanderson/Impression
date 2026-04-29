@@ -57,8 +57,54 @@ list_releases() {
     fi
     git ls-remote --tags --sort=-v:refname "$repo_url" \
         | awk '{print $2}' \
-        | sed 's#refs/tags/##;s#\\^{}##' \
+        | sed 's#refs/tags/##;s#\^{}##' \
         | awk 'NF && !seen[$0]++ {print}'
+}
+
+read_project_version() {
+    local pyproject="$1/pyproject.toml"
+    if [[ ! -f "$pyproject" ]]; then
+        return 1
+    fi
+    awk -F'"' '/^version[[:space:]]*=[[:space:]]*"/ {print $2; exit}' "$pyproject"
+}
+
+set_project_version() {
+    local root="$1"
+    local version="$2"
+    local pyproject="$root/pyproject.toml"
+    local init_py="$root/src/impression/__init__.py"
+    local tmp=""
+
+    if [[ ! -f "$pyproject" || ! -f "$init_py" ]]; then
+        return 1
+    fi
+
+    tmp="$(mktemp)"
+    awk -v v="$version" '
+        BEGIN { updated=0 }
+        /^version[[:space:]]*=[[:space:]]*"/ {
+            print "version = \"" v "\""
+            updated=1
+            next
+        }
+        { print }
+        END { if (!updated) exit 2 }
+    ' "$pyproject" > "$tmp"
+    mv "$tmp" "$pyproject"
+
+    tmp="$(mktemp)"
+    awk -v v="$version" '
+        BEGIN { updated=0 }
+        /^__version__[[:space:]]*=[[:space:]]*"/ {
+            print "__version__ = \"" v "\""
+            updated=1
+            next
+        }
+        { print }
+        END { if (!updated) exit 2 }
+    ' "$init_py" > "$tmp"
+    mv "$tmp" "$init_py"
 }
 
 if [[ "${list_only:-0}" == "1" ]]; then
@@ -131,6 +177,8 @@ if [[ "$install_source" == "release" ]]; then
                 echo "No releases found at $repo_url" >&2
                 exit 1
             fi
+            # Defensive normalization in case upstream refs include annotated-tag suffixes.
+            release_ref="${release_ref%\^\{\}}"
         fi
     fi
     log "Installing Impression release ${release_ref}."
@@ -146,6 +194,31 @@ if [[ "$install_source" == "release" ]]; then
         exit 1
     fi
     repo_root="$release_dir/impression"
+    release_version="${release_ref#v}"
+    project_version="$(read_project_version "$repo_root" || true)"
+    if [[ -n "$project_version" && "$project_version" != "$release_version" ]]; then
+        mismatch_msg="Release tag ${release_ref} contains project version ${project_version}."
+        if [[ "${IMPRESSION_STRICT_TAG_VERSION:-0}" == "1" ]]; then
+            echo "${mismatch_msg}" >&2
+            echo "Refusing to install mismatched release because IMPRESSION_STRICT_TAG_VERSION=1." >&2
+            exit 1
+        fi
+        log "WARNING: ${mismatch_msg} Normalizing package metadata to ${release_version}."
+        if ! set_project_version "$repo_root" "$release_version"; then
+            echo "Failed to normalize package version metadata for ${release_ref}." >&2
+            exit 1
+        fi
+        project_version="$(read_project_version "$repo_root" || true)"
+        if [[ "$project_version" != "$release_version" ]]; then
+            echo "Package version normalization failed (expected ${release_version}, got ${project_version})." >&2
+            exit 1
+        fi
+        if [[ "${IMPRESSION_ALLOW_VERSION_MISMATCH:-0}" == "1" ]]; then
+            log "IMPRESSION_ALLOW_VERSION_MISMATCH is set; normalization completed and install will continue."
+        else
+            log "Version mismatch was auto-corrected for installation."
+        fi
+    fi
 else
     if [[ "$interactive" == "1" ]]; then
         echo "Interactive mode is only available for release installs." >&2
@@ -200,6 +273,24 @@ create_venv() {
     exit 1
 }
 
+ensure_venv_pip() {
+    local py_bin="$1"
+    if "$py_bin" -m pip --version >/dev/null 2>&1; then
+        return 0
+    fi
+
+    log "Bootstrapping pip into the target venv"
+    if ! "$py_bin" -m ensurepip --upgrade >/dev/null 2>&1; then
+        echo "Failed to bootstrap pip into $venv_path." >&2
+        exit 1
+    fi
+
+    if ! "$py_bin" -m pip --version >/dev/null 2>&1; then
+        echo "pip is still unavailable in $venv_path after ensurepip." >&2
+        exit 1
+    fi
+}
+
 if [[ -x "$venv_path/bin/python" ]]; then
     if ! "$venv_path/bin/python" - <<PY
 import sys
@@ -221,6 +312,7 @@ else
 fi
 
 py="$venv_path/bin/python"
+ensure_venv_pip "$py"
 
 "$py" - <<'PY' > /tmp/impression_installed_version.txt 2>/dev/null || true
 import importlib.metadata
@@ -244,17 +336,35 @@ if [[ -z "$wheel" ]]; then
     exit 1
 fi
 
-# Ensure manifold3d is available. If already installed, skip rebuilding it.
-if "$py" - <<'PY'
-import importlib.util
-raise SystemExit(0 if importlib.util.find_spec("manifold3d") else 1)
-PY
-then
+# Ensure manifold3d is available.
+# Default behavior prefers binary wheels (fast) and falls back to source build only if needed.
+# Set IMPRESSION_MANIFOLD_MODE=source to force source builds, or =skip to skip manifold install.
+manifold_mode="${IMPRESSION_MANIFOLD_MODE:-auto}"
+if [[ "$manifold_mode" != "auto" && "$manifold_mode" != "source" && "$manifold_mode" != "skip" ]]; then
+    echo "Invalid IMPRESSION_MANIFOLD_MODE='$manifold_mode' (expected auto|source|skip)." >&2
+    exit 1
+fi
+
+if "$py" -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("manifold3d") else 1)'; then
     log "manifold3d already installed; skipping build."
 else
-    log "Building manifold3d (serial mode)"
-    CMAKE_ARGS="-DMANIFOLD_PAR=OFF" "$py" -m pip install --upgrade --no-binary=:all: manifold3d
+    if [[ "$manifold_mode" == "skip" ]]; then
+        log "IMPRESSION_MANIFOLD_MODE=skip; skipping manifold3d install."
+    elif [[ "$manifold_mode" == "source" ]]; then
+        log "Building manifold3d from source (serial mode)"
+        CMAKE_ARGS="-DMANIFOLD_PAR=OFF" "$py" -m pip install --upgrade --no-binary=:all: manifold3d
+    else
+        log "Installing manifold3d (prefer wheel)"
+        if ! "$py" -m pip install --upgrade --only-binary=:all: manifold3d; then
+            log "manifold3d wheel unavailable; building from source (serial mode)"
+            CMAKE_ARGS="-DMANIFOLD_PAR=OFF" "$py" -m pip install --upgrade --no-binary=:all: manifold3d
+        fi
+    fi
 fi
+
+# Ensure PyVista (viewer) is available in the target venv.
+log "Ensuring Impression CLI runtime dependencies are installed"
+"$py" -m pip install --upgrade typer rich watchfiles mapbox_earcut pyclipper fonttools markdown Pillow
 
 # Ensure PyVista (viewer) is available in the target venv.
 log "Ensuring PyVista is installed"
@@ -262,7 +372,24 @@ log "Ensuring PyVista is installed"
 
 # Install the freshly built wheel.
 log "Installing Impression wheel"
-CMAKE_ARGS="-DMANIFOLD_PAR=OFF" "$py" -m pip install --upgrade --force-reinstall "$wheel"
+CMAKE_ARGS="-DMANIFOLD_PAR=OFF" "$py" -m pip install --upgrade --force-reinstall --no-deps "$wheel"
+
+# Validate CLI installation (module + executable entrypoint).
+if ! "$py" -m impression.cli --version >/dev/null 2>&1; then
+    echo "Impression CLI module failed to run after install." >&2
+    exit 1
+fi
+
+if [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* || "$OSTYPE" == win32* ]]; then
+    cli_bin="$venv_path/Scripts/impression.exe"
+else
+    cli_bin="$venv_path/bin/impression"
+fi
+
+if [[ ! -x "$cli_bin" ]]; then
+    echo "Impression CLI executable not found at $cli_bin after install." >&2
+    exit 1
+fi
 
 post_version="$("$py" - <<'PY' 2>/dev/null
 import importlib.metadata

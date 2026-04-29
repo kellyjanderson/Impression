@@ -1,12 +1,16 @@
 # Modeling - Heightmaps
 
-Heightmaps let you generate meshes from images and displace existing meshes using image data.
+Heightmaps let you generate geometry from images and displace existing geometry using image data.
 Impression accepts any image format supported by Pillow (PNG, JPG, TIFF, etc), auto‑grayscales
 color images, and treats `alpha == 0` as masked.
 
 ```python
 from impression.modeling import heightmap, displace_heightmap
 ```
+
+Both APIs support `backend="surface"` for a surface-first path. In the current
+build that surfaced result is emitted as a piecewise-planar `SurfaceBody`,
+which keeps the output canonical before preview/export tessellation.
 
 ## heightmap
 
@@ -19,6 +23,7 @@ terrain = heightmap(
     xy_scale=0.2,
     center=(0, 0, 0),
     alpha_mode="mask",  # drop faces where alpha == 0
+    backend="surface",
 )
 ```
 
@@ -29,10 +34,11 @@ Options:
 - `xy_scale`: scalar or `(sx, sy)` spacing between pixels.
 - `center`: world‑space center of the heightfield.
 - `alpha_mode`: `"mask"` (holes) or `"ignore"` (transparent pixels become zero height).
+- `backend`: `"mesh"` for legacy mesh-primary output, or `"surface"` for surfaced output.
 
 ## displace_heightmap
 
-Displace an existing mesh by projecting a heightmap onto it.
+Displace an existing mesh or surface body by projecting a heightmap onto it.
 
 ```python
 from impression.modeling import make_box
@@ -45,6 +51,7 @@ carved = displace_heightmap(
     plane="xy",
     direction="normal",
     alpha_mode="ignore",
+    backend="surface",
 )
 ```
 
@@ -55,6 +62,7 @@ Options:
 - `direction`: `"normal"`, `"x"`, `"y"`, `"z"`, or a custom vector.
 - `alpha_mode`: `"ignore"` (no displacement where alpha == 0) or `"mask"` (drop faces).
 - `bounds`: optional `(umin, umax, vmin, vmax)` to override projection bounds.
+- `backend`: `"mesh"` or `"surface"`.
 
 ## Notes
 

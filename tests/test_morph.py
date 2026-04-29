@@ -1,30 +1,17 @@
 from __future__ import annotations
 
-import numpy as np
+import importlib
+
 import pytest
 
-from impression.modeling import morph
-from impression.modeling.drawing2d import make_circle, make_ngon
+import impression.modeling as modeling
 
 
-def test_morph_positive():
-    start = make_circle(radius=1.0)
-    end = make_ngon(sides=6, radius=1.0)
-    result = morph(start, end, t=0.5, samples=60)
-    pts = result.outer.sample()
-    assert pts.shape[0] > 0
+def test_morph_is_no_longer_exported_from_public_modeling_namespace() -> None:
+    assert "morph" not in modeling.__all__
+    assert "morph_profiles" not in modeling.__all__
 
 
-def test_morph_invalid_t():
-    start = make_circle(radius=1.0)
-    end = make_ngon(sides=6, radius=1.0)
-    with pytest.raises(ValueError):
-        morph(start, end, t=-0.1)
-
-
-def test_morph_hole_mismatch():
-    start = make_circle(radius=1.0)
-    end = make_ngon(sides=6, radius=1.0)
-    end.holes.append(start.outer)
-    with pytest.raises(ValueError):
-        morph(start, end, t=0.5)
+def test_morph_module_is_removed() -> None:
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("impression.modeling.morph")

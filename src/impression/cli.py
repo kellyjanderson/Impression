@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from types import ModuleType
 import sys
 import traceback
+import inspect
+import time
 from typing import Callable
 
 import typer
@@ -16,6 +18,7 @@ import io
 import shutil
 import tempfile
 import urllib.request
+import urllib.error
 import zipfile
 import os
 import re
@@ -73,31 +76,27 @@ def _format_exception(exc: BaseException) -> str:
     return "".join(traceback.format_exception(exc))
 
 
-def _download_docs(
-    repo_url: str,
-    ref: str,
-    destination: pathlib.Path,
-    clean: bool,
-) -> None:
-    repo_url = repo_url.rstrip("/")
-    if repo_url.endswith(".git"):
-        repo_url = repo_url[:-4]
-    zip_url = f"{repo_url}/archive/refs/heads/{ref}.zip"
-
+def _extract_docs_archive(data: bytes, destination: pathlib.Path, clean: bool) -> None:
     if clean and destination.exists():
         shutil.rmtree(destination)
     destination.mkdir(parents=True, exist_ok=True)
-
-    console.print(f"[cyan]Downloading docs from {zip_url}...[/cyan]")
-    with urllib.request.urlopen(zip_url) as response:
-        data = response.read()
 
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         names = archive.namelist()
         if not names:
             raise typer.BadParameter("Downloaded archive is empty.")
-        root = names[0].split("/", 1)[0]
-        docs_prefix = f"{root}/docs/"
+
+        prefixes: list[str] = []
+        for name in names:
+            if name.startswith("docs/"):
+                prefixes.append("docs/")
+            idx = name.find("/docs/")
+            if idx != -1:
+                prefixes.append(name[: idx + len("/docs/")])
+        if not prefixes:
+            raise typer.BadParameter("Docs folder not found in the downloaded archive.")
+        docs_prefix = min(prefixes, key=len)
+
         extracted = False
         for member in archive.infolist():
             if not member.filename.startswith(docs_prefix):
@@ -117,6 +116,54 @@ def _download_docs(
     if not extracted:
         raise typer.BadParameter("Docs folder not found in the downloaded archive.")
     console.print(f"[green]Docs saved to {destination}[/green]")
+
+
+def _download_docs_archive(
+    repo_url: str,
+    ref: str,
+    destination: pathlib.Path,
+    clean: bool,
+) -> None:
+    repo_url = repo_url.rstrip("/")
+    if repo_url.endswith(".git"):
+        repo_url = repo_url[:-4]
+    tag_url = f"{repo_url}/archive/refs/tags/{ref}.zip"
+    head_url = f"{repo_url}/archive/refs/heads/{ref}.zip"
+
+    console.print(f"[cyan]Downloading docs from {tag_url}...[/cyan]")
+    data: bytes | None = None
+    try:
+        with urllib.request.urlopen(tag_url) as response:
+            data = response.read()
+    except urllib.error.HTTPError:
+        try:
+            console.print(f"[cyan]Tag archive missing; trying branch archive {head_url}...[/cyan]")
+            with urllib.request.urlopen(head_url) as response:
+                data = response.read()
+        except urllib.error.HTTPError as exc:
+            raise typer.BadParameter(f"Could not download docs archive for ref '{ref}'.") from exc
+    if data is None:
+        raise typer.BadParameter(f"Could not download docs archive for ref '{ref}'.")
+    _extract_docs_archive(data, destination, clean)
+
+
+def _download_docs_release_asset(
+    repo_url: str,
+    ref: str,
+    destination: pathlib.Path,
+    clean: bool,
+) -> None:
+    repo_url = repo_url.rstrip("/")
+    if repo_url.endswith(".git"):
+        repo_url = repo_url[:-4]
+    asset_url = f"{repo_url}/releases/download/{ref}/impression-docs-{ref}.zip"
+    console.print(f"[cyan]Downloading docs asset from {asset_url}...[/cyan]")
+    try:
+        with urllib.request.urlopen(asset_url) as response:
+            data = response.read()
+    except urllib.error.HTTPError as exc:
+        raise typer.BadParameter(f"Docs asset impression-docs-{ref}.zip not found for release {ref}.") from exc
+    _extract_docs_archive(data, destination, clean)
 
 
 @app.callback(invoke_without_command=True)
@@ -162,27 +209,94 @@ def main(
         destination = docs_dest or pathlib.Path.cwd() / "impression-docs"
         resolved_ref = docs_ref or f"v{__version__}"
         try:
-            _download_docs(docs_repo, resolved_ref, destination, docs_clean)
+            _download_docs_release_asset(docs_repo, resolved_ref, destination, docs_clean)
         except typer.BadParameter:
-            if docs_ref is not None:
-                raise
-            console.print(
-                f"[yellow]Docs ref {resolved_ref} not found; falling back to main.[/yellow]"
-            )
-            _download_docs(docs_repo, "main", destination, docs_clean)
+            _download_docs_archive(docs_repo, resolved_ref, destination, docs_clean)
         raise typer.Exit()
 
     if ctx.invoked_subcommand is None:
         return
 
 
-def _scene_factory_from_module(model_path: pathlib.Path) -> Callable[[], object]:
+def _scene_factory_from_module(
+    model_path: pathlib.Path,
+    *,
+    on_module_loaded: Callable[[ModuleType], None] | None = None,
+    cache_module: bool = False,
+) -> Callable[[], object]:
+    cached_module: ModuleType | None = None
+    cached_mtime_ns: int | None = None
+    builder_signature: inspect.Signature | None = None
+    accepts_kwargs = False
+    accepted_kw_names: set[str] = set()
+    start_time = time.monotonic()
+    last_build_time: float | None = None
+    previous_scene: object | None = None
+
+    def _refresh_builder_metadata(builder: Callable[..., object]) -> None:
+        nonlocal builder_signature, accepts_kwargs, accepted_kw_names
+        builder_signature = inspect.signature(builder)
+        accepts_kwargs = any(
+            param.kind == inspect.Parameter.VAR_KEYWORD for param in builder_signature.parameters.values()
+        )
+        accepted_kw_names = {
+            name
+            for name, param in builder_signature.parameters.items()
+            if param.kind in {inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}
+        }
+
+    def _load_cached_or_fresh_module() -> ModuleType:
+        nonlocal cached_module, cached_mtime_ns, start_time, last_build_time, previous_scene
+        if not cache_module:
+            module = _load_module(model_path)
+            if on_module_loaded is not None:
+                on_module_loaded(module)
+            builder = getattr(module, "build", None)
+            if builder is None or not callable(builder):
+                raise ModelBuildError(f"{model_path} must define a callable build() function.")
+            _refresh_builder_metadata(builder)
+            start_time = time.monotonic()
+            last_build_time = None
+            previous_scene = None
+            return module
+
+        try:
+            mtime_ns = model_path.stat().st_mtime_ns
+        except OSError:
+            mtime_ns = None
+        needs_reload = cached_module is None or mtime_ns != cached_mtime_ns
+        if needs_reload:
+            cached_module = _load_module(model_path)
+            cached_mtime_ns = mtime_ns
+            if on_module_loaded is not None:
+                on_module_loaded(cached_module)
+            builder = getattr(cached_module, "build", None)
+            if builder is None or not callable(builder):
+                raise ModelBuildError(f"{model_path} must define a callable build() function.")
+            _refresh_builder_metadata(builder)
+            start_time = time.monotonic()
+            last_build_time = None
+            previous_scene = None
+        return cached_module
+
     def factory() -> object:
-        module = _load_module(model_path)
+        nonlocal last_build_time, previous_scene
+        module = _load_cached_or_fresh_module()
         builder = getattr(module, "build", None)
         if builder is None or not callable(builder):
             raise ModelBuildError(f"{model_path} must define a callable build() function.")
-        return builder()
+        now = time.monotonic()
+        kwargs: dict[str, object] = {}
+        if accepts_kwargs or "elapsed_seconds" in accepted_kw_names:
+            kwargs["elapsed_seconds"] = now - start_time
+        if (accepts_kwargs or "dt_seconds" in accepted_kw_names) and last_build_time is not None:
+            kwargs["dt_seconds"] = now - last_build_time
+        if (accepts_kwargs or "previous_scene" in accepted_kw_names) and previous_scene is not None:
+            kwargs["previous_scene"] = previous_scene
+        scene = builder(**kwargs) if kwargs else builder()
+        last_build_time = now
+        previous_scene = scene
+        return scene
 
     return factory
 
@@ -239,6 +353,36 @@ def preview(
     opts = PreviewOptions(watch=watch, target_fps=target_fps)
 
     model_state = {"path": model}
+    auto_rebuild_state: dict[str, float | None] = {"interval": None}
+    preview_chrome_state: dict[str, bool] = {"show_bounds": True, "show_axes": True}
+
+    def _module_bool(module: ModuleType, name: str, default: bool) -> bool:
+        value = getattr(module, name, default)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            text = value.strip().lower()
+            if text in {"1", "true", "yes", "on"}:
+                return True
+            if text in {"0", "false", "no", "off"}:
+                return False
+        return default
+
+    def _on_module_loaded(module: ModuleType) -> None:
+        interval = getattr(module, "ANIMATE_INTERVAL_SECONDS", None)
+        if interval is None:
+            auto_rebuild_state["interval"] = None
+            return
+        try:
+            interval_val = float(interval)
+        except (TypeError, ValueError):
+            auto_rebuild_state["interval"] = None
+        else:
+            auto_rebuild_state["interval"] = interval_val if interval_val > 0 else None
+        preview_chrome_state["show_bounds"] = _module_bool(module, "PREVIEW_SHOW_BOUNDS", True)
+        preview_chrome_state["show_axes"] = _module_bool(module, "PREVIEW_SHOW_AXES", True)
 
     def _pid_alive(pid: int) -> bool:
         try:
@@ -289,8 +433,27 @@ def preview(
                 pass
         return _write_control_file(path)
 
+    scene_factory_cache: dict[str, pathlib.Path | Callable[[], object] | None] = {
+        "path": None,
+        "factory": None,
+    }
+
+    def _get_scene_factory(path: pathlib.Path) -> Callable[[], object]:
+        current_path = scene_factory_cache["path"]
+        factory = scene_factory_cache["factory"]
+        resolved = path.resolve()
+        if current_path is None or factory is None or resolved != current_path:
+            factory = _scene_factory_from_module(
+                path,
+                on_module_loaded=_on_module_loaded,
+                cache_module=True,
+            )
+            scene_factory_cache["path"] = resolved
+            scene_factory_cache["factory"] = factory
+        return factory  # type: ignore[return-value]
+
     def scene_factory() -> object:
-        return _scene_factory_from_module(model_state["path"])()
+        return _get_scene_factory(model_state["path"])()
     try:
         initial_scene = scene_factory()
     except Exception as exc:
@@ -311,6 +474,9 @@ def preview(
             console.print(
                 f"[cyan]Switch file: {control_path} (write a new path to auto-reload; SIGUSR1 optional).[/cyan]"
             )
+    interval = auto_rebuild_state["interval"]
+    if interval is not None:
+        console.print(f"[cyan]Animation timer active: rebuild every {interval:.2f}s.[/cyan]")
 
     previewer = PyVistaPreviewer(console=console)
     _log_active_units(previewer)
@@ -325,7 +491,10 @@ def preview(
             screenshot_path=screenshot,
             show_edges=show_edges,
             face_edges=face_edges,
+            show_bounds=preview_chrome_state["show_bounds"],
+            show_axes=preview_chrome_state["show_axes"],
             control_file=control_path,
+            auto_rebuild_interval_getter=lambda: auto_rebuild_state["interval"],
         )
     except PreviewBackendError as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -334,11 +503,11 @@ def preview(
 @app.command()
 def export(
     model: pathlib.Path = typer.Argument(..., help="Model module to export."),
-    output: pathlib.Path = typer.Option(
-        pathlib.Path("model.stl"),
+    output: pathlib.Path | None = typer.Option(
+        None,
         "--output",
         "-o",
-        help="Path to the STL file that will be produced.",
+        help="Path to the STL file that will be produced (defaults to model filename with .stl).",
     ),
     overwrite: bool = typer.Option(False, "--overwrite", help="Allow replacing an existing STL."),
     ascii: bool = typer.Option(False, "--ascii", help="Write ASCII STL instead of binary."),
@@ -350,12 +519,15 @@ def export(
     if not model.exists():
         raise typer.BadParameter(f"Model path {model} does not exist.")
 
-    final_output = output
-    if output.exists():
+    requested_output = output if output is not None else model.with_suffix(".stl")
+    final_output = requested_output
+    if requested_output.exists():
         if not overwrite:
-            final_output = _next_available_path(output)
-            if final_output != output:
-                console.print(f"[yellow]Output {output} exists; writing to {final_output} instead.[/yellow]")
+            final_output = _next_available_path(requested_output)
+            if final_output != requested_output:
+                console.print(
+                    f"[yellow]Output {requested_output} exists; writing to {final_output} instead.[/yellow]"
+                )
 
     try:
         scene_factory = _scene_factory_from_module(model)

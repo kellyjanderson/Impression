@@ -17,7 +17,12 @@ def _face_normals(mesh: Mesh) -> np.ndarray:
     normals = np.cross(v1 - v0, v2 - v0)
     lengths = np.linalg.norm(normals, axis=1)
     with np.errstate(invalid="ignore", divide="ignore"):
-        normals = np.divide(normals, lengths[:, np.newaxis], where=lengths[:, np.newaxis] > 0)
+        normals = np.divide(
+            normals,
+            lengths[:, np.newaxis],
+            out=np.zeros_like(normals),
+            where=lengths[:, np.newaxis] > 0,
+        )
     normals[~np.isfinite(normals)] = 0.0
     return normals
 

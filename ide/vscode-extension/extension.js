@@ -4,18 +4,20 @@ const fs = require('fs');
 const os = require('os');
 const cp = require('child_process');
 
-const REPO_URL = 'https://github.com/kellyjanderson/Impression.git';
 const DOCS_URL = 'https://github.com/kellyjanderson/Impression#getting-started';
-const INSTALL_FOLDER = path.join(os.homedir(), '.impression-cli');
 const IMPRESSION_HOME = path.join(os.homedir(), '.impression');
+const GLOBAL_VENV_PATH = path.join(IMPRESSION_HOME, 'global-venv');
 const ENV_FILE = path.join(IMPRESSION_HOME, 'env');
 const SOURCE_LINE = 'source ~/.impression/env # Impression\n';
 const RC_FILES = ['.zshrc', '.zprofile', '.bashrc', '.bash_profile', '.profile'];
+const INSTALL_SCRIPT_RELATIVE = path.join('scripts', 'dev', 'install_impression.sh');
 const PYTHON_STATE_KEY = 'impression.pythonPathCache';
 const PREVIEW_MODE_SETTING = 'previewMode';
 const PYTHON_PATH_SETTING = 'pythonPath';
 const PREVIEW_MODE_TERMINAL = 'terminal';
 const PREVIEW_MODE_WEBVIEW = 'webview';
+const AGENT_BOOTSTRAP_PROMPT =
+  'I have installed impression a parametric modleing freamework for pytyon. The documentation for impresison can be found in this project under ./impression-docs read through all of the documentation. We will be creating modles using impression. Always referr to the docuements before weriting or editing code to make sure you are useing the tools provided by impression.';
 const IMPRESSION_CLI_CHECK =
   'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("impression.cli") else 1)';
 const EXECUTE_ACCESS = process.platform === 'win32' ? fs.constants.F_OK : fs.constants.X_OK;
@@ -29,7 +31,13 @@ function activate(context) {
   extensionContext = context;
   hydrateCachedPython();
   context.subscriptions.push(
-    vscode.commands.registerCommand('impression.previewModel', () => previewModel()),
+    vscode.commands.registerCommand('impression.installLocal', () => installLocalImpressionCommand()),
+    vscode.commands.registerCommand('impression.installGlobal', () => installGlobalImpressionCommand()),
+    vscode.commands.registerCommand('impression.init', () => initImpressionProjectCommand()),
+    vscode.commands.registerCommand('impression.previewCurrentFile', () => previewCurrentFileCommand()),
+    vscode.commands.registerCommand('impression.previewCurrentFileNewWindow', () =>
+      previewCurrentFileCommand({ forceWindow: true })
+    ),
     vscode.commands.registerCommand('impression.exportStl', () => exportStl()),
     vscode.commands.registerCommand('impression.runPreviewTests', () => runPreviewTests())
   );
@@ -37,21 +45,23 @@ function activate(context) {
 
 function deactivate() {}
 
-async function previewModel() {
-  const modelPath = await resolveModelPath();
+async function previewCurrentFileCommand(options = {}) {
+  const modelPath = await resolveModelPath({ allowPicker: false });
   if (!modelPath) {
+    vscode.window.showErrorMessage('Open a Python model file in the editor before previewing.');
     return;
   }
   const python = await ensurePythonPath();
   if (!python) {
     return;
   }
-  const command = `${quote(python)} -m impression.cli preview ${quote(modelPath)}`;
+  const forceFlag = options.forceWindow ? ' --force-window=true' : '';
+  const command = `${quote(python)} -m impression.cli preview ${quote(modelPath)}${forceFlag}`;
   await launchPreview(command, modelPath, python);
 }
 
 async function exportStl() {
-  const modelPath = await resolveModelPath();
+  const modelPath = await resolveModelPath({ allowPicker: true });
   if (!modelPath) {
     return;
   }
@@ -99,20 +109,64 @@ async function pickModelFile() {
 
 function runInTerminal(command, options = {}) {
   const terminal = vscode.window.createTerminal({
-    name: 'Impression',
+    name: options.name ?? 'Impression',
     cwd: options.cwd,
     env: options.env,
   });
   terminal.show(true);
-  terminal.sendText(command);
+  void executeTerminalCommand(terminal, command);
+  return terminal;
 }
 
-async function resolveModelPath() {
+async function executeTerminalCommand(terminal, command) {
+  const shellIntegration = await waitForShellIntegration(terminal, 1500);
+  if (shellIntegration && typeof shellIntegration.executeCommand === 'function') {
+    shellIntegration.executeCommand(command);
+    return;
+  }
+  terminal.sendText(command, true);
+}
+
+async function waitForShellIntegration(terminal, timeoutMs) {
+  if (terminal.shellIntegration) {
+    return terminal.shellIntegration;
+  }
+  if (typeof vscode.window.onDidChangeTerminalShellIntegration !== 'function') {
+    return null;
+  }
+
+  return await new Promise((resolve) => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      subscription.dispose();
+      resolve(terminal.shellIntegration ?? null);
+    }, timeoutMs);
+
+    const subscription = vscode.window.onDidChangeTerminalShellIntegration((event) => {
+      if (event.terminal !== terminal || settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      subscription.dispose();
+      resolve(event.shellIntegration ?? terminal.shellIntegration ?? null);
+    });
+  });
+}
+
+async function resolveModelPath(options = {}) {
   const active = getActiveEditorPath();
   if (active) {
     return active;
   }
-  return await pickModelFile();
+  if (options.allowPicker) {
+    return await pickModelFile();
+  }
+  return null;
 }
 
 async function launchPreview(command, modelPath, pythonPath) {
@@ -210,20 +264,33 @@ async function ensurePythonPath() {
   }
 
   const selection = await vscode.window.showInformationMessage(
-    'The Impression CLI is not available. Install it automatically or view manual instructions.',
-    'Install Impression',
+    'The Impression CLI is not available. Install local to this workspace, install global, or view manual instructions.',
+    'Install Local',
+    'Install Global',
     'View Instructions',
     'Cancel'
   );
 
-  if (selection === 'Install Impression') {
+  if (selection === 'Install Local') {
     try {
-      const python = await installImpression();
+      const python = await installLocalImpression();
       rememberPythonPath(python);
-      vscode.window.showInformationMessage('Impression installed. You can now run previews.');
+      vscode.window.showInformationMessage('Impression installed locally. You can now run previews.');
       return python;
     } catch (error) {
-      vscode.window.showErrorMessage(`Impression install failed: ${error.message}`);
+      vscode.window.showErrorMessage(`Local Impression install failed: ${error.message}`);
+      return null;
+    }
+  }
+
+  if (selection === 'Install Global') {
+    try {
+      const python = await installGlobalImpression();
+      rememberPythonPath(python);
+      vscode.window.showInformationMessage('Impression installed globally. You can now run previews.');
+      return python;
+    } catch (error) {
+      vscode.window.showErrorMessage(`Global Impression install failed: ${error.message}`);
       return null;
     }
   }
@@ -476,40 +543,146 @@ async function pythonFromEnvFile() {
   return null;
 }
 
-async function installImpression() {
-  return vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: 'Installing Impression…',
-      cancellable: false,
-    },
-    async () => {
-      installerChannel.show(true);
-      if (!(await pathExists(INSTALL_FOLDER))) {
-        await runCommand('git', ['clone', REPO_URL, INSTALL_FOLDER]);
-      }
-      const pythonBin = getVenvPython(INSTALL_FOLDER);
-      if (!(await fileExists(pythonBin))) {
-        const bootstrapPython = resolveCommand('python3') || resolveCommand('python');
-        if (!bootstrapPython) {
-          throw new Error('Python 3 is required to install Impression.');
-        }
-        await runCommand(bootstrapPython, ['-m', 'venv', path.join(INSTALL_FOLDER, '.venv')]);
-      }
-      await runCommand(pythonBin, ['-m', 'pip', 'install', '--upgrade', 'pip'], { cwd: INSTALL_FOLDER });
-      await runCommand(pythonBin, ['-m', 'pip', 'install', '-e', '.'], { cwd: INSTALL_FOLDER });
-      await updateShellIntegration(pythonBin);
-      rememberPythonPath(pythonBin);
-      promptReloadNotice();
-      return pythonBin;
-    }
-  );
-}
-
 function getVenvPython(baseDir) {
   return process.platform === 'win32'
     ? path.join(baseDir, '.venv', 'Scripts', 'python.exe')
     : path.join(baseDir, '.venv', 'bin', 'python');
+}
+
+function getVenvPythonFromPath(venvPath) {
+  return process.platform === 'win32'
+    ? path.join(venvPath, 'Scripts', 'python.exe')
+    : path.join(venvPath, 'bin', 'python');
+}
+
+async function installLocalImpressionCommand() {
+  try {
+    const python = await installLocalImpression();
+    rememberPythonPath(python);
+    vscode.window.showInformationMessage(`Impression local install complete (${python}).`);
+  } catch (error) {
+    vscode.window.showErrorMessage(`Impression local install failed: ${error.message}`);
+  }
+}
+
+async function installGlobalImpressionCommand() {
+  try {
+    const python = await installGlobalImpression();
+    rememberPythonPath(python);
+    vscode.window.showInformationMessage(`Impression global install complete (${python}).`);
+  } catch (error) {
+    vscode.window.showErrorMessage(`Impression global install failed: ${error.message}`);
+  }
+}
+
+async function initImpressionProjectCommand() {
+  let workspace;
+  try {
+    workspace = getWorkspaceFolder();
+  } catch (error) {
+    return;
+  }
+  try {
+    const python = await installLocalImpression();
+    rememberPythonPath(python);
+
+    const docsDest = path.join(workspace, 'impression-docs');
+    installerChannel.show(true);
+    installerChannel.appendLine(`$ ${python} -m impression.cli --get-docs`);
+    await runCommand(
+      python,
+      ['-m', 'impression.cli', '--get-docs'],
+      { cwd: workspace, env: buildPythonEnv(python) }
+    );
+    if (!fs.existsSync(docsDest)) {
+      throw new Error(`Docs download did not create ${docsDest}. Check CLI output in "Impression Installer".`);
+    }
+
+    await vscode.env.clipboard.writeText(AGENT_BOOTSTRAP_PROMPT);
+    runInTerminal(`echo ${shellQuote(AGENT_BOOTSTRAP_PROMPT)}`, {
+      name: 'Impression Init',
+      cwd: workspace,
+      env: buildPythonEnv(python),
+    });
+    await trySendPromptToAgent(AGENT_BOOTSTRAP_PROMPT);
+    vscode.window.showInformationMessage(
+      'Impression initialized: local install complete, docs downloaded to ./impression-docs, and agent prompt copied to clipboard.'
+    );
+  } catch (error) {
+    vscode.window.showErrorMessage(`Impression init failed: ${error.message}`);
+  }
+}
+
+async function installLocalImpression() {
+  const workspace = getWorkspaceFolder();
+  const venvPath = path.join(workspace, '.venv');
+  await installWithInstaller({
+    cwd: workspace,
+    venvPath,
+    title: 'Installing Impression (local)…',
+  });
+  const python = getVenvPythonFromPath(venvPath);
+  if (!(await fileExists(python))) {
+    throw new Error(`Expected local interpreter at ${python}, but it was not found.`);
+  }
+  if (!(await impressionCliAvailable(python))) {
+    throw new Error(
+      `Installer completed but impression CLI is unavailable in ${venvPath}. Check installer logs in the "Impression Installer" output.`
+    );
+  }
+  return python;
+}
+
+async function installGlobalImpression() {
+  await installWithInstaller({
+    cwd: os.homedir(),
+    venvPath: GLOBAL_VENV_PATH,
+    title: 'Installing Impression (global)…',
+  });
+  const python = getVenvPythonFromPath(GLOBAL_VENV_PATH);
+  if (!(await fileExists(python))) {
+    throw new Error(`Expected global interpreter at ${python}, but it was not found.`);
+  }
+  if (!(await impressionCliAvailable(python))) {
+    throw new Error(
+      `Installer completed but impression CLI is unavailable in ${GLOBAL_VENV_PATH}. Check installer logs in the "Impression Installer" output.`
+    );
+  }
+  return python;
+}
+
+async function installWithInstaller(options) {
+  return vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: options.title ?? 'Installing Impression…',
+      cancellable: false,
+    },
+    async () => {
+      installerChannel.show(true);
+      const invocation = await resolveInstallerInvocation(options.cwd);
+      const args = [...invocation.prefixArgs, '--venv', options.venvPath];
+      await runCommand(invocation.command, args, { cwd: options.cwd, env: process.env });
+      await updateShellIntegration(getVenvPythonFromPath(options.venvPath));
+      promptReloadNotice();
+    }
+  );
+}
+
+async function resolveInstallerInvocation(cwd) {
+  const scriptPath = path.join(cwd, INSTALL_SCRIPT_RELATIVE);
+  if (await fileExists(scriptPath)) {
+    return { command: scriptPath, prefixArgs: [] };
+  }
+
+  const installCmd = resolveCommand('install');
+  if (installCmd) {
+    return { command: installCmd, prefixArgs: ['impression'] };
+  }
+
+  throw new Error(
+    'Installer not found. Expected scripts/dev/install_impression.sh in the workspace or an `install` command on PATH.'
+  );
 }
 
 async function fileExists(filePath) {
@@ -518,18 +691,6 @@ async function fileExists(filePath) {
   }
   try {
     await fs.promises.access(filePath, EXECUTE_ACCESS);
-    return true;
-  } catch (error) {
-    return false;
-  }
-}
-
-async function pathExists(filePath) {
-  if (!filePath) {
-    return false;
-  }
-  try {
-    await fs.promises.access(filePath);
     return true;
   } catch (error) {
     return false;
@@ -673,6 +834,16 @@ function getWorkspaceFolder() {
     vscode.window.showErrorMessage('Open the Impression workspace before running this command.');
     throw new Error('Workspace not found');
   }
+
+  // In multi-root workspaces, prefer the workspace that contains the active editor file.
+  const activeUri = vscode.window.activeTextEditor?.document?.uri;
+  if (activeUri && activeUri.scheme === 'file') {
+    const activeWorkspace = vscode.workspace.getWorkspaceFolder(activeUri);
+    if (activeWorkspace) {
+      return activeWorkspace.uri.fsPath;
+    }
+  }
+
   return folders[0].uri.fsPath;
 }
 
@@ -684,6 +855,25 @@ function quote(value) {
     return `"${value}"`;
   }
   return value;
+}
+
+function shellQuote(value) {
+  if (value == null) {
+    return "''";
+  }
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+async function trySendPromptToAgent(promptText) {
+  try {
+    const commands = await vscode.commands.getCommands(true);
+    if (!commands.includes('workbench.action.chat.open')) {
+      return;
+    }
+    await vscode.commands.executeCommand('workbench.action.chat.open', { query: promptText });
+  } catch (_error) {
+    // Best-effort only; prompt is always copied to clipboard and printed to terminal.
+  }
 }
 
 module.exports = { activate, deactivate };

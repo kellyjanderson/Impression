@@ -1,20 +1,9 @@
-"""Rotate extrude (lathe) example."""
+"""Retired rotate extrude example placeholder."""
 
 from __future__ import annotations
 
-from impression.modeling import rotate_extrude
-from impression.modeling.drawing2d import make_polygon
-
-
 def build():
-    profile = make_polygon(
-        [
-            (0.4, -0.6),
-            (0.8, -0.2),
-            (0.7, 0.3),
-            (0.4, 0.6),
-            (0.2, 0.2),
-        ],
-        color="#ff7a18",
+    raise RuntimeError(
+        "docs/examples/extrusions/rotate_extrude_example.py is retired. "
+        "Public extrusion examples are no longer part of the supported modeling posture."
     )
-    return rotate_extrude(profile, angle_deg=360)
