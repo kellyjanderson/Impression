@@ -1,0 +1,104 @@
+{
+  "name": "impression-vscode",
+  "displayName": "Impression Toolkit",
+  "description": "VS Code helpers for Impression: launch previews, export STL, and run regression tests without leaving the editor.",
+  "version": "0.1.0",
+  "license": "UNLICENSED",
+  "publisher": "impression",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kellyjanderson/Impression.git",
+    "directory": "ide/vscode-extension"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:impression.installLocal",
+    "onCommand:impression.installGlobal",
+    "onCommand:impression.init",
+    "onCommand:impression.previewCurrentFile",
+    "onCommand:impression.previewCurrentFileNewWindow",
+    "onCommand:impression.exportStl",
+    "onCommand:impression.runPreviewTests"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "impression.installLocal",
+        "title": "Impression: Install Local",
+        "category": "Impression",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "impression.installGlobal",
+        "title": "Impression: Install Global",
+        "category": "Impression"
+      },
+      {
+        "command": "impression.init",
+        "title": "Impression: Init",
+        "category": "Impression"
+      },
+      {
+        "command": "impression.previewCurrentFile",
+        "title": "Impression: Preview",
+        "category": "Impression",
+        "icon": "$(run)"
+      },
+      {
+        "command": "impression.previewCurrentFileNewWindow",
+        "title": "Impression: Preview in New Window",
+        "category": "Impression"
+      },
+      {
+        "command": "impression.exportStl",
+        "title": "Impression: Export STL",
+        "category": "Impression"
+      },
+      {
+        "command": "impression.runPreviewTests",
+        "title": "Impression: Run Preview Tests",
+        "category": "Impression"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "impression.previewCurrentFile",
+          "group": "navigation@10",
+          "when": "resourceExtname == .py"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Impression",
+      "properties": {
+        "impression.previewMode": {
+          "type": "string",
+          "enum": [
+            "terminal",
+            "webview"
+          ],
+          "default": "terminal",
+          "description": "Where to launch Impression previews. Webview is a placeholder until the embedded viewer ships."
+        },
+        "impression.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Explicit Python interpreter path to use for Impression commands (overrides auto-detection)."
+        }
+      }
+    }
+  },
+  "main": "extension.js",
+  "scripts": {
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "vsce": "^2.15.0"
+  }
+}
