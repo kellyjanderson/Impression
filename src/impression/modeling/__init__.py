@@ -77,6 +77,7 @@ from .paths import Path
 from .group import MeshGroup, group
 from .ops import offset, hull
 from .heightmap import heightmap, displace_heightmap
+from .sdf import extrude_sdf, loft_sdf
 from .drafting import make_line, make_plane, make_arrow, make_dimension
 from .text import make_text, text, text_profiles, text_sections
 from .topology import (
@@ -260,6 +261,8 @@ __all__ = [
     "hull",
     "heightmap",
     "displace_heightmap",
+    "extrude_sdf",
+    "loft_sdf",
     "make_line",
     "make_plane",
     "make_arrow",

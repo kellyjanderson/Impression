@@ -90,10 +90,14 @@ def _collect_datasets_from_scene(scene: object) -> List[Mesh | Polyline]:
             return
 
         if isinstance(item, Mesh):
+            if item.n_faces == 0 or item.n_vertices == 0:
+                return
             datasets.append(item)
             return
 
         if isinstance(item, Polyline):
+            if item.points.size == 0:
+                return
             datasets.append(item)
             return
 
