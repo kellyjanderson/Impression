@@ -1315,6 +1315,7 @@ def test_every_surface_family_tessellates_through_family_adapter_metadata() -> N
             source_patch=PlanarSurfacePatch(family="planar"),
             displacement_samples=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
             direction="z",
+            projection_bounds=(0.0, 1.0, 0.0, 1.0),
         ),
     }
 

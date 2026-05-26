@@ -9,14 +9,22 @@ from PIL import Image
 from impression.modeling import (
     HeightmapAlphaMaskPolicy,
     HeightmapCacheKeyRecord,
+    HeightmapProjectionBoundsPolicy,
+    HeightmapSampleCoordinateRecord,
     HeightmapSurfacePatch,
     DisplacementSurfacePatch,
     MeshQuality,
+    ParameterDomain,
+    PlanarSurfacePatch,
     heightmap,
     displace_heightmap,
     heightmap_cache_key_record,
+    heightmap_sample_coordinate_record,
+    make_surface_body,
+    make_surface_shell,
     make_heightmap_surface_patch,
     resolve_heightmap_alpha_mask_policy,
+    resolve_heightmap_projection_bounds_policy,
     tessellate_surface_body,
     tessellate_surface_patch,
 )
@@ -130,6 +138,106 @@ def test_displace_heightmap_surface_backend_uses_displacement_payload():
     assert patch_mesh.metadata["heightmap_displacement_boundary"] == "surface-payload"
     assert np.isclose(mesh.bounds[5] - mesh.bounds[4], 0.0, atol=1e-9)
     assert np.isclose(mesh.bounds[4], 0.5, atol=1e-9)
+
+
+def test_heightmap_projection_policy_resolves_planes_and_bounds():
+    xy = resolve_heightmap_projection_bounds_policy(plane="xy", source_bounds=(0.0, 2.0, 10.0, 14.0, -1.0, 1.0))
+    xz = resolve_heightmap_projection_bounds_policy(plane="xz", source_bounds=(0.0, 2.0, 10.0, 14.0, -1.0, 1.0))
+    yz = resolve_heightmap_projection_bounds_policy(plane="yz", bounds=(10.0, 14.0, -1.0, 1.0))
+    record = heightmap_sample_coordinate_record(
+        np.asarray([[1.0, 12.0, 0.0]], dtype=float),
+        yz,
+    )
+
+    assert isinstance(xy, HeightmapProjectionBoundsPolicy)
+    assert xy.bounds == (0.0, 2.0, 10.0, 14.0)
+    assert xz.bounds == (0.0, 2.0, -1.0, 1.0)
+    assert yz.source == "explicit"
+    assert isinstance(record, HeightmapSampleCoordinateRecord)
+    assert np.allclose(record.u_normalized, [0.5])
+    assert np.allclose(record.v_normalized, [0.5])
+    assert record.canonical_payload()["sample_count"] == 1
+
+
+def test_heightmap_projection_policy_refuses_degenerate_and_unsupported_projection():
+    with pytest.raises(ValueError, match="projection bounds are degenerate"):
+        resolve_heightmap_projection_bounds_policy(bounds=(0.0, 0.0, 0.0, 1.0))
+
+    with pytest.raises(ValueError, match="Only planar projection"):
+        resolve_heightmap_projection_bounds_policy(projection="cylindrical", bounds=(0.0, 1.0, 0.0, 1.0))
+
+    with pytest.raises(ValueError, match="plane must be"):
+        resolve_heightmap_projection_bounds_policy(plane="uv", bounds=(0.0, 1.0, 0.0, 1.0))
+
+
+def test_displace_heightmap_surface_projection_planes_and_explicit_bounds():
+    source_patch = PlanarSurfacePatch(
+        family="planar",
+        domain=ParameterDomain((0.0, 1.0), (0.0, 1.0)),
+        origin=np.asarray([0.0, 0.0, 0.0], dtype=float),
+        u_axis=np.asarray([1.0, 0.0, 0.0], dtype=float),
+        v_axis=np.asarray([0.0, 0.0, 1.0], dtype=float),
+    )
+    surface = make_surface_body((make_surface_shell((source_patch,), connected=False),))
+    image = np.asarray([[0.0, 0.0], [1.0, 1.0]], dtype=float)
+
+    displaced = displace_heightmap(
+        surface,
+        image,
+        height=0.25,
+        plane="xz",
+        direction="y",
+        backend="surface",
+    )
+    patch = displaced.iter_patches()[0]
+
+    assert isinstance(patch, DisplacementSurfacePatch)
+    assert patch.plane == "xz"
+    assert patch.projection_bounds == (0.0, 1.0, 0.0, 1.0)
+    assert patch.kernel_metadata()["projection_policy"]["plane"] == "xz"
+    assert np.isclose(patch.point_at(0.5, 0.0)[1], 0.25)
+    assert np.isclose(patch.point_at(0.5, 1.0)[1], 0.0)
+
+
+def test_displace_heightmap_surface_projection_bounds_refusal_and_mask():
+    surface = make_plane(size=(1.0, 1.0), center=(0.0, 0.0, 0.0))
+    image = np.ones((2, 2, 4), dtype=np.uint8) * 255
+    image[0, 0, 3] = 0
+
+    with pytest.raises(ValueError, match="projection bounds are degenerate"):
+        displace_heightmap(
+            surface,
+            image,
+            height=0.5,
+            plane="xz",
+            direction="z",
+            backend="surface",
+        )
+
+    masked = displace_heightmap(
+        surface,
+        image,
+        height=0.5,
+        plane="xz",
+        direction="z",
+        bounds=(-0.5, 0.5, -0.5, 0.5),
+        alpha_mode="mask",
+        backend="surface",
+    )
+    ignored = displace_heightmap(
+        surface,
+        image,
+        height=0.5,
+        plane="xz",
+        direction="z",
+        bounds=(-0.5, 0.5, -0.5, 0.5),
+        alpha_mode="ignore",
+        backend="surface",
+    )
+    mesh = tessellate_surface_body(masked).mesh
+
+    assert masked.iter_patches()[0].alpha_mode == "mask"
+    assert mesh.n_faces < tessellate_surface_body(ignored).mesh.n_faces
 
 
 def test_displace_heightmap_surface_backend_rejects_mesh_input() -> None:

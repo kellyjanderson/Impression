@@ -59,6 +59,49 @@ class HeightmapCacheKeyRecord:
         }
 
 
+@dataclass(frozen=True)
+class HeightmapProjectionBoundsPolicy:
+    projection: Literal["planar"]
+    plane: Literal["xy", "xz", "yz"]
+    bounds: tuple[float, float, float, float]
+    source: Literal["explicit", "source-bounds"]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "projection": self.projection,
+            "plane": self.plane,
+            "bounds": self.bounds,
+            "source": self.source,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapSampleCoordinateRecord:
+    projection: Literal["planar"]
+    plane: Literal["xy", "xz", "yz"]
+    bounds: tuple[float, float, float, float]
+    u: np.ndarray
+    v: np.ndarray
+    u_normalized: np.ndarray
+    v_normalized: np.ndarray
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "projection": self.projection,
+            "plane": self.plane,
+            "bounds": self.bounds,
+            "sample_count": int(np.size(self.u_normalized)),
+            "u_normalized_range": (
+                float(np.min(self.u_normalized)) if self.u_normalized.size else 0.0,
+                float(np.max(self.u_normalized)) if self.u_normalized.size else 0.0,
+            ),
+            "v_normalized_range": (
+                float(np.min(self.v_normalized)) if self.v_normalized.size else 0.0,
+                float(np.max(self.v_normalized)) if self.v_normalized.size else 0.0,
+            ),
+        }
+
+
 def _as_scale(value: float | Sequence[float]) -> tuple[float, float]:
     if isinstance(value, (int, float)):
         return float(value), float(value)
@@ -145,6 +188,95 @@ def heightmap_cache_key_record(
             reason = "path-stat-unavailable"
         return HeightmapCacheKeyRecord(cache_key=None, reason=reason)
     return HeightmapCacheKeyRecord(cache_key=cache_key, reason="cache-key-valid")
+
+
+def _as_planar_projection(projection: str) -> Literal["planar"]:
+    projection_name = str(projection).lower()
+    if projection_name != "planar":
+        raise ValueError("Only planar projection is supported in this build.")
+    return "planar"
+
+
+def _as_projection_plane(plane: str) -> Literal["xy", "xz", "yz"]:
+    plane_name = str(plane).lower()
+    if plane_name not in {"xy", "xz", "yz"}:
+        raise ValueError("plane must be 'xy', 'xz', or 'yz'.")
+    return plane_name  # type: ignore[return-value]
+
+
+def _project_bounds_from_source(
+    source_bounds: Sequence[float],
+    plane: Literal["xy", "xz", "yz"],
+) -> tuple[float, float, float, float]:
+    values = tuple(float(value) for value in np.asarray(source_bounds, dtype=float).ravel())
+    if len(values) == 4:
+        return values
+    if len(values) != 6:
+        raise ValueError("source_bounds must contain 4 projected values or 6 xyz bounds values.")
+    xmin, xmax, ymin, ymax, zmin, zmax = values
+    if plane == "xy":
+        return xmin, xmax, ymin, ymax
+    if plane == "xz":
+        return xmin, xmax, zmin, zmax
+    return ymin, ymax, zmin, zmax
+
+
+def resolve_heightmap_projection_bounds_policy(
+    *,
+    projection: str = "planar",
+    plane: str = "xy",
+    bounds: Sequence[float] | None = None,
+    source_bounds: Sequence[float] | None = None,
+) -> HeightmapProjectionBoundsPolicy:
+    projection_name = _as_planar_projection(projection)
+    plane_name = _as_projection_plane(plane)
+    source: Literal["explicit", "source-bounds"]
+    if bounds is None:
+        if source_bounds is None:
+            raise ValueError("projection bounds are required when source bounds are unavailable.")
+        resolved = _project_bounds_from_source(source_bounds, plane_name)
+        source = "source-bounds"
+    else:
+        resolved = tuple(float(value) for value in np.asarray(bounds, dtype=float).reshape(4))
+        source = "explicit"
+    if not np.all(np.isfinite(np.asarray(resolved, dtype=float))):
+        raise ValueError("projection bounds must be finite.")
+    umin, umax, vmin, vmax = resolved
+    if np.isclose(umax, umin) or np.isclose(vmax, vmin):
+        raise ValueError("projection bounds are degenerate.")
+    return HeightmapProjectionBoundsPolicy(projection_name, plane_name, resolved, source)
+
+
+def heightmap_sample_coordinate_record(
+    points: np.ndarray,
+    policy: HeightmapProjectionBoundsPolicy,
+) -> HeightmapSampleCoordinateRecord:
+    point_arr = np.asarray(points, dtype=float)
+    if point_arr.size == 0:
+        point_arr = point_arr.reshape(0, 3)
+    if point_arr.ndim != 2 or point_arr.shape[1] != 3:
+        raise ValueError("heightmap sample coordinates require Nx3 points.")
+    if policy.plane == "xy":
+        u = point_arr[:, 0]
+        v = point_arr[:, 1]
+    elif policy.plane == "xz":
+        u = point_arr[:, 0]
+        v = point_arr[:, 2]
+    else:
+        u = point_arr[:, 1]
+        v = point_arr[:, 2]
+    umin, umax, vmin, vmax = policy.bounds
+    u_norm = (u - umin) / (umax - umin)
+    v_norm = (v - vmin) / (vmax - vmin)
+    return HeightmapSampleCoordinateRecord(
+        projection=policy.projection,
+        plane=policy.plane,
+        bounds=policy.bounds,
+        u=u,
+        v=v,
+        u_normalized=u_norm,
+        v_normalized=v_norm,
+    )
 
 
 def _triangle_surface_body_from_mesh(mesh: Mesh, *, metadata: dict[str, object] | None = None) -> "SurfaceBody":
@@ -519,10 +651,8 @@ def _displace_heightmap_surface_body(
     bounds: Sequence[float] | None,
     quality: MeshQuality | None,
 ) -> "SurfaceBody":
-    if bounds is not None:
-        raise ValueError("Surface displacement bounds are not supported until projection sampling policy lands.")
-    if plane.lower() != "xy":
-        raise ValueError("Surface displacement currently supports plane='xy'; projection sampling policy owns other planes.")
+    projection_name = _as_planar_projection(projection)
+    plane_name = _as_projection_plane(plane)
     heights, mask = _load_heightmap(image)
     if quality is not None:
         quality = apply_lod(quality)
@@ -542,30 +672,40 @@ def _displace_heightmap_surface_body(
 
     displaced_shells = []
     for shell in body.iter_shells(world=True):
-        patches = tuple(
-            DisplacementSurfacePatch(
-                family="displacement",
-                source_patch=patch,
-                displacement_samples=heights,
-                alpha_mask=mask,
-                alpha_mode=alpha_policy.alpha_mode,
-                height_scale=float(height),
-                direction=direction,
-                projection=projection,
-                metadata={
-                    "kernel": {
-                        "producer": "heightmap",
-                        "operation": "displace",
-                        "alpha_policy": alpha_policy.canonical_payload(),
-                        "cache_key_policy": cache_record.canonical_payload(),
-                    }
-                },
+        patches = []
+        for patch in shell.iter_patches(world=True):
+            policy = resolve_heightmap_projection_bounds_policy(
+                projection=projection_name,
+                plane=plane_name,
+                bounds=bounds,
+                source_bounds=_surface_patch_projection_source_bounds(patch, plane_name) if bounds is None else None,
             )
-            for patch in shell.iter_patches(world=True)
-        )
+            patches.append(
+                DisplacementSurfacePatch(
+                    family="displacement",
+                    source_patch=patch,
+                    displacement_samples=heights,
+                    alpha_mask=mask,
+                    alpha_mode=alpha_policy.alpha_mode,
+                    height_scale=float(height),
+                    direction=direction,
+                    projection=policy.projection,
+                    plane=policy.plane,
+                    projection_bounds=policy.bounds,
+                    metadata={
+                        "kernel": {
+                            "producer": "heightmap",
+                            "operation": "displace",
+                            "projection_policy": policy.canonical_payload(),
+                            "alpha_policy": alpha_policy.canonical_payload(),
+                            "cache_key_policy": cache_record.canonical_payload(),
+                        }
+                    },
+                )
+            )
         displaced_shells.append(
             make_surface_shell(
-                patches,
+                tuple(patches),
                 connected=shell.connected,
                 metadata={"kernel": {"producer": "heightmap", "operation": "displace"}},
             )
@@ -573,6 +713,34 @@ def _displace_heightmap_surface_body(
     return make_surface_body(
         tuple(displaced_shells),
         metadata={"kernel": {"producer": "heightmap", "operation": "displace"}, "consumer": {"source": "heightmap"}},
+    )
+
+
+def _surface_patch_projection_source_bounds(
+    patch: object,
+    plane: Literal["xy", "xz", "yz"],
+) -> tuple[float, float, float, float]:
+    domain = getattr(patch, "domain")
+    u0, u1 = domain.u_range
+    v0, v1 = domain.v_range
+    points = np.asarray(
+        [
+            patch.point_at(u0, v0),
+            patch.point_at(u1, v0),
+            patch.point_at(u1, v1),
+            patch.point_at(u0, v1),
+        ],
+        dtype=float,
+    )
+    coord_record = heightmap_sample_coordinate_record(
+        points,
+        HeightmapProjectionBoundsPolicy("planar", plane, (0.0, 1.0, 0.0, 1.0), "source-bounds"),
+    )
+    return (
+        float(np.min(coord_record.u)),
+        float(np.max(coord_record.u)),
+        float(np.min(coord_record.v)),
+        float(np.max(coord_record.v)),
     )
 
 
@@ -588,12 +756,6 @@ def _displace_heightmap_mesh_impl(
     bounds: Sequence[float] | None,
     quality: MeshQuality | None,
 ) -> Mesh:
-    if projection != "planar":
-        raise ValueError("Only planar projection is supported in this build.")
-    plane = plane.lower()
-    if plane not in {"xy", "xz", "yz"}:
-        raise ValueError("plane must be 'xy', 'xz', or 'yz'.")
-
     heights, mask = _load_heightmap(image)
     if quality is not None:
         quality = apply_lod(quality)
@@ -604,33 +766,15 @@ def _displace_heightmap_mesh_impl(
         return mesh.copy()
 
     verts = mesh.vertices.copy()
-    if plane == "xy":
-        u = verts[:, 0]
-        v = verts[:, 1]
-        if bounds is None:
-            xmin, xmax, ymin, ymax, _, _ = mesh.bounds
-            bounds = (xmin, xmax, ymin, ymax)
-    elif plane == "xz":
-        u = verts[:, 0]
-        v = verts[:, 2]
-        if bounds is None:
-            xmin, xmax, _, _, zmin, zmax = mesh.bounds
-            bounds = (xmin, xmax, zmin, zmax)
-    else:
-        u = verts[:, 1]
-        v = verts[:, 2]
-        if bounds is None:
-            _, _, ymin, ymax, zmin, zmax = mesh.bounds
-            bounds = (ymin, ymax, zmin, zmax)
+    policy = resolve_heightmap_projection_bounds_policy(
+        projection=projection,
+        plane=plane,
+        bounds=bounds,
+        source_bounds=mesh.bounds if bounds is None else None,
+    )
+    coord_record = heightmap_sample_coordinate_record(verts, policy)
 
-    umin, umax, vmin, vmax = np.asarray(bounds, dtype=float).reshape(4)
-    if np.isclose(umax, umin) or np.isclose(vmax, vmin):
-        raise ValueError("projection bounds are degenerate.")
-
-    u_norm = (u - umin) / (umax - umin)
-    v_norm = (v - vmin) / (vmax - vmin)
-
-    sampled, masked = _sample_heightmap(heights, mask, u_norm, v_norm)
+    sampled, masked = _sample_heightmap(heights, mask, coord_record.u_normalized, coord_record.v_normalized)
     if alpha_mode == "ignore":
         sampled = np.where(masked, 0.0, sampled)
     elif alpha_mode != "mask":
@@ -678,9 +822,13 @@ def _heightmap_cache_key(
 __all__ = [
     "HeightmapAlphaMaskPolicy",
     "HeightmapCacheKeyRecord",
+    "HeightmapProjectionBoundsPolicy",
+    "HeightmapSampleCoordinateRecord",
     "heightmap",
     "displace_heightmap",
     "heightmap_cache_key_record",
+    "heightmap_sample_coordinate_record",
     "make_heightmap_surface_patch",
+    "resolve_heightmap_projection_bounds_policy",
     "resolve_heightmap_alpha_mask_policy",
 ]
