@@ -21,10 +21,15 @@ from impression.modeling import (
     SurfaceBooleanResult,
     SurfaceBooleanSplitRecord,
     SurfaceBooleanTrimmedPatchFragment,
+    SurfaceCSGCurvePrimitive,
+    SurfaceCSGToleranceDiagnostic,
+    SurfaceCSGTolerancePolicy,
     SurfaceShell,
     boolean_difference,
     boolean_intersection,
     boolean_union,
+    make_surface_csg_curve,
+    make_surface_csg_line_curve,
     make_box,
     make_plane,
     make_sphere,
@@ -32,10 +37,58 @@ from impression.modeling import (
     make_surface_shell,
     prepare_surface_boolean_difference_operands,
     prepare_surface_boolean_operands,
+    sort_surface_csg_curves,
+    surface_csg_curve_digest,
+    surface_csg_curve_key,
+    surface_csg_curves_equal,
     surface_boolean_overlap_fragments,
     surface_boolean_intersection_stage,
     surface_boolean_result,
+    validate_surface_csg_curve,
 )
+
+
+def test_surface_csg_curve_primitives_have_deterministic_payload_keys_and_digests() -> None:
+    policy = SurfaceCSGTolerancePolicy(snap_tolerance=1e-6, equality_tolerance=1e-6)
+    first = make_surface_csg_line_curve((0.0, 0.0, 0.0), (1.0000004, 0.0, 0.0), policy=policy)
+    second = make_surface_csg_line_curve((0.0, 0.0, 0.0), (1.00000049, 0.0, 0.0), policy=policy)
+    sampled = make_surface_csg_curve(
+        "sampled",
+        ((0.0, 0.0, 0.0), (0.5, 0.0, 0.0), (1.0, 0.0, 0.0)),
+        policy=policy,
+    )
+
+    assert isinstance(first, SurfaceCSGCurvePrimitive)
+    assert first.canonical_payload(policy)["kind"] == "line"
+    assert surface_csg_curve_key(first, policy=policy) == surface_csg_curve_key(second, policy=policy)
+    assert surface_csg_curve_digest(first, policy=policy) == surface_csg_curve_digest(second, policy=policy)
+    assert surface_csg_curves_equal(first, second, policy=policy)
+    assert sort_surface_csg_curves((sampled, first), policy=policy) == tuple(
+        sorted((sampled, first), key=lambda curve: surface_csg_curve_key(curve, policy=policy))
+    )
+
+
+def test_surface_csg_tolerance_policy_reports_degenerate_and_ambiguous_curves() -> None:
+    policy = SurfaceCSGTolerancePolicy(degeneracy_tolerance=1e-3)
+    degenerate = SurfaceCSGCurvePrimitive(
+        kind="line",
+        points_3d=((0.0, 0.0, 0.0), (0.0, 0.0, 5e-4)),
+    )
+    ambiguous_arc = SurfaceCSGCurvePrimitive(
+        kind="arc",
+        points_3d=((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)),
+    )
+
+    degenerate_diagnostics = validate_surface_csg_curve(degenerate, policy=policy)
+    ambiguous_diagnostics = validate_surface_csg_curve(ambiguous_arc, policy=policy)
+
+    assert all(isinstance(diagnostic, SurfaceCSGToleranceDiagnostic) for diagnostic in degenerate_diagnostics)
+    assert degenerate_diagnostics[0].code == "degenerate-curve"
+    assert ambiguous_diagnostics[0].code == "ambiguous-curve"
+    with pytest.raises(ValueError, match="positive finite"):
+        SurfaceCSGTolerancePolicy(snap_tolerance=0.0)
+    with pytest.raises(ValueError, match="degeneracy tolerance"):
+        make_surface_csg_line_curve((0.0, 0.0, 0.0), (0.0, 0.0, 5e-4), policy=policy)
 
 
 def _translated(body: SurfaceBody, offset: tuple[float, float, float]) -> SurfaceBody:
@@ -455,6 +508,8 @@ def test_surface_boolean_intersection_stage_is_deterministic_for_overlapping_box
     assert stage.body_relation == "overlap"
     assert len(stage.cut_curves) == 16
     assert all(len(curve.points_3d) == 2 for curve in stage.cut_curves)
+    assert all(isinstance(curve.curve, SurfaceCSGCurvePrimitive) for curve in stage.cut_curves)
+    assert {curve.curve.kind for curve in stage.cut_curves if curve.curve is not None} == {"line"}
     assert all(len(curve.trim_fragments) == 2 for curve in stage.cut_curves)
     assert len(stage.split_records) == len(stage.patch_classifications)
     assert all(isinstance(record, SurfaceBooleanSplitRecord) for record in stage.split_records)
