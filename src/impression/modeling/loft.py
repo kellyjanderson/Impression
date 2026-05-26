@@ -75,6 +75,32 @@ class RailResolutionResult:
 
 
 @dataclass(frozen=True)
+class InferenceCandidateScore:
+    shift: int
+    reversed: bool
+    cost: float
+    cost_terms: dict[str, float]
+    protected_anchor_agreement: float
+    prior_interval_agreement: float = 1.0
+
+
+@dataclass(frozen=True)
+class InferenceRefusalDiagnostic:
+    reason: str
+    best_candidate: InferenceCandidateScore | None = None
+    second_best_candidate: InferenceCandidateScore | None = None
+    required_rail_hint: str | None = None
+
+
+@dataclass(frozen=True)
+class InferenceResult:
+    accepted: bool
+    matches: tuple[tuple[str, str], ...] = ()
+    candidate: InferenceCandidateScore | None = None
+    diagnostics: tuple[InferenceRefusalDiagnostic, ...] = ()
+
+
+@dataclass(frozen=True)
 class _RailRecord:
     ref: str
     key: str
@@ -135,6 +161,155 @@ def validate_rail_priority(result: RailResolutionResult) -> None:
     if invalid_conflicts:
         reasons = ", ".join(conflict.reason for conflict in invalid_conflicts)
         raise ValueError(f"Invalid authored rail priority: {reasons}.")
+
+
+def score_correspondence_candidates(
+    source_loop: TopologyPath,
+    target_loop: TopologyPath,
+    rail_result: RailResolutionResult,
+) -> tuple[InferenceCandidateScore, ...]:
+    """Rank cyclic-shift and reversal correspondence candidates for equal-size topology paths."""
+
+    validate_rail_priority(rail_result)
+    source_points = tuple(source_loop.points)
+    target_points = tuple(target_loop.points)
+    if not source_points or len(source_points) != len(target_points):
+        return ()
+    source_coords = np.vstack([point.coordinates for point in source_points])
+    target_coords = np.vstack([point.coordinates for point in target_points])
+    scale = max(_point_cloud_span(source_coords), _point_cloud_span(target_coords), 1e-9)
+    candidates: list[InferenceCandidateScore] = []
+    for reversed_candidate in (False, True):
+        for shift in range(len(source_points)):
+            target_indices = _candidate_target_indices(len(source_points), shift, reversed_candidate)
+            distances = np.linalg.norm(source_coords - target_coords[target_indices], axis=1) / scale
+            protected_count, protected_hits = _candidate_protected_anchor_hits(
+                source_points,
+                target_points,
+                target_indices,
+                rail_result,
+            )
+            protected_agreement = 1.0 if protected_count == 0 else protected_hits / protected_count
+            candidates.append(
+                InferenceCandidateScore(
+                    shift=shift,
+                    reversed=reversed_candidate,
+                    cost=float(np.mean(distances)),
+                    cost_terms={
+                        "mean_distance": float(np.mean(distances)),
+                        "max_distance": float(np.max(distances)),
+                        "protected_anchor_count": float(protected_count),
+                    },
+                    protected_anchor_agreement=float(protected_agreement),
+                )
+            )
+    return tuple(sorted(candidates, key=lambda candidate: (candidate.cost, candidate.reversed, candidate.shift)))
+
+
+def accept_or_refuse_inferred_correspondence(
+    candidates: Sequence[InferenceCandidateScore],
+    *,
+    topology_semantics: dict[str, object] | None = None,
+) -> InferenceResult:
+    semantics = dict(topology_semantics or {})
+    ranked = tuple(sorted(candidates, key=lambda candidate: (candidate.cost, candidate.reversed, candidate.shift)))
+    if not ranked:
+        return _refused_inference("no_candidates", None, None, "Add authored topology rails or compatible point counts.")
+    best = ranked[0]
+    second_best = ranked[1] if len(ranked) > 1 else None
+    if best.reversed and not bool(semantics.get("allow_reversal", False)):
+        return _refused_inference(
+            "reversal_conflicts_with_authored_direction",
+            best,
+            second_best,
+            "Allow reversal explicitly or add direction-preserving rails.",
+        )
+    if best.protected_anchor_agreement < 1.0:
+        return _refused_inference(
+            "crossing_protected_order",
+            best,
+            second_best,
+            "Fix contradictory protected rails before inference.",
+        )
+    protected_anchor_count = int(best.cost_terms.get("protected_anchor_count", 0.0))
+    compatible_authored_starts = bool(semantics.get("compatible_authored_starts", False))
+    if protected_anchor_count < 2 and not compatible_authored_starts:
+        return _refused_inference(
+            "missing_stable_anchors",
+            best,
+            second_best,
+            "Add at least two stable correspondence rails.",
+        )
+    if best.cost > float(semantics.get("max_normalized_cost", 0.20)):
+        return _refused_inference(
+            "cost_above_threshold",
+            best,
+            second_best,
+            "Add authored rails or closer topology-compatible profiles.",
+        )
+    if second_best is not None:
+        required_separation = max(0.10, best.cost * 0.50)
+        if (second_best.cost - best.cost) < required_separation:
+            return _refused_inference(
+                "ambiguous_phase",
+                best,
+                second_best,
+                "Add a named anchor or correspondence id to break the phase tie.",
+            )
+    return InferenceResult(accepted=True, candidate=best)
+
+
+def _refused_inference(
+    reason: str,
+    best_candidate: InferenceCandidateScore | None,
+    second_best_candidate: InferenceCandidateScore | None,
+    required_rail_hint: str,
+) -> InferenceResult:
+    return InferenceResult(
+        accepted=False,
+        candidate=best_candidate,
+        diagnostics=(
+            InferenceRefusalDiagnostic(
+                reason=reason,
+                best_candidate=best_candidate,
+                second_best_candidate=second_best_candidate,
+                required_rail_hint=required_rail_hint,
+            ),
+        ),
+    )
+
+
+def _point_cloud_span(points: np.ndarray) -> float:
+    bounds_min = np.min(points, axis=0)
+    bounds_max = np.max(points, axis=0)
+    return float(np.linalg.norm(bounds_max - bounds_min))
+
+
+def _candidate_target_indices(count: int, shift: int, reversed_candidate: bool) -> np.ndarray:
+    if reversed_candidate:
+        return np.asarray([(shift - index) % count for index in range(count)], dtype=int)
+    return np.asarray([(index + shift) % count for index in range(count)], dtype=int)
+
+
+def _candidate_protected_anchor_hits(
+    source_points: Sequence[TopologyPoint],
+    target_points: Sequence[TopologyPoint],
+    target_indices: np.ndarray,
+    rail_result: RailResolutionResult,
+) -> tuple[int, int]:
+    source_index_by_id = {point.id: index for index, point in enumerate(source_points)}
+    target_index_by_id = {point.id: index for index, point in enumerate(target_points)}
+    protected_pairs = [
+        (source_ref, target_ref)
+        for source_ref, target_ref in rail_result.matches
+        if source_ref in source_index_by_id and target_ref in target_index_by_id
+    ]
+    hits = 0
+    for source_ref, target_ref in protected_pairs:
+        source_index = source_index_by_id[source_ref]
+        if int(target_indices[source_index]) == target_index_by_id[target_ref]:
+            hits += 1
+    return len(protected_pairs), hits
 
 
 def _rail_records_for_tier(path: TopologyPath, tier: RailSource) -> tuple[_RailRecord, ...]:
@@ -5440,11 +5615,16 @@ __all__ = [
     "PlannedClosure",
     "PlannedRegionPair",
     "PlannedTransition",
+    "InferenceCandidateScore",
+    "InferenceRefusalDiagnostic",
+    "InferenceResult",
     "RailConflictDiagnostic",
     "RailResolutionResult",
     "RailSource",
     "LoftPlan",
+    "accept_or_refuse_inferred_correspondence",
     "resolve_authored_rails",
+    "score_correspondence_candidates",
     "validate_rail_priority",
     "loft_profiles",
     "loft",
