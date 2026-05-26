@@ -1337,6 +1337,33 @@ class SubdivisionCrease:
 
 
 SubdivisionScheme = Literal["catmull_clark"]
+ImplicitFieldNodeKind = Literal[
+    "sphere",
+    "box",
+    "plane",
+    "constant",
+    "union",
+    "intersection",
+    "difference",
+    "translate",
+    "scale",
+    "negate",
+]
+
+IMPLICIT_FIELD_NODE_KINDS: frozenset[str] = frozenset(
+    {
+        "sphere",
+        "box",
+        "plane",
+        "constant",
+        "union",
+        "intersection",
+        "difference",
+        "translate",
+        "scale",
+        "negate",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -1591,6 +1618,129 @@ class SubdivisionSurfacePatch(SurfacePatch):
         return (float(mins[0]), float(maxs[0]), float(mins[1]), float(maxs[1]), float(mins[2]), float(maxs[2]))
 
 
+def _normalize_field_parameter(value: object, *, name: str) -> object:
+    if isinstance(value, np.ndarray):
+        return _normalize_field_parameter(value.tolist(), name=name)
+    if isinstance(value, np.generic):
+        return _normalize_field_parameter(value.item(), name=name)
+    if isinstance(value, (str, bool)) or value is None:
+        return value
+    if isinstance(value, (int, float)):
+        scalar = float(value)
+        if not np.isfinite(scalar):
+            raise ValueError(f"Implicit field parameter {name!r} must be finite.")
+        return scalar
+    if isinstance(value, (list, tuple)):
+        return tuple(_normalize_field_parameter(item, name=name) for item in value)
+    if isinstance(value, dict):
+        return {str(key): _normalize_field_parameter(value[key], name=f"{name}.{key}") for key in sorted(value)}
+    raise ValueError(f"Implicit field parameter {name!r} has unsupported type {type(value).__name__}.")
+
+
+def _as_bounds3(value: Sequence[float], *, name: str) -> tuple[float, float, float, float, float, float]:
+    bounds = tuple(float(item) for item in value)
+    if len(bounds) != 6:
+        raise ValueError(f"{name} must contain six values.")
+    if not np.all(np.isfinite(bounds)):
+        raise ValueError(f"{name} must contain only finite values.")
+    xmin, xmax, ymin, ymax, zmin, zmax = bounds
+    if xmax <= xmin or ymax <= ymin or zmax <= zmin:
+        raise ValueError(f"{name} must have positive span on every axis.")
+    return bounds
+
+
+@dataclass(frozen=True)
+class ImplicitFieldNode:
+    """Declarative allow-listed implicit field node."""
+
+    kind: ImplicitFieldNodeKind
+    parameters: dict[str, object] = field(default_factory=dict)
+    children: tuple["ImplicitFieldNode", ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        kind = str(self.kind).strip()
+        if kind not in IMPLICIT_FIELD_NODE_KINDS:
+            raise ValueError(f"Unsupported implicit field node kind {kind!r}.")
+        parameters = {
+            str(key): _normalize_field_parameter(value, name=str(key))
+            for key, value in sorted(dict(self.parameters).items())
+        }
+        children = tuple(_coerce_implicit_field_node(child) for child in self.children)
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "parameters", parameters)
+        object.__setattr__(self, "children", children)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "kind": self.kind,
+            "parameters": self.parameters,
+            "children": [child.canonical_payload() for child in self.children],
+        }
+
+
+def _coerce_implicit_field_node(value: object) -> ImplicitFieldNode:
+    if isinstance(value, ImplicitFieldNode):
+        return value
+    if isinstance(value, dict):
+        allowed = {"kind", "parameters", "children"}
+        keys = set(value)
+        unknown = keys - allowed
+        if unknown:
+            raise ValueError(f"Unsupported implicit field node fields: {sorted(unknown)}.")
+        return ImplicitFieldNode(
+            kind=value["kind"],
+            parameters=dict(value.get("parameters", {})),
+            children=tuple(value.get("children", ())),
+        )
+    raise ValueError("Implicit field nodes must be ImplicitFieldNode instances or dictionaries.")
+
+
+def make_implicit_field_node(
+    kind: ImplicitFieldNodeKind,
+    *,
+    parameters: dict[str, object] | None = None,
+    children: Sequence[ImplicitFieldNode | dict[str, object]] = (),
+) -> ImplicitFieldNode:
+    return ImplicitFieldNode(kind=kind, parameters={} if parameters is None else parameters, children=tuple(children))
+
+
+@dataclass(frozen=True)
+class ImplicitSurfacePatch(SurfacePatch):
+    """Implicit surface payload backed by a declarative field tree."""
+
+    field: ImplicitFieldNode = field(
+        default_factory=lambda: ImplicitFieldNode(kind="sphere", parameters={"center": (0.0, 0.0, 0.0), "radius": 1.0})
+    )
+    bounds: tuple[float, float, float, float, float, float] = (-1.0, 1.0, -1.0, 1.0, -1.0, 1.0)
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.family != "implicit":
+            raise ValueError("ImplicitSurfacePatch.family must be 'implicit'.")
+        field_node = _coerce_implicit_field_node(self.field)
+        bounds = _as_bounds3(self.bounds, name="ImplicitSurfacePatch.bounds")
+        object.__setattr__(self, "field", field_node)
+        object.__setattr__(self, "bounds", bounds)
+
+    def geometry_payload(self) -> dict[str, object]:
+        return {
+            "field": self.field.canonical_payload(),
+            "bounds": self.bounds,
+        }
+
+    def point_at(self, u: float, v: float) -> np.ndarray:
+        self.validate_parameters(u, v)
+        raise NotImplementedError("ImplicitSurfacePatch point evaluation is implemented by Surface Spec 149.")
+
+    def derivatives_at(self, u: float, v: float) -> tuple[np.ndarray, np.ndarray]:
+        self.validate_parameters(u, v)
+        raise NotImplementedError("ImplicitSurfacePatch derivatives are implemented by Surface Spec 149.")
+
+    def bounds_estimate(self, *, u_count: int = 3, v_count: int = 3) -> tuple[float, float, float, float, float, float]:
+        del u_count, v_count
+        return _transform_bounds(self.bounds, self.transform_matrix)
+
+
 @dataclass(frozen=True)
 class SurfaceShell:
     """An ordered collection of patches that form one shell."""
@@ -1810,6 +1960,7 @@ __all__ = [
     "REQUIRED_V1_PATCH_FAMILIES",
     "SUPPORTED_SURFACE_PATCH_FAMILIES",
     "SURFACE_SPEC_66_RETIREMENT_NOTE",
+    "IMPLICIT_FIELD_NODE_KINDS",
     "ParameterDomain",
     "TrimLoop",
     "SurfaceBoundaryRef",
@@ -1825,6 +1976,9 @@ __all__ = [
     "SubdivisionCrease",
     "SubdivisionRefinementResult",
     "SubdivisionSurfacePatch",
+    "ImplicitFieldNode",
+    "ImplicitSurfacePatch",
+    "make_implicit_field_node",
     "refine_subdivision_control_cage",
     "SurfaceShell",
     "SurfaceBody",

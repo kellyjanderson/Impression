@@ -41,6 +41,9 @@ from impression.modeling import (
     export_tessellation_request,
     flatten_surface_scene,
     handoff_surface_scene,
+    IMPLICIT_FIELD_NODE_KINDS,
+    ImplicitFieldNode,
+    ImplicitSurfacePatch,
     make_surface_consumer_collection,
     make_surface_mesh_adapter,
     make_surface_scene_group,
@@ -71,6 +74,7 @@ from impression.modeling import (
     TrimLoop,
     make_surface_body,
     make_surface_shell,
+    make_implicit_field_node,
     refine_subdivision_control_cage,
     tessellate_surface_body,
     tessellate_surface_patch,
@@ -944,6 +948,69 @@ def test_subdivision_surface_patch_tessellates_with_approximation_metadata() -> 
     assert mesh.metadata["subdivision_scheme"] == "catmull_clark"
     assert mesh.metadata["subdivision_level"] >= 2
     assert mesh.metadata["subdivision_approximation"] == "finite_catmull_clark"
+
+
+def test_implicit_field_node_payload_is_allow_listed_and_canonical() -> None:
+    sphere = make_implicit_field_node("sphere", parameters={"radius": 2, "center": np.array([0.0, 1.0, 2.0])})
+    translated = make_implicit_field_node(
+        "translate",
+        parameters={"offset": (1.0, 0.0, 0.0)},
+        children=(sphere,),
+    )
+
+    payload = translated.canonical_payload()
+    assert "sphere" in IMPLICIT_FIELD_NODE_KINDS
+    assert payload["kind"] == "translate"
+    assert payload["parameters"] == {"offset": (1.0, 0.0, 0.0)}
+    assert payload["children"][0]["parameters"] == {"center": (0.0, 1.0, 2.0), "radius": 2.0}
+
+
+def test_implicit_surface_patch_owns_field_tree_and_bounds() -> None:
+    patch = ImplicitSurfacePatch(
+        family="implicit",
+        field={
+            "kind": "union",
+            "children": [
+                {"kind": "sphere", "parameters": {"radius": 1.0}},
+                {"kind": "box", "parameters": {"half_extents": (1.0, 2.0, 3.0)}},
+            ],
+        },
+        bounds=(-2.0, 2.0, -3.0, 3.0, -4.0, 4.0),
+    )
+
+    payload = patch.geometry_payload()
+    assert patch.family == "implicit"
+    assert isinstance(patch.field, ImplicitFieldNode)
+    assert patch.bounds_estimate() == (-2.0, 2.0, -3.0, 3.0, -4.0, 4.0)
+    assert payload["field"]["kind"] == "union"
+    assert len(payload["field"]["children"]) == 2
+    assert isinstance(patch.stable_identity, str)
+
+
+@pytest.mark.parametrize(
+    "factory, message",
+    [
+        (lambda: ImplicitFieldNode(kind="python_eval"), "Unsupported implicit field node kind"),
+        (lambda: ImplicitFieldNode(kind="sphere", parameters={"radius": float("nan")}), "must be finite"),
+        (lambda: ImplicitFieldNode(kind="sphere", parameters={"callback": object()}), "unsupported type"),
+        (lambda: ImplicitSurfacePatch(family="bspline"), "family must be 'implicit'"),
+        (lambda: ImplicitSurfacePatch(family="implicit", field={"kind": "sphere", "code": "x"}), "Unsupported implicit field node fields"),
+        (lambda: ImplicitSurfacePatch(family="implicit", bounds=(0.0, 0.0, -1.0, 1.0, -1.0, 1.0)), "positive span"),
+    ],
+)
+def test_implicit_surface_patch_rejects_unsupported_payloads(factory: object, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        factory()
+
+
+def test_implicit_surface_patch_refuses_evaluation_until_field_evaluator_exists() -> None:
+    patch = ImplicitSurfacePatch(family="implicit")
+
+    with pytest.raises(NotImplementedError, match="Surface Spec 149"):
+        patch.point_at(0.5, 0.5)
+
+    with pytest.raises(NotImplementedError, match="Surface Spec 149"):
+        patch.derivatives_at(0.5, 0.5)
 
 
 def test_planar_patch_rejects_collinear_axes_and_multiple_outer_trims() -> None:
