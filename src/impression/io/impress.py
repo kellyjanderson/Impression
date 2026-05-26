@@ -5,12 +5,25 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
-from impression.modeling.surface import SurfaceBody, SurfacePatch, SurfaceShell
+from impression.modeling.surface import (
+    ParameterDomain,
+    PlanarSurfacePatch,
+    RevolutionSurfacePatch,
+    RuledSurfacePatch,
+    SurfaceBody,
+    SurfacePatch,
+    SurfaceShell,
+)
 
 IMPRESS_FORMAT = "impress"
 CURRENT_IMPRESS_SCHEMA_VERSION = "1.0"
 DEFAULT_IMPRESS_LENGTH_UNIT = "unitless"
 SUPPORTED_IMPRESS_LENGTH_UNITS = frozenset({"unitless", "mm", "cm", "m", "in", "ft"})
+_PATCH_KIND_FAMILIES = {
+    "PlanarSurfacePatch": "planar",
+    "RuledSurfacePatch": "ruled",
+    "RevolutionSurfacePatch": "revolution",
+}
 
 
 class ImpressFormatError(ValueError):
@@ -204,6 +217,109 @@ def _validate_body_entry_payload(entry: object) -> ImpressBodyEntry:
     return ImpressBodyEntry(body_id=body_id, stable_identity=stable_identity)
 
 
+def encode_surface_patch_payload(patch: SurfacePatch) -> dict[str, object]:
+    """Encode base patch fields and supported family geometry for `.impress` persistence."""
+
+    if not isinstance(patch, SurfacePatch):
+        raise ImpressFormatError("encode_surface_patch_payload requires a SurfacePatch.")
+    if patch.trim_loops:
+        raise ImpressFormatError("SurfacePatch trim payloads require the dedicated `.impress` trim codec.")
+    _validate_patch_kind_family(type(patch).__name__, patch.family)
+    return {
+        "kind": type(patch).__name__,
+        "family": patch.family,
+        "domain": _encode_parameter_domain_payload(patch.domain),
+        "capability_flags": sorted(patch.capability_flags),
+        "transform_matrix": patch.transform_matrix.tolist(),
+        "metadata": dict(patch.metadata),
+        "trim_loops": [],
+        "geometry": _encode_patch_geometry_payload(patch),
+    }
+
+
+def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
+    """Decode a `.impress` patch payload through the public patch constructors."""
+
+    if not isinstance(payload, Mapping):
+        raise ImpressFormatError("SurfacePatch payload must be an object.")
+    unknown_keys = set(payload) - {
+        "kind",
+        "family",
+        "domain",
+        "capability_flags",
+        "transform_matrix",
+        "metadata",
+        "trim_loops",
+        "geometry",
+    }
+    if unknown_keys:
+        keys = ", ".join(sorted(str(key) for key in unknown_keys))
+        raise ImpressFormatError(f"Unsupported SurfacePatch payload fields: {keys}.")
+
+    kind = payload.get("kind")
+    if not isinstance(kind, str) or not kind:
+        raise ImpressFormatError("SurfacePatch payload requires a non-empty kind.")
+    family = payload.get("family")
+    if not isinstance(family, str) or not family:
+        raise ImpressFormatError("SurfacePatch payload requires a non-empty family.")
+    _validate_patch_kind_family(kind, family)
+
+    flags = payload.get("capability_flags", [])
+    if not isinstance(flags, Sequence) or isinstance(flags, (str, bytes)):
+        raise ImpressFormatError("SurfacePatch capability_flags must be an array.")
+    if not all(isinstance(flag, str) and flag for flag in flags):
+        raise ImpressFormatError("SurfacePatch capability_flags must contain non-empty strings.")
+
+    metadata = payload.get("metadata", {})
+    if not isinstance(metadata, Mapping):
+        raise ImpressFormatError("SurfacePatch metadata must be an object.")
+
+    trim_loops = payload.get("trim_loops", [])
+    if trim_loops != []:
+        raise ImpressFormatError("SurfacePatch trim payloads require the dedicated `.impress` trim codec.")
+
+    geometry = payload.get("geometry")
+    if not isinstance(geometry, Mapping):
+        raise ImpressFormatError("SurfacePatch geometry must be an object.")
+
+    domain = _decode_parameter_domain_payload(payload.get("domain"))
+    transform_matrix = _validate_matrix4_payload(payload.get("transform_matrix"))
+    common = {
+        "family": family,
+        "domain": domain,
+        "capability_flags": frozenset(flags),
+        "trim_loops": (),
+        "transform_matrix": transform_matrix,
+        "metadata": dict(metadata),
+    }
+    try:
+        if kind == "PlanarSurfacePatch":
+            return PlanarSurfacePatch(
+                **common,
+                origin=_validate_vec3_payload(geometry.get("origin"), "origin"),
+                u_axis=_validate_vec3_payload(geometry.get("u_axis"), "u_axis"),
+                v_axis=_validate_vec3_payload(geometry.get("v_axis"), "v_axis"),
+            )
+        if kind == "RuledSurfacePatch":
+            return RuledSurfacePatch(
+                **common,
+                start_curve=_validate_points3_payload(geometry.get("start_curve"), "start_curve"),
+                end_curve=_validate_points3_payload(geometry.get("end_curve"), "end_curve"),
+            )
+        if kind == "RevolutionSurfacePatch":
+            return RevolutionSurfacePatch(
+                **common,
+                profile_curve=_validate_points3_payload(geometry.get("profile_curve"), "profile_curve"),
+                axis_origin=_validate_vec3_payload(geometry.get("axis_origin"), "axis_origin"),
+                axis_direction=_validate_vec3_payload(geometry.get("axis_direction"), "axis_direction"),
+                start_angle_deg=_validate_float_payload(geometry.get("start_angle_deg"), "start_angle_deg"),
+                sweep_angle_deg=_validate_float_payload(geometry.get("sweep_angle_deg"), "sweep_angle_deg"),
+            )
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(str(exc)) from exc
+    raise ImpressFormatError(f"Unsupported SurfacePatch kind {kind!r}.")
+
+
 def encode_surface_shell_payload(shell: SurfaceShell) -> dict[str, object]:
     """Encode container-level shell fields for `.impress` persistence."""
 
@@ -321,6 +437,115 @@ def _validate_matrix4_payload(payload: object) -> np.ndarray:
     if not np.all(np.isfinite(matrix)):
         raise ImpressFormatError("transform_matrix must contain only finite values.")
     return matrix
+
+
+def _encode_parameter_domain_payload(domain: ParameterDomain) -> dict[str, object]:
+    return {
+        "u_range": list(domain.u_range),
+        "v_range": list(domain.v_range),
+        "normalized": domain.normalized,
+    }
+
+
+def _decode_parameter_domain_payload(payload: object) -> ParameterDomain:
+    if payload is None:
+        return ParameterDomain()
+    if not isinstance(payload, Mapping):
+        raise ImpressFormatError("SurfacePatch domain must be an object.")
+    unknown_keys = set(payload) - {"u_range", "v_range", "normalized"}
+    if unknown_keys:
+        keys = ", ".join(sorted(str(key) for key in unknown_keys))
+        raise ImpressFormatError(f"Unsupported SurfacePatch domain fields: {keys}.")
+    normalized = payload.get("normalized", True)
+    if not isinstance(normalized, bool):
+        raise ImpressFormatError("SurfacePatch domain normalized must be a boolean.")
+    try:
+        return ParameterDomain(
+            u_range=_validate_range_payload(payload.get("u_range"), "u_range"),
+            v_range=_validate_range_payload(payload.get("v_range"), "v_range"),
+            normalized=normalized,
+        )
+    except ValueError as exc:
+        raise ImpressFormatError(str(exc)) from exc
+
+
+def _encode_patch_geometry_payload(patch: SurfacePatch) -> dict[str, object]:
+    geometry = patch.geometry_payload()
+    if isinstance(patch, PlanarSurfacePatch):
+        return {
+            "origin": _array_payload(geometry["origin"]),
+            "u_axis": _array_payload(geometry["u_axis"]),
+            "v_axis": _array_payload(geometry["v_axis"]),
+        }
+    if isinstance(patch, RuledSurfacePatch):
+        return {
+            "start_curve": _array_payload(geometry["start_curve"]),
+            "end_curve": _array_payload(geometry["end_curve"]),
+        }
+    if isinstance(patch, RevolutionSurfacePatch):
+        return {
+            "profile_curve": _array_payload(geometry["profile_curve"]),
+            "axis_origin": _array_payload(geometry["axis_origin"]),
+            "axis_direction": _array_payload(geometry["axis_direction"]),
+            "start_angle_deg": float(geometry["start_angle_deg"]),
+            "sweep_angle_deg": float(geometry["sweep_angle_deg"]),
+        }
+    raise ImpressFormatError(f"Unsupported SurfacePatch kind {type(patch).__name__!r}.")
+
+
+def _validate_patch_kind_family(kind: str, family: str) -> None:
+    expected_family = _PATCH_KIND_FAMILIES.get(kind)
+    if expected_family is None:
+        raise ImpressFormatError(f"Unsupported SurfacePatch kind {kind!r}.")
+    if family != expected_family:
+        raise ImpressFormatError(
+            f"SurfacePatch kind {kind!r} requires family {expected_family!r}; got {family!r}."
+        )
+
+
+def _array_payload(value: object) -> list[object]:
+    array = np.asarray(value, dtype=float)
+    if not np.all(np.isfinite(array)):
+        raise ImpressFormatError("SurfacePatch geometry arrays must contain only finite values.")
+    return array.tolist()
+
+
+def _validate_range_payload(payload: object, name: str) -> tuple[float, float]:
+    if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)) or len(payload) != 2:
+        raise ImpressFormatError(f"SurfacePatch domain {name} must be a two-value numeric array.")
+    return (_validate_float_payload(payload[0], f"{name}[0]"), _validate_float_payload(payload[1], f"{name}[1]"))
+
+
+def _validate_vec3_payload(payload: object, name: str) -> np.ndarray:
+    try:
+        vector = np.asarray(payload, dtype=float).reshape(3)
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be a 3D numeric vector.") from exc
+    if not np.all(np.isfinite(vector)):
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must contain only finite values.")
+    return vector
+
+
+def _validate_points3_payload(payload: object, name: str) -> np.ndarray:
+    try:
+        points = np.asarray(payload, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be a numeric point array.") from exc
+    if points.ndim != 2 or points.shape[1] != 3 or points.shape[0] < 2:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must contain at least two 3D points.")
+    if not np.all(np.isfinite(points)):
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must contain only finite values.")
+    return points
+
+
+def _validate_float_payload(payload: object, name: str) -> float:
+    try:
+        value = float(payload)
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be numeric.") from exc
+    if not np.isfinite(value):
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be finite.")
+    return value
 
 
 def validate_impress_document_root(root: Mapping[str, object]) -> ImpressDocumentRoot:

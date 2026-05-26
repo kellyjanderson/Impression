@@ -12,8 +12,10 @@ from impression.io import (
     SurfaceBodyStore,
     UnsupportedImpressSchemaVersion,
     decode_surface_body_payload,
+    decode_surface_patch_payload,
     decode_surface_shell_payload,
     encode_surface_body_payload,
+    encode_surface_patch_payload,
     encode_surface_shell_payload,
     make_impress_document_root,
     make_surface_body_store,
@@ -22,7 +24,15 @@ from impression.io import (
     validate_surface_body_store,
 )
 import numpy as np
-from impression.modeling.surface import PlanarSurfacePatch, make_surface_body, make_surface_shell
+from impression.modeling.surface import (
+    ParameterDomain,
+    PlanarSurfacePatch,
+    RevolutionSurfacePatch,
+    RuledSurfacePatch,
+    TrimLoop,
+    make_surface_body,
+    make_surface_shell,
+)
 
 
 def test_make_impress_document_root_declares_format_and_schema() -> None:
@@ -209,6 +219,109 @@ def test_encode_decode_surface_body_payload_round_trips_container_fields() -> No
     assert decoded.metadata == body.metadata
     assert np.allclose(decoded.transform_matrix, body.transform_matrix)
     assert decoded.shells == body.shells
+
+
+def test_encode_decode_planar_surface_patch_payload_round_trips_base_fields() -> None:
+    patch = PlanarSurfacePatch(
+        family="planar",
+        domain=ParameterDomain(u_range=(-1.0, 1.0), v_range=(2.0, 4.0), normalized=False),
+        capability_flags=frozenset({"evaluatable", "tessellatable"}),
+        transform_matrix=[
+            [1.0, 0.0, 0.0, 5.0],
+            [0.0, 1.0, 0.0, 6.0],
+            [0.0, 0.0, 1.0, 7.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        metadata={"kernel": {"name": "face-1"}},
+        origin=(1.0, 2.0, 3.0),
+        u_axis=(2.0, 0.0, 0.0),
+        v_axis=(0.0, 3.0, 0.0),
+    )
+
+    payload = encode_surface_patch_payload(patch)
+    decoded = decode_surface_patch_payload(payload)
+
+    assert payload["kind"] == "PlanarSurfacePatch"
+    assert payload["family"] == "planar"
+    assert payload["domain"] == {"u_range": [-1.0, 1.0], "v_range": [2.0, 4.0], "normalized": False}
+    assert payload["capability_flags"] == ["evaluatable", "tessellatable"]
+    assert decoded.stable_identity == patch.stable_identity
+    assert decoded.metadata == patch.metadata
+
+
+def test_encode_decode_ruled_and_revolution_surface_patch_payloads_round_trip() -> None:
+    ruled = RuledSurfacePatch(
+        family="ruled",
+        start_curve=[(0.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 2.0, 0.0)],
+        end_curve=[(2.0, 0.0, 0.5), (2.0, 1.0, 0.5), (2.0, 2.0, 0.5)],
+    )
+    revolution = RevolutionSurfacePatch(
+        family="revolution",
+        profile_curve=[(1.0, 0.0, 0.0), (1.5, 0.0, 2.0)],
+        axis_origin=(0.0, 0.0, 0.0),
+        axis_direction=(0.0, 0.0, 1.0),
+        start_angle_deg=15.0,
+        sweep_angle_deg=180.0,
+    )
+
+    assert decode_surface_patch_payload(encode_surface_patch_payload(ruled)).stable_identity == ruled.stable_identity
+    assert decode_surface_patch_payload(encode_surface_patch_payload(revolution)).stable_identity == revolution.stable_identity
+
+
+def test_decode_surface_patch_payload_rejects_invalid_family_dispatch() -> None:
+    patch = PlanarSurfacePatch(family="planar")
+    payload = encode_surface_patch_payload(patch)
+    payload["family"] = "ruled"
+
+    with pytest.raises(ImpressFormatError, match="requires family"):
+        decode_surface_patch_payload(payload)
+
+
+def test_decode_surface_patch_payload_uses_constructor_validation() -> None:
+    patch = PlanarSurfacePatch(family="planar")
+    payload = encode_surface_patch_payload(patch)
+    geometry = dict(payload["geometry"])  # type: ignore[arg-type]
+    geometry["v_axis"] = [2.0, 0.0, 0.0]
+    payload["geometry"] = geometry
+
+    with pytest.raises(ImpressFormatError, match="linearly independent"):
+        decode_surface_patch_payload(payload)
+
+
+def test_surface_patch_payload_codec_refuses_trim_payload_until_trim_codec() -> None:
+    patch = PlanarSurfacePatch(
+        family="planar",
+        trim_loops=(TrimLoop(points_uv=[(0.1, 0.1), (0.8, 0.1), (0.1, 0.8)], category="outer"),),
+    )
+
+    with pytest.raises(ImpressFormatError, match="trim payloads require"):
+        encode_surface_patch_payload(patch)
+
+    payload = encode_surface_patch_payload(PlanarSurfacePatch(family="planar"))
+    payload["trim_loops"] = [{"category": "outer", "points_uv": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]}]
+    with pytest.raises(ImpressFormatError, match="trim payloads require"):
+        decode_surface_patch_payload(payload)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"kind": "UnknownSurfacePatch", "family": "unknown", "geometry": {}},
+        {"kind": "PlanarSurfacePatch", "family": "planar", "geometry": []},
+        {"kind": "PlanarSurfacePatch", "family": "planar", "geometry": {}, "capability_flags": "flag"},
+        {"kind": "PlanarSurfacePatch", "family": "planar", "geometry": {}, "metadata": []},
+        {"kind": "PlanarSurfacePatch", "family": "planar", "geometry": {}, "domain": {"u_range": [0.0, 0.0]}},
+        {
+            "kind": "PlanarSurfacePatch",
+            "family": "planar",
+            "geometry": {"origin": [float("nan"), 0.0, 0.0]},
+        },
+    ],
+)
+def test_decode_surface_patch_payload_rejects_invalid_payloads(payload: dict[str, object]) -> None:
+    with pytest.raises(ImpressFormatError):
+        decode_surface_patch_payload(payload)
 
 
 @pytest.mark.parametrize(

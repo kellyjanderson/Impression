@@ -341,7 +341,7 @@ Only final leaf specifications appear here.
 - [x] [Impress Spec 02: .impress Units And Root Validation Policy (v1.0)](../specifications/impress-02-impress-units-and-root-validation-policy-v1_0.md)
 - [x] [Impress Spec 03: .impress SurfaceBodyStore And Identity Policy (v1.0)](../specifications/impress-03-impress-surfacebodystore-and-identity-policy-v1_0.md)
 - [x] [Impress Spec 04: .impress Body And Shell Payload Codec (v1.0)](../specifications/impress-04-impress-body-and-shell-payload-codec-v1_0.md)
-- [ ] [Impress Spec 05: .impress Patch Payload Codec (v1.0)](../specifications/impress-05-impress-patch-payload-codec-v1_0.md)
+- [x] [Impress Spec 05: .impress Patch Payload Codec (v1.0)](../specifications/impress-05-impress-patch-payload-codec-v1_0.md)
 - [ ] [Impress Spec 06: .impress Trim Payload Codec (v1.0)](../specifications/impress-06-impress-trim-payload-codec-v1_0.md)
 - [ ] [Impress Spec 07: .impress Seam Payload Codec (v1.0)](../specifications/impress-07-impress-seam-payload-codec-v1_0.md)
 - [ ] [Impress Spec 08: .impress Adjacency Payload Codec (v1.0)](../specifications/impress-08-impress-adjacency-payload-codec-v1_0.md)
