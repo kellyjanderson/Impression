@@ -1,6 +1,9 @@
 # Modeling — Primitives
 
-All primitives are exposed from `impression.modeling` and return internal triangle meshes. Import helpers like:
+All primitives are exposed from `impression.modeling`. Surface-first primitives
+return `SurfaceBody` by default as they are migrated; mesh output remains
+available through explicit `backend="mesh"` compatibility routes. Import helpers
+like:
 
 ```python
 from impression.modeling import make_box, make_cylinder, make_ngon, make_polyhedron, make_sphere, make_torus
@@ -8,7 +11,10 @@ from impression.modeling import make_box, make_cylinder, make_ngon, make_polyhed
 
 > Rendering note: the CLI preview (`impression preview`) or `docs/examples/...` scripts can be used to visualize outputs on a desktop environment.
 
-**Color support:** every `make_*` function accepts an optional `color` argument (RGB/RGBA tuple in 0–1 or a hex/common named color string). Colors are stored with the mesh so previews and future exports respect object colors.
+**Color support:** every `make_*` function accepts an optional `color` argument
+(RGB/RGBA tuple in 0-1 or a hex/common named color string). Surface defaults
+store color as consumer metadata; explicit mesh compatibility routes store color
+with the mesh.
 
 - **Example (two colored cubes):** `docs/examples/primitives/color_dual_example.py`
 - **Example (translucent shell):** `docs/examples/primitives/color_transparency_example.py`
@@ -16,6 +22,7 @@ from impression.modeling import make_box, make_cylinder, make_ngon, make_polyhed
 ## Box
 
 - **Function:** `make_box(size=(dx, dy, dz), center=(0, 0, 0))`
+- **Default output:** `SurfaceBody`; use `backend="mesh"` for explicit mesh compatibility.
 - **Options**
   - `size`: tuple specifying side lengths along X/Y/Z.
   - `center`: world-space center of the box.
@@ -105,6 +112,7 @@ def build():
 ## Prism / Pyramid
 
 - **Function:** `make_prism(base_size=(dx, dy), top_size=None, height=1.0, ...)`
+- **Default output:** `SurfaceBody`; use `backend="mesh"` for explicit mesh compatibility.
 - `top_size=None` → straight prism, `top_size=(0,0)` → pyramid.
 - **Example:** `docs/examples/primitives/prism_example.py`
 - **Preview:** `impression preview docs/examples/primitives/prism_example.py`
@@ -121,6 +129,7 @@ def build():
 ## Polyhedron (Regular Solids)
 
 - **Function:** `make_polyhedron(faces=6, radius=0.5, center=(0,0,0))`
+- **Default output:** `SurfaceBody`; use `backend="mesh"` for explicit mesh compatibility.
 - **Supported face counts:** 4 (tetrahedron), 6 (hexahedron/cube), 8 (octahedron), 12 (dodecahedron), 20 (icosahedron).
 - **Example:** `docs/examples/primitives/polyhedron_example.py`
 - **Preview:** `impression preview docs/examples/primitives/polyhedron_example.py`
