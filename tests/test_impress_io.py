@@ -8,6 +8,7 @@ from impression.io import (
     IMPRESS_FORMAT,
     ImpressBodyEntry,
     ImpressFormatError,
+    ImpressSaveOptions,
     ImpressUnits,
     SurfaceBodyStore,
     UnsupportedImpressSchemaVersion,
@@ -18,6 +19,7 @@ from impression.io import (
     decode_surface_seam_payload,
     decode_surface_shell_payload,
     decode_trim_loop_payload,
+    dumps_impress_json,
     encode_surface_adjacency_payload,
     encode_surface_boundary_ref_payload,
     encode_surface_body_payload,
@@ -25,11 +27,14 @@ from impression.io import (
     encode_surface_seam_payload,
     encode_surface_shell_payload,
     encode_trim_loop_payload,
+    make_impress_document_payload,
     make_impress_document_root,
     make_surface_body_store,
     validate_impress_units,
     validate_impress_document_root,
     validate_surface_body_store,
+    save_impress,
+    write_impress_json,
 )
 import numpy as np
 from impression.modeling.surface import (
@@ -198,6 +203,74 @@ def test_surface_body_store_rejects_entry_identity_mismatch() -> None:
 
     with pytest.raises(ImpressFormatError, match="stable_identity does not match"):
         SurfaceBodyStore((ImpressBodyEntry(body_id="body-a", stable_identity="not-the-body", body=body),))
+
+
+def test_make_impress_document_payload_serializes_surface_bodies() -> None:
+    body = _single_patch_body()
+
+    payload = make_impress_document_payload([body], units={"length": "mm"}, metadata={"author": "test"})
+
+    assert payload["format"] == IMPRESS_FORMAT
+    assert payload["schema_version"] == CURRENT_IMPRESS_SCHEMA_VERSION
+    assert payload["units"] == {"length": "mm"}
+    assert payload["metadata"] == {"author": "test"}
+    assert payload["body_store"] == {
+        "bodies": [{"body_id": "body-0001", "stable_identity": body.stable_identity, "body_ref": "body-0001"}]
+    }
+    assert list(payload["bodies"]) == ["body-0001"]  # type: ignore[arg-type]
+
+
+def test_dumps_impress_json_is_byte_stable_for_equivalent_payloads() -> None:
+    body = _single_patch_body()
+    payload_a = make_impress_document_payload([body], metadata={"b": 2, "a": 1})
+    payload_b = {
+        "metadata": {"a": 1, "b": 2},
+        "bodies": payload_a["bodies"],
+        "format": payload_a["format"],
+        "body_store": payload_a["body_store"],
+        "units": payload_a["units"],
+        "schema_version": payload_a["schema_version"],
+    }
+
+    encoded_a = dumps_impress_json(payload_a)
+    encoded_b = dumps_impress_json(payload_b)
+
+    assert encoded_a == encoded_b
+    assert encoded_a.endswith("\n")
+    assert '"schema_version": "1.0"' in encoded_a
+
+
+def test_write_and_save_impress_write_deterministic_json(tmp_path) -> None:
+    body = _single_patch_body()
+    payload = make_impress_document_payload([body])
+    payload_path = tmp_path / "payload.impress"
+    saved_path = tmp_path / "saved.impress"
+
+    assert write_impress_json(payload, payload_path) == payload_path
+    assert save_impress([body], saved_path) == saved_path
+
+    assert payload_path.read_text(encoding="utf-8") == dumps_impress_json(payload)
+    assert saved_path.read_text(encoding="utf-8") == dumps_impress_json(make_impress_document_payload([body]))
+
+
+def test_dumps_impress_json_accepts_save_options() -> None:
+    payload = make_impress_document_payload([_single_patch_body()])
+
+    encoded = dumps_impress_json(payload, options=ImpressSaveOptions(indent=0, trailing_newline=False))
+
+    assert not encoded.endswith("\n")
+    assert encoded.startswith("{")
+
+
+def test_impress_json_writer_rejects_invalid_payload_and_write_errors(tmp_path) -> None:
+    with pytest.raises(ImpressFormatError, match="root must declare format"):
+        dumps_impress_json({"schema_version": CURRENT_IMPRESS_SCHEMA_VERSION})
+
+    with pytest.raises(ImpressFormatError, match="Unable to serialize"):
+        dumps_impress_json({"format": "impress", "schema_version": CURRENT_IMPRESS_SCHEMA_VERSION, "bad": object()})
+
+    with pytest.raises(ImpressFormatError, match="Unable to write"):
+        write_impress_json(make_impress_document_payload([_single_patch_body()]), tmp_path / "missing" / "file.impress")
 
 
 def test_encode_decode_surface_shell_payload_round_trips_container_fields() -> None:

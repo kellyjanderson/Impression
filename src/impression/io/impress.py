@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Mapping, Sequence
 
 import numpy as np
@@ -100,6 +102,23 @@ class ImpressDocumentRoot:
         }
 
 
+@dataclass(frozen=True)
+class ImpressSaveOptions:
+    """Deterministic `.impress` JSON writer options."""
+
+    indent: int = 2
+    ensure_ascii: bool = False
+    trailing_newline: bool = True
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.indent, int) or isinstance(self.indent, bool) or self.indent < 0:
+            raise ImpressFormatError("ImpressSaveOptions.indent must be a non-negative integer.")
+        if not isinstance(self.ensure_ascii, bool):
+            raise ImpressFormatError("ImpressSaveOptions.ensure_ascii must be a boolean.")
+        if not isinstance(self.trailing_newline, bool):
+            raise ImpressFormatError("ImpressSaveOptions.trailing_newline must be a boolean.")
+
+
 def make_impress_document_root(
     *,
     schema_version: str = CURRENT_IMPRESS_SCHEMA_VERSION,
@@ -116,6 +135,81 @@ def make_impress_document_root(
     )
     validate_impress_document_root(root.to_json_object())
     return root
+
+
+def make_impress_document_payload(
+    bodies: Sequence[SurfaceBody],
+    *,
+    units: ImpressUnits | Mapping[str, object] | None = None,
+    metadata: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Create a validated `.impress` document payload from authored surface bodies."""
+
+    body_store = make_surface_body_store(bodies)
+    root = make_impress_document_root(units=units, metadata=metadata).to_json_object()
+    root["body_store"] = body_store.to_json_object()
+    root["bodies"] = {
+        entry.body_id: encode_surface_body_payload(entry.body)
+        for entry in body_store.bodies
+        if entry.body is not None
+    }
+    return root
+
+
+def dumps_impress_json(
+    payload: Mapping[str, object],
+    *,
+    options: ImpressSaveOptions | None = None,
+) -> str:
+    """Serialize a `.impress` payload as deterministic JSON."""
+
+    if not isinstance(payload, Mapping):
+        raise ImpressFormatError("`.impress` payload must be an object.")
+    validate_impress_document_root(payload)
+    save_options = ImpressSaveOptions() if options is None else options
+    if not isinstance(save_options, ImpressSaveOptions):
+        raise ImpressFormatError("options must be an ImpressSaveOptions instance.")
+    try:
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=save_options.ensure_ascii,
+            indent=save_options.indent,
+            sort_keys=True,
+            separators=(",", ": ") if save_options.indent is not None else (",", ":"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(f"Unable to serialize `.impress` payload: {exc}") from exc
+    return f"{encoded}\n" if save_options.trailing_newline else encoded
+
+
+def write_impress_json(
+    payload: Mapping[str, object],
+    path: str | Path,
+    *,
+    options: ImpressSaveOptions | None = None,
+) -> Path:
+    """Write a deterministic `.impress` JSON payload to a user-selected path."""
+
+    output_path = Path(path)
+    try:
+        output_path.write_text(dumps_impress_json(payload, options=options), encoding="utf-8")
+    except OSError as exc:
+        raise ImpressFormatError(f"Unable to write `.impress` file {output_path}: {exc}") from exc
+    return output_path
+
+
+def save_impress(
+    bodies: Sequence[SurfaceBody],
+    path: str | Path,
+    *,
+    units: ImpressUnits | Mapping[str, object] | None = None,
+    metadata: Mapping[str, object] | None = None,
+    options: ImpressSaveOptions | None = None,
+) -> Path:
+    """Persist authored surface bodies as deterministic `.impress` JSON."""
+
+    payload = make_impress_document_payload(bodies, units=units, metadata=metadata)
+    return write_impress_json(payload, path, options=options)
 
 
 def validate_impress_units(units: ImpressUnits | Mapping[str, object] | None) -> ImpressUnits:
