@@ -213,6 +213,76 @@ class SurfaceCSGCurvePrimitive:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGPatchLocalCurve:
+    """One CSG curve mapped into a participating patch parameter domain."""
+
+    source_curve_digest: str
+    patch: SurfaceBooleanPatchRef
+    points_uv: tuple[tuple[float, float], ...]
+    domain_bounds: tuple[float, float, float, float]
+    orientation: Literal["forward", "reversed"] = "forward"
+
+    def __post_init__(self) -> None:
+        points_uv = tuple(_normalize_curve_point_uv(point) for point in self.points_uv)
+        if len(points_uv) < 2:
+            raise ValueError("SurfaceCSGPatchLocalCurve requires at least two UV points.")
+        if self.orientation not in {"forward", "reversed"}:
+            raise ValueError("SurfaceCSGPatchLocalCurve.orientation must be forward or reversed.")
+        object.__setattr__(self, "points_uv", points_uv)
+
+    def canonical_payload(self, policy: SurfaceCSGTolerancePolicy | None = None) -> dict[str, object]:
+        normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+        return {
+            "domain_bounds": self.domain_bounds,
+            "orientation": self.orientation,
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+            "points_uv": tuple(
+                tuple(_snap_scalar(component, normalized_policy.snap_tolerance) for component in point)
+                for point in self.points_uv
+            ),
+            "source_curve_digest": self.source_curve_digest,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGCurveMappingDiagnostic:
+    """Explicit diagnostic for failed 3D-curve to patch-local mapping."""
+
+    code: SurfaceCSGToleranceDiagnosticCode
+    message: str
+    patch: SurfaceBooleanPatchRef
+    source_curve_digest: str
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+            "source_curve_digest": self.source_curve_digest,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGPatchLocalCurveMappingResult:
+    """Result of mapping one CSG curve into one patch-local parameter domain."""
+
+    source_curve: SurfaceCSGCurvePrimitive
+    patch: SurfaceBooleanPatchRef
+    curve: SurfaceCSGPatchLocalCurve | None = None
+    diagnostics: tuple[SurfaceCSGCurveMappingDiagnostic, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return self.curve is not None and not self.diagnostics
+
+
+@dataclass(frozen=True)
 class SurfaceBooleanCutCurve:
     """One surfaced cut curve shared by two operand patches."""
 
@@ -221,6 +291,7 @@ class SurfaceBooleanCutCurve:
     patches: tuple[SurfaceBooleanPatchRef, SurfaceBooleanPatchRef]
     trim_fragments: tuple[SurfaceBooleanTrimFragment, SurfaceBooleanTrimFragment]
     curve: SurfaceCSGCurvePrimitive | None = None
+    patch_local_curves: tuple[SurfaceCSGPatchLocalCurve, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -448,6 +519,15 @@ def _normalize_curve_point(point: Sequence[float]) -> tuple[float, float, float]
     return normalized
 
 
+def _normalize_curve_point_uv(point: Sequence[float]) -> tuple[float, float]:
+    if len(point) != 2:
+        raise ValueError("CSG patch-local curve points must be UV coordinates.")
+    normalized = (float(point[0]), float(point[1]))
+    if any(not np.isfinite(component) for component in normalized):
+        raise ValueError("CSG patch-local curve points must contain finite coordinates.")
+    return normalized
+
+
 def _snap_scalar(value: float, tolerance: float) -> float:
     return round(float(value) / tolerance) * tolerance
 
@@ -574,6 +654,195 @@ def sort_surface_csg_curves(
 
     normalized_policy = normalize_surface_csg_tolerance_policy(policy)
     return tuple(sorted(curves, key=lambda curve: surface_csg_curve_key(curve, policy=normalized_policy)))
+
+
+def _surface_csg_mapping_diagnostic(
+    code: SurfaceCSGToleranceDiagnosticCode,
+    message: str,
+    *,
+    patch_ref: SurfaceBooleanPatchRef,
+    curve: SurfaceCSGCurvePrimitive,
+    policy: SurfaceCSGTolerancePolicy,
+) -> SurfaceCSGCurveMappingDiagnostic:
+    return SurfaceCSGCurveMappingDiagnostic(
+        code=code,
+        message=message,
+        patch=patch_ref,
+        source_curve_digest=surface_csg_curve_digest(curve, policy=policy),
+    )
+
+
+def validate_surface_csg_patch_local_curve_domain(
+    curve: SurfaceCSGPatchLocalCurve,
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> tuple[SurfaceCSGCurveMappingDiagnostic, ...]:
+    """Validate that a patch-local CSG curve stays inside its declared domain."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    u0, u1, v0, v1 = curve.domain_bounds
+    diagnostics: list[SurfaceCSGCurveMappingDiagnostic] = []
+    for u, v in curve.points_uv:
+        if (
+            u < u0 - normalized_policy.domain_tolerance
+            or u > u1 + normalized_policy.domain_tolerance
+            or v < v0 - normalized_policy.domain_tolerance
+            or v > v1 + normalized_policy.domain_tolerance
+        ):
+            diagnostics.append(
+                SurfaceCSGCurveMappingDiagnostic(
+                    code="outside-domain",
+                    message="Mapped CSG curve point is outside the patch parameter domain.",
+                    patch=curve.patch,
+                    source_curve_digest=curve.source_curve_digest,
+                )
+            )
+            break
+    return tuple(diagnostics)
+
+
+def _inverse_transform_point(matrix: np.ndarray, point: Sequence[float]) -> np.ndarray:
+    hom = np.ones(4, dtype=float)
+    hom[:3] = np.asarray(point, dtype=float).reshape(3)
+    local = np.linalg.inv(matrix) @ hom
+    return local[:3]
+
+
+def _axis_frame(axis_direction: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    reference = np.array([1.0, 0.0, 0.0], dtype=float)
+    if abs(float(np.dot(reference, axis_direction))) > 0.9:
+        reference = np.array([0.0, 1.0, 0.0], dtype=float)
+    x_axis = reference - axis_direction * float(np.dot(reference, axis_direction))
+    x_axis /= np.linalg.norm(x_axis)
+    y_axis = np.cross(axis_direction, x_axis)
+    y_axis /= np.linalg.norm(y_axis)
+    return x_axis, y_axis
+
+
+def _rotate_point_about_axis(point: np.ndarray, origin: np.ndarray, axis: np.ndarray, angle_rad: float) -> np.ndarray:
+    rel = point - origin
+    cos_a = float(np.cos(angle_rad))
+    sin_a = float(np.sin(angle_rad))
+    return origin + rel * cos_a + np.cross(axis, rel) * sin_a + axis * float(np.dot(axis, rel)) * (1.0 - cos_a)
+
+
+def _polyline_closest_normalized_parameter(points: np.ndarray, target: np.ndarray) -> float:
+    if len(points) == 1:
+        return 0.0
+    segment_lengths = np.linalg.norm(np.diff(points, axis=0), axis=1)
+    total = float(np.sum(segment_lengths))
+    if total <= 0.0:
+        return 0.0
+    best_distance = float("inf")
+    best_length = 0.0
+    traversed = 0.0
+    for index, length in enumerate(segment_lengths):
+        if length <= 0.0:
+            continue
+        start = points[index]
+        end = points[index + 1]
+        direction = end - start
+        t = float(np.clip(np.dot(target - start, direction) / (length * length), 0.0, 1.0))
+        candidate = start + direction * t
+        distance = float(np.linalg.norm(candidate - target))
+        if distance < best_distance:
+            best_distance = distance
+            best_length = traversed + length * t
+        traversed += length
+    return best_length / total
+
+
+def _map_revolution_point_to_uv(
+    patch: RevolutionSurfacePatch,
+    point: Sequence[float],
+    *,
+    policy: SurfaceCSGTolerancePolicy,
+) -> tuple[float, float] | SurfaceCSGToleranceDiagnosticCode:
+    local_point = _inverse_transform_point(patch.transform_matrix, point)
+    axis = patch.axis_direction
+    origin = patch.axis_origin
+    radial = local_point - origin
+    height = float(np.dot(radial, axis))
+    radial -= axis * height
+    radial_norm = float(np.linalg.norm(radial))
+    if radial_norm <= policy.degeneracy_tolerance:
+        return "ambiguous-curve"
+    x_axis, y_axis = _axis_frame(axis)
+    angle = float(np.arctan2(np.dot(radial, y_axis), np.dot(radial, x_axis)))
+    start = float(np.deg2rad(patch.start_angle_deg))
+    sweep = float(np.deg2rad(patch.sweep_angle_deg))
+    u_norm = (angle - start) / sweep
+    if sweep > 0.0:
+        while u_norm < -policy.domain_tolerance:
+            u_norm += (2.0 * np.pi) / sweep
+        while u_norm > 1.0 + policy.domain_tolerance:
+            u_norm -= (2.0 * np.pi) / sweep
+    unrotated = _rotate_point_about_axis(local_point, origin, axis, -(start + sweep * u_norm))
+    v_norm = _polyline_closest_normalized_parameter(patch.profile_curve, unrotated)
+    u0, u1 = patch.domain.u_range
+    v0, v1 = patch.domain.v_range
+    return (float(u0 + u_norm * (u1 - u0)), float(v0 + v_norm * (v1 - v0)))
+
+
+def map_surface_csg_curve_to_patch_local(
+    curve: SurfaceCSGCurvePrimitive,
+    patch_ref: SurfaceBooleanPatchRef,
+    patch: PlanarSurfacePatch | RevolutionSurfacePatch,
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> SurfaceCSGPatchLocalCurveMappingResult:
+    """Map a 3D CSG curve into a deterministic patch-local UV curve."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    source_digest = surface_csg_curve_digest(curve, policy=normalized_policy)
+    diagnostics: list[SurfaceCSGCurveMappingDiagnostic] = []
+    points_uv: list[tuple[float, float]] = []
+    for point in curve.points_3d:
+        if isinstance(patch, PlanarSurfacePatch):
+            points_uv.append(_planar_patch_point_to_uv(patch, point))
+        elif isinstance(patch, RevolutionSurfacePatch):
+            mapped = _map_revolution_point_to_uv(patch, point, policy=normalized_policy)
+            if isinstance(mapped, str):
+                diagnostics.append(
+                    _surface_csg_mapping_diagnostic(
+                        mapped,
+                        "Revolution CSG curve mapping is singular or periodic-ambiguous at the axis.",
+                        patch_ref=patch_ref,
+                        curve=curve,
+                        policy=normalized_policy,
+                    )
+                )
+            else:
+                points_uv.append(mapped)
+        else:
+            diagnostics.append(
+                _surface_csg_mapping_diagnostic(
+                    "ambiguous-curve",
+                    f"Patch family {patch.family!r} does not expose deterministic CSG curve mapping yet.",
+                    patch_ref=patch_ref,
+                    curve=curve,
+                    policy=normalized_policy,
+                )
+            )
+    if diagnostics:
+        return SurfaceCSGPatchLocalCurveMappingResult(source_curve=curve, patch=patch_ref, diagnostics=tuple(diagnostics))
+    u0, u1 = patch.domain.u_range
+    v0, v1 = patch.domain.v_range
+    local_curve = SurfaceCSGPatchLocalCurve(
+        source_curve_digest=source_digest,
+        patch=patch_ref,
+        points_uv=tuple(points_uv),
+        domain_bounds=(float(u0), float(u1), float(v0), float(v1)),
+    )
+    domain_diagnostics = validate_surface_csg_patch_local_curve_domain(local_curve, policy=normalized_policy)
+    if domain_diagnostics:
+        return SurfaceCSGPatchLocalCurveMappingResult(
+            source_curve=curve,
+            patch=patch_ref,
+            curve=None,
+            diagnostics=domain_diagnostics,
+        )
+    return SurfaceCSGPatchLocalCurveMappingResult(source_curve=curve, patch=patch_ref, curve=local_curve)
 
 
 def _ensure_backend(backend: BooleanBackend) -> None:
@@ -1790,19 +2059,19 @@ def _intersect_axis_aligned_patch_pair(
     curve = make_surface_csg_line_curve(points_3d[0], points_3d[1])
     first_ref = SurfaceBooleanPatchRef(first.operand_index, first.patch_index)
     second_ref = SurfaceBooleanPatchRef(second.operand_index, second.patch_index)
+    first_mapping = map_surface_csg_curve_to_patch_local(curve, first_ref, first.patch)
+    second_mapping = map_surface_csg_curve_to_patch_local(curve, second_ref, second.patch)
+    if not first_mapping.supported or first_mapping.curve is None:
+        return None
+    if not second_mapping.supported or second_mapping.curve is None:
+        return None
     first_trim = SurfaceBooleanTrimFragment(
         patch=first_ref,
-        points_uv=(
-            _planar_patch_point_to_uv(first.patch, start),
-            _planar_patch_point_to_uv(first.patch, end),
-        ),
+        points_uv=first_mapping.curve.points_uv,
     )
     second_trim = SurfaceBooleanTrimFragment(
         patch=second_ref,
-        points_uv=(
-            _planar_patch_point_to_uv(second.patch, start),
-            _planar_patch_point_to_uv(second.patch, end),
-        ),
+        points_uv=second_mapping.curve.points_uv,
     )
     return SurfaceBooleanCutCurve(
         cut_curve_id=_cut_curve_id(first_ref, second_ref, points_3d),
@@ -1810,6 +2079,7 @@ def _intersect_axis_aligned_patch_pair(
         patches=(first_ref, second_ref),
         trim_fragments=(first_trim, second_trim),
         curve=curve,
+        patch_local_curves=(first_mapping.curve, second_mapping.curve),
     )
 
 
