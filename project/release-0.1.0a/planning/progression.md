@@ -392,7 +392,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 174: Heightmap Displacement Surface Contract (v1.0)](../specifications/surface-174-heightmap-displacement-surface-contract-v1_0.md)
 - [x] [Surface Spec 175: Heightmap Projection Sampling Policy (v1.0)](../specifications/surface-175-heightmap-projection-sampling-policy-v1_0.md)
 - [x] [Surface Spec 176: Heightmap Mesh Compatibility And Serialization Guard (v1.0)](../specifications/surface-176-heightmap-mesh-compatibility-and-serialization-guard-v1_0.md)
-- [ ] [Surface Spec 177: Thread Surface Representation Defaults (v1.0)](../specifications/surface-177-thread-surface-representation-defaults-v1_0.md)
+- [x] [Surface Spec 177: Thread Surface Representation Defaults (v1.0)](../specifications/surface-177-thread-surface-representation-defaults-v1_0.md)
 - [ ] [Surface Spec 178: Thread Assembly To SurfaceBody Lowering (v1.0)](../specifications/surface-178-thread-assembly-to-surfacebody-lowering-v1_0.md)
 - [ ] [Surface Spec 179: Thread Mesh Compatibility And Quality Budget (v1.0)](../specifications/surface-179-thread-mesh-compatibility-and-quality-budget-v1_0.md)
 - [ ] [Surface Spec 180: Traditional Hinge Surface Lowering (v1.0)](../specifications/surface-180-traditional-hinge-surface-lowering-v1_0.md)

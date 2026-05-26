@@ -29,3 +29,29 @@ def _load_extension() -> ModuleType:
 _extension = _load_extension()
 __all__ = list(getattr(_extension, "__all__", ()))
 globals().update({name: getattr(_extension, name) for name in __all__})
+
+
+def make_external_thread(spec, *args, backend="surface", **kwargs):
+    return _extension.make_external_thread(spec, *args, backend=backend, **kwargs)
+
+
+def make_internal_thread(spec, *args, backend="surface", **kwargs):
+    return _extension.make_internal_thread(spec, *args, backend=backend, **kwargs)
+
+
+def make_threaded_rod(spec, *args, backend="surface", **kwargs):
+    return _extension.make_threaded_rod(spec, *args, backend=backend, **kwargs)
+
+
+def make_tapped_hole_cutter(spec, *args, backend="surface", **kwargs):
+    return _extension.make_tapped_hole_cutter(spec, *args, backend=backend, **kwargs)
+
+
+globals().update(
+    {
+        "make_external_thread": make_external_thread,
+        "make_internal_thread": make_internal_thread,
+        "make_threaded_rod": make_threaded_rod,
+        "make_tapped_hole_cutter": make_tapped_hole_cutter,
+    }
+)
