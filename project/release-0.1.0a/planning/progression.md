@@ -362,7 +362,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 146: Subdivision Surface Evaluation And Tessellation (v1.0)](../specifications/surface-146-subdivision-surface-evaluation-and-tessellation-v1_0.md)
 - [x] [Surface Spec 147: Implicit Field Node Payload (v1.0)](../specifications/surface-147-implicit-field-node-payload-v1_0.md)
 - [x] [Surface Spec 148: Implicit Field Validation Security (v1.0)](../specifications/surface-148-implicit-field-validation-security-v1_0.md)
-- [ ] [Surface Spec 149: Implicit Field Evaluation (v1.0)](../specifications/surface-149-implicit-field-evaluation-v1_0.md)
+- [x] [Surface Spec 149: Implicit Field Evaluation (v1.0)](../specifications/surface-149-implicit-field-evaluation-v1_0.md)
 - [ ] [Surface Spec 150: Implicit Tessellation Bounds And Approximation Metadata (v1.0)](../specifications/surface-150-implicit-tessellation-bounds-and-approximation-metadata-v1_0.md)
 - [ ] [Surface Spec 151: Cross-Family Tessellation Adapters (v1.0)](../specifications/surface-151-cross-family-tessellation-adapters-v1_0.md)
 - [ ] [Surface Spec 152: Cross-Family Seam Boundary Participation (v1.0)](../specifications/surface-152-cross-family-seam-boundary-participation-v1_0.md)
