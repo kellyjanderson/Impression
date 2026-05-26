@@ -10,8 +10,10 @@ from impression.modeling.surface import (
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
+    SurfaceBoundaryRef,
     SurfaceBody,
     SurfacePatch,
+    SurfaceSeam,
     SurfaceShell,
     TrimLoop,
 )
@@ -256,6 +258,90 @@ def decode_trim_loop_payload(payload: Mapping[str, object]) -> TrimLoop:
     return normalized
 
 
+def encode_surface_boundary_ref_payload(boundary: SurfaceBoundaryRef) -> dict[str, object]:
+    """Encode a seam boundary reference."""
+
+    if not isinstance(boundary, SurfaceBoundaryRef):
+        raise ImpressFormatError("encode_surface_boundary_ref_payload requires a SurfaceBoundaryRef.")
+    return {
+        "patch_index": boundary.patch_index,
+        "boundary_id": boundary.boundary_id,
+    }
+
+
+def decode_surface_boundary_ref_payload(
+    payload: Mapping[str, object],
+    *,
+    patch_count: int | None = None,
+) -> SurfaceBoundaryRef:
+    """Decode and optionally validate a seam boundary reference against loaded patches."""
+
+    if not isinstance(payload, Mapping):
+        raise ImpressFormatError("SurfaceBoundaryRef payload must be an object.")
+    unknown_keys = set(payload) - {"patch_index", "boundary_id"}
+    if unknown_keys:
+        keys = ", ".join(sorted(str(key) for key in unknown_keys))
+        raise ImpressFormatError(f"Unsupported SurfaceBoundaryRef payload fields: {keys}.")
+    patch_index = _validate_nonnegative_int_payload(payload.get("patch_index"), "patch_index")
+    if patch_count is not None and patch_index >= patch_count:
+        raise ImpressFormatError("SurfaceBoundaryRef references a patch index outside the loaded shell.")
+    boundary_id = payload.get("boundary_id")
+    if not isinstance(boundary_id, str) or not boundary_id.strip():
+        raise ImpressFormatError("SurfaceBoundaryRef boundary_id must be a non-empty string.")
+    try:
+        return SurfaceBoundaryRef(patch_index, boundary_id)
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(str(exc)) from exc
+
+
+def encode_surface_seam_payload(seam: SurfaceSeam) -> dict[str, object]:
+    """Encode a `.impress` seam payload."""
+
+    if not isinstance(seam, SurfaceSeam):
+        raise ImpressFormatError("encode_surface_seam_payload requires a SurfaceSeam.")
+    return {
+        "seam_id": seam.seam_id,
+        "boundaries": [encode_surface_boundary_ref_payload(boundary) for boundary in seam.boundaries],
+        "continuity": seam.continuity,
+        "metadata": dict(seam.metadata),
+    }
+
+
+def decode_surface_seam_payload(
+    payload: Mapping[str, object],
+    *,
+    patch_count: int | None = None,
+) -> SurfaceSeam:
+    """Decode a `.impress` seam payload and validate boundary references when patch_count is provided."""
+
+    if not isinstance(payload, Mapping):
+        raise ImpressFormatError("SurfaceSeam payload must be an object.")
+    unknown_keys = set(payload) - {"seam_id", "boundaries", "continuity", "metadata"}
+    if unknown_keys:
+        keys = ", ".join(sorted(str(key) for key in unknown_keys))
+        raise ImpressFormatError(f"Unsupported SurfaceSeam payload fields: {keys}.")
+    seam_id = payload.get("seam_id")
+    if not isinstance(seam_id, str) or not seam_id.strip():
+        raise ImpressFormatError("SurfaceSeam seam_id must be a non-empty string.")
+    boundary_payloads = payload.get("boundaries")
+    if not isinstance(boundary_payloads, Sequence) or isinstance(boundary_payloads, (str, bytes)):
+        raise ImpressFormatError("SurfaceSeam boundaries must be an array.")
+    boundaries = tuple(
+        decode_surface_boundary_ref_payload(boundary_payload, patch_count=patch_count)
+        for boundary_payload in boundary_payloads
+    )
+    continuity = payload.get("continuity", "C0")
+    if not isinstance(continuity, str) or not continuity.strip():
+        raise ImpressFormatError("SurfaceSeam continuity must be a non-empty string.")
+    metadata = payload.get("metadata", {})
+    if not isinstance(metadata, Mapping):
+        raise ImpressFormatError("SurfaceSeam metadata must be an object.")
+    try:
+        return SurfaceSeam(seam_id, boundaries, continuity=continuity, metadata=dict(metadata))
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(str(exc)) from exc
+
+
 def encode_surface_patch_payload(patch: SurfacePatch) -> dict[str, object]:
     """Encode base patch fields and supported family geometry for `.impress` persistence."""
 
@@ -363,15 +449,15 @@ def encode_surface_shell_payload(shell: SurfaceShell) -> dict[str, object]:
 
     if not isinstance(shell, SurfaceShell):
         raise ImpressFormatError("encode_surface_shell_payload requires a SurfaceShell.")
-    if shell.seams or shell.adjacency:
-        raise ImpressFormatError("SurfaceShell seam and adjacency payloads are encoded by later `.impress` codecs.")
+    if shell.adjacency:
+        raise ImpressFormatError("SurfaceShell adjacency payloads are encoded by the dedicated `.impress` adjacency codec.")
     return {
         "connected": shell.connected,
         "patch_count": shell.patch_count,
         "patches": [patch.stable_identity for patch in shell.patches],
         "transform_matrix": shell.transform_matrix.tolist(),
         "metadata": dict(shell.metadata),
-        "seams": [],
+        "seams": [encode_surface_seam_payload(seam) for seam in shell.seams],
         "adjacency": [],
     }
 
@@ -408,14 +494,18 @@ def decode_surface_shell_payload(payload: Mapping[str, object], *, patches: Sequ
 
     seams = payload.get("seams", [])
     adjacency = payload.get("adjacency", [])
-    if seams != [] or adjacency != []:
-        raise ImpressFormatError("SurfaceShell seam and adjacency payloads require their dedicated codecs.")
+    if not isinstance(seams, Sequence) or isinstance(seams, (str, bytes)):
+        raise ImpressFormatError("SurfaceShell seams must be an array.")
+    if adjacency != []:
+        raise ImpressFormatError("SurfaceShell adjacency payloads require their dedicated codec.")
+    decoded_seams = tuple(decode_surface_seam_payload(seam, patch_count=len(patches)) for seam in seams)
 
     transform_matrix = _validate_matrix4_payload(payload.get("transform_matrix"))
     try:
         return SurfaceShell(
             tuple(patches),
             connected=connected,
+            seams=decoded_seams,
             transform_matrix=transform_matrix,
             metadata=dict(metadata),
         )
@@ -552,6 +642,12 @@ def _validate_range_payload(payload: object, name: str) -> tuple[float, float]:
     if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)) or len(payload) != 2:
         raise ImpressFormatError(f"SurfacePatch domain {name} must be a two-value numeric array.")
     return (_validate_float_payload(payload[0], f"{name}[0]"), _validate_float_payload(payload[1], f"{name}[1]"))
+
+
+def _validate_nonnegative_int_payload(payload: object, name: str) -> int:
+    if not isinstance(payload, int) or isinstance(payload, bool) or payload < 0:
+        raise ImpressFormatError(f"{name} must be a non-negative integer.")
+    return payload
 
 
 def _validate_vec3_payload(payload: object, name: str) -> np.ndarray:
