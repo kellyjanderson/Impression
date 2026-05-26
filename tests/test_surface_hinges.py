@@ -107,7 +107,6 @@ def test_surface_living_hinge_handoff_returns_structured_surface_collection() ->
         height=20.0,
         hinge_band_width=12.0,
         slit_pitch=1.8,
-        backend="surface",
     )
 
     assert isinstance(assembly, HingeSurfaceAssembly)
@@ -126,7 +125,6 @@ def test_surface_bistable_hinge_handoff_returns_structured_surface_collection() 
     assembly = make_bistable_hinge(
         width=40.0,
         preload_offset=2.0,
-        backend="surface",
     )
 
     assert isinstance(assembly, HingeSurfaceAssembly)

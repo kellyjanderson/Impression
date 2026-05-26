@@ -27,8 +27,8 @@ Today the surfaced path is split into two layers:
 - direct surfaced leaf geometry for `make_traditional_hinge_leaf(...)`
 - structured surfaced assemblies for:
   - `make_traditional_hinge_pair(...)`
-  - `make_living_hinge(..., backend="surface")`
-  - `make_bistable_hinge(..., backend="surface")`
+  - `make_living_hinge(...)`
+  - `make_bistable_hinge(...)`
 
 Those structured results are returned as `HingeSurfaceAssembly`, which preserves:
 

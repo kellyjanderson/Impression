@@ -43,13 +43,13 @@ def make_traditional_hinge_pair(*args, backend="surface", **kwargs):
     return _extension.make_traditional_hinge_pair(*args, backend=backend, **kwargs)
 
 
-def make_living_hinge(*args, backend="mesh", **kwargs):
+def make_living_hinge(*args, backend="surface", **kwargs):
     if backend == "mesh":
         return _call_with_legacy_mesh_primitives(_extension.make_living_hinge, *args, backend=backend, **kwargs)
     return _extension.make_living_hinge(*args, backend=backend, **kwargs)
 
 
-def make_bistable_hinge(*args, backend="mesh", **kwargs):
+def make_bistable_hinge(*args, backend="surface", **kwargs):
     if backend == "mesh":
         return _call_with_legacy_mesh_primitives(_extension.make_bistable_hinge, *args, backend=backend, **kwargs)
     return _extension.make_bistable_hinge(*args, backend=backend, **kwargs)
