@@ -20,6 +20,7 @@ from impression.modeling import (
     make_round_nut,
     make_runout_relief,
     make_tapped_hole_cutter,
+    make_thread_mesh_compatibility_result,
     lower_thread_surface_assembly,
     prepare_surface_thread_representation,
     make_threaded_rod,
@@ -74,6 +75,11 @@ mesh-first truth.
 surface primitives. Difference assemblies, such as nuts that require a thread
 cutter subtraction, refuse with `ThreadAssemblyLoweringError` until the needed
 surface boolean dependency is available.
+
+Mesh thread generation remains available only as an explicit compatibility
+route. Use `backend="mesh"` on individual helpers or
+`make_thread_mesh_compatibility_result(...)` when callers need both the mesh and
+the predicted quality-budget estimate recorded together.
 
 Fit presets still change canonical geometry on the surfaced path, because they change the actual compensated thread dimensions. Mesh-quality controls do not: they are currently ignored by surfaced thread preparation and only matter on the legacy mesh generator path.
 
