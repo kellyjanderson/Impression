@@ -11,9 +11,12 @@ from impression.mesh_quality import MeshQuality, apply_lod
 
 from ._color import set_mesh_color
 from .surface import (
+    BSplineSurfacePatch,
+    NURBSSurfacePatch,
     ParameterDomain,
     PlanarSurfacePatch,
     RuledSurfacePatch,
+    SweepSurfacePatch,
     SurfaceBody,
     SurfaceBoundaryRef,
     SurfaceSeam,
@@ -21,6 +24,7 @@ from .surface import (
     make_surface_body,
     make_surface_shell,
 )
+from .surface_spline import build_loft_control_net
 from .tessellation import SurfaceConsumerCollection, make_surface_consumer_collection
 from .topology import (
     loops_resampled as _loops_resampled,
@@ -172,6 +176,84 @@ class SurfaceSampleEmissionDiagnostic:
     track_id: str | None
     lifecycle_event_id: str | None
     reason: str
+
+
+@dataclass(frozen=True)
+class LoftFamilyIntentEvidence:
+    transition_interval: tuple[int, int]
+    topology_case: str
+    loop_pair_count: int
+    smooth_intent: bool = False
+    rational_intent: bool = False
+    sweep_intent: bool = False
+    requested_family: str | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "transition_interval": tuple(int(value) for value in self.transition_interval),
+            "topology_case": self.topology_case,
+            "loop_pair_count": int(self.loop_pair_count),
+            "smooth_intent": bool(self.smooth_intent),
+            "rational_intent": bool(self.rational_intent),
+            "sweep_intent": bool(self.sweep_intent),
+            "requested_family": self.requested_family,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPatchFamilySelectionRecord:
+    transition_interval: tuple[int, int]
+    selected_family: str | None
+    evidence: LoftFamilyIntentEvidence
+    refusal_reason: str | None = None
+
+    @property
+    def accepted(self) -> bool:
+        return self.selected_family is not None and self.refusal_reason is None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "transition_interval": tuple(int(value) for value in self.transition_interval),
+            "selected_family": self.selected_family,
+            "accepted": self.accepted,
+            "refusal_reason": self.refusal_reason,
+            "evidence": self.evidence.canonical_payload(),
+        }
+
+
+@dataclass(frozen=True)
+class LoftRationalWeightPolicyRecord:
+    source: str
+    shape: tuple[int, int]
+    min_weight: float
+    max_weight: float
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "source": self.source,
+            "shape": self.shape,
+            "min_weight": self.min_weight,
+            "max_weight": self.max_weight,
+        }
+
+
+@dataclass(frozen=True)
+class LoftSweepFramePolicyRecord:
+    frame_policy: str
+    source: str = "explicit"
+
+    def __post_init__(self) -> None:
+        policy = str(self.frame_policy).strip()
+        if policy not in {"parallel_transport", "frenet", "fixed"}:
+            raise ValueError("Loft sweep frame_policy must be parallel_transport, frenet, or fixed.")
+        source = str(self.source).strip()
+        if not source:
+            raise ValueError("Loft sweep frame policy source must be non-empty.")
+        object.__setattr__(self, "frame_policy", policy)
+        object.__setattr__(self, "source", source)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {"frame_policy": self.frame_policy, "source": self.source}
 
 
 @dataclass(frozen=True)
@@ -1464,6 +1546,244 @@ class PlannedTransition:
         )
 
 
+_LOFT_OUTPUT_PATCH_FAMILIES = ("ruled", "bspline", "nurbs", "sweep")
+
+
+def classify_loft_patch_family(
+    transition: PlannedTransition,
+    *,
+    requested_family: str | None = None,
+    smooth_intent: bool = False,
+    rational_intent: bool = False,
+    sweep_path: Path3D | None = None,
+) -> LoftPatchFamilySelectionRecord:
+    """Select the native patch family for a planned loft transition."""
+
+    family_request = None if requested_family is None else str(requested_family).strip().lower()
+    if family_request == "":
+        family_request = None
+    loop_pair_count = sum(len(pair.loop_pairs) for pair in transition.region_pairs)
+    evidence = LoftFamilyIntentEvidence(
+        transition_interval=transition.interval,
+        topology_case=transition.topology_case,
+        loop_pair_count=loop_pair_count,
+        smooth_intent=bool(smooth_intent),
+        rational_intent=bool(rational_intent),
+        sweep_intent=sweep_path is not None,
+        requested_family=family_request,
+    )
+    if family_request is not None and family_request not in _LOFT_OUTPUT_PATCH_FAMILIES:
+        return LoftPatchFamilySelectionRecord(
+            transition_interval=transition.interval,
+            selected_family=None,
+            evidence=evidence,
+            refusal_reason=f"unsupported_loft_patch_family:{family_request}",
+        )
+    selected = "ruled"
+    if sweep_path is not None:
+        selected = "sweep"
+    elif rational_intent:
+        selected = "nurbs"
+    elif smooth_intent:
+        selected = "bspline"
+    if family_request is not None:
+        selected = family_request
+    if selected == "nurbs" and not (rational_intent or family_request == "nurbs"):
+        return LoftPatchFamilySelectionRecord(
+            transition_interval=transition.interval,
+            selected_family=None,
+            evidence=evidence,
+            refusal_reason="nurbs_requires_explicit_rational_intent",
+        )
+    return LoftPatchFamilySelectionRecord(
+        transition_interval=transition.interval,
+        selected_family=selected,
+        evidence=evidence,
+    )
+
+
+def loft_patch_family_selection_records(
+    plan_or_transitions: "LoftPlan | Sequence[PlannedTransition]",
+    *,
+    requested_family: str | None = None,
+    smooth_intent: bool = False,
+    rational_intent: bool = False,
+    sweep_path: Path3D | None = None,
+) -> tuple[LoftPatchFamilySelectionRecord, ...]:
+    """Classify every planned transition in deterministic interval order."""
+
+    transitions = plan_or_transitions.transitions if isinstance(plan_or_transitions, LoftPlan) else tuple(plan_or_transitions)
+    return tuple(
+        classify_loft_patch_family(
+            transition,
+            requested_family=requested_family,
+            smooth_intent=smooth_intent,
+            rational_intent=rational_intent,
+            sweep_path=sweep_path,
+        )
+        for transition in transitions
+    )
+
+
+def validate_loft_bspline_intent(selection: LoftPatchFamilySelectionRecord) -> LoftPatchFamilySelectionRecord:
+    """Validate that a loft family selection can produce B-spline output."""
+
+    if selection.selected_family != "bspline" or not selection.accepted:
+        raise ValueError("B-spline loft output requires accepted B-spline smooth intent.")
+    if not (selection.evidence.smooth_intent or selection.evidence.requested_family == "bspline"):
+        raise ValueError("B-spline loft output requires explicit smooth intent or B-spline selector.")
+    return selection
+
+
+def assert_loft_bspline_output_contract(
+    patch: BSplineSurfacePatch,
+    selection: LoftPatchFamilySelectionRecord | dict[str, object],
+) -> dict[str, object]:
+    """Validate metadata carried by a loft-produced B-spline patch."""
+
+    selection_payload = selection.canonical_payload() if isinstance(selection, LoftPatchFamilySelectionRecord) else dict(selection)
+    kernel = patch.metadata.get("kernel", {})
+    if patch.family != "bspline":
+        raise ValueError("Loft B-spline output contract requires a BSplineSurfacePatch.")
+    expected = {
+        "operation": "loft",
+        "executor": "surface",
+        "selected_family": "bspline",
+        "fit_posture": "interpolation",
+        "control_net_boundary": "surface-native",
+    }
+    mismatches = {
+        key: (kernel.get(key), value)
+        for key, value in expected.items()
+        if kernel.get(key) != value
+    }
+    if mismatches:
+        raise ValueError(f"Loft B-spline output metadata mismatch: {mismatches!r}.")
+    if kernel.get("loft_family_selection") != selection_payload:
+        raise ValueError("Loft B-spline output metadata must preserve the family selection record.")
+    return dict(kernel)
+
+
+def validate_loft_nurbs_intent(
+    selection: LoftPatchFamilySelectionRecord,
+    rational_weights: object | None,
+) -> LoftPatchFamilySelectionRecord:
+    """Validate explicit rational intent before loft may emit NURBS output."""
+
+    if selection.selected_family != "nurbs" or not selection.accepted:
+        raise ValueError("NURBS loft output requires accepted NURBS rational intent.")
+    if not (selection.evidence.rational_intent or selection.evidence.requested_family == "nurbs"):
+        raise ValueError("NURBS loft output requires explicit rational intent.")
+    if rational_weights is None:
+        raise ValueError("NURBS loft output requires explicit positive finite rational weights.")
+    return selection
+
+
+def _resolve_loft_nurbs_weight_grid(
+    rational_weights: object,
+    shape: tuple[int, int],
+) -> tuple[np.ndarray, LoftRationalWeightPolicyRecord]:
+    if np.isscalar(rational_weights):
+        weight = float(rational_weights)
+        weights = np.full(shape, weight, dtype=float)
+        source = "explicit_scalar"
+    else:
+        weights = np.asarray(rational_weights, dtype=float)
+        source = "explicit_grid"
+    if weights.shape != shape:
+        raise ValueError(f"NURBS loft rational weights must have shape {shape}.")
+    if not np.all(np.isfinite(weights)) or np.any(weights <= 0.0):
+        raise ValueError("NURBS loft rational weights must be finite and positive.")
+    return weights, LoftRationalWeightPolicyRecord(
+        source=source,
+        shape=shape,
+        min_weight=float(np.min(weights)),
+        max_weight=float(np.max(weights)),
+    )
+
+
+def assert_loft_nurbs_output_contract(
+    patch: NURBSSurfacePatch,
+    selection: LoftPatchFamilySelectionRecord | dict[str, object],
+) -> dict[str, object]:
+    """Validate metadata carried by a loft-produced NURBS patch."""
+
+    selection_payload = selection.canonical_payload() if isinstance(selection, LoftPatchFamilySelectionRecord) else dict(selection)
+    kernel = patch.metadata.get("kernel", {})
+    if patch.family != "nurbs":
+        raise ValueError("Loft NURBS output contract requires a NURBSSurfacePatch.")
+    expected = {
+        "operation": "loft",
+        "executor": "surface",
+        "selected_family": "nurbs",
+        "fit_posture": "rational_interpolation",
+        "control_net_boundary": "surface-native",
+    }
+    mismatches = {
+        key: (kernel.get(key), value)
+        for key, value in expected.items()
+        if kernel.get(key) != value
+    }
+    if mismatches:
+        raise ValueError(f"Loft NURBS output metadata mismatch: {mismatches!r}.")
+    if kernel.get("loft_family_selection") != selection_payload:
+        raise ValueError("Loft NURBS output metadata must preserve the family selection record.")
+    if "rational_weight_policy" not in kernel:
+        raise ValueError("Loft NURBS output metadata must include rational_weight_policy.")
+    return dict(kernel)
+
+
+def resolve_loft_sweep_frame_policy(frame_policy: str | None = None) -> LoftSweepFramePolicyRecord:
+    """Resolve the sweep frame policy used by loft path/profile intent."""
+
+    return LoftSweepFramePolicyRecord("parallel_transport" if frame_policy is None else frame_policy)
+
+
+def validate_loft_sweep_intent(
+    selection: LoftPatchFamilySelectionRecord,
+    sweep_path: Path3D | None,
+) -> LoftPatchFamilySelectionRecord:
+    """Validate path/profile intent before loft may emit sweep output."""
+
+    if selection.selected_family != "sweep" or not selection.accepted:
+        raise ValueError("Sweep loft output requires accepted sweep path/profile intent.")
+    if sweep_path is None:
+        raise ValueError("Sweep loft output requires an explicit Path3D guide.")
+    if not isinstance(sweep_path, Path3D):
+        raise ValueError("Sweep loft output requires an explicit Path3D guide.")
+    return selection
+
+
+def assert_loft_sweep_output_contract(
+    patch: SweepSurfacePatch,
+    selection: LoftPatchFamilySelectionRecord | dict[str, object],
+) -> dict[str, object]:
+    """Validate metadata carried by a loft-produced sweep patch."""
+
+    selection_payload = selection.canonical_payload() if isinstance(selection, LoftPatchFamilySelectionRecord) else dict(selection)
+    kernel = patch.metadata.get("kernel", {})
+    if patch.family != "sweep":
+        raise ValueError("Loft sweep output contract requires a SweepSurfacePatch.")
+    expected = {
+        "operation": "loft",
+        "executor": "surface",
+        "selected_family": "sweep",
+        "profile_payload_boundary": "surface-native",
+    }
+    mismatches = {
+        key: (kernel.get(key), value)
+        for key, value in expected.items()
+        if kernel.get(key) != value
+    }
+    if mismatches:
+        raise ValueError(f"Loft sweep output metadata mismatch: {mismatches!r}.")
+    if kernel.get("loft_family_selection") != selection_payload:
+        raise ValueError("Loft sweep output metadata must preserve the family selection record.")
+    if "frame_policy" not in kernel or "path_reference" not in kernel or "profile_reference" not in kernel:
+        raise ValueError("Loft sweep output metadata must include frame, path, and profile references.")
+    return dict(kernel)
+
+
 @dataclass(frozen=True)
 class LoftPlan:
     """Deterministic planner output consumed by the loft executor."""
@@ -2005,6 +2325,12 @@ def loft_plan_sections(
     fairness_weight: float = 0.2,
     skeleton_mode: str = "auto",
     fairness_iterations: int = 12,
+    smooth_intent: bool = False,
+    rational_intent: bool = False,
+    rational_weights: object | None = None,
+    sweep_path: Path3D | None = None,
+    sweep_frame_policy: str | None = None,
+    requested_patch_family: str | None = None,
 ) -> LoftPlan:
     """Build a deterministic loft execution plan from section stations."""
 
@@ -2030,6 +2356,7 @@ def loft_plan_sections(
     _validate_fairness_weight(fairness_weight)
     _validate_skeleton_mode(skeleton_mode)
     _validate_fairness_iterations(fairness_iterations)
+    sweep_policy = resolve_loft_sweep_frame_policy(sweep_frame_policy)
     _validate_section_stations(stations)
 
     resolved_disambiguation_seed = (
@@ -2341,6 +2668,25 @@ def loft_plan_sections(
         fairness_convergence_status = (
             "max_iterations" if global_optimizer_hit_iteration_cap else "converged"
         )
+    family_selection_records = loft_patch_family_selection_records(
+        planned_transitions,
+        requested_family=requested_patch_family,
+        smooth_intent=smooth_intent,
+        rational_intent=rational_intent,
+        sweep_path=sweep_path,
+    )
+    refused_family_records = tuple(record for record in family_selection_records if not record.accepted)
+    if refused_family_records:
+        reason = refused_family_records[0].refusal_reason or "unknown"
+        raise ValueError(f"Unsupported loft patch family selection: {reason}.")
+    if any(record.selected_family == "nurbs" for record in family_selection_records) and rational_weights is None:
+        raise ValueError("NURBS loft output requires explicit positive finite rational weights.")
+    if any(record.selected_family == "sweep" for record in family_selection_records) and sweep_path is None:
+        raise ValueError("Sweep loft output requires an explicit Path3D guide.")
+    rational_weights_payload = None
+    if rational_weights is not None:
+        rational_weights_payload = float(rational_weights) if np.isscalar(rational_weights) else np.asarray(rational_weights, dtype=float).tolist()
+    sweep_path_points_payload = None if sweep_path is None else tuple(tuple(float(value) for value in point) for point in sweep_path.sample())
     plan = LoftPlan(
         samples=samples,
         stations=tuple(planned_stations),
@@ -2373,6 +2719,10 @@ def loft_plan_sections(
             "fairness_weight": float(fairness_weight),
             "fairness_iterations": int(fairness_iterations),
             "skeleton_mode": skeleton_mode,
+            "loft_family_selection_records": tuple(record.canonical_payload() for record in family_selection_records),
+            "loft_rational_weights": rational_weights_payload,
+            "loft_sweep_path_points": sweep_path_points_payload,
+            "loft_sweep_frame_policy": sweep_policy.canonical_payload(),
             "fairness_objective_pre": fairness_objective_pre,
             "fairness_objective_post": fairness_objective_post,
             "fairness_diagnostics": fairness_diagnostics,
@@ -2714,6 +3064,20 @@ def _loft_execute_plan_surface(
     patches: list[object] = []
     seams: list[SurfaceSeam] = []
     seam_candidates: dict[tuple[int, str, int, str, int], list[SurfaceBoundaryRef]] = {}
+    family_selection_by_interval = {
+        tuple(record["transition_interval"]): record
+        for record in plan.metadata.get("loft_family_selection_records", ())
+        if isinstance(record, dict) and "transition_interval" in record
+    }
+    rational_weights = plan.metadata.get("loft_rational_weights")
+    sweep_path_points = plan.metadata.get("loft_sweep_path_points")
+    sweep_path = None if sweep_path_points is None else Path3D.from_points(sweep_path_points)
+    sweep_frame_policy_payload = plan.metadata.get("loft_sweep_frame_policy", {})
+    sweep_frame_policy = (
+        sweep_frame_policy_payload.get("frame_policy")
+        if isinstance(sweep_frame_policy_payload, dict)
+        else None
+    )
 
     def register_boundary(
         station_index: int,
@@ -2744,28 +3108,63 @@ def _loft_execute_plan_surface(
         prev_station = plan.stations[prev_idx]
         curr_station = plan.stations[curr_idx]
         region_pairs_by_branch = {pair.branch_id: pair for pair in transition.region_pairs}
+        family_selection = family_selection_by_interval.get(
+            transition.interval,
+            classify_loft_patch_family(transition).canonical_payload(),
+        )
+        selected_family = str(family_selection.get("selected_family", "ruled"))
         for branch_id in transition.branch_order:
             region_pair = region_pairs_by_branch[branch_id]
             for loop_index, loop_pair in enumerate(region_pair.loop_pairs):
                 patch_index = len(patches)
                 prev_curve = _station_loop_world(prev_station, loop_pair.prev_loop)
                 curr_curve = _station_loop_world(curr_station, loop_pair.curr_loop)
-                patch = RuledSurfacePatch(
-                    family="ruled",
-                    start_curve=prev_curve,
-                    end_curve=curr_curve,
-                    metadata={
-                        "kernel": {
-                            "operation": "loft",
-                            "executor": "surface",
-                            "transition_interval": transition.interval,
-                            "branch_id": branch_id,
-                            "region_action": region_pair.action,
-                            "loop_role": loop_pair.role,
-                            "loop_index": loop_index,
-                        }
-                    },
-                )
+                base_metadata = {
+                    "kernel": {
+                        "operation": "loft",
+                        "executor": "surface",
+                        "transition_interval": transition.interval,
+                        "branch_id": branch_id,
+                        "region_action": region_pair.action,
+                        "loop_role": loop_pair.role,
+                        "loop_index": loop_index,
+                        "loft_family_selection": family_selection,
+                    }
+                }
+                if selected_family == "bspline":
+                    patch = _loft_bspline_patch_from_station_curves(
+                        prev_curve,
+                        curr_curve,
+                        family_selection=family_selection,
+                        metadata=base_metadata,
+                    )
+                elif selected_family == "nurbs":
+                    patch = _loft_nurbs_patch_from_station_curves(
+                        prev_curve,
+                        curr_curve,
+                        family_selection=family_selection,
+                        rational_weights=rational_weights,
+                        metadata=base_metadata,
+                    )
+                elif selected_family == "sweep":
+                    patch = _loft_sweep_patch_from_loop_pair(
+                        loop_pair.prev_loop,
+                        family_selection=family_selection,
+                        sweep_path=sweep_path,
+                        frame_policy=sweep_frame_policy,
+                        metadata=base_metadata,
+                    )
+                elif selected_family == "ruled":
+                    patch = RuledSurfacePatch(
+                        family="ruled",
+                        start_curve=prev_curve,
+                        end_curve=curr_curve,
+                        metadata=base_metadata,
+                    )
+                else:
+                    raise ValueError(
+                        f"Unsupported loft patch family for surface executor: {selected_family!r}."
+                    )
                 patches.append(patch)
                 seams.append(
                     SurfaceSeam(
@@ -2984,6 +3383,142 @@ def _loft_planar_patch_from_station_loops(
         v_axis=station.v,
         metadata=metadata,
     )
+
+
+def _loft_family_selection_from_payload(family_selection: dict[str, object]) -> LoftPatchFamilySelectionRecord:
+    evidence_payload = family_selection["evidence"]
+    if not isinstance(evidence_payload, dict):
+        raise ValueError("Loft family selection payload must include evidence.")
+    return LoftPatchFamilySelectionRecord(
+        transition_interval=tuple(family_selection["transition_interval"]),
+        selected_family=family_selection.get("selected_family"),
+        evidence=LoftFamilyIntentEvidence(
+            transition_interval=tuple(evidence_payload["transition_interval"]),
+            topology_case=str(evidence_payload["topology_case"]),
+            loop_pair_count=int(evidence_payload["loop_pair_count"]),
+            smooth_intent=bool(evidence_payload["smooth_intent"]),
+            rational_intent=bool(evidence_payload["rational_intent"]),
+            sweep_intent=bool(evidence_payload["sweep_intent"]),
+            requested_family=evidence_payload["requested_family"],
+        ),
+        refusal_reason=family_selection.get("refusal_reason"),
+    )
+
+
+def _loft_bspline_patch_from_station_curves(
+    prev_curve: np.ndarray,
+    curr_curve: np.ndarray,
+    *,
+    family_selection: dict[str, object],
+    metadata: dict[str, object],
+) -> BSplineSurfacePatch:
+    selection = _loft_family_selection_from_payload(family_selection)
+    validate_loft_bspline_intent(selection)
+    control = build_loft_control_net((prev_curve, curr_curve), degree_u=1)
+    patch_metadata = {
+        "kernel": {
+            **dict(metadata.get("kernel", {})),
+            "selected_family": "bspline",
+            "fit_posture": "interpolation",
+            "control_net_boundary": "surface-native",
+            "control_net_shape": tuple(int(value) for value in control.control_net.shape),
+            "degree_u": control.degree_u,
+            "degree_v": control.degree_v,
+        }
+    }
+    patch = BSplineSurfacePatch(
+        family="bspline",
+        degree_u=control.degree_u,
+        degree_v=control.degree_v,
+        knots_u=control.knots_u,
+        knots_v=control.knots_v,
+        control_net=control.control_net,
+        metadata=patch_metadata,
+    )
+    assert_loft_bspline_output_contract(patch, selection)
+    return patch
+
+
+def _loft_nurbs_patch_from_station_curves(
+    prev_curve: np.ndarray,
+    curr_curve: np.ndarray,
+    *,
+    family_selection: dict[str, object],
+    rational_weights: object | None,
+    metadata: dict[str, object],
+) -> NURBSSurfacePatch:
+    selection = _loft_family_selection_from_payload(family_selection)
+    validate_loft_nurbs_intent(selection, rational_weights)
+    control = build_loft_control_net((prev_curve, curr_curve), degree_u=1)
+    weights, weight_policy = _resolve_loft_nurbs_weight_grid(rational_weights, control.control_net.shape[:2])
+    patch_metadata = {
+        "kernel": {
+            **dict(metadata.get("kernel", {})),
+            "selected_family": "nurbs",
+            "fit_posture": "rational_interpolation",
+            "control_net_boundary": "surface-native",
+            "control_net_shape": tuple(int(value) for value in control.control_net.shape),
+            "degree_u": control.degree_u,
+            "degree_v": control.degree_v,
+            "rational_weight_policy": weight_policy.canonical_payload(),
+        }
+    }
+    patch = NURBSSurfacePatch(
+        family="nurbs",
+        degree_u=control.degree_u,
+        degree_v=control.degree_v,
+        knots_u=control.knots_u,
+        knots_v=control.knots_v,
+        control_net=control.control_net,
+        weights=weights,
+        metadata=patch_metadata,
+    )
+    assert_loft_nurbs_output_contract(patch, selection)
+    return patch
+
+
+def _loft_sweep_patch_from_loop_pair(
+    profile_loop: np.ndarray,
+    *,
+    family_selection: dict[str, object],
+    sweep_path: Path3D | None,
+    frame_policy: str | None,
+    metadata: dict[str, object],
+) -> SweepSurfacePatch:
+    selection = _loft_family_selection_from_payload(family_selection)
+    validate_loft_sweep_intent(selection, sweep_path)
+    assert sweep_path is not None
+    frame_record = resolve_loft_sweep_frame_policy(frame_policy)
+    profile = np.asarray(profile_loop, dtype=float).reshape(-1, 2)
+    profile_reference = (
+        f"loft:{selection.transition_interval[0]}->{selection.transition_interval[1]}:"
+        f"{metadata.get('kernel', {}).get('branch_id', 'branch')}:profile"
+    )
+    path_reference = (
+        f"loft:{selection.transition_interval[0]}->{selection.transition_interval[1]}:"
+        "sweep-path"
+    )
+    patch_metadata = {
+        "kernel": {
+            **dict(metadata.get("kernel", {})),
+            "selected_family": "sweep",
+            "profile_payload_boundary": "surface-native",
+            "profile_reference": profile_reference,
+            "path_reference": path_reference,
+            "frame_policy": frame_record.canonical_payload(),
+        }
+    }
+    patch = SweepSurfacePatch(
+        family="sweep",
+        profile_points_uv=profile,
+        path=sweep_path,
+        frame_policy=frame_record.frame_policy,
+        profile_reference=profile_reference,
+        path_reference=path_reference,
+        metadata=patch_metadata,
+    )
+    assert_loft_sweep_output_contract(patch, selection)
+    return patch
 
 
 def _as_planned_region_pair(
@@ -6322,23 +6857,36 @@ __all__ = [
     "RailSource",
     "PointLifecycleEvent",
     "PointLifecycleState",
+    "LoftFamilyIntentEvidence",
+    "LoftPatchFamilySelectionRecord",
+    "LoftRationalWeightPolicyRecord",
+    "LoftSweepFramePolicyRecord",
     "SampleCorrespondenceRecord",
     "SurfaceSampleEmissionDiagnostic",
     "SyntheticSupportReference",
     "LoftPlan",
     "LoftDebugMeshResult",
     "accept_or_refuse_inferred_correspondence",
+    "assert_loft_bspline_output_contract",
+    "assert_loft_nurbs_output_contract",
+    "assert_loft_sweep_output_contract",
     "emit_mesh_faces_from_sample_correspondence",
     "emit_surface_patches_from_sample_correspondence",
     "insert_synthetic_support_reference",
+    "classify_loft_patch_family",
+    "loft_patch_family_selection_records",
     "locate_parent_span",
     "project_point_to_span",
     "resolve_authored_rails",
+    "resolve_loft_sweep_frame_policy",
     "resolve_point_birth_death_events",
     "resample_loop_correspondence",
     "score_correspondence_candidates",
     "validate_point_lifecycle_event",
     "validate_point_lifecycle_events",
+    "validate_loft_bspline_intent",
+    "validate_loft_nurbs_intent",
+    "validate_loft_sweep_intent",
     "validate_mesh_executor_correspondence_input",
     "validate_rail_priority",
     "validate_sample_correspondence",

@@ -17,6 +17,7 @@ from impression.io import (
     SurfaceBodyStore,
     UnsupportedImpressSchemaVersion,
     atomic_write_text,
+    assert_impress_patch_codec_coverage_for_available_families,
     decode_surface_adjacency_payload,
     decode_surface_boundary_ref_payload,
     decode_surface_body_payload,
@@ -36,6 +37,7 @@ from impression.io import (
     make_impress_document_payload,
     make_impress_document_root,
     make_surface_body_store,
+    inspect_impress_patch_codec_coverage,
     load_impress,
     loads_impress_json,
     validate_impress_units,
@@ -49,6 +51,8 @@ import numpy as np
 from impression.modeling.path3d import Path3D
 from impression.modeling.surface import (
     BSplineSurfacePatch,
+    DisplacementSurfacePatch,
+    HeightmapSurfacePatch,
     ImplicitSurfacePatch,
     NURBSSurfacePatch,
     ParameterDomain,
@@ -76,6 +80,36 @@ def test_make_impress_document_root_declares_format_and_schema() -> None:
         "schema_version": CURRENT_IMPRESS_SCHEMA_VERSION,
         "units": {"length": DEFAULT_IMPRESS_LENGTH_UNIT},
         "metadata": {"author": "test"},
+    }
+
+
+def test_impress_patch_codec_coverage_inventory_covers_available_families() -> None:
+    records = assert_impress_patch_codec_coverage_for_available_families()
+
+    by_family = {record.family: record for record in records}
+    assert by_family["planar"].patch_kind == "PlanarSurfacePatch"
+    assert by_family["ruled"].patch_kind == "RuledSurfacePatch"
+    assert by_family["revolution"].patch_kind == "RevolutionSurfacePatch"
+    assert by_family["planar"].required_for_available is True
+    assert by_family["heightmap"].required_for_available is False
+    assert by_family["heightmap"].covered is True
+    assert by_family["displacement"].covered is True
+
+
+def test_impress_patch_codec_coverage_inventory_reports_supported_family_list() -> None:
+    records = inspect_impress_patch_codec_coverage()
+
+    assert {record.family for record in records} == {
+        "planar",
+        "ruled",
+        "revolution",
+        "bspline",
+        "nurbs",
+        "sweep",
+        "subdivision",
+        "implicit",
+        "heightmap",
+        "displacement",
     }
 
 
@@ -182,6 +216,96 @@ def _round_trip_fixture_body() -> object:
     )
 
 
+def _codec_covered_patch_fixtures() -> tuple[object, ...]:
+    control_net = np.array(
+        [
+            [[0.0, 0.0, 0.0], [0.0, 1.0, 0.2], [0.0, 2.0, 0.0]],
+            [[1.0, 0.0, 0.1], [1.0, 1.0, 0.4], [1.0, 2.0, 0.1]],
+            [[2.0, 0.0, 0.0], [2.0, 1.0, 0.2], [2.0, 2.0, 0.0]],
+        ],
+        dtype=float,
+    )
+    knots = (0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+    field = make_implicit_field_node("sphere", parameters={"center": (0.0, 0.0, 0.0), "radius": 0.75})
+    return (
+        PlanarSurfacePatch(family="planar", metadata={"kernel": {"fixture": "planar"}}),
+        RuledSurfacePatch(
+            family="ruled",
+            start_curve=[(0.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            end_curve=[(1.0, 0.0, 0.25), (1.0, 1.0, 0.25)],
+        ),
+        RevolutionSurfacePatch(
+            family="revolution",
+            profile_curve=[(1.0, 0.0, 0.0), (1.5, 0.0, 2.0)],
+            axis_origin=(0.0, 0.0, 0.0),
+            axis_direction=(0.0, 0.0, 1.0),
+            sweep_angle_deg=180.0,
+        ),
+        BSplineSurfacePatch(
+            family="bspline",
+            degree_u=2,
+            degree_v=2,
+            knots_u=knots,
+            knots_v=knots,
+            control_net=control_net,
+        ),
+        NURBSSurfacePatch(
+            family="nurbs",
+            degree_u=2,
+            degree_v=2,
+            knots_u=knots,
+            knots_v=knots,
+            control_net=control_net,
+            weights=np.ones((3, 3), dtype=float),
+        ),
+        SweepSurfacePatch(
+            family="sweep",
+            profile_points_uv=[(0.0, 0.0), (0.5, 0.25), (1.0, 0.0)],
+            path=Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.5, 1.0), (0.0, 0.0, 2.0)]),
+            frame_policy="fixed",
+        ),
+        HeightmapSurfacePatch(
+            family="heightmap",
+            height_samples=np.array([[0.0, 0.25], [0.5, 0.75]], dtype=float),
+            alpha_mask=np.array([[True, True], [False, True]], dtype=bool),
+            alpha_mode="mask",
+            xy_scale=(0.5, 0.25),
+            center=(1.0, 2.0, 3.0),
+            height_scale=2.0,
+        ),
+        DisplacementSurfacePatch(
+            family="displacement",
+            source_patch=PlanarSurfacePatch(family="planar", metadata={"kernel": {"fixture": "source"}}),
+            displacement_samples=np.array([[0.0, 0.1], [0.2, 0.3]], dtype=float),
+            alpha_mask=np.array([[True, True], [False, True]], dtype=bool),
+            alpha_mode="ignore",
+            height_scale=0.5,
+            direction="z",
+            projection="planar",
+            plane="xy",
+            projection_bounds=(-1.0, 1.0, -1.0, 1.0),
+        ),
+        SubdivisionSurfacePatch(
+            family="subdivision",
+            control_points=[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.1), (0.0, 1.0, 0.0)],
+            faces=((0, 1, 2, 3),),
+            subdivision_level=1,
+        ),
+        ImplicitSurfacePatch(
+            family="implicit",
+            field=field,
+            bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+        ),
+    )
+
+
+def _all_codec_covered_family_body() -> object:
+    return make_surface_body(
+        [make_surface_shell(_codec_covered_patch_fixtures(), metadata={"fixture": "all-codec-covered"})],
+        metadata={"body": "all-codec-covered"},
+    )
+
+
 def _assert_loaded_body_preserves_identity_and_metadata(loaded_body: object, expected_body: object) -> None:
     assert loaded_body.stable_identity == expected_body.stable_identity
     assert loaded_body.metadata == expected_body.metadata
@@ -190,6 +314,22 @@ def _assert_loaded_body_preserves_identity_and_metadata(loaded_body: object, exp
         patch.metadata for patch in expected_body.shells[0].patches
     ]
     assert loaded_body.shells[0].seams[0].metadata == expected_body.shells[0].seams[0].metadata
+
+
+def test_impress_all_codec_covered_families_round_trip_preserves_identity_and_families() -> None:
+    body = _all_codec_covered_family_body()
+
+    loaded = loads_impress_json(dumps_impress_json(make_impress_document_payload([body])))
+
+    loaded_body = loaded.bodies[0]
+    expected_patches = body.shells[0].patches
+    loaded_patches = loaded_body.shells[0].patches
+    assert loaded_body.stable_identity == body.stable_identity
+    assert [patch.family for patch in loaded_patches] == [patch.family for patch in expected_patches]
+    assert [patch.stable_identity for patch in loaded_patches] == [patch.stable_identity for patch in expected_patches]
+    assert {patch.family for patch in loaded_patches} == {
+        record.family for record in inspect_impress_patch_codec_coverage() if record.covered
+    }
 
 
 def _invalid_impress_file(path, payload: dict[str, object]) -> None:
@@ -873,6 +1013,68 @@ def test_encode_decode_implicit_surface_patch_payload_round_trips_safe_field_tre
     assert decoded.bounds == (-1.0, 1.0, -1.5, 1.5, -2.0, 2.0)
 
 
+def test_encode_decode_heightmap_surface_patch_payload_round_trips_sampled_grid() -> None:
+    patch = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.array([[0.0, 0.25], [0.5, 0.75]], dtype=float),
+        alpha_mask=np.array([[True, False], [True, True]], dtype=bool),
+        alpha_mode="mask",
+        xy_scale=(0.5, 0.25),
+        center=(1.0, 2.0, 3.0),
+        height_scale=2.0,
+    )
+
+    payload = encode_surface_patch_payload(patch)
+    decoded = decode_surface_patch_payload(payload)
+
+    assert payload["kind"] == "HeightmapSurfacePatch"
+    assert payload["family"] == "heightmap"
+    assert payload["geometry"] == {
+        "payload_version": 1,
+        "height_samples": patch.height_samples.tolist(),
+        "alpha_mask": patch.alpha_mask.tolist(),
+        "alpha_mode": "mask",
+        "xy_scale": [0.5, 0.25],
+        "center": [1.0, 2.0, 3.0],
+        "height_scale": 2.0,
+    }
+    assert decoded.stable_identity == patch.stable_identity
+    assert isinstance(decoded, HeightmapSurfacePatch)
+    assert decoded.alpha_mode == "mask"
+    assert np.array_equal(decoded.alpha_mask, patch.alpha_mask)
+
+
+def test_encode_decode_displacement_surface_patch_payload_round_trips_source_and_samples() -> None:
+    source = PlanarSurfacePatch(family="planar", metadata={"kernel": {"source": "base-face"}})
+    patch = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.array([[0.0, 0.25], [0.5, 0.75]], dtype=float),
+        alpha_mask=np.array([[True, False], [True, True]], dtype=bool),
+        alpha_mode="ignore",
+        height_scale=2.0,
+        direction=(0.0, 0.0, 1.0),
+        projection="planar",
+        plane="xy",
+        projection_bounds=(-1.0, 1.0, -2.0, 2.0),
+    )
+
+    payload = encode_surface_patch_payload(patch)
+    decoded = decode_surface_patch_payload(payload)
+
+    assert payload["kind"] == "DisplacementSurfacePatch"
+    assert payload["family"] == "displacement"
+    assert payload["geometry"]["payload_version"] == 1
+    assert payload["geometry"]["source_patch"]["kind"] == "PlanarSurfacePatch"
+    assert payload["geometry"]["displacement_samples"] == patch.displacement_samples.tolist()
+    assert payload["geometry"]["alpha_mask"] == patch.alpha_mask.tolist()
+    assert payload["geometry"]["direction"] == [0.0, 0.0, 1.0]
+    assert payload["geometry"]["projection_bounds"] == [-1.0, 1.0, -2.0, 2.0]
+    assert decoded.stable_identity == patch.stable_identity
+    assert isinstance(decoded, DisplacementSurfacePatch)
+    assert decoded.source_patch.stable_identity == source.stable_identity
+
+
 def test_decode_surface_patch_payload_rejects_invalid_family_dispatch() -> None:
     patch = PlanarSurfacePatch(family="planar")
     payload = encode_surface_patch_payload(patch)
@@ -1019,6 +1221,66 @@ def test_decode_subdivision_surface_patch_payload_rejects_invalid_geometry(mutat
 )
 def test_decode_implicit_surface_patch_payload_rejects_unsafe_or_invalid_geometry(mutation, message: str) -> None:
     patch = ImplicitSurfacePatch(family="implicit")
+    payload = encode_surface_patch_payload(patch)
+    geometry = dict(payload["geometry"])  # type: ignore[arg-type]
+    mutation(geometry)
+    payload["geometry"] = geometry
+
+    with pytest.raises(ImpressFormatError, match=message):
+        decode_surface_patch_payload(payload)
+
+
+@pytest.mark.parametrize(
+    "mutation, message",
+    [
+        (lambda geometry: geometry.pop("payload_version"), "payload_version"),
+        (lambda geometry: geometry.update({"payload_version": 2}), "payload_version"),
+        (lambda geometry: geometry.update({"mesh": {"vertices": []}}), "Unsupported HeightmapSurfacePatch geometry fields"),
+        (lambda geometry: geometry.update({"height_samples": [[0.0]]}), "height_samples"),
+        (lambda geometry: geometry.update({"height_samples": [[0.0, float("nan")], [1.0, 2.0]]}), "height_samples"),
+        (lambda geometry: geometry.update({"alpha_mask": [[True, "yes"], [False, True]]}), "alpha_mask"),
+        (lambda geometry: geometry.update({"xy_scale": [0.0, 1.0]}), "xy_scale"),
+        (lambda geometry: geometry.update({"alpha_mode": "magic"}), "alpha_mode"),
+    ],
+)
+def test_decode_heightmap_surface_patch_payload_rejects_invalid_geometry(mutation, message: str) -> None:
+    patch = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.array([[0.0, 0.25], [0.5, 0.75]], dtype=float),
+        alpha_mask=np.array([[True, False], [True, True]], dtype=bool),
+    )
+    payload = encode_surface_patch_payload(patch)
+    geometry = dict(payload["geometry"])  # type: ignore[arg-type]
+    mutation(geometry)
+    payload["geometry"] = geometry
+
+    with pytest.raises(ImpressFormatError, match=message):
+        decode_surface_patch_payload(payload)
+
+
+@pytest.mark.parametrize(
+    "mutation, message",
+    [
+        (lambda geometry: geometry.pop("payload_version"), "payload_version"),
+        (lambda geometry: geometry.update({"payload_version": 2}), "payload_version"),
+        (lambda geometry: geometry.update({"mesh": {"vertices": []}}), "Unsupported DisplacementSurfacePatch geometry fields"),
+        (lambda geometry: geometry.update({"source_patch": {"kind": "UnknownSurfacePatch"}}), "SurfacePatch payload requires"),
+        (lambda geometry: geometry.update({"displacement_samples": [[0.0]]}), "displacement_samples"),
+        (lambda geometry: geometry.update({"alpha_mask": [[True, "yes"], [False, True]]}), "alpha_mask"),
+        (lambda geometry: geometry.update({"direction": [0.0, 0.0, 0.0]}), "direction vector must be non-zero"),
+        (lambda geometry: geometry.update({"plane": "abc"}), "plane"),
+        (lambda geometry: geometry.update({"projection_bounds": [0.0, 0.0, -1.0, 1.0]}), "projection_bounds"),
+    ],
+)
+def test_decode_displacement_surface_patch_payload_rejects_invalid_geometry(mutation, message: str) -> None:
+    patch = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=PlanarSurfacePatch(family="planar"),
+        displacement_samples=np.array([[0.0, 0.25], [0.5, 0.75]], dtype=float),
+        alpha_mask=np.array([[True, False], [True, True]], dtype=bool),
+        direction="z",
+        projection_bounds=(-1.0, 1.0, -1.0, 1.0),
+    )
     payload = encode_surface_patch_payload(patch)
     geometry = dict(payload["geometry"])  # type: ignore[arg-type]
     mutation(geometry)
