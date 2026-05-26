@@ -8,6 +8,7 @@ import numpy as np
 from impression.modeling import (
     make_box,
 )
+from impression.modeling._legacy_mesh_primitives import LEGACY_MESH_PRIMITIVE_HELPERS
 from impression.modeling.loft import loft
 from impression.modeling.topology import Loop, Region, Section
 
@@ -55,6 +56,19 @@ def test_finished_surface_first_modules_do_not_import_or_call_legacy_deprecation
         assert "warn_mesh_primary_api" not in text
         assert "warn_mesh_primary_backend" not in text
         assert "_legacy_mesh_deprecation" not in text
+
+
+def test_planar_and_frustum_mesh_helpers_are_quarantined_outside_primitives(project_root) -> None:
+    primitives_text = (project_root / "src/impression/modeling/primitives.py").read_text()
+
+    assert "def _box_mesh" not in primitives_text
+    assert "def _circular_frustum_mesh" not in primitives_text
+    assert "def _rectangular_frustum_mesh" not in primitives_text
+    assert {record.legacy_name for record in LEGACY_MESH_PRIMITIVE_HELPERS} == {
+        "_box_mesh",
+        "_circular_frustum_mesh",
+        "_rectangular_frustum_mesh",
+    }
 
 
 def test_finished_surface_first_geometry_paths_do_not_emit_deprecation_warnings() -> None:
