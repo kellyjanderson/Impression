@@ -20,6 +20,7 @@ from impression.modeling import (
     make_round_nut,
     make_runout_relief,
     make_tapped_hole_cutter,
+    lower_thread_surface_assembly,
     prepare_surface_thread_representation,
     make_threaded_rod,
     clear_thread_cache,
@@ -67,6 +68,12 @@ The broader convenience builders also expose `backend="surface"`:
 That assembly records surfaced primitive and thread operands plus the intended
 composition (`standalone`, `union`, or `difference`) without collapsing back to
 mesh-first truth.
+
+`lower_thread_surface_assembly(...)` lowers supported surfaced assemblies to
+`SurfaceBody` output. Standalone and non-boolean union assemblies lower through
+surface primitives. Difference assemblies, such as nuts that require a thread
+cutter subtraction, refuse with `ThreadAssemblyLoweringError` until the needed
+surface boolean dependency is available.
 
 Fit presets still change canonical geometry on the surfaced path, because they change the actual compensated thread dimensions. Mesh-quality controls do not: they are currently ignored by surfaced thread preparation and only matter on the legacy mesh generator path.
 
