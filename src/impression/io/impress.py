@@ -12,6 +12,8 @@ import numpy as np
 from impression.modeling.path3d import Path3D
 from impression.modeling.surface import (
     BSplineSurfacePatch,
+    ImplicitFieldNode,
+    ImplicitSurfacePatch,
     NURBSSurfacePatch,
     ParameterDomain,
     PlanarSurfacePatch,
@@ -41,11 +43,13 @@ _PATCH_KIND_FAMILIES = {
     "NURBSSurfacePatch": "nurbs",
     "SweepSurfacePatch": "sweep",
     "SubdivisionSurfacePatch": "subdivision",
+    "ImplicitSurfacePatch": "implicit",
 }
 _ANALYTIC_PATCH_PAYLOAD_VERSION = 1
 _SPLINE_PATCH_PAYLOAD_VERSION = 1
 _SWEEP_PATCH_PAYLOAD_VERSION = 1
 _SUBDIVISION_PATCH_PAYLOAD_VERSION = 1
+_IMPLICIT_PATCH_PAYLOAD_VERSION = 1
 
 
 class ImpressFormatError(ValueError):
@@ -834,6 +838,18 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 faces=_validate_subdivision_faces_payload(geometry.get("faces"), "faces"),
                 creases=tuple(_decode_subdivision_crease_payload(crease) for crease in _validate_array_payload(geometry.get("creases"), "creases")),
             )
+        if kind == "ImplicitSurfacePatch":
+            _validate_patch_geometry_fields(
+                geometry,
+                kind=kind,
+                allowed_fields={"payload_version", "field", "bounds"},
+                expected_payload_version=_IMPLICIT_PATCH_PAYLOAD_VERSION,
+            )
+            return ImplicitSurfacePatch(
+                **common,
+                field=_decode_implicit_field_node_payload(geometry.get("field")),
+                bounds=_validate_bounds3_payload(geometry.get("bounds"), "bounds"),
+            )
     except (TypeError, ValueError) as exc:
         raise ImpressFormatError(str(exc)) from exc
     raise ImpressFormatError(f"Unsupported SurfacePatch kind {kind!r}.")
@@ -1103,6 +1119,12 @@ def _encode_patch_geometry_payload(patch: SurfacePatch) -> dict[str, object]:
                 for crease in geometry["creases"]
             ],
         }
+    if isinstance(patch, ImplicitSurfacePatch):
+        return {
+            "payload_version": _IMPLICIT_PATCH_PAYLOAD_VERSION,
+            "field": geometry["field"],
+            "bounds": _array_payload(geometry["bounds"]),
+        }
     raise ImpressFormatError(f"Unsupported SurfacePatch kind {type(patch).__name__!r}.")
 
 
@@ -1145,6 +1167,16 @@ def _validate_range_payload(payload: object, name: str) -> tuple[float, float]:
     if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)) or len(payload) != 2:
         raise ImpressFormatError(f"SurfacePatch domain {name} must be a two-value numeric array.")
     return (_validate_float_payload(payload[0], f"{name}[0]"), _validate_float_payload(payload[1], f"{name}[1]"))
+
+
+def _validate_bounds3_payload(payload: object, name: str) -> tuple[float, float, float, float, float, float]:
+    if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)) or len(payload) != 6:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be a six-value numeric bounds array.")
+    bounds = tuple(_validate_float_payload(value, f"{name}[]") for value in payload)
+    xmin, xmax, ymin, ymax, zmin, zmax = bounds
+    if xmax <= xmin or ymax <= ymin or zmax <= zmin:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must have positive span on every axis.")
+    return bounds
 
 
 def _validate_nonnegative_int_payload(payload: object, name: str) -> int:
@@ -1315,6 +1347,31 @@ def _decode_subdivision_crease_payload(payload: object) -> SubdivisionCrease:
         return SubdivisionCrease(
             edge=(edge[0], edge[1]),
             sharpness=_validate_float_payload(payload.get("sharpness", 1.0), "crease.sharpness"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(str(exc)) from exc
+
+
+def _decode_implicit_field_node_payload(payload: object) -> ImplicitFieldNode:
+    if not isinstance(payload, Mapping):
+        raise ImpressFormatError("Implicit field payload must be an object.")
+    unknown_keys = set(payload) - {"kind", "parameters", "children"}
+    if unknown_keys:
+        keys = ", ".join(sorted(str(key) for key in unknown_keys))
+        raise ImpressFormatError(f"Unsupported implicit field node fields: {keys}.")
+    kind = payload.get("kind")
+    if not isinstance(kind, str) or not kind.strip():
+        raise ImpressFormatError("Implicit field node kind must be a non-empty string.")
+    parameters = payload.get("parameters", {})
+    if not isinstance(parameters, Mapping):
+        raise ImpressFormatError("Implicit field node parameters must be an object.")
+    children_payload = payload.get("children", [])
+    children = _validate_array_payload(children_payload, "field.children")
+    try:
+        return ImplicitFieldNode(
+            kind=kind,
+            parameters=dict(parameters),
+            children=tuple(_decode_implicit_field_node_payload(child) for child in children),
         )
     except (TypeError, ValueError) as exc:
         raise ImpressFormatError(str(exc)) from exc

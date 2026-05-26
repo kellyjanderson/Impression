@@ -371,7 +371,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 155: .impress Spline Patch Payloads (v1.0)](../specifications/surface-155-impress-spline-patch-payloads-v1_0.md)
 - [x] [Surface Spec 156: .impress Sweep Patch Payload (v1.0)](../specifications/surface-156-impress-sweep-patch-payload-v1_0.md)
 - [x] [Surface Spec 157: .impress Subdivision Patch Payload (v1.0)](../specifications/surface-157-impress-subdivision-patch-payload-v1_0.md)
-- [ ] [Surface Spec 158: .impress Implicit Patch Payload Security (v1.0)](../specifications/surface-158-impress-implicit-patch-payload-security-v1_0.md)
+- [x] [Surface Spec 158: .impress Implicit Patch Payload Security (v1.0)](../specifications/surface-158-impress-implicit-patch-payload-security-v1_0.md)
 
 ### Mesh Execution Tessellation Boundary Architecture
 - [ ] [Surface Spec 159: Mesh Execution Inventory And Classification (v1.0)](../specifications/surface-159-mesh-execution-inventory-and-classification-v1_0.md)
