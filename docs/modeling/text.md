@@ -1,11 +1,10 @@
 # Modeling - Text
 
-Impression can generate text outlines and turn them into meshes. Under the hood
-the text is converted to 2D profiles and then extruded to 3D.
+Impression can generate text outlines and turn them into surface bodies. Under
+the hood the text is converted to 2D profiles and then extruded to 3D.
 
-The text API also supports a surface-first path with `backend="surface"`, which
-preserves the topology-native outline stage and terminates in surfaced text
-before preview/export tessellation.
+The text API is surface-first by default. Use `backend="mesh"` only for the
+legacy mesh compatibility route.
 
 ```python
 from impression.modeling import make_text, text, text_profiles, text_sections
@@ -19,8 +18,8 @@ from impression.modeling import make_text, text, text_profiles, text_sections
 - glyph outline extraction
 - character/line layout
 - conversion of glyph commands into authored `Path2D` values
-- text-local extrusion assembly for mesh output
-- dispatch to the private surfaced linear-extrude builder for surfaced output
+- dispatch to the private surfaced linear-extrude builder for canonical output
+- text-local extrusion assembly for explicit mesh compatibility output
 
 `text.py` does not own:
 
@@ -51,7 +50,7 @@ text can evolve without inheriting public extrude-module coupling.
 - `font`: family name (defaults to `"Arial"`).
 - `font_path`: explicit font file (recommended for reproducible results).
 - `color`: RGB/RGBA tuple or color string (propagates through previews/exports).
-- `backend`: `"mesh"` for legacy mesh-primary output, or `"surface"` for surfaced output.
+- `backend`: `"surface"` by default, or `"mesh"` for legacy mesh compatibility output.
 
 Text uses FontTools to convert glyph outlines into Bezier segments. The helper
 `text_profiles(...)`/`text_sections(...)` return a list of topology-native `Section` values you
@@ -74,7 +73,6 @@ def build():
         center=(0, -0.35, 0),
         color="#7b8aa6",
         font_path="assets/fonts/NotoSansSymbols2-Regular.ttf",
-        backend="surface",
     )
     tagline = text(
         "Parametric playground",

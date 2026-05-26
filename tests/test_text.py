@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from impression.modeling import Section, TessellationRequest, make_text, tessellate_surface_body, text_profiles
+from impression.modeling import Section, SurfaceBody, TessellationRequest, make_text, tessellate_surface_body, text, text_profiles
 from tests.text_font_fixtures import require_glyph_capable_font
 
 
@@ -65,7 +65,7 @@ def test_text_profiles_multiline_line_height_changes_vertical_span() -> None:
 
 def test_make_text_mesh_respects_depth_and_direction_axis() -> None:
     font_path = _require_text_font()
-    mesh = make_text("OO", depth=0.2, font_size=1.0, font_path=str(font_path))
+    mesh = make_text("OO", depth=0.2, font_size=1.0, font_path=str(font_path), backend="mesh")
     xmin, xmax, ymin, ymax, zmin, zmax = mesh.bounds
 
     assert np.isclose(zmin, 0.0, atol=1e-9)
@@ -79,6 +79,7 @@ def test_make_text_mesh_respects_depth_and_direction_axis() -> None:
         direction=(1.0, 0.0, 0.0),
         font_size=1.0,
         font_path=str(font_path),
+        backend="mesh",
     )
     xmin, xmax, ymin, ymax, zmin, zmax = oriented.bounds
 
@@ -103,6 +104,19 @@ def test_surface_text_tessellates_to_expected_depth_and_patch_count() -> None:
     assert body.patch_count > 100
     assert np.isclose(zmin, 0.0, atol=1e-9)
     assert np.isclose(zmax - zmin, 0.2, atol=1e-9)
+
+
+def test_make_text_and_text_alias_default_to_surface_body() -> None:
+    font_path = _require_text_font()
+    body = make_text("OO", depth=0.2, font_size=1.0, font_path=str(font_path))
+    alias = text("OO", depth=0.2, font_size=1.0, font_path=str(font_path))
+
+    assert isinstance(body, SurfaceBody)
+    assert isinstance(alias, SurfaceBody)
+    assert body.stable_identity == alias.stable_identity
+    assert body.patch_count > 100
+    mesh = tessellate_surface_body(body, TessellationRequest(intent="preview")).mesh
+    xmin, xmax, ymin, ymax, *_ = mesh.bounds
     assert xmax > xmin
     assert ymax > ymin
     assert mesh.n_faces > 0
