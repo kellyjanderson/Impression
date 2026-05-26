@@ -407,6 +407,66 @@ class SurfaceCSGAnalyticIntersectionRecord:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGArrangementDiagnostic:
+    """Explicit diagnostic for invalid patch-local curve arrangements."""
+
+    code: Literal["ambiguous-overlap", "self-intersection", "zero-length-fragment", "outside-domain"]
+    message: str
+    patch: SurfaceBooleanPatchRef
+    cut_curve_ids: tuple[str, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "cut_curve_ids": self.cut_curve_ids,
+            "message": self.message,
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGSplitTrimLoopRecord:
+    """One deterministic trim-loop fragment produced by a CSG arrangement."""
+
+    patch: SurfaceBooleanPatchRef
+    loop: TrimLoop
+    source_category: str
+    cut_curve_ids: tuple[str, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cut_curve_ids": self.cut_curve_ids,
+            "loop": {
+                "category": self.loop.category,
+                "clockwise": self.loop.is_clockwise,
+                "points_uv": tuple(tuple(point) for point in self.loop.points_uv),
+            },
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+            "source_category": self.source_category,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGPatchLocalArrangementGraph:
+    """Patch-local arrangement of intersection curves and split trim loops."""
+
+    patch: SurfaceBooleanPatchRef
+    patch_local_curves: tuple[SurfaceCSGPatchLocalCurve, ...]
+    split_loops: tuple[SurfaceCSGSplitTrimLoopRecord, ...]
+    diagnostics: tuple[SurfaceCSGArrangementDiagnostic, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return not self.diagnostics
+
+
+@dataclass(frozen=True)
 class SurfaceBooleanCutCurve:
     """One surfaced cut curve shared by two operand patches."""
 
@@ -2652,6 +2712,26 @@ def _sorted_cut_curve_ids_for_patch(
     )
 
 
+def _patch_local_curves_for_patch(
+    cut_curves: Sequence[SurfaceBooleanCutCurve],
+    patch: SurfaceBooleanPatchRef,
+) -> tuple[SurfaceCSGPatchLocalCurve, ...]:
+    curves: list[SurfaceCSGPatchLocalCurve] = []
+    for cut_curve in cut_curves:
+        curves.extend(
+            local_curve
+            for local_curve in cut_curve.patch_local_curves
+            if local_curve.patch.operand_index == patch.operand_index
+            and local_curve.patch.patch_index == patch.patch_index
+        )
+    return tuple(
+        sorted(
+            curves,
+            key=lambda curve: (curve.source_curve_digest, curve.points_uv),
+        )
+    )
+
+
 def _trim_loop_for_overlap_fragment(
     fragment: _AxisAlignedPlanarPatch,
     overlap_bounds: tuple[float, float, float, float, float, float],
@@ -2690,6 +2770,99 @@ def _boundary_contributor_patch(
     return min(matches, key=lambda patch: (patch.operand_index, patch.patch_index))
 
 
+def _trim_loop_min_edge_length(loop: TrimLoop) -> float:
+    points = np.asarray(loop.points_uv, dtype=float)
+    if len(points) < 2:
+        return 0.0
+    closed = np.vstack((points, points[0]))
+    distances = np.linalg.norm(np.diff(closed, axis=0), axis=1)
+    return float(np.min(distances))
+
+
+def _arrangement_diagnostic(
+    code: Literal["ambiguous-overlap", "self-intersection", "zero-length-fragment", "outside-domain"],
+    message: str,
+    *,
+    patch_ref: SurfaceBooleanPatchRef,
+    cut_curve_ids: tuple[str, ...] = (),
+) -> SurfaceCSGArrangementDiagnostic:
+    return SurfaceCSGArrangementDiagnostic(
+        code=code,
+        message=message,
+        patch=patch_ref,
+        cut_curve_ids=cut_curve_ids,
+    )
+
+
+def build_surface_csg_patch_arrangement(
+    patch_ref: SurfaceBooleanPatchRef,
+    patch: PlanarSurfacePatch,
+    *,
+    patch_local_curves: Sequence[SurfaceCSGPatchLocalCurve] = (),
+    trim_loops: Sequence[TrimLoop] = (),
+    generated_loop: TrimLoop | None = None,
+    cut_curve_ids: Sequence[str] = (),
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> SurfaceCSGPatchLocalArrangementGraph:
+    """Build a deterministic patch-local arrangement and split trim loop records."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    diagnostics: list[SurfaceCSGArrangementDiagnostic] = []
+    local_curves = tuple(
+        sorted(
+            patch_local_curves,
+            key=lambda curve: (
+                curve.source_curve_digest,
+                curve.patch.operand_index,
+                curve.patch.patch_index,
+                curve.points_uv,
+            ),
+        )
+    )
+    for curve in local_curves:
+        for diagnostic in validate_surface_csg_patch_local_curve_domain(curve, policy=normalized_policy):
+            diagnostics.append(
+                _arrangement_diagnostic(
+                    "outside-domain",
+                    diagnostic.message,
+                    patch_ref=patch_ref,
+                    cut_curve_ids=tuple(cut_curve_ids),
+                )
+            )
+    loops = tuple(trim_loops)
+    if generated_loop is not None:
+        loops = (*loops, generated_loop)
+    if not loops:
+        loops = patch.trim_loops
+    split_loops: list[SurfaceCSGSplitTrimLoopRecord] = []
+    for loop in loops:
+        normalized_loop = loop.normalized()
+        if _trim_loop_min_edge_length(normalized_loop) <= normalized_policy.degeneracy_tolerance:
+            diagnostics.append(
+                _arrangement_diagnostic(
+                    "zero-length-fragment",
+                    "Trim loop splitting produced a zero-length fragment.",
+                    patch_ref=patch_ref,
+                    cut_curve_ids=tuple(cut_curve_ids),
+                )
+            )
+            continue
+        split_loops.append(
+            SurfaceCSGSplitTrimLoopRecord(
+                patch=patch_ref,
+                loop=normalized_loop,
+                source_category=normalized_loop.category,
+                cut_curve_ids=tuple(sorted(cut_curve_ids)),
+            )
+        )
+    return SurfaceCSGPatchLocalArrangementGraph(
+        patch=patch_ref,
+        patch_local_curves=local_curves,
+        split_loops=tuple(split_loops),
+        diagnostics=tuple(diagnostics),
+    )
+
+
 def surface_boolean_overlap_fragments(operands: SurfaceBooleanOperands) -> tuple[SurfaceBooleanTrimmedPatchFragment, ...]:
     """Reconstruct trimmed planar overlap fragments for the initial box intersection slice."""
 
@@ -2714,15 +2887,25 @@ def surface_boolean_overlap_fragments(operands: SurfaceBooleanOperands) -> tuple
             if contributor is None:
                 continue
             source_ref = SurfaceBooleanPatchRef(contributor.operand_index, contributor.patch_index)
+            cut_curve_ids = _sorted_cut_curve_ids_for_patch(stage.cut_curves, source_ref)
+            arrangement = build_surface_csg_patch_arrangement(
+                source_ref,
+                contributor.patch,
+                patch_local_curves=_patch_local_curves_for_patch(stage.cut_curves, source_ref),
+                generated_loop=_trim_loop_for_overlap_fragment(contributor, overlap_bounds),
+                cut_curve_ids=cut_curve_ids,
+            )
+            if not arrangement.supported or not arrangement.split_loops:
+                continue
             trimmed_patch = replace(
                 contributor.patch,
-                trim_loops=(_trim_loop_for_overlap_fragment(contributor, overlap_bounds),),
+                trim_loops=tuple(record.loop for record in arrangement.split_loops),
             )
             fragments.append(
                 SurfaceBooleanTrimmedPatchFragment(
                     source_patch=source_ref,
                     patch=trimmed_patch,
-                    cut_curve_ids=_sorted_cut_curve_ids_for_patch(stage.cut_curves, source_ref),
+                    cut_curve_ids=cut_curve_ids,
                 )
             )
     return tuple(

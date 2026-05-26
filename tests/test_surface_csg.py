@@ -25,19 +25,24 @@ from impression.modeling import (
     SurfaceBooleanSplitRecord,
     SurfaceBooleanTrimmedPatchFragment,
     SurfaceCSGAnalyticIntersectionRecord,
+    SurfaceCSGArrangementDiagnostic,
     SurfaceCSGConicDiagnostic,
     SurfaceCSGCurvePrimitive,
     SurfaceCSGCurveMappingDiagnostic,
     SurfaceCSGPatchLocalCurve,
+    SurfaceCSGPatchLocalArrangementGraph,
     SurfaceCSGPatchLocalCurveMappingResult,
     SurfaceCSGPlanarRelationDiagnostic,
     SurfaceCSGRevolutionIntersectionRecord,
+    SurfaceCSGSplitTrimLoopRecord,
     SurfaceCSGToleranceDiagnostic,
     SurfaceCSGTolerancePolicy,
     SurfaceShell,
+    TrimLoop,
     boolean_difference,
     boolean_intersection,
     boolean_union,
+    build_surface_csg_patch_arrangement,
     intersect_axis_compatible_revolution_pair,
     intersect_planar_linear_patch_pair,
     intersect_planar_revolution_patch_pair,
@@ -157,6 +162,59 @@ def test_surface_csg_curve_maps_to_revolution_patch_local_domain() -> None:
     assert result.curve.points_uv[0] == pytest.approx((0.0, 0.25))
     assert result.curve.points_uv[1] == pytest.approx((0.25, 0.75))
     assert validate_surface_csg_patch_local_curve_domain(result.curve) == ()
+
+
+def test_surface_csg_patch_arrangement_preserves_loop_category_orientation_and_cut_ids() -> None:
+    patch = PlanarSurfacePatch(family="planar")
+    patch_ref = SurfaceBooleanPatchRef(0, 0)
+    curve = make_surface_csg_line_curve((0.5, 0.0, 0.0), (0.5, 1.0, 0.0))
+    mapping = map_surface_csg_curve_to_patch_local(curve, patch_ref, patch)
+    assert mapping.curve is not None
+    loop = TrimLoop(((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)), category="outer")
+
+    graph = build_surface_csg_patch_arrangement(
+        patch_ref,
+        patch,
+        patch_local_curves=(mapping.curve,),
+        generated_loop=loop,
+        cut_curve_ids=("cut-b", "cut-a"),
+    )
+
+    assert isinstance(graph, SurfaceCSGPatchLocalArrangementGraph)
+    assert graph.supported is True
+    assert len(graph.patch_local_curves) == 1
+    assert len(graph.split_loops) == 1
+    split = graph.split_loops[0]
+    assert isinstance(split, SurfaceCSGSplitTrimLoopRecord)
+    assert split.source_category == "outer"
+    assert split.loop.category == "outer"
+    assert split.loop.is_clockwise is False
+    assert split.cut_curve_ids == ("cut-a", "cut-b")
+    assert graph.diagnostics == ()
+
+
+def test_surface_csg_patch_arrangement_reports_zero_length_fragments_and_outside_curves() -> None:
+    patch = PlanarSurfacePatch(family="planar")
+    patch_ref = SurfaceBooleanPatchRef(0, 0)
+    outside_curve = SurfaceCSGPatchLocalCurve(
+        source_curve_digest="outside",
+        patch=patch_ref,
+        points_uv=((0.5, 0.5), (1.5, 0.5)),
+        domain_bounds=(0.0, 1.0, 0.0, 1.0),
+    )
+    zero_loop = TrimLoop(((0.0, 0.0), (1e-12, 0.0), (1.0, 0.0)), category="outer")
+
+    graph = build_surface_csg_patch_arrangement(
+        patch_ref,
+        patch,
+        patch_local_curves=(outside_curve,),
+        generated_loop=zero_loop,
+        cut_curve_ids=("cut-0",),
+    )
+
+    assert graph.supported is False
+    assert all(isinstance(diagnostic, SurfaceCSGArrangementDiagnostic) for diagnostic in graph.diagnostics)
+    assert {diagnostic.code for diagnostic in graph.diagnostics} == {"outside-domain", "zero-length-fragment"}
 
 
 def test_planar_linear_analytic_intersection_emits_exact_line_record() -> None:
