@@ -19,6 +19,8 @@ LEGACY_MESH_PRIMITIVE_HELPERS: tuple[LegacyMeshPrimitiveHelperRecord, ...] = (
     LegacyMeshPrimitiveHelperRecord("_box_mesh", __name__),
     LegacyMeshPrimitiveHelperRecord("_circular_frustum_mesh", __name__),
     LegacyMeshPrimitiveHelperRecord("_rectangular_frustum_mesh", __name__),
+    LegacyMeshPrimitiveHelperRecord("_sphere_mesh", __name__),
+    LegacyMeshPrimitiveHelperRecord("_torus_mesh", __name__),
 )
 
 
@@ -190,3 +192,78 @@ def rectangular_frustum_mesh(
 
     faces_arr = triangulate_faces(faces)
     return Mesh(points, faces_arr)
+
+
+def sphere_mesh(radius: float, theta_resolution: int, phi_resolution: int) -> Mesh:
+    theta_steps = max(int(theta_resolution), 3)
+    phi_points = max(int(phi_resolution), 3)
+
+    points = [
+        (0.0, 0.0, radius),
+        (0.0, 0.0, -radius),
+    ]
+
+    ring_count = phi_points - 2
+    for i in range(1, phi_points - 1):
+        phi = np.pi * i / (phi_points - 1)
+        z = radius * np.cos(phi)
+        ring_radius = radius * np.sin(phi)
+        for j in range(theta_steps):
+            theta = 2 * np.pi * j / theta_steps
+            points.append((ring_radius * np.cos(theta), ring_radius * np.sin(theta), z))
+
+    faces: list[list[int]] = []
+    ring_start = 2
+    if ring_count > 0:
+        for j in range(theta_steps):
+            j_next = (j + 1) % theta_steps
+            faces.append([0, ring_start + j, ring_start + j_next])
+
+        for i in range(ring_count - 1):
+            ring0 = ring_start + i * theta_steps
+            ring1 = ring_start + (i + 1) * theta_steps
+            for j in range(theta_steps):
+                j_next = (j + 1) % theta_steps
+                faces.append([ring0 + j, ring1 + j, ring1 + j_next, ring0 + j_next])
+
+        last_ring = ring_start + (ring_count - 1) * theta_steps
+        for j in range(theta_steps):
+            j_next = (j + 1) % theta_steps
+            faces.append([1, last_ring + j_next, last_ring + j])
+
+    points_arr = np.asarray(points, dtype=float)
+    faces_arr = triangulate_faces(faces)
+    return Mesh(points_arr, faces_arr)
+
+
+def torus_mesh(major_radius: float, minor_radius: float, n_theta: int, n_phi: int) -> Mesh:
+    theta_steps = max(int(n_theta), 3)
+    phi_steps = max(int(n_phi), 3)
+    points = []
+    for i in range(theta_steps):
+        u = 2 * np.pi * i / theta_steps
+        cos_u = np.cos(u)
+        sin_u = np.sin(u)
+        for j in range(phi_steps):
+            v = 2 * np.pi * j / phi_steps
+            cos_v = np.cos(v)
+            sin_v = np.sin(v)
+            radial = major_radius + minor_radius * cos_v
+            points.append((radial * cos_u, radial * sin_u, minor_radius * sin_v))
+
+    faces: list[list[int]] = []
+    for i in range(theta_steps):
+        i_next = (i + 1) % theta_steps
+        for j in range(phi_steps):
+            j_next = (j + 1) % phi_steps
+            idx0 = i * phi_steps + j
+            idx1 = i * phi_steps + j_next
+            idx2 = i_next * phi_steps + j_next
+            idx3 = i_next * phi_steps + j
+            faces.append([idx0, idx1, idx2, idx3])
+
+    points_arr = np.asarray(points, dtype=float)
+    faces_arr = triangulate_faces(faces)
+    if faces_arr.size:
+        faces_arr = faces_arr[:, [0, 2, 1]]
+    return Mesh(points_arr, faces_arr)
