@@ -164,6 +164,15 @@ def _subdivision_face_edges(faces: Sequence[Sequence[int]]) -> frozenset[tuple[i
     return frozenset(edges)
 
 
+def _subdivision_edge_faces(faces: Sequence[Sequence[int]]) -> dict[tuple[int, int], list[int]]:
+    edge_faces: dict[tuple[int, int], list[int]] = {}
+    for face_index, face in enumerate(faces):
+        for start, end in zip(face, (*face[1:], face[0])):
+            edge = tuple(sorted((int(start), int(end))))
+            edge_faces.setdefault((edge[0], edge[1]), []).append(face_index)
+    return edge_faces
+
+
 def _normalize_degree(value: int, *, name: str) -> int:
     degree = int(value)
     if degree < 1:
@@ -1331,6 +1340,150 @@ SubdivisionScheme = Literal["catmull_clark"]
 
 
 @dataclass(frozen=True)
+class SubdivisionRefinementResult:
+    """Finite subdivision approximation data produced from an authored control cage."""
+
+    control_points: np.ndarray
+    faces: tuple[tuple[int, ...], ...]
+    level: int
+    scheme: SubdivisionScheme
+    metadata: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        control_points = _as_control_points3(self.control_points, name="control_points")
+        faces = _normalize_subdivision_faces(self.faces, control_point_count=control_points.shape[0])
+        level = int(self.level)
+        if level < 0:
+            raise ValueError("SubdivisionRefinementResult.level must be >= 0.")
+        scheme = str(self.scheme)
+        if scheme != "catmull_clark":
+            raise ValueError("SubdivisionRefinementResult.scheme must be 'catmull_clark'.")
+        object.__setattr__(self, "control_points", control_points)
+        object.__setattr__(self, "faces", faces)
+        object.__setattr__(self, "level", level)
+        object.__setattr__(self, "scheme", scheme)
+        object.__setattr__(self, "metadata", _normalize_metadata(self.metadata))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "control_points": self.control_points,
+            "faces": self.faces,
+            "level": self.level,
+            "scheme": self.scheme,
+            "metadata": self.metadata,
+        }
+
+
+def _catmull_clark_refine_once(
+    control_points: np.ndarray,
+    faces: tuple[tuple[int, ...], ...],
+    crease_sharpness: dict[tuple[int, int], float],
+) -> tuple[np.ndarray, tuple[tuple[int, ...], ...]]:
+    face_points = np.asarray([control_points[list(face)].mean(axis=0) for face in faces], dtype=float)
+    edge_faces = _subdivision_edge_faces(faces)
+    edge_points: dict[tuple[int, int], np.ndarray] = {}
+    for edge, adjacent_faces in edge_faces.items():
+        start, end = edge
+        is_sharp = crease_sharpness.get(edge, 0.0) > 0.0
+        is_boundary = len(adjacent_faces) == 1
+        if is_sharp or is_boundary:
+            edge_points[edge] = (control_points[start] + control_points[end]) * 0.5
+        else:
+            edge_points[edge] = (
+                control_points[start] + control_points[end] + face_points[adjacent_faces[0]] + face_points[adjacent_faces[1]]
+            ) * 0.25
+
+    adjacent_faces_by_vertex: dict[int, list[int]] = {index: [] for index in range(control_points.shape[0])}
+    adjacent_edges_by_vertex: dict[int, list[tuple[int, int]]] = {index: [] for index in range(control_points.shape[0])}
+    for face_index, face in enumerate(faces):
+        for index in face:
+            adjacent_faces_by_vertex[index].append(face_index)
+    for edge in edge_faces:
+        adjacent_edges_by_vertex[edge[0]].append(edge)
+        adjacent_edges_by_vertex[edge[1]].append(edge)
+
+    vertex_points = np.zeros_like(control_points)
+    for index, point in enumerate(control_points):
+        adjacent_edges = adjacent_edges_by_vertex[index]
+        sharp_or_boundary_edges = [
+            edge for edge in adjacent_edges if crease_sharpness.get(edge, 0.0) > 0.0 or len(edge_faces[edge]) == 1
+        ]
+        if len(sharp_or_boundary_edges) >= 2:
+            neighbor_points = []
+            for edge in sharp_or_boundary_edges[:2]:
+                neighbor = edge[1] if edge[0] == index else edge[0]
+                neighbor_points.append(control_points[neighbor])
+            vertex_points[index] = ((6.0 * point) + neighbor_points[0] + neighbor_points[1]) * 0.125
+            continue
+        adjacent_faces = adjacent_faces_by_vertex[index]
+        n = len(adjacent_faces)
+        if n == 0:
+            vertex_points[index] = point
+            continue
+        face_average = face_points[adjacent_faces].mean(axis=0)
+        edge_midpoints = np.asarray(
+            [(control_points[edge[0]] + control_points[edge[1]]) * 0.5 for edge in adjacent_edges],
+            dtype=float,
+        )
+        edge_average = edge_midpoints.mean(axis=0)
+        vertex_points[index] = (face_average + (2.0 * edge_average) + ((n - 3.0) * point)) / float(n)
+
+    new_points: list[np.ndarray] = [point.copy() for point in vertex_points]
+    edge_point_indices: dict[tuple[int, int], int] = {}
+    for edge in sorted(edge_points):
+        edge_point_indices[edge] = len(new_points)
+        new_points.append(edge_points[edge])
+    face_point_indices: list[int] = []
+    for point in face_points:
+        face_point_indices.append(len(new_points))
+        new_points.append(point)
+
+    new_faces: list[tuple[int, ...]] = []
+    for face_index, face in enumerate(faces):
+        face_point_index = face_point_indices[face_index]
+        for local_index, vertex_index in enumerate(face):
+            next_vertex = face[(local_index + 1) % len(face)]
+            previous_vertex = face[(local_index - 1) % len(face)]
+            next_edge = tuple(sorted((vertex_index, next_vertex)))
+            previous_edge = tuple(sorted((previous_vertex, vertex_index)))
+            new_faces.append(
+                (
+                    int(vertex_index),
+                    edge_point_indices[(next_edge[0], next_edge[1])],
+                    face_point_index,
+                    edge_point_indices[(previous_edge[0], previous_edge[1])],
+                )
+            )
+    return np.asarray(new_points, dtype=float), tuple(new_faces)
+
+
+def refine_subdivision_control_cage(
+    patch: "SubdivisionSurfacePatch",
+    *,
+    levels: int | None = None,
+) -> SubdivisionRefinementResult:
+    level_count = patch.subdivision_level if levels is None else int(levels)
+    if level_count < 0:
+        raise ValueError("Subdivision refinement levels must be >= 0.")
+    control_points = patch.control_points.copy()
+    faces = patch.faces
+    crease_sharpness = {crease.edge: crease.sharpness for crease in patch.creases}
+    for _level in range(level_count):
+        control_points, faces = _catmull_clark_refine_once(control_points, faces, crease_sharpness)
+        crease_sharpness = {}
+    return SubdivisionRefinementResult(
+        control_points=control_points,
+        faces=faces,
+        level=level_count,
+        scheme=patch.scheme,
+        metadata={
+            "approximation": "finite_catmull_clark",
+            "source_patch_id": patch.stable_identity,
+        },
+    )
+
+
+@dataclass(frozen=True)
 class SubdivisionSurfacePatch(SurfacePatch):
     """A subdivision surface payload with authored control cage and crease metadata."""
 
@@ -1386,13 +1539,49 @@ class SubdivisionSurfacePatch(SurfacePatch):
             "creases": [crease.canonical_payload() for crease in self.creases],
         }
 
-    def point_at(self, u: float, v: float) -> np.ndarray:
+    def refined_cage(self, *, levels: int | None = None) -> SubdivisionRefinementResult:
+        return refine_subdivision_control_cage(self, levels=levels)
+
+    def _normalized_parameters(self, u: float, v: float) -> tuple[float, float]:
         self.validate_parameters(u, v)
-        raise NotImplementedError("SubdivisionSurfacePatch evaluation is implemented by Surface Spec 146.")
+        u0, u1 = self.domain.u_range
+        v0, v1 = self.domain.v_range
+        u_norm = (float(u) - u0) / (u1 - u0)
+        v_norm = (float(v) - v0) / (v1 - v0)
+        return float(np.clip(u_norm, 0.0, 1.0)), float(np.clip(v_norm, 0.0, 1.0))
+
+    def point_at(self, u: float, v: float) -> np.ndarray:
+        u_norm, v_norm = self._normalized_parameters(u, v)
+        result = self.refined_cage(levels=max(1, self.subdivision_level))
+        face = result.faces[0]
+        if len(face) < 4:
+            raise ValueError("SubdivisionSurfacePatch finite evaluation requires a refined quad face.")
+        a, b, c, d = (result.control_points[index] for index in face[:4])
+        local = (
+            ((1.0 - u_norm) * (1.0 - v_norm) * a)
+            + (u_norm * (1.0 - v_norm) * b)
+            + (u_norm * v_norm * c)
+            + ((1.0 - u_norm) * v_norm * d)
+        )
+        return _transform_point(self.transform_matrix, local)
 
     def derivatives_at(self, u: float, v: float) -> tuple[np.ndarray, np.ndarray]:
         self.validate_parameters(u, v)
-        raise NotImplementedError("SubdivisionSurfacePatch derivatives are implemented by Surface Spec 146.")
+        u_step = min(1e-5 * self.domain.u_span, self.domain.u_span * 0.25)
+        v_step = min(1e-5 * self.domain.v_span, self.domain.v_span * 0.25)
+        u_prev = max(self.domain.u_range[0], float(u) - u_step)
+        u_next = min(self.domain.u_range[1], float(u) + u_step)
+        v_prev = max(self.domain.v_range[0], float(v) - v_step)
+        v_next = min(self.domain.v_range[1], float(v) + v_step)
+        if np.isclose(u_prev, u_next):
+            du = np.zeros(3, dtype=float)
+        else:
+            du = (self.point_at(u_next, v) - self.point_at(u_prev, v)) / (u_next - u_prev)
+        if np.isclose(v_prev, v_next):
+            dv = np.zeros(3, dtype=float)
+        else:
+            dv = (self.point_at(u, v_next) - self.point_at(u, v_prev)) / (v_next - v_prev)
+        return du, dv
 
     def bounds_estimate(self, *, u_count: int = 3, v_count: int = 3) -> tuple[float, float, float, float, float, float]:
         del u_count, v_count
@@ -1634,7 +1823,9 @@ __all__ = [
     "NURBSSurfacePatch",
     "SweepSurfacePatch",
     "SubdivisionCrease",
+    "SubdivisionRefinementResult",
     "SubdivisionSurfacePatch",
+    "refine_subdivision_control_cage",
     "SurfaceShell",
     "SurfaceBody",
     "make_surface_shell",
