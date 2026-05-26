@@ -444,7 +444,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 227: CSG Patch-Local Curve Mapping (v1.0)](../specifications/surface-227-csg-patch-local-curve-mapping-v1_0.md)
 - [x] [Surface Spec 228: CSG Planar/Linear Analytic Intersections (v1.0)](../specifications/surface-228-csg-planar-linear-analytic-intersections-v1_0.md)
 - [x] [Surface Spec 229: CSG Revolution/Conic Analytic Intersections (v1.0)](../specifications/surface-229-csg-revolution-conic-analytic-intersections-v1_0.md)
-- [ ] [Surface Spec 230: CSG Higher-Order Analytic Intersection Refusal Or Solver Boundary (v1.0)](../specifications/surface-230-csg-higher-order-analytic-intersection-refusal-or-solver-boundary-v1_0.md)
+- [x] [Surface Spec 230: CSG Higher-Order Analytic Intersection Refusal Or Solver Boundary (v1.0)](../specifications/surface-230-csg-higher-order-analytic-intersection-refusal-or-solver-boundary-v1_0.md)
 - [ ] [Surface Spec 231: CSG Curve Arrangement And Trim Loop Splitting (v1.0)](../specifications/surface-231-csg-curve-arrangement-and-trim-loop-splitting-v1_0.md)
 - [ ] [Surface Spec 232: CSG Fragment Inside/Outside Classification Predicates (v1.0)](../specifications/surface-232-csg-fragment-inside-outside-classification-predicates-v1_0.md)
 - [ ] [Surface Spec 233: CSG Operation Selection Rules (v1.0)](../specifications/surface-233-csg-operation-selection-rules-v1_0.md)

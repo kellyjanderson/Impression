@@ -167,7 +167,7 @@ def test_surface_csg_unsupported_result_is_diagnostic_not_mesh_fallback() -> Non
     assert isinstance(result, SurfaceBooleanResult)
     assert result.status == "unsupported"
     assert result.body is None
-    assert "operand-family-eligibility" in diagnostic.reason
+    assert "higher-order-exact-solver" in diagnostic.reason
     assert diagnostic.canonical_payload()["boundary"] == "surface-boolean"
 
 

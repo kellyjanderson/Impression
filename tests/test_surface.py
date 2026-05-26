@@ -49,7 +49,9 @@ from impression.modeling import (
     analysis_tessellation_request,
     BSplineSurfacePatch,
     boolean_union,
+    build_higher_order_csg_refusal_diagnostic,
     build_surface_boolean_unsupported_family_diagnostic,
+    classify_higher_order_csg_pair,
     compare_tessellation_modes,
     DisplacementSurfacePatch,
     export_tessellation_request,
@@ -97,6 +99,8 @@ from impression.modeling import (
     SurfaceBooleanFamilyPairSupport,
     SurfaceBooleanOperands,
     SurfaceBooleanUnsupportedFamilyDiagnostic,
+    SurfaceCSGHigherOrderRefusalDiagnostic,
+    SurfaceCSGHigherOrderSupportRecord,
     SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX,
     SURFACE_BOOLEAN_OPERATIONS,
     SurfaceSeamParticipationRecord,
@@ -2150,6 +2154,31 @@ def test_surface_boolean_unsupported_family_diagnostic_builder_refuses_supported
         build_surface_boolean_unsupported_family_diagnostic(supported)
 
 
+def test_higher_order_csg_solver_boundary_names_advanced_family_refusals() -> None:
+    advanced_families = ("bspline", "nurbs", "sweep", "subdivision", "implicit", "heightmap", "displacement", "torus")
+
+    for family in advanced_families:
+        support = classify_higher_order_csg_pair("intersection", "planar", family)
+        diagnostic = build_higher_order_csg_refusal_diagnostic(support)
+
+        assert isinstance(support, SurfaceCSGHigherOrderSupportRecord)
+        assert isinstance(diagnostic, SurfaceCSGHigherOrderRefusalDiagnostic)
+        assert support.supported is False
+        assert support.solver_boundary == "higher-order-exact-solver"
+        assert family in diagnostic.message
+        assert "requires" in diagnostic.message
+
+
+def test_higher_order_csg_refusal_is_reflected_in_family_diagnostics() -> None:
+    support = surface_boolean_family_pair_support("union", "planar", "bspline")
+
+    diagnostic = build_surface_boolean_unsupported_family_diagnostic(support)
+
+    assert diagnostic.phase == "higher-order-exact-solver"
+    assert "unsupported higher-order surface boolean pair" in diagnostic.required_future_capability
+    assert "planar/bspline" in diagnostic.message
+
+
 def test_surface_backend_boolean_api_uses_family_diagnostic_result_for_unsupported_pairs() -> None:
     box = make_surface_box(size=(1.0, 1.0, 1.0), center=(0.0, 0.0, 0.0))
     bspline_body = make_surface_body([make_surface_shell([BSplineSurfacePatch(family="bspline")])])
@@ -2158,7 +2187,7 @@ def test_surface_backend_boolean_api_uses_family_diagnostic_result_for_unsupport
 
     assert result.status == "unsupported"
     assert result.failure_reason is not None
-    assert "operand-family-eligibility" in result.failure_reason
+    assert "higher-order-exact-solver" in result.failure_reason
 
 
 def test_surface_boolean_family_refusal_gate_never_invokes_mesh_boolean(monkeypatch: pytest.MonkeyPatch) -> None:

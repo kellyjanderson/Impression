@@ -349,6 +349,48 @@ class SurfaceCSGRevolutionIntersectionRecord:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGHigherOrderSupportRecord:
+    """Explicit solver-boundary decision for higher-order CSG family pairs."""
+
+    operation: SurfaceBooleanOperation
+    left_family: str
+    right_family: str
+    supported: bool
+    solver_boundary: str
+    required_future_capability: str | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "left_family": self.left_family,
+            "operation": self.operation,
+            "required_future_capability": self.required_future_capability,
+            "right_family": self.right_family,
+            "solver_boundary": self.solver_boundary,
+            "supported": self.supported,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGHigherOrderRefusalDiagnostic:
+    """Explicit refusal diagnostic for unsupported higher-order CSG pairs."""
+
+    support: SurfaceCSGHigherOrderSupportRecord
+
+    @property
+    def message(self) -> str:
+        return (
+            f"unsupported higher-order surface boolean pair for {self.support.operation}: "
+            f"{self.support.left_family}/{self.support.right_family} at {self.support.solver_boundary}; "
+            f"requires {self.support.required_future_capability}"
+        )
+
+    def canonical_payload(self) -> dict[str, object]:
+        payload = self.support.canonical_payload()
+        payload["message"] = self.message
+        return payload
+
+
+@dataclass(frozen=True)
 class SurfaceCSGAnalyticIntersectionRecord:
     """Analytic low-order patch intersection result."""
 
@@ -1596,6 +1638,63 @@ def _surface_boolean_family_pair_support(
     return surface_boolean_family_pair_support(operation, left_family, right_family)
 
 
+HIGHER_ORDER_CSG_FAMILIES: frozenset[str] = frozenset(
+    {
+        "bspline",
+        "nurbs",
+        "sweep",
+        "subdivision",
+        "implicit",
+        "heightmap",
+        "displacement",
+        "torus",
+    }
+)
+
+
+def classify_higher_order_csg_pair(
+    operation: SurfaceBooleanOperation,
+    left_family: str,
+    right_family: str,
+) -> SurfaceCSGHigherOrderSupportRecord:
+    """Return the exact-solver boundary decision for higher-order CSG pairs."""
+
+    pair_support = surface_boolean_family_pair_support(operation, left_family, right_family)
+    higher_order = left_family in HIGHER_ORDER_CSG_FAMILIES or right_family in HIGHER_ORDER_CSG_FAMILIES
+    if not higher_order:
+        return SurfaceCSGHigherOrderSupportRecord(
+            operation=operation,
+            left_family=left_family,
+            right_family=right_family,
+            supported=pair_support.supported,
+            solver_boundary="low-order-analytic",
+            required_future_capability=pair_support.required_future_capability,
+        )
+    future = pair_support.required_future_capability or (
+        f"exact higher-order surface boolean {operation} solver for {left_family}/{right_family}"
+    )
+    return SurfaceCSGHigherOrderSupportRecord(
+        operation=operation,
+        left_family=left_family,
+        right_family=right_family,
+        supported=False,
+        solver_boundary="higher-order-exact-solver",
+        required_future_capability=future,
+    )
+
+
+def build_higher_order_csg_refusal_diagnostic(
+    support: SurfaceCSGHigherOrderSupportRecord,
+) -> SurfaceCSGHigherOrderRefusalDiagnostic:
+    """Build the explicit refusal diagnostic for a higher-order solver-boundary record."""
+
+    if support.supported:
+        raise ValueError("Supported higher-order CSG records do not need refusal diagnostics.")
+    if not support.required_future_capability:
+        raise ValueError("Unsupported higher-order CSG records require a future capability.")
+    return SurfaceCSGHigherOrderRefusalDiagnostic(support=support)
+
+
 def build_surface_boolean_unsupported_family_diagnostic(
     support: SurfaceBooleanFamilyPairSupport,
 ) -> SurfaceBooleanUnsupportedFamilyDiagnostic:
@@ -1603,6 +1702,16 @@ def build_surface_boolean_unsupported_family_diagnostic(
 
     if support.supported:
         raise ValueError("Supported surface boolean family pairs do not need unsupported diagnostics.")
+    higher_order = classify_higher_order_csg_pair(support.operation, support.left_family, support.right_family)
+    if higher_order.solver_boundary == "higher-order-exact-solver":
+        higher_order_diagnostic = build_higher_order_csg_refusal_diagnostic(higher_order)
+        return SurfaceBooleanUnsupportedFamilyDiagnostic(
+            operation=support.operation,
+            left_family=support.left_family,
+            right_family=support.right_family,
+            phase=higher_order.solver_boundary,
+            required_future_capability=higher_order_diagnostic.message,
+        )
     if support.required_future_capability is None:
         raise ValueError("Unsupported surface boolean family pairs require a future capability.")
     return SurfaceBooleanUnsupportedFamilyDiagnostic(
