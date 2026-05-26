@@ -31,6 +31,7 @@ SUPPORTED_SURFACE_PATCH_FAMILIES: tuple[str, ...] = (
     "subdivision",
     "implicit",
     "heightmap",
+    "displacement",
 )
 REQUIRED_V1_PATCH_FAMILIES: tuple[str, ...] = ("planar", "ruled", "revolution")
 PATCH_FAMILY_CAPABILITY_MATRIX: dict[str, PatchFamilyCapabilityRecord] = {
@@ -78,6 +79,11 @@ PATCH_FAMILY_CAPABILITY_MATRIX: dict[str, PatchFamilyCapabilityRecord] = {
         family="heightmap",
         support_phase="planned",
         operations=("sample-grid-payload", "evaluation", "tessellation"),
+    ),
+    "displacement": PatchFamilyCapabilityRecord(
+        family="displacement",
+        support_phase="planned",
+        operations=("source-surface-reference", "sample-grid-payload", "evaluation", "tessellation"),
     ),
 }
 SURFACE_SPEC_66_RETIREMENT_NOTE = (
@@ -896,6 +902,134 @@ class HeightmapSurfacePatch(SurfacePatch):
         y = ((rows - 1 - float(v)) - (rows - 1) / 2.0) * sy + self.center[1]
         z = self.center[2] + self._height_at(float(u), float(v))
         return _transform_point(self.transform_matrix, np.array([x, y, z], dtype=float))
+
+    def derivatives_at(self, u: float, v: float) -> tuple[np.ndarray, np.ndarray]:
+        self.validate_parameters(u, v)
+        epsilon = 1e-4
+        u0 = max(self.domain.u_range[0], float(u) - epsilon)
+        u1 = min(self.domain.u_range[1], float(u) + epsilon)
+        v0 = max(self.domain.v_range[0], float(v) - epsilon)
+        v1 = min(self.domain.v_range[1], float(v) + epsilon)
+        du = (self.point_at(u1, v) - self.point_at(u0, v)) / max(u1 - u0, 1e-9)
+        dv = (self.point_at(u, v1) - self.point_at(u, v0)) / max(v1 - v0, 1e-9)
+        return du, dv
+
+
+@dataclass(frozen=True)
+class DisplacementSurfacePatch(SurfacePatch):
+    """Surface patch displaced by a sampled heightfield payload."""
+
+    source_patch: SurfacePatch | None = None
+    displacement_samples: np.ndarray = field(default_factory=lambda: np.zeros((2, 2), dtype=float))
+    alpha_mask: np.ndarray = field(default_factory=lambda: np.ones((2, 2), dtype=bool))
+    alpha_mode: Literal["mask", "ignore"] = "ignore"
+    height_scale: float = 1.0
+    direction: str | tuple[float, float, float] = "normal"
+    projection: str = "planar"
+
+    def __post_init__(self) -> None:
+        if self.source_patch is None:
+            raise ValueError("DisplacementSurfacePatch.source_patch is required.")
+        if not isinstance(self.source_patch, SurfacePatch):
+            raise TypeError("DisplacementSurfacePatch.source_patch must be a SurfacePatch.")
+        samples = np.asarray(self.displacement_samples, dtype=float)
+        if samples.ndim != 2:
+            raise ValueError("DisplacementSurfacePatch.displacement_samples must be a 2D array.")
+        if samples.shape[0] < 2 or samples.shape[1] < 2:
+            raise ValueError("DisplacementSurfacePatch.displacement_samples must be at least 2x2.")
+        if not np.all(np.isfinite(samples)):
+            raise ValueError("DisplacementSurfacePatch.displacement_samples must be finite.")
+        alpha_mask = np.asarray(self.alpha_mask, dtype=bool)
+        if alpha_mask.shape != samples.shape:
+            raise ValueError("DisplacementSurfacePatch.alpha_mask must match displacement_samples shape.")
+        alpha_mode = str(self.alpha_mode).lower()
+        if alpha_mode not in {"mask", "ignore"}:
+            raise ValueError("DisplacementSurfacePatch.alpha_mode must be 'mask' or 'ignore'.")
+        projection = str(self.projection).lower()
+        if projection != "planar":
+            raise ValueError("Only planar displacement projection is supported in this build.")
+        height_scale = float(self.height_scale)
+        if not np.isfinite(height_scale):
+            raise ValueError("DisplacementSurfacePatch.height_scale must be finite.")
+        direction = self.direction
+        if not isinstance(direction, str):
+            vector = _as_vec3(direction, name="direction")
+            if float(np.linalg.norm(vector)) == 0.0:
+                raise ValueError("DisplacementSurfacePatch direction vector must be non-zero.")
+            direction = tuple(float(value) for value in vector / float(np.linalg.norm(vector)))
+        else:
+            direction = direction.lower()
+            if direction not in {"normal", "x", "y", "z"}:
+                raise ValueError("DisplacementSurfacePatch.direction must be normal, x, y, z, or a vector.")
+        object.__setattr__(self, "family", "displacement")
+        object.__setattr__(self, "domain", self.source_patch.domain)
+        object.__setattr__(self, "displacement_samples", samples)
+        object.__setattr__(self, "alpha_mask", alpha_mask)
+        object.__setattr__(self, "alpha_mode", alpha_mode)
+        object.__setattr__(self, "height_scale", height_scale)
+        object.__setattr__(self, "direction", direction)
+        object.__setattr__(self, "projection", projection)
+        super().__post_init__()
+
+    def _sample_height(self, u: float, v: float) -> tuple[float, bool]:
+        rows, cols = self.displacement_samples.shape
+        u0, u1 = self.source_patch.domain.u_range
+        v0, v1 = self.source_patch.domain.v_range
+        u_norm = 0.0 if np.isclose(u1, u0) else (float(u) - u0) / (u1 - u0)
+        v_norm = 0.0 if np.isclose(v1, v0) else (float(v) - v0) / (v1 - v0)
+        x = np.clip(u_norm, 0.0, 1.0) * (cols - 1)
+        y = (1.0 - np.clip(v_norm, 0.0, 1.0)) * (rows - 1)
+        x0 = int(np.floor(x))
+        y0 = int(np.floor(y))
+        x1 = min(x0 + 1, cols - 1)
+        y1 = min(y0 + 1, rows - 1)
+        dx = x - x0
+        dy = y - y0
+        h00 = self.displacement_samples[y0, x0]
+        h10 = self.displacement_samples[y0, x1]
+        h01 = self.displacement_samples[y1, x0]
+        h11 = self.displacement_samples[y1, x1]
+        height = (
+            (1.0 - dx) * (1.0 - dy) * h00
+            + dx * (1.0 - dy) * h10
+            + (1.0 - dx) * dy * h01
+            + dx * dy * h11
+        )
+        mx = int(np.clip(round(x), 0, cols - 1))
+        my = int(np.clip(round(y), 0, rows - 1))
+        masked = not bool(self.alpha_mask[my, mx])
+        if self.alpha_mode == "ignore" and masked:
+            height = 0.0
+        return float(height * self.height_scale), masked
+
+    def _direction_at(self, u: float, v: float) -> np.ndarray:
+        if self.direction == "normal":
+            return self.source_patch.normal_at(u, v)
+        if self.direction == "x":
+            return np.array([1.0, 0.0, 0.0], dtype=float)
+        if self.direction == "y":
+            return np.array([0.0, 1.0, 0.0], dtype=float)
+        if self.direction == "z":
+            return np.array([0.0, 0.0, 1.0], dtype=float)
+        return np.asarray(self.direction, dtype=float)
+
+    def geometry_payload(self) -> dict[str, object]:
+        return {
+            "source_patch": self.source_patch.canonical_payload(),
+            "displacement_samples": self.displacement_samples,
+            "alpha_mask": self.alpha_mask,
+            "alpha_mode": self.alpha_mode,
+            "height_scale": self.height_scale,
+            "direction": self.direction,
+            "projection": self.projection,
+        }
+
+    def point_at(self, u: float, v: float) -> np.ndarray:
+        self.validate_parameters(u, v)
+        base = self.source_patch.point_at(u, v)
+        height, _masked = self._sample_height(u, v)
+        local = base + self._direction_at(u, v) * height
+        return _transform_point(self.transform_matrix, local)
 
     def derivatives_at(self, u: float, v: float) -> tuple[np.ndarray, np.ndarray]:
         self.validate_parameters(u, v)
@@ -2639,6 +2773,7 @@ __all__ = [
     "SurfacePatch",
     "PlanarSurfacePatch",
     "HeightmapSurfacePatch",
+    "DisplacementSurfacePatch",
     "RuledSurfacePatch",
     "RevolutionSurfacePatch",
     "BSplineSurfacePatch",

@@ -10,6 +10,7 @@ from impression.mesh import Mesh, MeshAnalysis, analyze_mesh, combine_meshes
 from ._legacy_mesh_deprecation import warn_mesh_primary_api
 from .surface import (
     ImplicitFieldEvaluationDomain,
+    DisplacementSurfacePatch,
     ImplicitSurfacePatch,
     HeightmapSurfacePatch,
     RevolutionSurfacePatch,
@@ -493,6 +494,34 @@ def _heightmap_patch_mesh(patch: HeightmapSurfacePatch, request: NormalizedTesse
     return mesh
 
 
+def _displacement_patch_mesh(patch: DisplacementSurfacePatch, request: NormalizedTessellationRequest) -> Mesh:
+    u_count, v_count = _rectangular_grid_counts(request)
+    uv_vertices, faces = _rectangular_grid_uv_mesh_data(patch, u_count=u_count, v_count=v_count)
+    vertices = np.asarray([patch.point_at(*_clamp_patch_parameters(patch, float(u), float(v))) for u, v in uv_vertices], dtype=float)
+    kept_faces: list[list[int]] = []
+    for tri in faces:
+        if patch.alpha_mode == "mask":
+            masked = False
+            for vertex_index in tri:
+                u, v = uv_vertices[int(vertex_index)]
+                _height, sample_masked = patch._sample_height(float(u), float(v))
+                masked = masked or sample_masked
+            if masked:
+                continue
+        kept_faces.append([int(tri[0]), int(tri[1]), int(tri[2])])
+    return Mesh(
+        vertices=vertices,
+        faces=np.asarray(kept_faces, dtype=int) if kept_faces else np.zeros((0, 3), dtype=int),
+        metadata={
+            "surface_family": patch.family,
+            "surface_patch_id": patch.stable_identity,
+            "heightmap_displacement_boundary": "surface-payload",
+            "heightmap_alpha_mode": patch.alpha_mode,
+            "heightmap_tessellation_request": request.cache_key,
+        },
+    )
+
+
 def _tessellate_patch_with_family_adapter(
     patch: SurfacePatch,
     request: NormalizedTessellationRequest,
@@ -508,6 +537,8 @@ def _tessellate_patch_with_family_adapter(
         mesh = _subdivision_patch_mesh(patch, request)
     elif isinstance(patch, HeightmapSurfacePatch):
         mesh = _heightmap_patch_mesh(patch, request)
+    elif isinstance(patch, DisplacementSurfacePatch):
+        mesh = _displacement_patch_mesh(patch, request)
     elif adapter.sampling_kind == "rectangular-grid":
         mesh = _rectangular_grid_patch_mesh(patch, request)
     else:
@@ -839,6 +870,7 @@ SURFACE_FAMILY_TESSELLATION_ADAPTERS: dict[str, SurfaceFamilyTessellationAdapter
         approximation_boundary="tessellation",
     ),
     "heightmap": SurfaceFamilyTessellationAdapter("heightmap", "rectangular-grid", supports_seam_boundaries=False),
+    "displacement": SurfaceFamilyTessellationAdapter("displacement", "rectangular-grid", supports_seam_boundaries=False),
 }
 
 _missing_surface_tessellation_adapters = set(SUPPORTED_SURFACE_PATCH_FAMILIES) - set(SURFACE_FAMILY_TESSELLATION_ADAPTERS)
