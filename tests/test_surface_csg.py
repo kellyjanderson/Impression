@@ -25,18 +25,22 @@ from impression.modeling import (
     SurfaceBooleanSplitRecord,
     SurfaceBooleanTrimmedPatchFragment,
     SurfaceCSGAnalyticIntersectionRecord,
+    SurfaceCSGConicDiagnostic,
     SurfaceCSGCurvePrimitive,
     SurfaceCSGCurveMappingDiagnostic,
     SurfaceCSGPatchLocalCurve,
     SurfaceCSGPatchLocalCurveMappingResult,
     SurfaceCSGPlanarRelationDiagnostic,
+    SurfaceCSGRevolutionIntersectionRecord,
     SurfaceCSGToleranceDiagnostic,
     SurfaceCSGTolerancePolicy,
     SurfaceShell,
     boolean_difference,
     boolean_intersection,
     boolean_union,
+    intersect_axis_compatible_revolution_pair,
     intersect_planar_linear_patch_pair,
+    intersect_planar_revolution_patch_pair,
     map_surface_csg_curve_to_patch_local,
     make_surface_csg_curve,
     make_surface_csg_line_curve,
@@ -230,6 +234,102 @@ def test_planar_linear_analytic_intersection_gates_ruled_pairs() -> None:
     assert record.relation == "unsupported-linear"
     assert record.supported is False
     assert "Ruled patch analytic intersection is gated" in record.diagnostics[0].message
+
+
+def test_plane_revolution_intersection_emits_circle_records_for_cylinder_cone_and_sphere() -> None:
+    plane_ref = SurfaceBooleanPatchRef(0, 0)
+    revolution_ref = SurfaceBooleanPatchRef(1, 0)
+    plane = PlanarSurfacePatch(
+        family="planar",
+        origin=(-2.0, -2.0, 0.5),
+        u_axis=(4.0, 0.0, 0.0),
+        v_axis=(0.0, 4.0, 0.0),
+    )
+    cylinder = RevolutionSurfacePatch(
+        family="revolution",
+        profile_curve=((1.0, 0.0, 0.0), (1.0, 0.0, 2.0)),
+    )
+    cone = RevolutionSurfacePatch(
+        family="revolution",
+        profile_curve=((0.0, 0.0, 0.0), (2.0, 0.0, 2.0)),
+    )
+    sphere = RevolutionSurfacePatch(
+        family="revolution",
+        profile_curve=((0.0, 0.0, -1.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+    )
+
+    records = (
+        intersect_planar_revolution_patch_pair(plane_ref, plane, revolution_ref, cylinder),
+        intersect_planar_revolution_patch_pair(plane_ref, plane, revolution_ref, cone),
+        intersect_planar_revolution_patch_pair(
+            SurfaceBooleanPatchRef(0, 1),
+            PlanarSurfacePatch(
+                family="planar",
+                origin=(-2.0, -2.0, 0.0),
+                u_axis=(4.0, 0.0, 0.0),
+                v_axis=(0.0, 4.0, 0.0),
+            ),
+            revolution_ref,
+            sphere,
+        ),
+    )
+
+    assert all(isinstance(record, SurfaceCSGRevolutionIntersectionRecord) for record in records)
+    assert all(record.supported for record in records)
+    assert all(record.conic_kind == "circle" for record in records)
+    assert all(record.curve is not None and record.curve.kind == "arc" for record in records)
+    assert all(len(record.patch_local_curves) == 2 for record in records)
+    assert records[0].curve is not None
+    assert dict(records[0].curve.parameters)["radius"] == pytest.approx(1.0)
+    assert records[1].curve is not None
+    assert dict(records[1].curve.parameters)["radius"] == pytest.approx(0.5)
+    assert records[2].curve is not None
+    assert dict(records[2].curve.parameters)["radius"] == pytest.approx(1.0)
+
+
+def test_plane_revolution_intersection_reports_degenerate_and_unsupported_cases() -> None:
+    plane_ref = SurfaceBooleanPatchRef(0, 0)
+    revolution_ref = SurfaceBooleanPatchRef(1, 0)
+    oblique_plane = PlanarSurfacePatch(
+        family="planar",
+        origin=(0.0, 0.0, 0.0),
+        u_axis=(1.0, 0.0, 0.0),
+        v_axis=(0.0, 1.0, 1.0),
+    )
+    horizontal_plane = PlanarSurfacePatch(
+        family="planar",
+        origin=(-1.0, -1.0, 0.0),
+        u_axis=(2.0, 0.0, 0.0),
+        v_axis=(0.0, 2.0, 0.0),
+    )
+    cone = RevolutionSurfacePatch(
+        family="revolution",
+        profile_curve=((0.0, 0.0, 0.0), (2.0, 0.0, 2.0)),
+    )
+
+    oblique = intersect_planar_revolution_patch_pair(plane_ref, oblique_plane, revolution_ref, cone)
+    tangent = intersect_planar_revolution_patch_pair(plane_ref, horizontal_plane, revolution_ref, cone)
+
+    assert oblique.supported is False
+    assert isinstance(oblique.diagnostics[0], SurfaceCSGConicDiagnostic)
+    assert oblique.diagnostics[0].code == "unsupported-oblique-plane"
+    assert tangent.supported is False
+    assert tangent.diagnostics[0].code == "tangent-or-singular-axis"
+
+
+def test_axis_compatible_revolution_pair_is_explicitly_gated() -> None:
+    first_ref = SurfaceBooleanPatchRef(0, 0)
+    second_ref = SurfaceBooleanPatchRef(1, 0)
+    cylinder = RevolutionSurfacePatch(
+        family="revolution",
+        profile_curve=((1.0, 0.0, 0.0), (1.0, 0.0, 2.0)),
+    )
+
+    record = intersect_axis_compatible_revolution_pair(first_ref, cylinder, second_ref, cylinder)
+
+    assert record.supported is False
+    assert record.diagnostics[0].code == "axis-compatible-revolution-gate"
+    assert "recognized" in record.diagnostics[0].message
 
 
 def _translated(body: SurfaceBody, offset: tuple[float, float, float]) -> SurfaceBody:

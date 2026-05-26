@@ -309,6 +309,46 @@ class SurfaceCSGPlanarRelationDiagnostic:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGConicDiagnostic:
+    """Explicit diagnostic for revolution/conic analytic intersections."""
+
+    code: str
+    message: str
+    first_patch: SurfaceBooleanPatchRef
+    second_patch: SurfaceBooleanPatchRef
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "first_patch": {
+                "operand_index": self.first_patch.operand_index,
+                "patch_index": self.first_patch.patch_index,
+            },
+            "message": self.message,
+            "second_patch": {
+                "operand_index": self.second_patch.operand_index,
+                "patch_index": self.second_patch.patch_index,
+            },
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGRevolutionIntersectionRecord:
+    """Analytic revolution/conic patch intersection result."""
+
+    first_patch: SurfaceBooleanPatchRef
+    second_patch: SurfaceBooleanPatchRef
+    conic_kind: Literal["circle", "ellipse", "parabola", "hyperbola", "line", "unsupported"]
+    curve: SurfaceCSGCurvePrimitive | None = None
+    patch_local_curves: tuple[SurfaceCSGPatchLocalCurve, ...] = ()
+    diagnostics: tuple[SurfaceCSGConicDiagnostic, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return self.curve is not None and self.conic_kind != "unsupported" and not self.diagnostics
+
+
+@dataclass(frozen=True)
 class SurfaceCSGAnalyticIntersectionRecord:
     """Analytic low-order patch intersection result."""
 
@@ -626,10 +666,13 @@ def validate_surface_csg_curve(
     """Return explicit tolerance diagnostics for one CSG curve primitive."""
 
     normalized_policy = normalize_surface_csg_tolerance_policy(policy)
-    start = np.asarray(curve.points_3d[0], dtype=float)
-    end = np.asarray(curve.points_3d[-1], dtype=float)
+    points = np.asarray(curve.points_3d, dtype=float)
     diagnostics: list[SurfaceCSGToleranceDiagnostic] = []
-    if float(np.linalg.norm(end - start)) <= normalized_policy.degeneracy_tolerance:
+    if curve.kind == "line":
+        span = float(np.linalg.norm(points[-1] - points[0]))
+    else:
+        span = float(np.max(np.linalg.norm(points - points[0], axis=1)))
+    if span <= normalized_policy.degeneracy_tolerance:
         diagnostics.append(
             SurfaceCSGToleranceDiagnostic(
                 code="degenerate-curve",
@@ -1082,6 +1125,199 @@ def intersect_planar_linear_patch_pair(
         relation="crossing",
         curve=curve,
         patch_local_curves=(first_mapping.curve, second_mapping.curve),
+    )
+
+
+def _surface_csg_conic_diagnostic(
+    code: str,
+    message: str,
+    first_ref: SurfaceBooleanPatchRef,
+    second_ref: SurfaceBooleanPatchRef,
+) -> SurfaceCSGConicDiagnostic:
+    return SurfaceCSGConicDiagnostic(
+        code=code,
+        message=message,
+        first_patch=first_ref,
+        second_patch=second_ref,
+    )
+
+
+def _revolution_profile_radius_height(patch: RevolutionSurfacePatch) -> tuple[np.ndarray, np.ndarray]:
+    axis = patch.axis_direction
+    rel = patch.profile_curve - patch.axis_origin
+    heights = rel @ axis
+    radial = rel - np.outer(heights, axis)
+    radii = np.linalg.norm(radial, axis=1)
+    return radii.astype(float), heights.astype(float)
+
+
+def _revolution_radius_at_height(
+    patch: RevolutionSurfacePatch,
+    height: float,
+    *,
+    policy: SurfaceCSGTolerancePolicy,
+) -> tuple[str, float] | None:
+    radii, heights = _revolution_profile_radius_height(patch)
+    h_min = float(np.min(heights))
+    h_max = float(np.max(heights))
+    if height < h_min - policy.domain_tolerance or height > h_max + policy.domain_tolerance:
+        return None
+    if np.allclose(radii, radii[0], atol=policy.equality_tolerance):
+        return ("cylinder", float(radii[0]))
+    if len(radii) >= 3 and abs(float(radii[0])) <= policy.equality_tolerance and abs(float(radii[-1])) <= policy.equality_tolerance:
+        center_height = (h_min + h_max) * 0.5
+        sphere_radius = (h_max - h_min) * 0.5
+        offset = height - center_height
+        remaining = sphere_radius * sphere_radius - offset * offset
+        if remaining < -policy.equality_tolerance:
+            return None
+        return ("sphere", float(np.sqrt(max(0.0, remaining))))
+    if len(radii) >= 2 and (
+        abs(float(radii[0])) <= policy.equality_tolerance
+        or abs(float(radii[-1])) <= policy.equality_tolerance
+    ):
+        order = np.argsort(heights)
+        radius = float(np.interp(height, heights[order], radii[order]))
+        return ("cone", radius)
+    return None
+
+
+def _circle_points(center: np.ndarray, axis: np.ndarray, radius: float) -> tuple[tuple[float, float, float], ...]:
+    x_axis, y_axis = _axis_frame(axis)
+    points = []
+    for angle in (0.0, np.pi * 0.5, np.pi, np.pi * 1.5, np.pi * 2.0):
+        point = center + radius * (np.cos(angle) * x_axis + np.sin(angle) * y_axis)
+        points.append((float(point[0]), float(point[1]), float(point[2])))
+    return tuple(points)
+
+
+def intersect_planar_revolution_patch_pair(
+    plane_ref: SurfaceBooleanPatchRef,
+    plane_patch: PlanarSurfacePatch,
+    revolution_ref: SurfaceBooleanPatchRef,
+    revolution_patch: RevolutionSurfacePatch,
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> SurfaceCSGRevolutionIntersectionRecord:
+    """Intersect a plane with a supported revolution/conic patch without mesh fallback."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    plane_normal = _planar_patch_normal(plane_patch)
+    plane_origin = plane_patch.point_at(plane_patch.domain.u_range[0], plane_patch.domain.v_range[0])
+    axis = revolution_patch.axis_direction
+    parallel = abs(float(np.dot(plane_normal, axis)))
+    if 1.0 - parallel > normalized_policy.equality_tolerance:
+        return SurfaceCSGRevolutionIntersectionRecord(
+            first_patch=plane_ref,
+            second_patch=revolution_ref,
+            conic_kind="unsupported",
+            diagnostics=(
+                _surface_csg_conic_diagnostic(
+                    "unsupported-oblique-plane",
+                    "Only axis-perpendicular plane/revolution conic intersections are supported in this slice.",
+                    plane_ref,
+                    revolution_ref,
+                ),
+            ),
+        )
+    height = float(np.dot(plane_origin - revolution_patch.axis_origin, axis))
+    radius_record = _revolution_radius_at_height(revolution_patch, height, policy=normalized_policy)
+    if radius_record is None:
+        return SurfaceCSGRevolutionIntersectionRecord(
+            first_patch=plane_ref,
+            second_patch=revolution_ref,
+            conic_kind="unsupported",
+            diagnostics=(
+                _surface_csg_conic_diagnostic(
+                    "outside-profile-domain",
+                    "Plane lies outside the revolution profile height domain.",
+                    plane_ref,
+                    revolution_ref,
+                ),
+            ),
+        )
+    profile_kind, radius = radius_record
+    if radius <= normalized_policy.degeneracy_tolerance:
+        return SurfaceCSGRevolutionIntersectionRecord(
+            first_patch=plane_ref,
+            second_patch=revolution_ref,
+            conic_kind="unsupported",
+            diagnostics=(
+                _surface_csg_conic_diagnostic(
+                    "tangent-or-singular-axis",
+                    "Plane/revolution intersection degenerates at the revolution axis.",
+                    plane_ref,
+                    revolution_ref,
+                ),
+            ),
+        )
+    center = revolution_patch.axis_origin + axis * height
+    points = _circle_points(center, axis, radius)
+    curve = make_surface_csg_curve(
+        "arc",
+        points,
+        parameters=(
+            ("axis_x", float(axis[0])),
+            ("axis_y", float(axis[1])),
+            ("axis_z", float(axis[2])),
+            ("center_x", float(center[0])),
+            ("center_y", float(center[1])),
+            ("center_z", float(center[2])),
+            ("radius", radius),
+        ),
+        policy=normalized_policy,
+    )
+    plane_mapping = map_surface_csg_curve_to_patch_local(curve, plane_ref, plane_patch, policy=normalized_policy)
+    revolution_mapping = map_surface_csg_curve_to_patch_local(
+        curve, revolution_ref, revolution_patch, policy=normalized_policy
+    )
+    if not plane_mapping.supported or plane_mapping.curve is None or not revolution_mapping.supported or revolution_mapping.curve is None:
+        return SurfaceCSGRevolutionIntersectionRecord(
+            first_patch=plane_ref,
+            second_patch=revolution_ref,
+            conic_kind="unsupported",
+            diagnostics=(
+                _surface_csg_conic_diagnostic(
+                    "mapping-failed",
+                    "Plane/revolution conic could not be mapped into both patch-local domains.",
+                    plane_ref,
+                    revolution_ref,
+                ),
+            ),
+        )
+    return SurfaceCSGRevolutionIntersectionRecord(
+        first_patch=plane_ref,
+        second_patch=revolution_ref,
+        conic_kind="circle" if profile_kind in {"cylinder", "sphere", "cone"} else "unsupported",
+        curve=curve,
+        patch_local_curves=(plane_mapping.curve, revolution_mapping.curve),
+    )
+
+
+def intersect_axis_compatible_revolution_pair(
+    first_ref: SurfaceBooleanPatchRef,
+    first_patch: RevolutionSurfacePatch,
+    second_ref: SurfaceBooleanPatchRef,
+    second_patch: RevolutionSurfacePatch,
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> SurfaceCSGRevolutionIntersectionRecord:
+    """Gate axis-compatible revolution/revolution pairs before general algebra."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    same_axis = np.allclose(first_patch.axis_direction, second_patch.axis_direction, atol=normalized_policy.equality_tolerance)
+    same_origin = np.linalg.norm(first_patch.axis_origin - second_patch.axis_origin) <= normalized_policy.equality_tolerance
+    if same_axis and same_origin:
+        code = "axis-compatible-revolution-gate"
+        message = "Axis-compatible revolution/revolution intersection is recognized but awaits operation-specific curve selection."
+    else:
+        code = "unsupported-general-revolution"
+        message = "General revolution/revolution intersection is outside the supported solver boundary."
+    return SurfaceCSGRevolutionIntersectionRecord(
+        first_patch=first_ref,
+        second_patch=second_ref,
+        conic_kind="unsupported",
+        diagnostics=(_surface_csg_conic_diagnostic(code, message, first_ref, second_ref),),
     )
 
 
