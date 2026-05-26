@@ -40,7 +40,9 @@ def make_box(
 
         return make_surface_box(size=size, center=center, metadata=_surface_metadata(color=color))
 
-    mesh = _box_mesh(size, center)
+    from ._legacy_mesh_primitives import box_mesh
+
+    mesh = box_mesh(size, center)
     if color is not None:
         set_mesh_color(mesh, color)
     return mesh
@@ -73,7 +75,9 @@ def make_cylinder(
         )
 
     direction = _normalize(direction)
-    mesh = _circular_frustum_mesh(radius, radius, height, resolution, capping=capping)
+    from ._legacy_mesh_primitives import circular_frustum_mesh
+
+    mesh = circular_frustum_mesh(radius, radius, height, resolution, capping=capping)
     mesh = _orient_mesh(mesh, direction)
     mesh.translate(center, inplace=True)
     if color is not None:
@@ -118,7 +122,9 @@ def make_ngon(
         )
 
     direction = _normalize(direction)
-    mesh = _circular_frustum_mesh(radius, radius, height, sides, capping=True)
+    from ._legacy_mesh_primitives import circular_frustum_mesh
+
+    mesh = circular_frustum_mesh(radius, radius, height, sides, capping=True)
     mesh = _orient_mesh(mesh, direction)
     mesh.translate(center, inplace=True)
     if color is not None:
@@ -283,7 +289,9 @@ def make_cone(
             metadata=_surface_metadata(color=color),
         )
 
-    mesh = _circular_frustum_mesh(bottom_radius, top_radius, height, resolution)
+    from ._legacy_mesh_primitives import circular_frustum_mesh
+
+    mesh = circular_frustum_mesh(bottom_radius, top_radius, height, resolution)
     mesh = _orient_mesh(mesh, direction)
     mesh.translate(center, inplace=True)
     if color is not None:
@@ -319,7 +327,9 @@ def make_prism(
 
     if top_size is None:
         top_size = tuple(base_size)
-    mesh = _rectangular_frustum_mesh(tuple(base_size), tuple(top_size), height)
+    from ._legacy_mesh_primitives import rectangular_frustum_mesh
+
+    mesh = rectangular_frustum_mesh(tuple(base_size), tuple(top_size), height)
     mesh = _orient_mesh(mesh, direction)
     mesh.translate(center, inplace=True)
     if color is not None:
@@ -546,43 +556,6 @@ def _orient_mesh(mesh: Mesh, direction: Sequence[float]) -> Mesh:
     return rotated
 
 
-def _box_mesh(size: Sequence[float], center: Sequence[float]) -> Mesh:
-    sx, sy, sz = size
-    cx, cy, cz = center
-    hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
-    points = np.array(
-        [
-            (-hx, -hy, -hz),
-            (hx, -hy, -hz),
-            (hx, hy, -hz),
-            (-hx, hy, -hz),
-            (-hx, -hy, hz),
-            (hx, -hy, hz),
-            (hx, hy, hz),
-            (-hx, hy, hz),
-        ]
-    )
-    points += np.array([cx, cy, cz], dtype=float)
-    faces = np.array(
-        [
-            [0, 2, 1],  # bottom (-Z)
-            [0, 3, 2],
-            [4, 5, 6],  # top (+Z)
-            [4, 6, 7],
-            [0, 1, 5],  # -Y
-            [0, 5, 4],
-            [1, 2, 6],  # +X
-            [1, 6, 5],
-            [2, 3, 7],  # +Y
-            [2, 7, 6],
-            [0, 4, 7],  # -X
-            [0, 7, 3],
-        ],
-        dtype=int,
-    )
-    return Mesh(points, faces)
-
-
 def _sphere_mesh(radius: float, theta_resolution: int, phi_resolution: int) -> Mesh:
     theta_steps = max(int(theta_resolution), 3)
     phi_points = max(int(phi_resolution), 3)
@@ -656,140 +629,6 @@ def _torus_mesh(major_radius: float, minor_radius: float, n_theta: int, n_phi: i
     if faces_arr.size:
         faces_arr = faces_arr[:, [0, 2, 1]]
     return Mesh(points_arr, faces_arr)
-
-
-def _circular_frustum_mesh(
-    bottom_radius: float,
-    top_radius: float,
-    height: float,
-    resolution: int,
-    capping: bool = True,
-) -> Mesh:
-    resolution = max(int(resolution), 3)
-    bottom_radius = max(bottom_radius, 0.0)
-    top_radius = max(top_radius, 0.0)
-    z_bottom = -height / 2.0
-    z_top = height / 2.0
-    angles = np.linspace(0, 2 * np.pi, resolution, endpoint=False)
-
-    points = []
-    faces: list[list[int]] = []
-
-    def ring_points(radius: float, z: float) -> np.ndarray:
-        return np.column_stack(
-            [
-                radius * np.cos(angles),
-                radius * np.sin(angles),
-                np.full_like(angles, z),
-            ]
-        )
-
-    bottom_has_ring = bottom_radius > 0
-    top_has_ring = top_radius > 0
-
-    if bottom_has_ring:
-        bottom = ring_points(bottom_radius, z_bottom)
-        bottom_indices = np.arange(len(bottom))
-        points.append(bottom)
-    else:
-        bottom = np.array([[0.0, 0.0, z_bottom]])
-        bottom_indices = np.array([0])
-        points.append(bottom)
-
-    if top_has_ring:
-        top = ring_points(top_radius, z_top)
-        top_indices = np.arange(len(points[0]), len(points[0]) + len(top))
-        points.append(top)
-    else:
-        top = np.array([[0.0, 0.0, z_top]])
-        top_indices = np.array([len(points[0])])
-        points.append(top)
-
-    points_arr = np.vstack(points)
-
-    if bottom_has_ring and top_has_ring:
-        count = resolution
-        for i in range(count):
-            j = (i + 1) % count
-            faces.append([bottom_indices[i], bottom_indices[j], top_indices[j], top_indices[i]])
-        if capping:
-            faces.append(list(bottom_indices[::-1]))
-            faces.append(list(top_indices))
-    elif bottom_has_ring:
-        apex = int(top_indices[0])
-        count = resolution
-        for i in range(count):
-            j = (i + 1) % count
-            faces.append([bottom_indices[i], bottom_indices[j], apex])
-        if capping:
-            faces.append(list(bottom_indices[::-1]))
-    else:
-        # inverted cone (top ring, bottom apex)
-        apex = int(bottom_indices[0])
-        count = resolution
-        for i in range(count):
-            j = (i + 1) % count
-            faces.append([apex, top_indices[j], top_indices[i]])
-        if capping:
-            faces.append(list(top_indices))
-
-    faces_arr = triangulate_faces(faces)
-    return Mesh(points_arr, faces_arr)
-
-
-def _rectangular_frustum_mesh(
-    base_size: Tuple[float, float],
-    top_size: Tuple[float, float],
-    height: float,
-) -> Mesh:
-    hx, hy = base_size[0] / 2.0, base_size[1] / 2.0
-    tx, ty = top_size[0] / 2.0, top_size[1] / 2.0
-    z_bottom = -height / 2.0
-    z_top = height / 2.0
-
-    bottom_pts = np.array(
-        [
-            (-hx, -hy, z_bottom),
-            (hx, -hy, z_bottom),
-            (hx, hy, z_bottom),
-            (-hx, hy, z_bottom),
-        ]
-    )
-
-    if top_size[0] == 0 and top_size[1] == 0:
-        top_pts = np.array([[0.0, 0.0, z_top]])
-        apex_only = True
-    else:
-        top_pts = np.array(
-            [
-                (-tx, -ty, z_top),
-                (tx, -ty, z_top),
-                (tx, ty, z_top),
-                (-tx, ty, z_top),
-            ]
-        )
-        apex_only = False
-
-    points = np.vstack([bottom_pts, top_pts])
-    faces: list[list[int]] = []
-    bottom_indices = np.arange(4)
-
-    if apex_only:
-        apex_idx = 4
-        for i in range(4):
-            j = (i + 1) % 4
-            faces.append([bottom_indices[i], bottom_indices[j], apex_idx])
-        faces.append(list(bottom_indices[::-1]))
-    else:
-        top_indices = np.arange(4, 8)
-        for i in range(4):
-            j = (i + 1) % 4
-            faces.append([bottom_indices[i], bottom_indices[j], top_indices[j], top_indices[i]])
-        faces.append(list(bottom_indices[::-1]))
-        faces.append(list(top_indices))
-
-    faces_arr = triangulate_faces(faces)
-    return Mesh(points, faces_arr)
 
 
 def _orient_faces_outward(vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:

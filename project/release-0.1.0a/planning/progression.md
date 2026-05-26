@@ -379,7 +379,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 161: Primitive Surface Defaults: Cylinder, Cone, Ngon (v1.0)](../specifications/surface-161-primitive-surface-defaults-cylinder-cone-ngon-v1_0.md)
 - [x] [Surface Spec 162: Primitive Surface Defaults: Sphere And Torus (v1.0)](../specifications/surface-162-primitive-surface-defaults-sphere-and-torus-v1_0.md)
 - [x] [Surface Spec 163: Primitive Mesh Compatibility API Names (v1.0)](../specifications/surface-163-primitive-mesh-compatibility-api-names-v1_0.md)
-- [ ] [Surface Spec 164: Primitive Planar And Frustum Helper Quarantine (v1.0)](../specifications/surface-164-primitive-planar-and-frustum-helper-quarantine-v1_0.md)
+- [x] [Surface Spec 164: Primitive Planar And Frustum Helper Quarantine (v1.0)](../specifications/surface-164-primitive-planar-and-frustum-helper-quarantine-v1_0.md)
 - [ ] [Surface Spec 165: Primitive Curved Helper Quarantine (v1.0)](../specifications/surface-165-primitive-curved-helper-quarantine-v1_0.md)
 - [ ] [Surface Spec 166: Primitive Tessellation Helper Relocation (v1.0)](../specifications/surface-166-primitive-tessellation-helper-relocation-v1_0.md)
 - [ ] [Surface Spec 167: Loft Spec 60 Revision Or Retirement (v1.0)](../specifications/surface-167-loft-spec-60-revision-or-retirement-v1_0.md)
