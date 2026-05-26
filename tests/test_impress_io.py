@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import impression.io.impress as impress_io
@@ -140,6 +142,48 @@ def test_validate_impress_document_root_rejects_unsafe_root_shape() -> None:
 def _single_patch_body(offset: float = 0.0):
     shell = make_surface_shell([PlanarSurfacePatch(family="planar", origin=(offset, 0.0, 0.0))])
     return make_surface_body([shell])
+
+
+def _round_trip_fixture_body() -> object:
+    planar = PlanarSurfacePatch(
+        family="planar",
+        metadata={"kernel": {"face": "planar"}},
+        trim_loops=(TrimLoop(points_uv=[(0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0)], category="outer"),),
+    )
+    ruled = RuledSurfacePatch(
+        family="ruled",
+        metadata={"consumer": {"label": "guide"}},
+        start_curve=[(0.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+        end_curve=[(1.0, 0.0, 0.25), (1.0, 1.0, 0.25)],
+    )
+    seam = SurfaceSeam(
+        "planar-ruled",
+        (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")),
+        metadata={"kernel": {"continuity_source": "authored"}},
+    )
+    adjacency = SurfaceAdjacencyRecord(
+        source=SurfaceBoundaryRef(0, "right"),
+        target=SurfaceBoundaryRef(1, "left"),
+        seam_id="planar-ruled",
+    )
+    return make_surface_body(
+        [make_surface_shell([planar, ruled], seams=(seam,), adjacency=(adjacency,), metadata={"shell": "primary"})],
+        metadata={"body": "fixture"},
+    )
+
+
+def _assert_loaded_body_preserves_identity_and_metadata(loaded_body: object, expected_body: object) -> None:
+    assert loaded_body.stable_identity == expected_body.stable_identity
+    assert loaded_body.metadata == expected_body.metadata
+    assert loaded_body.shells[0].metadata == expected_body.shells[0].metadata
+    assert [patch.metadata for patch in loaded_body.shells[0].patches] == [
+        patch.metadata for patch in expected_body.shells[0].patches
+    ]
+    assert loaded_body.shells[0].seams[0].metadata == expected_body.shells[0].seams[0].metadata
+
+
+def _invalid_impress_file(path, payload: dict[str, object]) -> None:
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
 
 
 def test_make_surface_body_store_creates_ordered_identity_entries() -> None:
@@ -309,6 +353,56 @@ def test_load_impress_round_trips_saved_surface_bodies(tmp_path) -> None:
     assert [loaded_body.stable_identity for loaded_body in loaded.bodies] == [body.stable_identity]
     assert loaded.body_store.bodies[0].body is not None
     assert loaded.body_store.bodies[0].body.stable_identity == body.stable_identity
+
+
+def test_impress_acceptance_round_trip_preserves_identity_and_metadata(tmp_path) -> None:
+    body = _round_trip_fixture_body()
+    path = tmp_path / "acceptance.impress"
+
+    save_impress([body], path, metadata={"document": "acceptance"})
+    loaded = load_impress(path)
+
+    assert loaded.root.metadata == {"document": "acceptance"}
+    assert len(loaded.bodies) == 1
+    _assert_loaded_body_preserves_identity_and_metadata(loaded.bodies[0], body)
+    assert path.read_text(encoding="utf-8") == dumps_impress_json(make_impress_document_payload([body], metadata={"document": "acceptance"}))
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda payload: payload.update({"mesh": {"vertices": [], "faces": []}}), "Unsupported `.impress` document fields"),
+        (
+            lambda payload: payload["patches"].update(  # type: ignore[index,union-attr]
+                {
+                    "implicit-patch": {
+                        "kind": "ImplicitFieldSurfacePatch",
+                        "family": "implicit",
+                        "domain": {"u_range": [0.0, 1.0], "v_range": [0.0, 1.0], "normalized": True},
+                        "capability_flags": [],
+                        "transform_matrix": np.eye(4).tolist(),
+                        "metadata": {"code": "lambda x: x"},
+                        "trim_loops": [],
+                        "geometry": {"expression": "exec('unsafe')"},
+                    }
+                }
+            ),
+            "Unsupported SurfacePatch kind",
+        ),
+        (
+            lambda payload: payload["body_store"]["bodies"][0].update({"stable_identity": "not-the-body"}),  # type: ignore[index,union-attr]
+            "stable_identity does not match",
+        ),
+    ],
+)
+def test_impress_acceptance_invalid_files_refuse_explicitly(tmp_path, mutate, message) -> None:
+    payload = make_impress_document_payload([_round_trip_fixture_body()])
+    mutate(payload)
+    path = tmp_path / "invalid.impress"
+    _invalid_impress_file(path, payload)
+
+    with pytest.raises(ImpressFormatError, match=message):
+        load_impress(path)
 
 
 def test_loads_impress_json_returns_load_result_without_path() -> None:
