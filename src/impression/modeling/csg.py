@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import hashlib
+import json
 from typing import Iterable, Literal, Mapping, Sequence, Union
 
 import warnings
@@ -33,6 +35,13 @@ SurfaceBooleanBodyRelation = Literal["disjoint", "touching", "overlap", "contain
 SurfaceBooleanPatchRelation = Literal["inside", "outside", "on"]
 SurfaceBooleanSplitRole = Literal["survive", "cut_cap", "discard"]
 SurfaceBooleanUnsupportedPhase = Literal["operand-family-eligibility", "intersection-kernel"]
+SurfaceCSGCurveKind = Literal["line", "arc", "conic", "sampled"]
+SurfaceCSGToleranceDiagnosticCode = Literal[
+    "invalid-tolerance",
+    "degenerate-curve",
+    "ambiguous-curve",
+    "outside-domain",
+]
 
 
 class BooleanOperationError(RuntimeError):
@@ -120,6 +129,90 @@ class SurfaceBooleanTrimFragment:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGToleranceDiagnostic:
+    """Explicit tolerance diagnostic emitted by CSG curve helpers."""
+
+    code: SurfaceCSGToleranceDiagnosticCode
+    message: str
+    curve_id: str | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "curve_id": self.curve_id,
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGTolerancePolicy:
+    """Shared CSG numeric policy for snapping, equality, degeneracy, and domains."""
+
+    snap_tolerance: float = 1e-9
+    equality_tolerance: float = 1e-9
+    degeneracy_tolerance: float = 1e-9
+    domain_tolerance: float = 1e-9
+
+    def __post_init__(self) -> None:
+        values = {
+            "snap_tolerance": self.snap_tolerance,
+            "equality_tolerance": self.equality_tolerance,
+            "degeneracy_tolerance": self.degeneracy_tolerance,
+            "domain_tolerance": self.domain_tolerance,
+        }
+        for name, value in values.items():
+            normalized = float(value)
+            if not np.isfinite(normalized) or normalized <= 0.0:
+                raise ValueError(f"SurfaceCSGTolerancePolicy.{name} must be a positive finite value.")
+            object.__setattr__(self, name, normalized)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "snap_tolerance": self.snap_tolerance,
+            "equality_tolerance": self.equality_tolerance,
+            "degeneracy_tolerance": self.degeneracy_tolerance,
+            "domain_tolerance": self.domain_tolerance,
+        }
+
+
+DEFAULT_SURFACE_CSG_TOLERANCE_POLICY = SurfaceCSGTolerancePolicy()
+
+
+@dataclass(frozen=True)
+class SurfaceCSGCurvePrimitive:
+    """Surface-native CSG curve record shared by intersection and trim stages."""
+
+    kind: SurfaceCSGCurveKind
+    points_3d: tuple[tuple[float, float, float], ...]
+    parameters: tuple[tuple[str, float], ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.kind not in {"line", "arc", "conic", "sampled"}:
+            raise ValueError("SurfaceCSGCurvePrimitive.kind must be line, arc, conic, or sampled.")
+        points = tuple(_normalize_curve_point(point) for point in self.points_3d)
+        if len(points) < 2:
+            raise ValueError("SurfaceCSGCurvePrimitive requires at least two points.")
+        parameters = tuple((str(name), float(value)) for name, value in self.parameters)
+        if any(not name for name, _ in parameters):
+            raise ValueError("SurfaceCSGCurvePrimitive parameter names must be non-empty.")
+        if any(not np.isfinite(value) for _, value in parameters):
+            raise ValueError("SurfaceCSGCurvePrimitive parameter values must be finite.")
+        object.__setattr__(self, "points_3d", points)
+        object.__setattr__(self, "parameters", tuple(sorted(parameters)))
+
+    def canonical_payload(self, policy: SurfaceCSGTolerancePolicy | None = None) -> dict[str, object]:
+        normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+        return {
+            "kind": self.kind,
+            "parameters": self.parameters,
+            "points_3d": tuple(
+                tuple(_snap_scalar(component, normalized_policy.snap_tolerance) for component in point)
+                for point in self.points_3d
+            ),
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceBooleanCutCurve:
     """One surfaced cut curve shared by two operand patches."""
 
@@ -127,6 +220,7 @@ class SurfaceBooleanCutCurve:
     points_3d: tuple[tuple[float, float, float], ...]
     patches: tuple[SurfaceBooleanPatchRef, SurfaceBooleanPatchRef]
     trim_fragments: tuple[SurfaceBooleanTrimFragment, SurfaceBooleanTrimFragment]
+    curve: SurfaceCSGCurvePrimitive | None = None
 
 
 @dataclass(frozen=True)
@@ -343,6 +437,143 @@ SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX: dict[tuple[SurfaceBooleanOperation, 
     for left_family in PATCH_FAMILY_CAPABILITY_MATRIX
     for right_family in PATCH_FAMILY_CAPABILITY_MATRIX
 }
+
+
+def _normalize_curve_point(point: Sequence[float]) -> tuple[float, float, float]:
+    if len(point) != 3:
+        raise ValueError("CSG curve points must be 3D coordinates.")
+    normalized = tuple(float(component) for component in point)
+    if any(not np.isfinite(component) for component in normalized):
+        raise ValueError("CSG curve points must contain finite coordinates.")
+    return normalized
+
+
+def _snap_scalar(value: float, tolerance: float) -> float:
+    return round(float(value) / tolerance) * tolerance
+
+
+def normalize_surface_csg_tolerance_policy(
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> SurfaceCSGTolerancePolicy:
+    """Normalize a CSG tolerance policy or mapping to the shared policy record."""
+
+    if policy is None:
+        return DEFAULT_SURFACE_CSG_TOLERANCE_POLICY
+    if isinstance(policy, SurfaceCSGTolerancePolicy):
+        return policy
+    return SurfaceCSGTolerancePolicy(
+        snap_tolerance=policy.get("snap_tolerance", DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.snap_tolerance),
+        equality_tolerance=policy.get("equality_tolerance", DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.equality_tolerance),
+        degeneracy_tolerance=policy.get("degeneracy_tolerance", DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.degeneracy_tolerance),
+        domain_tolerance=policy.get("domain_tolerance", DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.domain_tolerance),
+    )
+
+
+def make_surface_csg_curve(
+    kind: SurfaceCSGCurveKind,
+    points_3d: Sequence[Sequence[float]],
+    *,
+    parameters: Sequence[tuple[str, float]] = (),
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> SurfaceCSGCurvePrimitive:
+    """Construct a deterministic surface-native CSG curve primitive."""
+
+    curve = SurfaceCSGCurvePrimitive(kind=kind, points_3d=tuple(tuple(point) for point in points_3d), parameters=tuple(parameters))
+    diagnostics = validate_surface_csg_curve(curve, policy=policy)
+    if diagnostics:
+        raise ValueError("; ".join(diagnostic.message for diagnostic in diagnostics))
+    return curve
+
+
+def make_surface_csg_line_curve(
+    start: Sequence[float],
+    end: Sequence[float],
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> SurfaceCSGCurvePrimitive:
+    """Construct a bounded line curve for CSG intersections."""
+
+    return make_surface_csg_curve("line", (start, end), policy=policy)
+
+
+def validate_surface_csg_curve(
+    curve: SurfaceCSGCurvePrimitive,
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> tuple[SurfaceCSGToleranceDiagnostic, ...]:
+    """Return explicit tolerance diagnostics for one CSG curve primitive."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    start = np.asarray(curve.points_3d[0], dtype=float)
+    end = np.asarray(curve.points_3d[-1], dtype=float)
+    diagnostics: list[SurfaceCSGToleranceDiagnostic] = []
+    if float(np.linalg.norm(end - start)) <= normalized_policy.degeneracy_tolerance:
+        diagnostics.append(
+            SurfaceCSGToleranceDiagnostic(
+                code="degenerate-curve",
+                curve_id=surface_csg_curve_digest(curve, policy=normalized_policy),
+                message="CSG curve length is at or below the degeneracy tolerance.",
+            )
+        )
+    if curve.kind in {"arc", "conic"} and not curve.parameters:
+        diagnostics.append(
+            SurfaceCSGToleranceDiagnostic(
+                code="ambiguous-curve",
+                curve_id=surface_csg_curve_digest(curve, policy=normalized_policy),
+                message=f"CSG {curve.kind} curves require parameters to disambiguate their analytic form.",
+            )
+        )
+    return tuple(diagnostics)
+
+
+def surface_csg_curve_key(
+    curve: SurfaceCSGCurvePrimitive,
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> tuple[object, ...]:
+    """Return a deterministic equality/deduplication key for a CSG curve."""
+
+    payload = curve.canonical_payload(normalize_surface_csg_tolerance_policy(policy))
+    return (
+        payload["kind"],
+        tuple(payload["parameters"]),
+        tuple(tuple(point) for point in payload["points_3d"]),
+    )
+
+
+def surface_csg_curve_digest(
+    curve: SurfaceCSGCurvePrimitive,
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> str:
+    """Return a stable digest for deterministic curve hashing."""
+
+    payload = curve.canonical_payload(normalize_surface_csg_tolerance_policy(policy))
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def surface_csg_curves_equal(
+    left: SurfaceCSGCurvePrimitive,
+    right: SurfaceCSGCurvePrimitive,
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> bool:
+    """Return whether two CSG curves are equal under the shared tolerance policy."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    return surface_csg_curve_key(left, policy=normalized_policy) == surface_csg_curve_key(right, policy=normalized_policy)
+
+
+def sort_surface_csg_curves(
+    curves: Iterable[SurfaceCSGCurvePrimitive],
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> tuple[SurfaceCSGCurvePrimitive, ...]:
+    """Return CSG curves in deterministic canonical-key order."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    return tuple(sorted(curves, key=lambda curve: surface_csg_curve_key(curve, policy=normalized_policy)))
 
 
 def _ensure_backend(backend: BooleanBackend) -> None:
@@ -1556,6 +1787,7 @@ def _intersect_axis_aligned_patch_pair(
         (float(start[0]), float(start[1]), float(start[2])),
         (float(end[0]), float(end[1]), float(end[2])),
     )
+    curve = make_surface_csg_line_curve(points_3d[0], points_3d[1])
     first_ref = SurfaceBooleanPatchRef(first.operand_index, first.patch_index)
     second_ref = SurfaceBooleanPatchRef(second.operand_index, second.patch_index)
     first_trim = SurfaceBooleanTrimFragment(
@@ -1577,6 +1809,7 @@ def _intersect_axis_aligned_patch_pair(
         points_3d=points_3d,
         patches=(first_ref, second_ref),
         trim_fragments=(first_trim, second_trim),
+        curve=curve,
     )
 
 
