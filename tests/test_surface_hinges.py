@@ -35,6 +35,19 @@ def test_surface_traditional_hinge_leaf_returns_surface_body_without_deprecation
     assert not [item for item in caught if issubclass(item.category, DeprecationWarning)]
 
 
+def test_traditional_hinge_defaults_lower_to_surface_outputs() -> None:
+    leaf = make_traditional_hinge_leaf(width=24.0, knuckle_count=5)
+    pair = make_traditional_hinge_pair(width=24.0, knuckle_count=5, include_pin=True)
+
+    assert isinstance(leaf, SurfaceBody)
+    assert tessellate_surface_body(leaf).mesh.n_faces > 0
+    assert isinstance(pair, HingeSurfaceAssembly)
+    assert pair.assembly_type == "traditional_hinge_pair"
+    collection = handoff_hinge_surface(pair)
+    assert len(collection.items) == 3
+    assert _combined_collection_mesh(collection).n_faces > 0
+
+
 def test_surface_hinge_paths_preserve_consumer_color_metadata() -> None:
     leaf = make_traditional_hinge_leaf(width=24.0, knuckle_count=5, color="#7f8fa6", backend="surface")
     pair = make_traditional_hinge_pair(

@@ -12,7 +12,7 @@ from impression.modeling import (
 
 
 def test_traditional_hinge_leaf_generates_mesh() -> None:
-    mesh = make_traditional_hinge_leaf(width=24.0, knuckle_count=5)
+    mesh = make_traditional_hinge_leaf(width=24.0, knuckle_count=5, backend="mesh")
     analysis = analyze_mesh(mesh)
     assert mesh.n_vertices > 0
     assert mesh.n_faces > 0
@@ -20,7 +20,7 @@ def test_traditional_hinge_leaf_generates_mesh() -> None:
 
 
 def test_traditional_hinge_pair_parts() -> None:
-    assembly = make_traditional_hinge_pair(width=24.0, include_pin=True, opened_angle_deg=35.0)
+    assembly = make_traditional_hinge_pair(width=24.0, include_pin=True, opened_angle_deg=35.0, backend="mesh")
     parts = assembly.to_meshes()
     assert len(parts) == 3
     assert all(mesh.n_faces > 0 for mesh in parts)
