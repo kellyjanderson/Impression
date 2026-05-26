@@ -3,10 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Iterable, Sequence
+import re
 
 import numpy as np
 
 from impression.modeling.drawing2d import Path2D
+from impression.modeling.bspline import BSpline2D
 from ._color import _normalize_color
 
 
@@ -17,6 +19,515 @@ def _normalize_loop_points(points: Sequence[Sequence[float]] | np.ndarray) -> np
     if np.allclose(pts[0], pts[-1]):
         pts = pts[:-1]
     return pts
+
+
+def derive_stable_id(name: str) -> str:
+    """Return a deterministic id-like token for a user-facing topology name."""
+
+    token = re.sub(r"[^a-zA-Z0-9]+", "-", str(name).strip().lower()).strip("-")
+    return token or "unnamed"
+
+
+def _normalize_provenance(provenance: dict[str, object] | None) -> dict[str, object]:
+    return dict(provenance or {})
+
+
+def _require_finite_vec2(value: Sequence[float], field_name: str) -> np.ndarray:
+    point = np.asarray(value, dtype=float).reshape(2)
+    if not np.all(np.isfinite(point)):
+        raise ValueError(f"{field_name} must contain finite coordinates.")
+    return point
+
+
+@dataclass(frozen=True)
+class TopologyPathSamplingPolicy:
+    sample_count: int | str = "auto"
+    min_span_samples: int = 1
+    preserve_protected_landmarks: bool = True
+
+    def __post_init__(self) -> None:
+        sample_count = self.sample_count
+        if sample_count != "auto":
+            if not isinstance(sample_count, int) or sample_count <= 0:
+                raise ValueError("sample_count must be 'auto' or a positive integer.")
+        min_span_samples = int(self.min_span_samples)
+        if min_span_samples <= 0:
+            raise ValueError("min_span_samples must be positive.")
+        object.__setattr__(self, "min_span_samples", min_span_samples)
+        object.__setattr__(self, "preserve_protected_landmarks", bool(self.preserve_protected_landmarks))
+
+
+@dataclass(frozen=True)
+class TopologyPoint:
+    id: str | None
+    coordinates: np.ndarray | Sequence[float]
+    ordinal: int
+    role: str | None = None
+    name: str | None = None
+    correspondence_id: str | None = None
+    protection_policy: str | None = None
+    provenance: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        point_id = self.id
+        provenance = _normalize_provenance(self.provenance)
+        if point_id is None:
+            if self.name is not None:
+                point_id = derive_stable_id(self.name)
+                provenance.setdefault("id_source", "derived_from_name")
+            else:
+                point_id = f"point-{int(self.ordinal)}"
+                provenance.setdefault("id_source", "derived_from_ordinal")
+        if not str(point_id):
+            raise ValueError("TopologyPoint id must not be empty.")
+        ordinal = int(self.ordinal)
+        if ordinal < 0:
+            raise ValueError("TopologyPoint ordinal must be non-negative.")
+        protection_policy = self.protection_policy
+        if protection_policy is None:
+            protection_policy = (
+                "protected"
+                if self.correspondence_id is not None or self.role in {"corner", "seam", "feature", "tangent_transition"}
+                else "sample"
+            )
+        if protection_policy not in {"protected", "sample", "synthetic"}:
+            raise ValueError("TopologyPoint protection_policy must be 'protected', 'sample', or 'synthetic'.")
+        object.__setattr__(self, "id", str(point_id))
+        object.__setattr__(self, "coordinates", _require_finite_vec2(self.coordinates, "TopologyPoint.coordinates"))
+        object.__setattr__(self, "ordinal", ordinal)
+        object.__setattr__(self, "protection_policy", protection_policy)
+        object.__setattr__(self, "provenance", provenance)
+
+
+@dataclass(frozen=True)
+class TopologyLandmark:
+    id: str | None = None
+    name: str | None = None
+    segment_id: str | None = None
+    parameter: float | None = None
+    point_ordinal: int | None = None
+    role: str | None = None
+    correspondence_id: str | None = None
+    protection_policy: str | None = None
+    provenance: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        landmark_id = self.id
+        provenance = _normalize_provenance(self.provenance)
+        if landmark_id is None:
+            if self.name is not None:
+                landmark_id = derive_stable_id(self.name)
+                provenance.setdefault("id_source", "derived_from_name")
+            elif self.point_ordinal is not None:
+                landmark_id = f"point-{int(self.point_ordinal)}-landmark"
+                provenance.setdefault("id_source", "derived_from_point_ordinal")
+            elif self.segment_id is not None and self.parameter is not None:
+                landmark_id = f"{self.segment_id}-u-{float(self.parameter):.6g}"
+                provenance.setdefault("id_source", "derived_from_segment_parameter")
+            else:
+                raise ValueError("TopologyLandmark requires id, name, point_ordinal, or segment parameter.")
+        if self.parameter is not None:
+            parameter = float(self.parameter)
+            if not np.isfinite(parameter):
+                raise ValueError("TopologyLandmark parameter must be finite.")
+            object.__setattr__(self, "parameter", parameter)
+        if self.point_ordinal is not None:
+            point_ordinal = int(self.point_ordinal)
+            if point_ordinal < 0:
+                raise ValueError("TopologyLandmark point_ordinal must be non-negative.")
+            object.__setattr__(self, "point_ordinal", point_ordinal)
+        protection_policy = self.protection_policy
+        if protection_policy is None:
+            protection_policy = (
+                "protected"
+                if self.correspondence_id is not None or self.role in {"corner", "seam", "feature", "tangent_transition"}
+                else "sample"
+            )
+        if protection_policy not in {"protected", "sample", "synthetic"}:
+            raise ValueError("TopologyLandmark protection_policy must be 'protected', 'sample', or 'synthetic'.")
+        object.__setattr__(self, "id", str(landmark_id))
+        object.__setattr__(self, "protection_policy", protection_policy)
+        object.__setattr__(self, "provenance", provenance)
+
+
+@dataclass(frozen=True)
+class TopologySegment:
+    id: str | None = None
+    name: str | None = None
+    source_kind: str = "polyline"
+    start_ref: str | None = None
+    end_ref: str | None = None
+    curve: object | None = None
+    correspondence_id: str | None = None
+    landmarks: tuple[TopologyLandmark, ...] = ()
+    provenance: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        segment_id = self.id
+        provenance = _normalize_provenance(self.provenance)
+        if segment_id is None:
+            if self.name is not None:
+                segment_id = derive_stable_id(self.name)
+                provenance.setdefault("id_source", "derived_from_name")
+            else:
+                segment_id = f"segment-{self.source_kind}"
+                provenance.setdefault("id_source", "derived_from_source_kind")
+        if not str(segment_id):
+            raise ValueError("TopologySegment id must not be empty.")
+        landmarks = tuple(self.landmarks)
+        object.__setattr__(self, "id", str(segment_id))
+        object.__setattr__(self, "source_kind", str(self.source_kind))
+        object.__setattr__(self, "landmarks", landmarks)
+        object.__setattr__(self, "provenance", provenance)
+
+
+@dataclass(frozen=True)
+class TopologyPath:
+    id: str = "topology-path"
+    closed: bool = True
+    anchor_id: str | None = None
+    anchor_policy: str = "authored"
+    direction: str = "forward"
+    sampling_policy: TopologyPathSamplingPolicy | dict[str, object] | None = None
+    points: tuple[TopologyPoint, ...] = ()
+    segments: tuple[TopologySegment, ...] = ()
+    landmarks: tuple[TopologyLandmark, ...] = ()
+    metadata: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        sampling_policy = self.sampling_policy
+        if sampling_policy is None:
+            sampling_policy = TopologyPathSamplingPolicy()
+        elif isinstance(sampling_policy, dict):
+            sampling_policy = TopologyPathSamplingPolicy(**sampling_policy)
+        elif not isinstance(sampling_policy, TopologyPathSamplingPolicy):
+            raise TypeError("sampling_policy must be TopologyPathSamplingPolicy, dict, or None.")
+        object.__setattr__(self, "closed", bool(self.closed))
+        object.__setattr__(self, "sampling_policy", sampling_policy)
+        object.__setattr__(self, "points", tuple(self.points))
+        object.__setattr__(self, "segments", tuple(self.segments))
+        object.__setattr__(self, "landmarks", tuple(self.landmarks))
+        object.__setattr__(self, "metadata", dict(self.metadata))
+        self.validate()
+
+    @classmethod
+    def from_points(
+        cls,
+        points: Iterable[Sequence[float] | tuple[str, Sequence[float]]],
+        *,
+        closed: bool = True,
+        anchor: str | None = None,
+        direction: str = "forward",
+        landmarks: Iterable[TopologyLandmark] | None = None,
+        sampling_policy: TopologyPathSamplingPolicy | dict[str, object] | None = None,
+        id: str = "topology-path",
+    ) -> "TopologyPath":
+        topology_points: list[TopologyPoint] = []
+        for ordinal, raw in enumerate(points):
+            name: str | None = None
+            coords: Sequence[float]
+            if isinstance(raw, tuple) and len(raw) == 2 and isinstance(raw[0], str):
+                name = raw[0]
+                coords = raw[1]
+            else:
+                coords = raw  # type: ignore[assignment]
+            topology_points.append(
+                TopologyPoint(
+                    id=None,
+                    name=name,
+                    coordinates=coords,
+                    ordinal=ordinal,
+                    role="corner" if name is not None else None,
+                    correspondence_id=name,
+                    provenance={"source": "from_points"},
+                )
+            )
+        anchor_id = anchor
+        if anchor_id is None and topology_points:
+            anchor_id = topology_points[0].id
+        return cls(
+            id=id,
+            closed=closed,
+            anchor_id=anchor_id,
+            anchor_policy="authored",
+            direction=direction,
+            sampling_policy=sampling_policy,
+            points=tuple(topology_points),
+            landmarks=tuple(landmarks or ()),
+            metadata={"source": "from_points"},
+        )
+
+    @classmethod
+    def from_path2d(
+        cls,
+        path: Path2D,
+        *,
+        closed: bool | None = None,
+        anchor: str | None = None,
+        landmarks: Iterable[TopologyLandmark] | None = None,
+        sampling_policy: TopologyPathSamplingPolicy | dict[str, object] | None = None,
+        id: str = "topology-path",
+        segments_per_circle: int = 64,
+        bezier_samples: int = 32,
+    ) -> "TopologyPath":
+        is_closed = path.closed if closed is None else bool(closed)
+        pts = _normalize_loop_points(path.sample(segments_per_circle=segments_per_circle, bezier_samples=bezier_samples))
+        result = cls.from_points(
+            pts,
+            closed=is_closed,
+            anchor=anchor,
+            landmarks=landmarks,
+            sampling_policy=sampling_policy,
+            id=id,
+        )
+        return cls(
+            id=result.id,
+            closed=result.closed,
+            anchor_id=result.anchor_id,
+            anchor_policy=result.anchor_policy,
+            direction=result.direction,
+            sampling_policy=result.sampling_policy,
+            points=result.points,
+            landmarks=result.landmarks,
+            metadata={"source": "from_path2d", "path_closed": path.closed},
+        )
+
+    @classmethod
+    def from_bspline(
+        cls,
+        curve: BSpline2D,
+        *,
+        closed: bool | None = None,
+        anchor: str | None = None,
+        landmarks: Iterable[TopologyLandmark] | None = None,
+        sampling_policy: TopologyPathSamplingPolicy | dict[str, object] | None = None,
+        id: str = "topology-path",
+    ) -> "TopologyPath":
+        is_closed = curve.closure != "open" if closed is None else bool(closed)
+        segment_id = f"{id}-bspline"
+        normalized_landmarks = tuple(
+            TopologyLandmark(
+                id=landmark.id,
+                name=landmark.name,
+                segment_id=landmark.segment_id or segment_id,
+                parameter=landmark.parameter,
+                point_ordinal=landmark.point_ordinal,
+                role=landmark.role,
+                correspondence_id=landmark.correspondence_id,
+                protection_policy=landmark.protection_policy,
+                provenance={**landmark.provenance, "source": "from_bspline"},
+            )
+            for landmark in (landmarks or ())
+        )
+        return cls(
+            id=id,
+            closed=is_closed,
+            anchor_id=anchor,
+            anchor_policy="authored",
+            sampling_policy=sampling_policy,
+            segments=(
+                TopologySegment(
+                    id=segment_id,
+                    name="bspline",
+                    source_kind="bspline",
+                    curve=curve,
+                    landmarks=normalized_landmarks,
+                    provenance={"source": "from_bspline"},
+                ),
+            ),
+            landmarks=normalized_landmarks,
+            metadata={"source": "from_bspline"},
+        )
+
+    @classmethod
+    def closed(
+        cls,
+        *,
+        anchor: str | None = None,
+        direction: str = "forward",
+        sampling_policy: TopologyPathSamplingPolicy | dict[str, object] | None = None,
+        id: str = "topology-path",
+    ) -> "TopologyPathBuilder":
+        return TopologyPathBuilder(id=id, closed=True, anchor=anchor, direction=direction, sampling_policy=sampling_policy)
+
+    def validate(self) -> None:
+        if not self.id:
+            raise ValueError("TopologyPath id must not be empty.")
+        if self.anchor_policy not in {"authored", "named", "generated", "inferred"}:
+            raise ValueError("anchor_policy must be authored, named, generated, or inferred.")
+        if self.direction not in {"forward", "reverse"}:
+            raise ValueError("direction must be 'forward' or 'reverse'.")
+        if not self.points and not self.segments:
+            raise ValueError("TopologyPath requires at least one point or segment.")
+        if self.closed and not self.segments and len(self.points) < 3:
+            raise ValueError("Closed TopologyPath requires at least three points.")
+        point_ids = [point.id for point in self.points]
+        if len(set(point_ids)) != len(point_ids):
+            raise ValueError("TopologyPath contains duplicate point ids.")
+        if self.anchor_id is not None and point_ids and self.anchor_id not in point_ids:
+            raise ValueError(f"TopologyPath anchor_id {self.anchor_id!r} does not match a point id.")
+        validate_topology_identity_records(self)
+
+    def to_section_loop(self) -> Loop:
+        if self.points:
+            return Loop(np.vstack([point.coordinates for point in self.points]))
+        if len(self.segments) == 1 and hasattr(self.segments[0].curve, "sample"):
+            return Loop(np.asarray(self.segments[0].curve.sample(), dtype=float))
+        raise ValueError("TopologyPath cannot be converted to a Loop without point or sampleable curve data.")
+
+
+@dataclass
+class TopologyPathBuilder:
+    id: str = "topology-path"
+    closed: bool = True
+    anchor: str | None = None
+    direction: str = "forward"
+    sampling_policy: TopologyPathSamplingPolicy | dict[str, object] | None = None
+    points: list[TopologyPoint] = field(default_factory=list)
+    segments: list[TopologySegment] = field(default_factory=list)
+    landmarks: list[TopologyLandmark] = field(default_factory=list)
+    lifecycle_requests: list[dict[str, object]] = field(default_factory=list)
+
+    def point(
+        self,
+        name: str,
+        coordinates: Sequence[float],
+        *,
+        id: str | None = None,
+        correspond: str | None = None,
+        role: str | None = None,
+    ) -> "TopologyPathBuilder":
+        self.points.append(
+            TopologyPoint(
+                id=id,
+                name=name,
+                coordinates=coordinates,
+                ordinal=len(self.points),
+                role=role or "corner",
+                correspondence_id=correspond if correspond is not None else name,
+                provenance={"source": "builder.point"},
+            )
+        )
+        return self
+
+    def segment(
+        self,
+        name: str,
+        *,
+        curve: object | None = None,
+        landmarks: Iterable[TopologyLandmark] | None = None,
+        correspond: str | None = None,
+    ) -> "TopologyPathBuilder":
+        segment_id = derive_stable_id(name)
+        segment_landmarks = tuple(landmarks or ())
+        self.segments.append(
+            TopologySegment(
+                id=segment_id,
+                name=name,
+                source_kind="curve" if curve is not None else "polyline",
+                curve=curve,
+                correspondence_id=correspond,
+                landmarks=segment_landmarks,
+                provenance={"source": "builder.segment"},
+            )
+        )
+        self.landmarks.extend(segment_landmarks)
+        return self
+
+    def birth_span(self, parent: tuple[str, str], *, points: Iterable[tuple[str, Sequence[float]]]) -> "TopologyPathBuilder":
+        self.lifecycle_requests.append({"request_type": "birth_span", "parent": tuple(parent), "points": tuple(points)})
+        for name, coordinates in points:
+            self.point(name, coordinates, correspond=name, role="feature")
+        return self
+
+    def birth_arc(
+        self,
+        name: str,
+        *,
+        parent: tuple[str, str],
+        start: Sequence[float],
+        end: Sequence[float],
+        radius: float,
+        correspond: str | None = None,
+    ) -> "TopologyPathBuilder":
+        if radius <= 0:
+            raise ValueError("radius must be positive.")
+        self.lifecycle_requests.append(
+            {
+                "request_type": "birth_arc",
+                "parent": tuple(parent),
+                "name": name,
+                "start": tuple(start),
+                "end": tuple(end),
+                "radius": float(radius),
+            }
+        )
+        self.point(f"{name}-start", start, correspond=correspond or f"{name}-start", role="tangent_transition")
+        self.point(f"{name}-end", end, correspond=correspond or f"{name}-end", role="tangent_transition")
+        return self
+
+    def death_span(
+        self,
+        parent: tuple[str, str],
+        *,
+        points: Iterable[tuple[str, Sequence[float]]] | None = None,
+        names: Iterable[str] | None = None,
+    ) -> "TopologyPathBuilder":
+        point_items = tuple(points or ())
+        name_items = tuple(names or ())
+        if not point_items and not name_items:
+            raise ValueError("death_span requires points or names.")
+        self.lifecycle_requests.append(
+            {"request_type": "death_span", "parent": tuple(parent), "points": point_items, "names": name_items}
+        )
+        for name, coordinates in point_items:
+            self.point(name, coordinates, correspond=name, role="feature")
+        return self
+
+    def build(self) -> TopologyPath:
+        metadata: dict[str, object] = {"source": "builder"}
+        if self.lifecycle_requests:
+            metadata["lifecycle_requests"] = tuple(self.lifecycle_requests)
+        return TopologyPath(
+            id=self.id,
+            closed=self.closed,
+            anchor_id=self.anchor or (self.points[0].id if self.points else None),
+            anchor_policy="authored",
+            direction=self.direction,
+            sampling_policy=self.sampling_policy,
+            points=tuple(self.points),
+            segments=tuple(self.segments),
+            landmarks=tuple(self.landmarks),
+            metadata=metadata,
+        )
+
+
+def validate_topology_identity_records(path: TopologyPath) -> None:
+    point_ids = [point.id for point in path.points]
+    if len(set(point_ids)) != len(point_ids):
+        raise ValueError("TopologyPath contains duplicate point ids.")
+    segment_ids = [segment.id for segment in path.segments]
+    if len(set(segment_ids)) != len(segment_ids):
+        raise ValueError("TopologyPath contains duplicate segment ids.")
+    landmark_ids = [landmark.id for landmark in path.landmarks]
+    if len(set(landmark_ids)) != len(landmark_ids):
+        raise ValueError("TopologyPath contains duplicate landmark ids.")
+    segment_id_set = set(segment_ids)
+    point_count = len(path.points)
+    correspondence_policies: dict[str, str] = {}
+    for record in (*path.points, *path.landmarks):
+        correspondence_id = record.correspondence_id
+        if correspondence_id is None:
+            continue
+        policy = record.protection_policy
+        prior_policy = correspondence_policies.setdefault(correspondence_id, policy)
+        if prior_policy != policy:
+            raise ValueError(f"Conflicting protection policies for correspondence id {correspondence_id!r}.")
+    for landmark in path.landmarks:
+        if landmark.segment_id is not None and segment_id_set and landmark.segment_id not in segment_id_set:
+            raise ValueError(f"TopologyLandmark segment_id {landmark.segment_id!r} does not match a segment id.")
+        if landmark.point_ordinal is not None and landmark.point_ordinal >= point_count:
+            raise ValueError("TopologyLandmark point_ordinal is outside path points.")
 
 
 @dataclass(frozen=True)
@@ -746,10 +1257,17 @@ __all__ = [
     "Loop",
     "Region",
     "Section",
+    "TopologyLandmark",
+    "TopologyPath",
+    "TopologyPathBuilder",
+    "TopologyPathSamplingPolicy",
+    "TopologyPoint",
+    "TopologySegment",
     "as_section",
     "as_sections",
     "anchor_loop",
     "classify_loops",
+    "derive_stable_id",
     "inset_profile_loops",
     "ensure_winding",
     "largest_loop",
@@ -771,4 +1289,5 @@ __all__ = [
     "signed_area",
     "triangulate_loops",
     "triangulate_profile",
+    "validate_topology_identity_records",
 ]
