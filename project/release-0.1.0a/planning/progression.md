@@ -313,7 +313,7 @@ Only final leaf specifications appear here.
 - [x] [Loft Spec 53: Topology Segment and Landmark Identity Records (v1.0)](../specifications/loft-53-topology-segment-landmark-identity-records-v1_0.md)
 - [x] [Loft Spec 54: Path Input Adapters to Topology Paths (v1.0)](../specifications/loft-54-path-input-adapters-to-topology-paths-v1_0.md)
 - [x] [Loft Spec 62: Topology Builder Core API (v1.0)](../specifications/loft-62-topology-builder-core-api-v1_0.md)
-- [ ] [Loft Spec 63: Topology Lifecycle Builder API (v1.0)](../specifications/loft-63-topology-lifecycle-builder-api-v1_0.md)
+- [x] [Loft Spec 63: Topology Lifecycle Builder API (v1.0)](../specifications/loft-63-topology-lifecycle-builder-api-v1_0.md)
 - [ ] [Loft Spec 64: Generated Shape Default Rails (v1.0)](../specifications/loft-64-generated-shape-default-rails-v1_0.md)
 - [ ] [Loft Spec 55: Authored Rail Priority and Diagnostics (v1.0)](../specifications/loft-55-authored-rail-priority-diagnostics-v1_0.md)
 - [ ] [Loft Spec 56: High-Confidence Inference and Refusal Policy (v1.0)](../specifications/loft-56-high-confidence-inference-refusal-policy-v1_0.md)
