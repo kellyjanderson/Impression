@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+import impression.io.impress as impress_io
 from impression.io import (
     CURRENT_IMPRESS_SCHEMA_VERSION,
     DEFAULT_IMPRESS_LENGTH_UNIT,
@@ -12,6 +13,7 @@ from impression.io import (
     ImpressUnits,
     SurfaceBodyStore,
     UnsupportedImpressSchemaVersion,
+    atomic_write_text,
     decode_surface_adjacency_payload,
     decode_surface_boundary_ref_payload,
     decode_surface_body_payload,
@@ -256,6 +258,32 @@ def test_write_and_save_impress_write_deterministic_json(tmp_path) -> None:
 
     assert payload_path.read_text(encoding="utf-8") == dumps_impress_json(payload)
     assert saved_path.read_text(encoding="utf-8") == dumps_impress_json(make_impress_document_payload([body]))
+
+
+def test_atomic_write_text_replaces_existing_file_without_temp_litter(tmp_path) -> None:
+    path = tmp_path / "model.impress"
+    path.write_text("old", encoding="utf-8")
+
+    assert atomic_write_text(path, "new") == path
+
+    assert path.read_text(encoding="utf-8") == "new"
+    assert list(tmp_path.glob(".model.impress.*.tmp")) == []
+
+
+def test_atomic_write_text_cleans_up_temp_file_when_replace_fails(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "model.impress"
+    path.write_text("old", encoding="utf-8")
+
+    def fail_replace(source, destination):  # noqa: ANN001
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(impress_io.os, "replace", fail_replace)
+
+    with pytest.raises(ImpressFormatError, match="Unable to write"):
+        atomic_write_text(path, "new")
+
+    assert path.read_text(encoding="utf-8") == "old"
+    assert list(tmp_path.glob(".model.impress.*.tmp")) == []
 
 
 def test_load_impress_round_trips_saved_surface_bodies(tmp_path) -> None:

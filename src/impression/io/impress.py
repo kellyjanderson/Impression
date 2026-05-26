@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -210,9 +212,36 @@ def write_impress_json(
     """Write a deterministic `.impress` JSON payload to a user-selected path."""
 
     output_path = Path(path)
+    text = dumps_impress_json(payload, options=options)
+    atomic_write_text(output_path, text)
+    return output_path
+
+
+def atomic_write_text(path: str | Path, text: str) -> Path:
+    """Write text through a sibling temporary file and atomically replace the destination."""
+
+    output_path = Path(path)
+    temp_path: Path | None = None
     try:
-        output_path.write_text(dumps_impress_json(payload, options=options), encoding="utf-8")
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=output_path.parent,
+            prefix=f".{output_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_path = Path(handle.name)
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, output_path)
     except OSError as exc:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         raise ImpressFormatError(f"Unable to write `.impress` file {output_path}: {exc}") from exc
     return output_path
 
