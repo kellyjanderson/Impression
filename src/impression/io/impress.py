@@ -119,6 +119,17 @@ class ImpressSaveOptions:
             raise ImpressFormatError("ImpressSaveOptions.trailing_newline must be a boolean.")
 
 
+@dataclass(frozen=True)
+class ImpressLoadResult:
+    """Decoded `.impress` document result."""
+
+    root: ImpressDocumentRoot
+    body_store: SurfaceBodyStore
+    bodies: tuple[SurfaceBody, ...]
+    payload: Mapping[str, object]
+    path: Path | None = None
+
+
 def make_impress_document_root(
     *,
     schema_version: str = CURRENT_IMPRESS_SCHEMA_VERSION,
@@ -147,7 +158,15 @@ def make_impress_document_payload(
 
     body_store = make_surface_body_store(bodies)
     root = make_impress_document_root(units=units, metadata=metadata).to_json_object()
+    patch_payloads: dict[str, object] = {}
+    for body in bodies:
+        if not isinstance(body, SurfaceBody):
+            raise ImpressFormatError("`.impress` document payload can only contain SurfaceBody instances.")
+        for shell in body.shells:
+            for patch in shell.patches:
+                patch_payloads.setdefault(patch.stable_identity, encode_surface_patch_payload(patch))
     root["body_store"] = body_store.to_json_object()
+    root["patches"] = patch_payloads
     root["bodies"] = {
         entry.body_id: encode_surface_body_payload(entry.body)
         for entry in body_store.bodies
@@ -196,6 +215,88 @@ def write_impress_json(
     except OSError as exc:
         raise ImpressFormatError(f"Unable to write `.impress` file {output_path}: {exc}") from exc
     return output_path
+
+
+def loads_impress_json(text: str) -> ImpressLoadResult:
+    """Read a `.impress` document from JSON text."""
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ImpressFormatError(f"Malformed `.impress` JSON: {exc.msg}.") from exc
+    if not isinstance(payload, Mapping):
+        raise ImpressFormatError("`.impress` JSON root must decode to an object.")
+    return decode_impress_document_payload(payload)
+
+
+def load_impress(path: str | Path) -> ImpressLoadResult:
+    """Load a `.impress` document from a user-selected path."""
+
+    input_path = Path(path)
+    try:
+        text = input_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ImpressFormatError(f"Unable to read `.impress` file {input_path}: {exc}") from exc
+    result = loads_impress_json(text)
+    return ImpressLoadResult(
+        root=result.root,
+        body_store=result.body_store,
+        bodies=result.bodies,
+        payload=result.payload,
+        path=input_path,
+    )
+
+
+def decode_impress_document_payload(payload: Mapping[str, object]) -> ImpressLoadResult:
+    """Decode a `.impress` document payload into surface-native bodies."""
+
+    if not isinstance(payload, Mapping):
+        raise ImpressFormatError("`.impress` document payload must be an object.")
+    unknown_keys = set(payload) - {"format", "schema_version", "units", "metadata", "body_store", "bodies", "patches"}
+    if unknown_keys:
+        keys = ", ".join(sorted(str(key) for key in unknown_keys))
+        raise ImpressFormatError(f"Unsupported `.impress` document fields: {keys}.")
+
+    root = validate_impress_document_root(payload)
+    body_store = validate_surface_body_store(_required_mapping(payload.get("body_store"), "body_store"))
+    body_payloads = _required_mapping(payload.get("bodies"), "bodies")
+    patch_payloads = _required_mapping(payload.get("patches"), "patches")
+    patches = {
+        _validate_patch_identity_payload(patch_id): decode_surface_patch_payload(
+            _required_mapping(patch_payload, f"patches[{patch_id!r}]")
+        )
+        for patch_id, patch_payload in patch_payloads.items()
+    }
+    for patch_id, patch in patches.items():
+        if patch.stable_identity != patch_id:
+            raise ImpressFormatError(f"Patch payload {patch_id!r} stable_identity does not match decoded patch.")
+
+    expected_body_ids = {entry.body_id for entry in body_store.bodies}
+    actual_body_ids = set(body_payloads)
+    if actual_body_ids != expected_body_ids:
+        raise ImpressFormatError("`.impress` bodies must exactly match SurfaceBodyStore body IDs.")
+
+    referenced_patch_ids: set[str] = set()
+    bodies: list[SurfaceBody] = []
+    entries: list[ImpressBodyEntry] = []
+    for entry in body_store.bodies:
+        body_payload = _required_mapping(body_payloads.get(entry.body_id), f"bodies[{entry.body_id!r}]")
+        shells = tuple(_decode_surface_shell_payload_from_document(shell_payload, patches, referenced_patch_ids) for shell_payload in _body_shell_payloads(body_payload))
+        body = decode_surface_body_payload(body_payload, shells=shells)
+        if body.stable_identity != entry.stable_identity:
+            raise ImpressFormatError(f"Body payload {entry.body_id!r} stable_identity does not match SurfaceBodyStore.")
+        bodies.append(body)
+        entries.append(ImpressBodyEntry(body_id=entry.body_id, stable_identity=entry.stable_identity, body=body))
+
+    if set(patches) != referenced_patch_ids:
+        raise ImpressFormatError("`.impress` patch payloads must exactly match shell patch references.")
+
+    return ImpressLoadResult(
+        root=root,
+        body_store=SurfaceBodyStore(tuple(entries)),
+        bodies=tuple(bodies),
+        payload=dict(payload),
+    )
 
 
 def save_impress(
@@ -711,6 +812,47 @@ def _validate_matrix4_payload(payload: object) -> np.ndarray:
     if not np.all(np.isfinite(matrix)):
         raise ImpressFormatError("transform_matrix must contain only finite values.")
     return matrix
+
+
+def _required_mapping(payload: object, name: str) -> Mapping[str, object]:
+    if not isinstance(payload, Mapping):
+        raise ImpressFormatError(f"`.impress` {name} must be an object.")
+    non_string_keys = [key for key in payload if not isinstance(key, str)]
+    if non_string_keys:
+        raise ImpressFormatError(f"`.impress` {name} keys must be strings.")
+    return payload
+
+
+def _validate_patch_identity_payload(patch_id: object) -> str:
+    if not isinstance(patch_id, str) or not patch_id:
+        raise ImpressFormatError("`.impress` patch IDs must be non-empty strings.")
+    return patch_id
+
+
+def _body_shell_payloads(body_payload: Mapping[str, object]) -> tuple[Mapping[str, object], ...]:
+    shell_payloads = body_payload.get("shells")
+    if not isinstance(shell_payloads, Sequence) or isinstance(shell_payloads, (str, bytes)):
+        raise ImpressFormatError("SurfaceBody shells must be an array.")
+    return tuple(_required_mapping(shell_payload, "SurfaceBody shell payload") for shell_payload in shell_payloads)
+
+
+def _decode_surface_shell_payload_from_document(
+    shell_payload: Mapping[str, object],
+    patches: Mapping[str, SurfacePatch],
+    referenced_patch_ids: set[str],
+) -> SurfaceShell:
+    patch_ids = shell_payload.get("patches")
+    if not isinstance(patch_ids, Sequence) or isinstance(patch_ids, (str, bytes)):
+        raise ImpressFormatError("SurfaceShell patches must be an array of patch identities.")
+    decoded_patches: list[SurfacePatch] = []
+    for patch_id in patch_ids:
+        patch_key = _validate_patch_identity_payload(patch_id)
+        try:
+            decoded_patches.append(patches[patch_key])
+        except KeyError as exc:
+            raise ImpressFormatError(f"SurfaceShell references missing patch payload {patch_key!r}.") from exc
+        referenced_patch_ids.add(patch_key)
+    return decode_surface_shell_payload(shell_payload, patches=decoded_patches)
 
 
 def _encode_parameter_domain_payload(domain: ParameterDomain) -> dict[str, object]:
