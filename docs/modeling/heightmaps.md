@@ -61,16 +61,17 @@ carved = displace_heightmap(
 Options:
 
 - `projection`: currently only `"planar"` is supported.
-- `plane`: `"xy"` for surface displacement in this build; the mesh compatibility route also accepts `"xz"` and `"yz"`.
+- `plane`: `"xy"`, `"xz"`, or `"yz"` for planar projection sampling on both surface and mesh routes.
 - `direction`: `"normal"`, `"x"`, `"y"`, `"z"`, or a custom vector.
 - `alpha_mode`: `"ignore"` (no displacement where alpha == 0) or `"mask"` (drop faces).
-- `bounds`: optional `(umin, umax, vmin, vmax)` to override projection bounds on the mesh compatibility route.
+- `bounds`: optional `(umin, umax, vmin, vmax)` to override projection bounds. Surface displacement derives bounds from each authored patch corner when omitted and refuses degenerate projected bounds.
 - `backend`: `"mesh"` or `"surface"`.
 
 ## Notes
 
 - Transparency is treated as a mask when `alpha_mode="mask"`.
 - For basic stamping onto objects, planar projection + `direction="normal"` works well.
+- Unsupported projections refuse explicitly; only planar projection is implemented.
 - UV‑based or triplanar projection is not implemented yet.
 
 ## Examples

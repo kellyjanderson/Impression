@@ -926,6 +926,8 @@ class DisplacementSurfacePatch(SurfacePatch):
     height_scale: float = 1.0
     direction: str | tuple[float, float, float] = "normal"
     projection: str = "planar"
+    plane: str = "xy"
+    projection_bounds: tuple[float, float, float, float] | None = None
 
     def __post_init__(self) -> None:
         if self.source_patch is None:
@@ -948,6 +950,17 @@ class DisplacementSurfacePatch(SurfacePatch):
         projection = str(self.projection).lower()
         if projection != "planar":
             raise ValueError("Only planar displacement projection is supported in this build.")
+        plane = str(self.plane).lower()
+        if plane not in {"xy", "xz", "yz"}:
+            raise ValueError("DisplacementSurfacePatch.plane must be 'xy', 'xz', or 'yz'.")
+        if self.projection_bounds is None:
+            raise ValueError("DisplacementSurfacePatch.projection_bounds is required.")
+        projection_bounds = tuple(float(value) for value in np.asarray(self.projection_bounds, dtype=float).reshape(4))
+        if not np.all(np.isfinite(np.asarray(projection_bounds, dtype=float))):
+            raise ValueError("DisplacementSurfacePatch.projection_bounds must be finite.")
+        umin, umax, vmin, vmax = projection_bounds
+        if np.isclose(umax, umin) or np.isclose(vmax, vmin):
+            raise ValueError("DisplacementSurfacePatch.projection_bounds are degenerate.")
         height_scale = float(self.height_scale)
         if not np.isfinite(height_scale):
             raise ValueError("DisplacementSurfacePatch.height_scale must be finite.")
@@ -969,14 +982,26 @@ class DisplacementSurfacePatch(SurfacePatch):
         object.__setattr__(self, "height_scale", height_scale)
         object.__setattr__(self, "direction", direction)
         object.__setattr__(self, "projection", projection)
+        object.__setattr__(self, "plane", plane)
+        object.__setattr__(self, "projection_bounds", projection_bounds)
         super().__post_init__()
 
     def _sample_height(self, u: float, v: float) -> tuple[float, bool]:
+        from .heightmap import HeightmapProjectionBoundsPolicy, heightmap_sample_coordinate_record
+
         rows, cols = self.displacement_samples.shape
-        u0, u1 = self.source_patch.domain.u_range
-        v0, v1 = self.source_patch.domain.v_range
-        u_norm = 0.0 if np.isclose(u1, u0) else (float(u) - u0) / (u1 - u0)
-        v_norm = 0.0 if np.isclose(v1, v0) else (float(v) - v0) / (v1 - v0)
+        base = self.source_patch.point_at(u, v)
+        coord_record = heightmap_sample_coordinate_record(
+            np.asarray([base], dtype=float),
+            HeightmapProjectionBoundsPolicy(
+                projection="planar",
+                plane=self.plane,
+                bounds=self.projection_bounds,
+                source="explicit",
+            ),
+        )
+        u_norm = float(coord_record.u_normalized[0])
+        v_norm = float(coord_record.v_normalized[0])
         x = np.clip(u_norm, 0.0, 1.0) * (cols - 1)
         y = (1.0 - np.clip(v_norm, 0.0, 1.0)) * (rows - 1)
         x0 = int(np.floor(x))
@@ -1022,6 +1047,8 @@ class DisplacementSurfacePatch(SurfacePatch):
             "height_scale": self.height_scale,
             "direction": self.direction,
             "projection": self.projection,
+            "plane": self.plane,
+            "projection_bounds": self.projection_bounds,
         }
 
     def point_at(self, u: float, v: float) -> np.ndarray:

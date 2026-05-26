@@ -216,10 +216,14 @@ from .ops import offset, hull
 from .heightmap import (
     HeightmapAlphaMaskPolicy,
     HeightmapCacheKeyRecord,
+    HeightmapProjectionBoundsPolicy,
+    HeightmapSampleCoordinateRecord,
     heightmap,
     displace_heightmap,
     heightmap_cache_key_record,
+    heightmap_sample_coordinate_record,
     make_heightmap_surface_patch,
+    resolve_heightmap_projection_bounds_policy,
     resolve_heightmap_alpha_mask_policy,
 )
 from .drafting import make_line, make_plane, make_arrow, make_dimension
@@ -584,8 +588,12 @@ __all__ = [
     "displace_heightmap",
     "HeightmapAlphaMaskPolicy",
     "HeightmapCacheKeyRecord",
+    "HeightmapProjectionBoundsPolicy",
+    "HeightmapSampleCoordinateRecord",
     "heightmap_cache_key_record",
+    "heightmap_sample_coordinate_record",
     "make_heightmap_surface_patch",
+    "resolve_heightmap_projection_bounds_policy",
     "resolve_heightmap_alpha_mask_policy",
     "make_line",
     "make_plane",
