@@ -21,6 +21,50 @@ class PatchFamilyCapabilityRecord:
     notes: str = ""
 
 
+@dataclass(frozen=True)
+class PatchFamilyAvailabilityDiagnostic:
+    """Structured reason a patch family does not satisfy an availability gate."""
+
+    family: str
+    code: str
+    message: str
+
+
+@dataclass(frozen=True)
+class PatchFamilyAvailabilityGateRecord:
+    """Validation result for one patch family's availability declaration."""
+
+    family: str
+    support_phase: Literal["available", "planned"]
+    available: bool
+    diagnostics: tuple[PatchFamilyAvailabilityDiagnostic, ...] = ()
+
+
+@dataclass(frozen=True)
+class PatchFamilyOperationSupportRecord:
+    """Operation-level evidence used by availability promotion checks."""
+
+    family: str
+    operation: str
+    supported: bool
+    diagnostic: str = ""
+
+
+@dataclass(frozen=True)
+class PatchFamilyPromotionEvidenceRecord:
+    """Evidence for whether a patch family can be promoted to available."""
+
+    family: str
+    current_phase: Literal["available", "planned"]
+    promoted_phase: Literal["available", "planned"]
+    operation_support: tuple[PatchFamilyOperationSupportRecord, ...]
+    diagnostics: tuple[PatchFamilyAvailabilityDiagnostic, ...] = ()
+
+    @property
+    def promoted(self) -> bool:
+        return self.current_phase != self.promoted_phase and self.promoted_phase == "available"
+
+
 SUPPORTED_SURFACE_PATCH_FAMILIES: tuple[str, ...] = (
     "planar",
     "ruled",
@@ -34,21 +78,54 @@ SUPPORTED_SURFACE_PATCH_FAMILIES: tuple[str, ...] = (
     "displacement",
 )
 REQUIRED_V1_PATCH_FAMILIES: tuple[str, ...] = ("planar", "ruled", "revolution")
+PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS: tuple[str, ...] = (
+    "surface-store",
+    "tessellation",
+    ".impress",
+    "diagnostics",
+    "no-hidden-fallback",
+)
 PATCH_FAMILY_CAPABILITY_MATRIX: dict[str, PatchFamilyCapabilityRecord] = {
     "planar": PatchFamilyCapabilityRecord(
         family="planar",
         support_phase="available",
-        operations=("caps", "planar-primitives", "trimmed-faces", "tessellation", ".impress"),
+        operations=(
+            "surface-store",
+            "caps",
+            "planar-primitives",
+            "trimmed-faces",
+            "tessellation",
+            ".impress",
+            "diagnostics",
+            "no-hidden-fallback",
+        ),
     ),
     "ruled": PatchFamilyCapabilityRecord(
         family="ruled",
         support_phase="available",
-        operations=("extrude", "loft", "linear-bridge-surfaces", "tessellation", ".impress"),
+        operations=(
+            "surface-store",
+            "extrude",
+            "loft",
+            "linear-bridge-surfaces",
+            "tessellation",
+            ".impress",
+            "diagnostics",
+            "no-hidden-fallback",
+        ),
     ),
     "revolution": PatchFamilyCapabilityRecord(
         family="revolution",
         support_phase="available",
-        operations=("rotate-extrude", "revolved-primitives", "tessellation", ".impress"),
+        operations=(
+            "surface-store",
+            "rotate-extrude",
+            "revolved-primitives",
+            "tessellation",
+            ".impress",
+            "diagnostics",
+            "no-hidden-fallback",
+        ),
     ),
     "bspline": PatchFamilyCapabilityRecord(
         family="bspline",
@@ -92,6 +169,214 @@ SURFACE_SPEC_66_RETIREMENT_NOTE = (
 PATCH_FAMILY_FEATURE_COVERAGE: dict[str, tuple[str, ...]] = {
     family: record.operations for family, record in PATCH_FAMILY_CAPABILITY_MATRIX.items()
 }
+
+
+def validate_patch_family_availability_gate(
+    family: str,
+    record: PatchFamilyCapabilityRecord | None = None,
+) -> PatchFamilyAvailabilityGateRecord:
+    """Validate one family against the public availability gate."""
+
+    family_key = str(family).strip()
+    diagnostics: list[PatchFamilyAvailabilityDiagnostic] = []
+    if not family_key:
+        diagnostics.append(
+            PatchFamilyAvailabilityDiagnostic(
+                family=family_key,
+                code="empty-family",
+                message="Patch family availability checks require a non-empty family key.",
+            )
+        )
+        return PatchFamilyAvailabilityGateRecord(
+            family=family_key,
+            support_phase="planned",
+            available=False,
+            diagnostics=tuple(diagnostics),
+        )
+
+    capability = record
+    if capability is None:
+        capability = PATCH_FAMILY_CAPABILITY_MATRIX.get(family_key)
+    if capability is None:
+        diagnostics.append(
+            PatchFamilyAvailabilityDiagnostic(
+                family=family_key,
+                code="missing-record",
+                message=f"Patch family '{family_key}' is missing from PATCH_FAMILY_CAPABILITY_MATRIX.",
+            )
+        )
+        return PatchFamilyAvailabilityGateRecord(
+            family=family_key,
+            support_phase="planned",
+            available=False,
+            diagnostics=tuple(diagnostics),
+        )
+
+    if family_key not in SUPPORTED_SURFACE_PATCH_FAMILIES:
+        diagnostics.append(
+            PatchFamilyAvailabilityDiagnostic(
+                family=family_key,
+                code="unsupported-family",
+                message=f"Patch family '{family_key}' is not listed in SUPPORTED_SURFACE_PATCH_FAMILIES.",
+            )
+        )
+    if capability.family != family_key:
+        diagnostics.append(
+            PatchFamilyAvailabilityDiagnostic(
+                family=family_key,
+                code="family-mismatch",
+                message=(
+                    f"Patch family matrix key '{family_key}' does not match record family "
+                    f"'{capability.family}'."
+                ),
+            )
+        )
+    if capability.support_phase not in ("available", "planned"):
+        diagnostics.append(
+            PatchFamilyAvailabilityDiagnostic(
+                family=family_key,
+                code="invalid-support-phase",
+                message=f"Patch family '{family_key}' has invalid support phase '{capability.support_phase}'.",
+            )
+        )
+    if len(set(capability.operations)) != len(capability.operations):
+        diagnostics.append(
+            PatchFamilyAvailabilityDiagnostic(
+                family=family_key,
+                code="duplicate-operation",
+                message=f"Patch family '{family_key}' declares duplicate capability operations.",
+            )
+        )
+
+    if capability.support_phase == "available":
+        operation_set = set(capability.operations)
+        for operation in PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS:
+            if operation not in operation_set:
+                diagnostics.append(
+                    PatchFamilyAvailabilityDiagnostic(
+                        family=family_key,
+                        code="missing-availability-operation",
+                        message=(
+                            f"Patch family '{family_key}' is available but lacks required "
+                            f"integration evidence '{operation}'."
+                        ),
+                    )
+                )
+        producer_operations = operation_set.difference(PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS)
+        if not producer_operations:
+            diagnostics.append(
+                PatchFamilyAvailabilityDiagnostic(
+                    family=family_key,
+                    code="missing-producer-evidence",
+                    message=(
+                        f"Patch family '{family_key}' is available but declares no authored "
+                        "producer or operation-scoped support evidence."
+                    ),
+                )
+            )
+
+    return PatchFamilyAvailabilityGateRecord(
+        family=family_key,
+        support_phase=capability.support_phase,
+        available=capability.support_phase == "available" and not diagnostics,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def assert_patch_family_capability_matrix() -> tuple[PatchFamilyAvailabilityGateRecord, ...]:
+    """Return gate records or raise when the capability matrix overstates support."""
+
+    diagnostics: list[PatchFamilyAvailabilityDiagnostic] = []
+    records: list[PatchFamilyAvailabilityGateRecord] = []
+    matrix_families = set(PATCH_FAMILY_CAPABILITY_MATRIX)
+    supported_families = set(SUPPORTED_SURFACE_PATCH_FAMILIES)
+    for family in SUPPORTED_SURFACE_PATCH_FAMILIES:
+        gate = validate_patch_family_availability_gate(family)
+        records.append(gate)
+        diagnostics.extend(gate.diagnostics)
+    for family in sorted(matrix_families.difference(supported_families)):
+        gate = validate_patch_family_availability_gate(family)
+        records.append(gate)
+        diagnostics.extend(gate.diagnostics)
+    if diagnostics:
+        joined = "; ".join(f"{item.family}:{item.code}" for item in diagnostics)
+        raise ValueError(f"Patch family capability matrix failed availability gates: {joined}")
+    return tuple(records)
+
+
+def assess_patch_family_availability_promotion(
+    family: str,
+    record: PatchFamilyCapabilityRecord | None = None,
+) -> PatchFamilyPromotionEvidenceRecord:
+    """Assess whether a planned family has enough evidence to become available."""
+
+    family_key = str(family).strip()
+    capability = record if record is not None else PATCH_FAMILY_CAPABILITY_MATRIX.get(family_key)
+    if capability is None:
+        gate = validate_patch_family_availability_gate(family_key, None)
+        return PatchFamilyPromotionEvidenceRecord(
+            family=family_key,
+            current_phase="planned",
+            promoted_phase="planned",
+            operation_support=(),
+            diagnostics=gate.diagnostics,
+        )
+
+    operation_set = set(capability.operations)
+    operation_support = tuple(
+        PatchFamilyOperationSupportRecord(
+            family=family_key,
+            operation=operation,
+            supported=operation in operation_set,
+            diagnostic="" if operation in operation_set else f"Missing integration evidence '{operation}'.",
+        )
+        for operation in PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS
+    )
+    candidate = replace(capability, support_phase="available")
+    gate = validate_patch_family_availability_gate(family_key, candidate)
+    promoted_phase: Literal["available", "planned"] = "available" if not gate.diagnostics else "planned"
+    return PatchFamilyPromotionEvidenceRecord(
+        family=family_key,
+        current_phase=capability.support_phase,
+        promoted_phase=promoted_phase,
+        operation_support=operation_support,
+        diagnostics=gate.diagnostics,
+    )
+
+
+def assert_patch_family_operation_coverage(
+    family: str,
+    required_operations: Iterable[str] = PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS,
+) -> tuple[PatchFamilyOperationSupportRecord, ...]:
+    """Return operation support records or raise when required coverage is missing."""
+
+    family_key = str(family).strip()
+    capability = PATCH_FAMILY_CAPABILITY_MATRIX.get(family_key)
+    if capability is None:
+        raise ValueError(f"Patch family '{family_key}' is missing from PATCH_FAMILY_CAPABILITY_MATRIX.")
+    operation_set = set(capability.operations)
+    records = tuple(
+        PatchFamilyOperationSupportRecord(
+            family=family_key,
+            operation=str(operation),
+            supported=str(operation) in operation_set,
+            diagnostic="" if str(operation) in operation_set else f"Missing operation coverage '{operation}'.",
+        )
+        for operation in required_operations
+    )
+    missing = [record.operation for record in records if not record.supported]
+    if missing:
+        raise ValueError(f"Patch family '{family_key}' is missing operation coverage: {', '.join(missing)}")
+    return records
+
+
+def run_patch_family_availability_promotion_pass() -> tuple[PatchFamilyPromotionEvidenceRecord, ...]:
+    """Assess every known family and report promotable or unpromoted evidence."""
+
+    families = tuple(SUPPORTED_SURFACE_PATCH_FAMILIES) + tuple(
+        family for family in sorted(PATCH_FAMILY_CAPABILITY_MATRIX) if family not in SUPPORTED_SURFACE_PATCH_FAMILIES
+    )
+    return tuple(assess_patch_family_availability_promotion(family) for family in families)
 
 
 def _as_vec2(value: Sequence[float], *, name: str) -> np.ndarray:
@@ -2780,13 +3065,86 @@ def make_surface_body(
     return SurfaceBody(tuple(shells), metadata=_normalize_metadata(metadata))
 
 
+def make_subdivision_surface(
+    *,
+    control_points: Sequence[Sequence[float]] | np.ndarray,
+    faces: Sequence[Sequence[int]],
+    creases: Sequence[SubdivisionCrease | dict[str, object]] = (),
+    subdivision_level: int = 1,
+    scheme: str = "catmull_clark",
+    metadata: dict[str, object] | None = None,
+) -> SurfaceBody:
+    """Create a surface body from an authored subdivision control cage."""
+
+    patch_metadata = {
+        "kernel": {
+            "operation": "subdivision-authoring",
+            "surface_family": "subdivision",
+            "authoring_boundary": "surface-native",
+        }
+    }
+    if metadata:
+        patch_metadata["kernel"].update(dict(metadata.get("kernel", {})))
+    patch = SubdivisionSurfacePatch(
+        family="subdivision",
+        control_points=control_points,
+        faces=faces,
+        creases=tuple(SubdivisionCrease(**crease) if isinstance(crease, dict) else crease for crease in creases),
+        subdivision_level=subdivision_level,
+        scheme=scheme,
+        metadata=patch_metadata,
+    )
+    shell = make_surface_shell((patch,), connected=False, metadata={"kernel": {"surface_family": "subdivision"}})
+    return make_surface_body((shell,), metadata={"kernel": {"surface_family": "subdivision", "authoring_boundary": "surface-native"}})
+
+
+def make_implicit_surface(
+    *,
+    field: ImplicitFieldNode | dict[str, object],
+    bounds: Sequence[float],
+    metadata: dict[str, object] | None = None,
+    policy: ImplicitFieldSafetyPolicy | None = None,
+) -> SurfaceBody:
+    """Create a surface body from a safe declarative implicit field."""
+
+    field_node = _coerce_implicit_field_node(field)
+    validate_implicit_field_security(field_node, policy=policy)
+    patch_metadata = {
+        "kernel": {
+            "operation": "implicit-authoring",
+            "surface_family": "implicit",
+            "authoring_boundary": "surface-native",
+        }
+    }
+    if metadata:
+        patch_metadata["kernel"].update(dict(metadata.get("kernel", {})))
+    patch = ImplicitSurfacePatch(
+        family="implicit",
+        field=field_node,
+        bounds=tuple(float(value) for value in bounds),
+        metadata=patch_metadata,
+    )
+    shell = make_surface_shell((patch,), connected=False, metadata={"kernel": {"surface_family": "implicit"}})
+    return make_surface_body((shell,), metadata={"kernel": {"surface_family": "implicit", "authoring_boundary": "surface-native"}})
+
+
 __all__ = [
     "PatchFamilyCapabilityRecord",
+    "PatchFamilyAvailabilityDiagnostic",
+    "PatchFamilyAvailabilityGateRecord",
+    "PatchFamilyOperationSupportRecord",
+    "PatchFamilyPromotionEvidenceRecord",
+    "PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS",
     "PATCH_FAMILY_CAPABILITY_MATRIX",
     "PATCH_FAMILY_FEATURE_COVERAGE",
     "REQUIRED_V1_PATCH_FAMILIES",
     "SUPPORTED_SURFACE_PATCH_FAMILIES",
     "SURFACE_SPEC_66_RETIREMENT_NOTE",
+    "assert_patch_family_capability_matrix",
+    "assert_patch_family_operation_coverage",
+    "assess_patch_family_availability_promotion",
+    "run_patch_family_availability_promotion_pass",
+    "validate_patch_family_availability_gate",
     "IMPLICIT_FIELD_NODE_KINDS",
     "ParameterDomain",
     "TrimLoop",
@@ -2829,4 +3187,6 @@ __all__ = [
     "SurfaceBody",
     "make_surface_shell",
     "make_surface_body",
+    "make_subdivision_surface",
+    "make_implicit_surface",
 ]

@@ -19,6 +19,7 @@ Architecture documents define:
 - [Surface-First Internal Model Architecture](surface-first-internal-model.md)
 - [.impress Surface-Native File Format Architecture](impress-surface-native-file-format-architecture.md)
 - [Full Surface Patch Family Architecture](full-surface-patch-family-architecture.md)
+- [Patch Family Integration Architecture](patch-family-integration-architecture.md)
 - [Surface-Native Capability Replacement Architecture](surface-native-capability-replacement-architecture.md)
 - [Mesh Analysis and Repair Architecture](surface-mesh-decommission-architecture.md)
 - [Mesh Execution To Tessellation Boundary Architecture](mesh-execution-tessellation-boundary-architecture.md)

@@ -9,6 +9,7 @@ from impression.mesh import Mesh, MeshAnalysis, analyze_mesh, combine_meshes
 
 from ._legacy_mesh_deprecation import warn_mesh_primary_api
 from .surface import (
+    PATCH_FAMILY_CAPABILITY_MATRIX,
     ImplicitFieldEvaluationDomain,
     DisplacementSurfacePatch,
     ImplicitSurfacePatch,
@@ -199,7 +200,7 @@ def _patch_boundary_ids(patch: SurfacePatch) -> tuple[str, ...]:
 def _patch_requires_shell_grid_tessellation(shell: SurfaceShell, patch_index: int, patch: SurfacePatch) -> bool:
     if _uses_rectangular_grid_tessellation(patch):
         return True
-    if not isinstance(patch, RuledSurfacePatch) or patch.trim_loops:
+    if patch.trim_loops:
         return False
     for seam in shell.seams:
         boundaries = tuple(
@@ -239,6 +240,8 @@ def _shell_grid_counts_for_patch(
         if curve_count >= 2 and np.allclose(patch.start_curve[0], patch.start_curve[-1]):
             curve_count -= 1
         return (u_count, max(2, curve_count))
+    if _patch_requires_shell_grid_tessellation(shell, patch_index, patch):
+        return _rectangular_grid_counts(request)
     return None
 
 
@@ -426,6 +429,7 @@ def _mesh_with_family_adapter_metadata(mesh: Mesh, adapter: SurfaceFamilyTessell
             "tessellation_family": adapter.family,
             "tessellation_sampling_kind": adapter.sampling_kind,
             "tessellation_adapter_boundary": "tessellation",
+            "adapter_lossiness": "lossy",
         }
     )
     if adapter.approximation_boundary is not None:
@@ -516,6 +520,8 @@ def _displacement_patch_mesh(patch: DisplacementSurfacePatch, request: Normalize
             "surface_family": patch.family,
             "surface_patch_id": patch.stable_identity,
             "heightmap_displacement_boundary": "surface-payload",
+            "displacement_source_family": patch.source_patch.family,
+            "displacement_source_patch_id": patch.source_patch.stable_identity,
             "heightmap_alpha_mode": patch.alpha_mode,
             "heightmap_tessellation_request": request.cache_key,
         },
@@ -576,6 +582,36 @@ def _subdivision_patch_mesh(patch: SubdivisionSurfacePatch, request: NormalizedT
     )
 
 
+def assert_subdivision_tessellation_approximation(
+    patch: SubdivisionSurfacePatch,
+    mesh: Mesh,
+    request: TessellationRequest | NormalizedTessellationRequest | None = None,
+) -> dict[str, object]:
+    """Validate the tessellation-boundary approximation record for a subdivision patch."""
+
+    normalized_request = normalize_tessellation_request(request)
+    expected_level = _subdivision_refinement_level(patch, normalized_request)
+    metadata = mesh.metadata
+    expected = {
+        "surface_family": "subdivision",
+        "surface_patch_id": patch.stable_identity,
+        "subdivision_scheme": patch.scheme,
+        "subdivision_level": expected_level,
+        "subdivision_approximation": "finite_catmull_clark",
+        "tessellation_adapter_boundary": "tessellation",
+        "tessellation_approximation_boundary": "tessellation",
+        "adapter_lossiness": "lossy",
+    }
+    mismatches = {
+        key: (metadata.get(key), value)
+        for key, value in expected.items()
+        if metadata.get(key) != value
+    }
+    if mismatches:
+        raise ValueError(f"Subdivision tessellation approximation metadata mismatch: {mismatches!r}.")
+    return expected
+
+
 def _implicit_samples_for_request(
     patch: ImplicitSurfacePatch,
     request: NormalizedTessellationRequest,
@@ -597,8 +633,18 @@ def _implicit_samples_for_request(
     return diagnostic
 
 
+def assert_implicit_tessellation_sampling_safety(
+    patch: ImplicitSurfacePatch,
+    request: TessellationRequest | NormalizedTessellationRequest | None = None,
+) -> ImplicitTessellationBoundsDiagnostic:
+    """Return the bounded sampling diagnostic or raise before implicit mesh creation."""
+
+    normalized_request = normalize_tessellation_request(request)
+    return _implicit_samples_for_request(patch, normalized_request)
+
+
 def _implicit_patch_mesh(patch: ImplicitSurfacePatch, request: NormalizedTessellationRequest) -> Mesh:
-    diagnostic = _implicit_samples_for_request(patch, request)
+    diagnostic = assert_implicit_tessellation_sampling_safety(patch, request)
     domain = ImplicitFieldEvaluationDomain(bounds=patch.bounds, samples=diagnostic.samples)
     values = patch.evaluate_domain(samples=diagnostic.samples)
     xmin, xmax, ymin, ymax, zmin, zmax = patch.bounds
@@ -811,6 +857,24 @@ class SurfaceFamilyTessellationAdapter:
 
 
 @dataclass(frozen=True)
+class SurfaceFamilyTessellationAdapterCoverageRecord:
+    """Static tessellation adapter coverage for one surface patch family."""
+
+    family: str
+    adapter: SurfaceFamilyTessellationAdapter | None
+    required_for_available: bool
+    diagnostic: str = ""
+
+    @property
+    def covered(self) -> bool:
+        return self.adapter is not None
+
+    @property
+    def metadata_traceable(self) -> bool:
+        return self.adapter is not None and self.adapter.canonical_payload().get("family") == self.family
+
+
+@dataclass(frozen=True)
 class ImplicitTessellationBoundsDiagnostic:
     """Bounded sampling decision for an implicit patch tessellation request."""
 
@@ -892,6 +956,42 @@ _missing_surface_tessellation_adapters = set(SUPPORTED_SURFACE_PATCH_FAMILIES) -
 if _missing_surface_tessellation_adapters:
     missing = ", ".join(sorted(_missing_surface_tessellation_adapters))
     raise RuntimeError(f"Missing surface family tessellation adapters for: {missing}")
+
+
+def inspect_surface_family_tessellation_adapter_coverage() -> tuple[SurfaceFamilyTessellationAdapterCoverageRecord, ...]:
+    """Return adapter coverage for every supported surface family."""
+
+    records: list[SurfaceFamilyTessellationAdapterCoverageRecord] = []
+    for family in SUPPORTED_SURFACE_PATCH_FAMILIES:
+        adapter = SURFACE_FAMILY_TESSELLATION_ADAPTERS.get(family)
+        capability = PATCH_FAMILY_CAPABILITY_MATRIX.get(family)
+        required = capability is not None and capability.support_phase == "available"
+        diagnostic = "" if adapter is not None else f"No tessellation adapter is registered for family '{family}'."
+        records.append(
+            SurfaceFamilyTessellationAdapterCoverageRecord(
+                family=family,
+                adapter=adapter,
+                required_for_available=required,
+                diagnostic=diagnostic,
+            )
+        )
+    return tuple(records)
+
+
+def assert_surface_family_tessellation_adapter_coverage() -> tuple[SurfaceFamilyTessellationAdapterCoverageRecord, ...]:
+    """Return adapter coverage or raise if an available family lacks traceable adapter metadata."""
+
+    records = inspect_surface_family_tessellation_adapter_coverage()
+    missing = [record.family for record in records if record.required_for_available and not record.covered]
+    stale_metadata = [record.family for record in records if record.covered and not record.metadata_traceable]
+    if missing or stale_metadata:
+        parts: list[str] = []
+        if missing:
+            parts.append(f"missing adapters for available families: {', '.join(missing)}")
+        if stale_metadata:
+            parts.append(f"stale adapter metadata for families: {', '.join(stale_metadata)}")
+        raise ValueError(f"Surface family tessellation adapter coverage failed: {'; '.join(parts)}")
+    return records
 
 
 @dataclass(frozen=True)
@@ -1316,6 +1416,7 @@ __all__ = [
     "SurfaceCollectionTessellationResult",
     "SurfaceFamilySamplingKind",
     "SurfaceFamilyTessellationAdapter",
+    "SurfaceFamilyTessellationAdapterCoverageRecord",
     "SurfaceMeshAdapter",
     "SurfaceOutputClassification",
     "SurfaceToMeshAdapterRecord",
@@ -1328,13 +1429,17 @@ __all__ = [
     "TessellationOutput",
     "TessellationQualityPreset",
     "TessellationRequest",
+    "assert_implicit_tessellation_sampling_safety",
+    "assert_subdivision_tessellation_approximation",
     "analysis_tessellation_request",
+    "assert_surface_family_tessellation_adapter_coverage",
     "compare_tessellation_modes",
     "export_tessellation_request",
     "make_surface_to_mesh_adapter_record",
     "make_surface_consumer_collection",
     "make_surface_mesh_adapter",
     "mesh_from_surface_body",
+    "inspect_surface_family_tessellation_adapter_coverage",
     "normalize_tessellation_request",
     "preview_tessellation_request",
     "tessellate_surface_body",

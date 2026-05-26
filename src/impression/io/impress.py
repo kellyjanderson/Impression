@@ -12,13 +12,17 @@ import numpy as np
 from impression.modeling.path3d import Path3D
 from impression.modeling.surface import (
     BSplineSurfacePatch,
+    DisplacementSurfacePatch,
+    HeightmapSurfacePatch,
     ImplicitFieldNode,
     ImplicitSurfacePatch,
     NURBSSurfacePatch,
+    PATCH_FAMILY_CAPABILITY_MATRIX,
     ParameterDomain,
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
+    SUPPORTED_SURFACE_PATCH_FAMILIES,
     SubdivisionCrease,
     SubdivisionSurfacePatch,
     SweepSurfacePatch,
@@ -44,12 +48,31 @@ _PATCH_KIND_FAMILIES = {
     "SweepSurfacePatch": "sweep",
     "SubdivisionSurfacePatch": "subdivision",
     "ImplicitSurfacePatch": "implicit",
+    "HeightmapSurfacePatch": "heightmap",
+    "DisplacementSurfacePatch": "displacement",
 }
 _ANALYTIC_PATCH_PAYLOAD_VERSION = 1
 _SPLINE_PATCH_PAYLOAD_VERSION = 1
 _SWEEP_PATCH_PAYLOAD_VERSION = 1
 _SUBDIVISION_PATCH_PAYLOAD_VERSION = 1
 _IMPLICIT_PATCH_PAYLOAD_VERSION = 1
+_SAMPLED_PATCH_PAYLOAD_VERSION = 1
+
+
+@dataclass(frozen=True)
+class ImpressPatchCodecCoverageRecord:
+    """Static `.impress` codec coverage for one surface patch family."""
+
+    family: str
+    patch_kind: str | None
+    encode_supported: bool
+    decode_supported: bool
+    required_for_available: bool
+    diagnostic: str = ""
+
+    @property
+    def covered(self) -> bool:
+        return self.encode_supported and self.decode_supported
 
 
 class ImpressFormatError(ValueError):
@@ -58,6 +81,41 @@ class ImpressFormatError(ValueError):
 
 class UnsupportedImpressSchemaVersion(ImpressFormatError):
     """Raised when an `.impress` document uses an unsupported schema."""
+
+
+def inspect_impress_patch_codec_coverage() -> tuple[ImpressPatchCodecCoverageRecord, ...]:
+    """Return static codec coverage records for all supported surface families."""
+
+    family_to_kind = {family: kind for kind, family in _PATCH_KIND_FAMILIES.items()}
+    records: list[ImpressPatchCodecCoverageRecord] = []
+    for family in SUPPORTED_SURFACE_PATCH_FAMILIES:
+        kind = family_to_kind.get(family)
+        capability = PATCH_FAMILY_CAPABILITY_MATRIX.get(family)
+        required = capability is not None and capability.support_phase == "available"
+        covered = kind is not None
+        diagnostic = "" if covered else f"No `.impress` patch codec is registered for family '{family}'."
+        records.append(
+            ImpressPatchCodecCoverageRecord(
+                family=family,
+                patch_kind=kind,
+                encode_supported=covered,
+                decode_supported=covered,
+                required_for_available=required,
+                diagnostic=diagnostic,
+            )
+        )
+    return tuple(records)
+
+
+def assert_impress_patch_codec_coverage_for_available_families() -> tuple[ImpressPatchCodecCoverageRecord, ...]:
+    """Return codec coverage or raise if an available family lacks a codec."""
+
+    records = inspect_impress_patch_codec_coverage()
+    missing = [record for record in records if record.required_for_available and not record.covered]
+    if missing:
+        joined = ", ".join(record.family for record in missing)
+        raise ImpressFormatError(f"Missing `.impress` patch codec coverage for available families: {joined}")
+    return records
 
 
 @dataclass(frozen=True)
@@ -876,6 +934,63 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 field=_decode_implicit_field_node_payload(geometry.get("field")),
                 bounds=_validate_bounds3_payload(geometry.get("bounds"), "bounds"),
             )
+        if kind == "HeightmapSurfacePatch":
+            _validate_patch_geometry_fields(
+                geometry,
+                kind=kind,
+                allowed_fields={
+                    "payload_version",
+                    "height_samples",
+                    "alpha_mask",
+                    "alpha_mode",
+                    "xy_scale",
+                    "center",
+                    "height_scale",
+                },
+                expected_payload_version=_SAMPLED_PATCH_PAYLOAD_VERSION,
+            )
+            return HeightmapSurfacePatch(
+                **common,
+                height_samples=_validate_numeric_grid_payload(geometry.get("height_samples"), "height_samples"),
+                alpha_mask=_validate_bool_grid_payload(geometry.get("alpha_mask"), "alpha_mask"),
+                alpha_mode=_validate_string_payload(geometry.get("alpha_mode"), "alpha_mode"),
+                xy_scale=_validate_positive_pair_payload(geometry.get("xy_scale"), "xy_scale"),
+                center=_validate_vec3_payload(geometry.get("center"), "center"),
+                height_scale=_validate_float_payload(geometry.get("height_scale"), "height_scale"),
+            )
+        if kind == "DisplacementSurfacePatch":
+            _validate_patch_geometry_fields(
+                geometry,
+                kind=kind,
+                allowed_fields={
+                    "payload_version",
+                    "source_patch",
+                    "displacement_samples",
+                    "alpha_mask",
+                    "alpha_mode",
+                    "height_scale",
+                    "direction",
+                    "projection",
+                    "plane",
+                    "projection_bounds",
+                },
+                expected_payload_version=_SAMPLED_PATCH_PAYLOAD_VERSION,
+            )
+            return DisplacementSurfacePatch(
+                **common,
+                source_patch=decode_surface_patch_payload(_required_mapping(geometry.get("source_patch"), "source_patch")),
+                displacement_samples=_validate_numeric_grid_payload(
+                    geometry.get("displacement_samples"),
+                    "displacement_samples",
+                ),
+                alpha_mask=_validate_bool_grid_payload(geometry.get("alpha_mask"), "alpha_mask"),
+                alpha_mode=_validate_string_payload(geometry.get("alpha_mode"), "alpha_mode"),
+                height_scale=_validate_float_payload(geometry.get("height_scale"), "height_scale"),
+                direction=_validate_direction_payload(geometry.get("direction"), "direction"),
+                projection=_validate_string_payload(geometry.get("projection"), "projection"),
+                plane=_validate_string_payload(geometry.get("plane"), "plane"),
+                projection_bounds=_validate_bounds2_payload(geometry.get("projection_bounds"), "projection_bounds"),
+            )
     except (TypeError, ValueError) as exc:
         raise ImpressFormatError(str(exc)) from exc
     raise ImpressFormatError(f"Unsupported SurfacePatch kind {kind!r}.")
@@ -1172,6 +1287,30 @@ def _encode_patch_geometry_payload(patch: SurfacePatch) -> dict[str, object]:
             "field": geometry["field"],
             "bounds": _array_payload(geometry["bounds"]),
         }
+    if isinstance(patch, HeightmapSurfacePatch):
+        return {
+            "payload_version": _SAMPLED_PATCH_PAYLOAD_VERSION,
+            "height_samples": _array_payload(geometry["height_samples"]),
+            "alpha_mask": np.asarray(geometry["alpha_mask"], dtype=bool).tolist(),
+            "alpha_mode": str(geometry["alpha_mode"]),
+            "xy_scale": _array_payload(geometry["xy_scale"]),
+            "center": _array_payload(geometry["center"]),
+            "height_scale": float(geometry["height_scale"]),
+        }
+    if isinstance(patch, DisplacementSurfacePatch):
+        direction = geometry["direction"]
+        return {
+            "payload_version": _SAMPLED_PATCH_PAYLOAD_VERSION,
+            "source_patch": encode_surface_patch_payload(patch.source_patch),
+            "displacement_samples": _array_payload(geometry["displacement_samples"]),
+            "alpha_mask": np.asarray(geometry["alpha_mask"], dtype=bool).tolist(),
+            "alpha_mode": str(geometry["alpha_mode"]),
+            "height_scale": float(geometry["height_scale"]),
+            "direction": _array_payload(direction) if not isinstance(direction, str) else direction,
+            "projection": str(geometry["projection"]),
+            "plane": str(geometry["plane"]),
+            "projection_bounds": _array_payload(geometry["projection_bounds"]),
+        }
     raise ImpressFormatError(f"Unsupported SurfacePatch kind {type(patch).__name__!r}.")
 
 
@@ -1223,6 +1362,16 @@ def _validate_bounds3_payload(payload: object, name: str) -> tuple[float, float,
     xmin, xmax, ymin, ymax, zmin, zmax = bounds
     if xmax <= xmin or ymax <= ymin or zmax <= zmin:
         raise ImpressFormatError(f"SurfacePatch geometry {name} must have positive span on every axis.")
+    return bounds
+
+
+def _validate_bounds2_payload(payload: object, name: str) -> tuple[float, float, float, float]:
+    if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)) or len(payload) != 4:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be a four-value numeric bounds array.")
+    bounds = tuple(_validate_float_payload(value, f"{name}[]") for value in payload)
+    umin, umax, vmin, vmax = bounds
+    if np.isclose(umax, umin) or np.isclose(vmax, vmin):
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must have non-degenerate spans.")
     return bounds
 
 
@@ -1302,6 +1451,44 @@ def _validate_weight_net_payload(payload: object, name: str) -> np.ndarray:
     if not np.all(np.isfinite(weights)) or np.any(weights <= 0.0):
         raise ImpressFormatError(f"SurfacePatch geometry {name} must contain only finite positive values.")
     return weights
+
+
+def _validate_numeric_grid_payload(payload: object, name: str) -> np.ndarray:
+    try:
+        grid = np.asarray(payload, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be a numeric 2D grid.") from exc
+    if grid.ndim != 2 or grid.shape[0] < 2 or grid.shape[1] < 2:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be a 2D grid with at least 2x2 samples.")
+    if not np.all(np.isfinite(grid)):
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must contain only finite values.")
+    return grid
+
+
+def _validate_bool_grid_payload(payload: object, name: str) -> np.ndarray:
+    values = np.asarray(payload, dtype=object)
+    if values.ndim != 2 or values.shape[0] < 2 or values.shape[1] < 2:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be a 2D boolean grid with at least 2x2 samples.")
+    for value in values.flat:
+        if not isinstance(value, (bool, np.bool_)):
+            raise ImpressFormatError(f"SurfacePatch geometry {name} must contain only booleans.")
+    return values.astype(bool)
+
+
+def _validate_positive_pair_payload(payload: object, name: str) -> tuple[float, float]:
+    if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)) or len(payload) != 2:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be a two-value numeric array.")
+    pair = (_validate_float_payload(payload[0], f"{name}[0]"), _validate_float_payload(payload[1], f"{name}[1]"))
+    if pair[0] <= 0.0 or pair[1] <= 0.0:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must contain two positive values.")
+    return pair
+
+
+def _validate_direction_payload(payload: object, name: str) -> str | tuple[float, float, float]:
+    if isinstance(payload, str):
+        return _validate_string_payload(payload, name)
+    vector = _validate_vec3_payload(payload, name)
+    return tuple(float(value) for value in vector)
 
 
 def _validate_points2_payload(payload: object, name: str) -> np.ndarray:

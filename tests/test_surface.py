@@ -90,6 +90,7 @@ from impression.modeling import (
     SurfaceConsumerCollection,
     SurfaceCollectionTessellationResult,
     SurfaceFamilyTessellationAdapter,
+    SurfaceFamilyTessellationAdapterCoverageRecord,
     SURFACE_FAMILY_TESSELLATION_ADAPTERS,
     SurfaceBooleanFamilyEligibilityResult,
     SurfaceBooleanFamilyPairSupport,
@@ -111,12 +112,18 @@ from impression.modeling import (
     TessellationBoundaryViolationDiagnostic,
     TessellationRequest,
     TrimLoop,
+    assert_implicit_tessellation_sampling_safety,
+    assert_subdivision_tessellation_approximation,
+    assert_surface_family_tessellation_adapter_coverage,
     classify_surface_seam_continuity,
     evaluate_implicit_field,
     evaluate_implicit_field_domain,
     extract_surface_boundary_descriptor,
+    inspect_surface_family_tessellation_adapter_coverage,
     make_surface_body,
     make_surface_shell,
+    make_implicit_surface,
+    make_subdivision_surface,
     make_implicit_field_node,
     prepare_surface_boolean_operands,
     assess_implicit_field_security,
@@ -160,6 +167,65 @@ def _make_two_patch_open_shell_body() -> SurfaceBody:
     )
     shell = make_surface_shell([patch_a, patch_b], seams=(seam,))
     return make_surface_body([shell])
+
+
+def _make_all_patch_family_body() -> SurfaceBody:
+    control_net = np.array(
+        [
+            [[0.0, 0.0, 0.0], [0.0, 1.0, 0.2], [0.0, 2.0, 0.0]],
+            [[1.0, 0.0, 0.1], [1.0, 1.0, 0.4], [1.0, 2.0, 0.1]],
+            [[2.0, 0.0, 0.0], [2.0, 1.0, 0.2], [2.0, 2.0, 0.0]],
+        ],
+        dtype=float,
+    )
+    knots = (0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+    source = PlanarSurfacePatch(family="planar", metadata={"kernel": {"source": "displacement"}})
+    patches = (
+        PlanarSurfacePatch(family="planar"),
+        RuledSurfacePatch(family="ruled"),
+        RevolutionSurfacePatch(family="revolution"),
+        BSplineSurfacePatch(family="bspline", degree_u=2, degree_v=2, knots_u=knots, knots_v=knots, control_net=control_net),
+        NURBSSurfacePatch(
+            family="nurbs",
+            degree_u=2,
+            degree_v=2,
+            knots_u=knots,
+            knots_v=knots,
+            control_net=control_net,
+            weights=np.ones((3, 3), dtype=float),
+        ),
+        SweepSurfacePatch(
+            family="sweep",
+            profile_points_uv=[(0.0, 0.0), (0.5, 0.25), (1.0, 0.0)],
+            path=Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.5, 1.0), (0.0, 0.0, 2.0)]),
+            frame_policy="fixed",
+        ),
+        SubdivisionSurfacePatch(
+            family="subdivision",
+            control_points=[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.1), (0.0, 1.0, 0.0)],
+            faces=((0, 1, 2, 3),),
+            subdivision_level=1,
+        ),
+        ImplicitSurfacePatch(
+            family="implicit",
+            field=make_implicit_field_node("sphere", parameters={"center": (0.0, 0.0, 0.0), "radius": 0.75}),
+            bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+        ),
+        HeightmapSurfacePatch(
+            family="heightmap",
+            height_samples=np.array([[0.0, 0.25], [0.5, 0.75]], dtype=float),
+            alpha_mask=np.array([[True, True], [False, True]], dtype=bool),
+        ),
+        DisplacementSurfacePatch(
+            family="displacement",
+            source_patch=source,
+            displacement_samples=np.array([[0.0, 0.1], [0.2, 0.3]], dtype=float),
+            alpha_mask=np.array([[True, True], [False, True]], dtype=bool),
+            direction="z",
+            projection_bounds=(-1.0, 1.0, -1.0, 1.0),
+        ),
+    )
+    return make_surface_body([make_surface_shell(patches)])
 
 
 def _make_closed_cube_body() -> SurfaceBody:
@@ -585,11 +651,14 @@ def test_patch_family_scope_constants_are_explicit() -> None:
     assert PATCH_FAMILY_CAPABILITY_MATRIX["planar"].support_phase == "available"
     assert "architecturally deferred" in SURFACE_SPEC_66_RETIREMENT_NOTE
     assert PATCH_FAMILY_FEATURE_COVERAGE["planar"] == (
+        "surface-store",
         "caps",
         "planar-primitives",
         "trimmed-faces",
         "tessellation",
         ".impress",
+        "diagnostics",
+        "no-hidden-fallback",
     )
 
 
@@ -1044,15 +1113,71 @@ def test_subdivision_refinement_runs_catmull_clark_and_preserves_crease_sharpnes
 
 def test_subdivision_surface_patch_tessellates_with_approximation_metadata() -> None:
     patch = SubdivisionSurfacePatch(family="subdivision", subdivision_level=1)
+    original_control_points = patch.control_points.copy()
+    original_faces = patch.faces
+    original_creases = patch.creases
+    request = export_tessellation_request(require_watertight=False)
 
-    mesh = tessellate_surface_patch(patch, export_tessellation_request(require_watertight=False))
+    mesh = tessellate_surface_patch(patch, request)
 
     assert mesh.vertices.shape[0] > patch.control_points.shape[0]
     assert mesh.faces.shape[0] > 0
     assert mesh.metadata["surface_family"] == "subdivision"
+    assert mesh.metadata["surface_patch_id"] == patch.stable_identity
     assert mesh.metadata["subdivision_scheme"] == "catmull_clark"
     assert mesh.metadata["subdivision_level"] >= 2
     assert mesh.metadata["subdivision_approximation"] == "finite_catmull_clark"
+    assert mesh.metadata["tessellation_adapter_boundary"] == "tessellation"
+    assert mesh.metadata["tessellation_approximation_boundary"] == "tessellation"
+    assert mesh.metadata["adapter_lossiness"] == "lossy"
+    assert_subdivision_tessellation_approximation(patch, mesh, request)
+    np.testing.assert_allclose(patch.control_points, original_control_points)
+    assert patch.faces == original_faces
+    assert patch.creases == original_creases
+
+
+def test_subdivision_surface_public_helper_wraps_valid_cage_as_surface_body() -> None:
+    body = make_subdivision_surface(
+        control_points=[
+            (0.0, 0.0, 0.0),
+            (1.0, 0.0, 0.0),
+            (1.0, 1.0, 0.0),
+            (0.0, 1.0, 0.0),
+        ],
+        faces=((0, 1, 2, 3),),
+        creases=({"edge": (0, 1), "sharpness": 2.0},),
+        subdivision_level=1,
+    )
+    patch = body.shells[0].patches[0]
+
+    assert isinstance(body, SurfaceBody)
+    assert isinstance(patch, SubdivisionSurfacePatch)
+    assert patch.family == "subdivision"
+    assert patch.metadata["kernel"]["authoring_boundary"] == "surface-native"
+    assert patch.creases[0].sharpness == pytest.approx(2.0)
+
+
+def test_subdivision_surface_public_helper_refuses_invalid_cage_or_crease() -> None:
+    with pytest.raises(ValueError, match="outside the cage"):
+        make_subdivision_surface(
+            control_points=[
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+            ],
+            faces=((0, 1, 4),),
+        )
+    with pytest.raises(ValueError, match="existing cage edges"):
+        make_subdivision_surface(
+            control_points=[
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (0.0, 1.0, 0.0),
+            ],
+            faces=((0, 1, 2, 3),),
+            creases=({"edge": (0, 2), "sharpness": 1.0},),
+        )
 
 
 def test_implicit_field_node_payload_is_allow_listed_and_canonical() -> None:
@@ -1243,20 +1368,54 @@ def test_implicit_field_evaluator_refuses_invalid_runtime_payloads(node: Implici
 
 def test_implicit_surface_patch_tessellates_with_bounds_and_approximation_metadata() -> None:
     patch = ImplicitSurfacePatch(family="implicit", field=make_implicit_field_node("sphere", parameters={"radius": 0.75}))
+    safety = assert_implicit_tessellation_sampling_safety(patch, preview_tessellation_request())
 
     mesh = tessellate_surface_patch(patch, preview_tessellation_request())
 
     diagnostic = mesh.metadata["implicit_bounds_diagnostic"]
     approximation = mesh.metadata["implicit_approximation"]
+    assert safety.within_bounds is True
+    assert safety.canonical_payload() == diagnostic
     assert mesh.vertices.shape[0] > 0
     assert mesh.faces.shape[0] > 0
     assert mesh.metadata["surface_family"] == "implicit"
+    assert mesh.metadata["surface_patch_id"] == patch.stable_identity
     assert diagnostic["within_bounds"] is True
     assert diagnostic["estimated_cells"] <= diagnostic["max_cells"]
     assert approximation["method"] == "bounded_sampled_sign_change_quads"
     assert approximation["exact"] is False
     assert approximation["active_cells"] > 0
     assert mesh.metadata["implicit_approximation_boundary"] == "tessellation"
+    assert mesh.metadata["tessellation_adapter_boundary"] == "tessellation"
+    assert mesh.metadata["tessellation_approximation_boundary"] == "tessellation"
+    assert mesh.metadata["adapter_lossiness"] == "lossy"
+
+
+def test_implicit_surface_public_helper_wraps_safe_bounded_field() -> None:
+    body = make_implicit_surface(
+        field=make_implicit_field_node("sphere", parameters={"radius": 0.75}),
+        bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+    )
+    patch = body.shells[0].patches[0]
+
+    assert isinstance(body, SurfaceBody)
+    assert isinstance(patch, ImplicitSurfacePatch)
+    assert patch.family == "implicit"
+    assert patch.metadata["kernel"]["authoring_boundary"] == "surface-native"
+    assert patch.bounds == (-1.0, 1.0, -1.0, 1.0, -1.0, 1.0)
+
+
+def test_implicit_surface_public_helper_refuses_unsafe_or_malformed_fields() -> None:
+    with pytest.raises(ValueError, match="Unsafe implicit field payload"):
+        make_implicit_surface(
+            field=make_implicit_field_node("sphere", parameters={"eval": "boom"}),
+            bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+        )
+    with pytest.raises(ValueError, match="positive span"):
+        make_implicit_surface(
+            field=make_implicit_field_node("sphere", parameters={"radius": 0.75}),
+            bounds=(0.0, 0.0, -1.0, 1.0, -1.0, 1.0),
+        )
 
 
 def test_implicit_tessellation_refuses_unbounded_sampling_request() -> None:
@@ -1266,6 +1425,8 @@ def test_implicit_tessellation_refuses_unbounded_sampling_request() -> None:
         bounds=(-100.0, 100.0, -100.0, 100.0, -100.0, 100.0),
     )
 
+    with pytest.raises(ValueError, match="bounded sampling limit"):
+        assert_implicit_tessellation_sampling_safety(patch, analysis_tessellation_request())
     with pytest.raises(ValueError, match="bounded sampling limit"):
         tessellate_surface_patch(patch, analysis_tessellation_request())
 
@@ -1294,6 +1455,19 @@ def test_surface_family_tessellation_adapter_registry_covers_supported_families(
         assert isinstance(adapter, SurfaceFamilyTessellationAdapter)
         assert adapter.family == family
         assert adapter.canonical_payload()["family"] == family
+
+
+def test_surface_family_tessellation_adapter_coverage_inventory_is_traceable() -> None:
+    records = assert_surface_family_tessellation_adapter_coverage()
+
+    assert all(isinstance(record, SurfaceFamilyTessellationAdapterCoverageRecord) for record in records)
+    assert {record.family for record in records} == set(SUPPORTED_SURFACE_PATCH_FAMILIES)
+    assert all(record.covered for record in records)
+    assert all(record.metadata_traceable for record in records)
+    assert {record.family for record in records if record.required_for_available} == {
+        family for family, capability in PATCH_FAMILY_CAPABILITY_MATRIX.items() if capability.support_phase == "available"
+    }
+    assert inspect_surface_family_tessellation_adapter_coverage() == records
 
 
 def test_every_surface_family_tessellates_through_family_adapter_metadata() -> None:
@@ -1336,6 +1510,88 @@ def test_every_surface_family_tessellates_through_family_adapter_metadata() -> N
         assert mesh.faces.shape[0] > 0
         assert mesh.metadata["surface_family"] == family
         assert adapter_metadata["family"] == family
+        assert mesh.metadata["tessellation_adapter_boundary"] == "tessellation"
+
+
+def test_sampled_surface_tessellation_adapters_preserve_payload_identity_and_lossiness_metadata() -> None:
+    source = PlanarSurfacePatch(family="planar", metadata={"kernel": {"source": "sampled-displacement"}})
+    patches = (
+        HeightmapSurfacePatch(
+            family="heightmap",
+            height_samples=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
+            alpha_mask=np.asarray([[True, True], [False, True]], dtype=bool),
+        ),
+        DisplacementSurfacePatch(
+            family="displacement",
+            source_patch=source,
+            displacement_samples=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
+            alpha_mask=np.asarray([[True, True], [False, True]], dtype=bool),
+            direction="z",
+            projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        ),
+    )
+    original_identities = [patch.stable_identity for patch in patches]
+
+    meshes = [tessellate_surface_patch(patch, preview_tessellation_request()) for patch in patches]
+
+    assert [patch.stable_identity for patch in patches] == original_identities
+    for patch, mesh in zip(patches, meshes):
+        assert mesh.vertices.shape[0] > 0
+        assert mesh.metadata["surface_family"] == patch.family
+        assert mesh.metadata["surface_patch_id"] == patch.stable_identity
+        assert mesh.metadata["adapter_lossiness"] == "lossy"
+        assert mesh.metadata["tessellation_adapter_boundary"] == "tessellation"
+    assert meshes[1].metadata["displacement_source_family"] == "planar"
+    assert meshes[1].metadata["displacement_source_patch_id"] == source.stable_identity
+
+
+def test_spline_surface_tessellation_adapters_preserve_control_payloads_and_boundary_metadata() -> None:
+    control_net = np.array(
+        [
+            [[0.0, 0.0, 0.0], [0.0, 1.0, 0.2], [0.0, 2.0, 0.0]],
+            [[1.0, 0.0, 0.1], [1.0, 1.0, 0.4], [1.0, 2.0, 0.1]],
+            [[2.0, 0.0, 0.0], [2.0, 1.0, 0.2], [2.0, 2.0, 0.0]],
+        ],
+        dtype=float,
+    )
+    knots = (0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+    patches = (
+        BSplineSurfacePatch(
+            family="bspline",
+            degree_u=2,
+            degree_v=2,
+            knots_u=knots,
+            knots_v=knots,
+            control_net=control_net,
+        ),
+        NURBSSurfacePatch(
+            family="nurbs",
+            degree_u=2,
+            degree_v=2,
+            knots_u=knots,
+            knots_v=knots,
+            control_net=control_net,
+            weights=np.ones((3, 3), dtype=float),
+        ),
+        SweepSurfacePatch(
+            family="sweep",
+            profile_points_uv=[(0.0, 0.0), (0.5, 0.25), (1.0, 0.0)],
+            path=Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.5, 1.0), (0.0, 0.0, 2.0)]),
+            frame_policy="fixed",
+        ),
+    )
+    original_identities = [patch.stable_identity for patch in patches]
+
+    meshes = [tessellate_surface_patch(patch, preview_tessellation_request()) for patch in patches]
+
+    assert [patch.stable_identity for patch in patches] == original_identities
+    for patch, mesh in zip(patches, meshes):
+        assert mesh.vertices.shape[0] > 0
+        assert mesh.faces.shape[0] > 0
+        assert mesh.metadata["surface_family"] == patch.family
+        assert mesh.metadata["surface_patch_id"] == patch.stable_identity
+        assert mesh.metadata["adapter_lossiness"] == "lossy"
+        assert mesh.metadata["tessellation_sampling_kind"] == "parametric-loop"
         assert mesh.metadata["tessellation_adapter_boundary"] == "tessellation"
 
 
@@ -1647,6 +1903,37 @@ def test_tessellation_helper_contract_accepts_only_surface_boundary_inputs() -> 
     assert isinstance(diagnostic, TessellationBoundaryViolationDiagnostic)
     assert diagnostic.received_type == "dict"
     assert "SurfaceBody" in diagnostic.expected_inputs
+
+
+def test_surface_primitive_family_appropriateness_matrix_stays_exact_and_native() -> None:
+    primitive_families = {
+        "box": {patch.family for patch in make_surface_box(size=(1.0, 1.0, 1.0)).iter_patches()},
+        "polyhedron": {patch.family for patch in make_surface_polyhedron(faces=4, radius=0.5).iter_patches()},
+        "prism": {patch.family for patch in make_surface_prism(base_size=(1.0, 1.0), top_size=(0.75, 0.5), height=1.0).iter_patches()},
+        "cylinder": {patch.family for patch in make_surface_cylinder(radius=0.5, height=1.0).iter_patches()},
+        "cone": {patch.family for patch in make_surface_cone(bottom_diameter=1.0, top_diameter=0.2, height=1.0).iter_patches()},
+        "sphere": {patch.family for patch in make_surface_sphere(radius=0.5).iter_patches()},
+        "torus": {patch.family for patch in make_surface_torus(major_radius=1.0, minor_radius=0.2).iter_patches()},
+    }
+
+    assert primitive_families["box"] == {"planar"}
+    assert primitive_families["polyhedron"] == {"planar"}
+    assert "ruled" in primitive_families["prism"]
+    assert primitive_families["prism"] <= {"planar", "ruled"}
+    assert "revolution" in primitive_families["cylinder"]
+    assert "revolution" in primitive_families["cone"]
+    assert primitive_families["sphere"] == {"revolution"}
+    assert primitive_families["torus"] == {"revolution"}
+
+    heightmap_patch = HeightmapSurfacePatch(family="heightmap", height_samples=np.asarray([[0.0, 1.0], [0.25, 0.5]]))
+    displacement_patch = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=PlanarSurfacePatch(family="planar"),
+        displacement_samples=np.asarray([[0.0, 1.0], [0.25, 0.5]]),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+    )
+    assert heightmap_patch.family == "heightmap"
+    assert displacement_patch.family == "displacement"
 
 
 def test_planar_patch_tessellates_to_mesh_from_domain_or_trim() -> None:
@@ -1962,6 +2249,58 @@ def test_surface_composition_traversal_is_preorder_and_transform_aware() -> None
         "root/0",
         "root/1/nested/0",
     )
+
+
+def test_surface_composition_traversal_preserves_all_patch_families_without_tessellation() -> None:
+    body = _make_all_patch_family_body()
+    composition = surface_group([body], group_id="all-families")
+
+    records = traverse_surface_composition(composition)
+    collection = surface_composition_to_consumer_collection(composition)
+
+    assert len(records) == 1
+    assert isinstance(collection, SurfaceConsumerCollection)
+    assert [item.source_id for item in collection.items] == ["all-families/0"]
+    assert not isinstance(collection.items[0].body, Mesh)
+    assert collection.items[0].body.stable_identity == body.stable_identity
+    assert [patch.family for patch in collection.items[0].body.iter_patches(world=False)] == [
+        "planar",
+        "ruled",
+        "revolution",
+        "bspline",
+        "nurbs",
+        "sweep",
+        "subdivision",
+        "implicit",
+        "heightmap",
+        "displacement",
+    ]
+    assert collection.metadata["surface_composition_traversal"]["traversal_order"] == ("all-families/0",)
+
+
+def test_surface_composition_transform_preserves_all_family_payload_identity_without_tessellation() -> None:
+    body = _make_all_patch_family_body()
+    translate = np.eye(4)
+    translate[:3, 3] = [3.0, 4.0, 5.0]
+    composition = surface_group([body], group_id="moved-families", transform_matrix=translate)
+
+    records = traverse_surface_composition(composition)
+    collection = surface_composition_to_consumer_collection(composition)
+    transformed_body = collection.items[0].body
+
+    assert not isinstance(transformed_body, Mesh)
+    assert np.allclose(records[0].transform_matrix, translate)
+    assert np.allclose(transformed_body.transform_matrix, translate)
+    assert np.allclose(body.transform_matrix, np.eye(4))
+    assert [patch.family for patch in transformed_body.shells[0].patches] == [
+        patch.family for patch in body.shells[0].patches
+    ]
+    assert [patch.stable_identity for patch in transformed_body.shells[0].patches] == [
+        patch.stable_identity for patch in body.shells[0].patches
+    ]
+    world_planar = transformed_body.iter_patches(world=True)[0]
+    assert np.allclose(world_planar.point_at(0.0, 0.0), np.array([3.0, 4.0, 5.0]))
+    assert collection.items[0].metadata["traversal"]["source_id"] == "moved-families/0"
 
 
 def test_surface_composition_tessellation_handoff_is_explicit_boundary() -> None:
