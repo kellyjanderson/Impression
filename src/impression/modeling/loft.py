@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Iterable, Sequence
 
 import numpy as np
@@ -37,11 +38,221 @@ from .topology import (
     Loop,
     Section,
     Region,
+    TopologyLandmark,
+    TopologyPath,
+    TopologyPoint,
+    TopologySegment,
     as_section,
 )
 from .drawing2d import Path2D
 from .path3d import Path3D
 from .paths import Path as PolyPath
+
+
+class RailSource(str, Enum):
+    EXPLICIT_ID = "explicit_id"
+    LANDMARK_NAME = "landmark_name"
+    SEGMENT_NAME = "segment_name"
+    AUTHORED_ORDER = "authored_order"
+    GENERATED_RAIL = "generated_rail"
+
+
+@dataclass(frozen=True)
+class RailConflictDiagnostic:
+    reason: str
+    source_ref: str
+    target_ref: str
+    priority_tier: RailSource
+
+
+@dataclass(frozen=True)
+class RailResolutionResult:
+    matches: tuple[tuple[str, str], ...]
+    source_by_match: dict[tuple[str, str], RailSource]
+    conflicts: tuple[RailConflictDiagnostic, ...] = ()
+    unmatched_source: tuple[str, ...] = ()
+    unmatched_target: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _RailRecord:
+    ref: str
+    key: str
+    ordinal: float
+    source: RailSource
+    generated: bool = False
+
+
+def resolve_authored_rails(source_loop: TopologyPath, target_loop: TopologyPath) -> RailResolutionResult:
+    """Resolve authored topology rails before any geometric inference is considered."""
+
+    if not isinstance(source_loop, TopologyPath) or not isinstance(target_loop, TopologyPath):
+        raise TypeError("resolve_authored_rails requires TopologyPath inputs.")
+
+    conflicts: list[RailConflictDiagnostic] = []
+    matches: dict[tuple[str, str], RailSource] = {}
+    used_source: set[str] = set()
+    used_target: set[str] = set()
+
+    for tier in (
+        RailSource.EXPLICIT_ID,
+        RailSource.LANDMARK_NAME,
+        RailSource.SEGMENT_NAME,
+        RailSource.AUTHORED_ORDER,
+        RailSource.GENERATED_RAIL,
+    ):
+        source_records = _rail_records_for_tier(source_loop, tier)
+        target_records = _rail_records_for_tier(target_loop, tier)
+        tier_conflicts = _duplicate_rail_conflicts(source_records, "source", tier)
+        tier_conflicts += _duplicate_rail_conflicts(target_records, "target", tier)
+        conflicts.extend(tier_conflicts)
+        if tier_conflicts and tier == RailSource.EXPLICIT_ID:
+            continue
+        for source_record, target_record in _match_rail_records(source_records, target_records):
+            if source_record.ref in used_source or target_record.ref in used_target:
+                continue
+            pair = (source_record.ref, target_record.ref)
+            matches[pair] = tier
+            used_source.add(source_record.ref)
+            used_target.add(target_record.ref)
+
+    conflicts.extend(_crossing_explicit_rail_conflicts(source_loop, target_loop, matches))
+    source_refs = tuple(point.id for point in source_loop.points)
+    target_refs = tuple(point.id for point in target_loop.points)
+    return RailResolutionResult(
+        matches=tuple(matches.keys()),
+        source_by_match=dict(matches),
+        conflicts=tuple(conflicts),
+        unmatched_source=tuple(ref for ref in source_refs if ref not in used_source),
+        unmatched_target=tuple(ref for ref in target_refs if ref not in used_target),
+    )
+
+
+def validate_rail_priority(result: RailResolutionResult) -> None:
+    invalid_conflicts = [
+        conflict for conflict in result.conflicts if conflict.priority_tier == RailSource.EXPLICIT_ID
+    ]
+    if invalid_conflicts:
+        reasons = ", ".join(conflict.reason for conflict in invalid_conflicts)
+        raise ValueError(f"Invalid authored rail priority: {reasons}.")
+
+
+def _rail_records_for_tier(path: TopologyPath, tier: RailSource) -> tuple[_RailRecord, ...]:
+    if tier == RailSource.EXPLICIT_ID:
+        return tuple(
+            _RailRecord(point.id, str(point.correspondence_id), float(point.ordinal), tier)
+            for point in path.points
+            if point.correspondence_id is not None and not _is_generated_rail(point)
+        )
+    if tier == RailSource.LANDMARK_NAME:
+        return tuple(
+            _RailRecord(_landmark_ref(landmark), str(landmark.name), float(index), tier)
+            for index, landmark in enumerate(path.landmarks)
+            if landmark.name is not None
+        )
+    if tier == RailSource.SEGMENT_NAME:
+        return tuple(
+            _RailRecord(str(segment.id), str(segment.name), float(index), tier)
+            for index, segment in enumerate(path.segments)
+            if segment.name is not None
+        )
+    if tier == RailSource.AUTHORED_ORDER:
+        if path.anchor_policy == "generated" or all(_is_generated_rail(point) for point in path.points):
+            return ()
+        return tuple(_RailRecord(point.id, str(point.ordinal), float(point.ordinal), tier) for point in path.points)
+    if tier == RailSource.GENERATED_RAIL:
+        return tuple(
+            _RailRecord(point.id, _generated_rail_key(point), float(point.ordinal), tier, generated=True)
+            for point in path.points
+            if _is_generated_rail(point)
+        )
+    return ()
+
+
+def _match_rail_records(
+    source_records: Sequence[_RailRecord],
+    target_records: Sequence[_RailRecord],
+) -> tuple[tuple[_RailRecord, _RailRecord], ...]:
+    target_by_key: dict[str, list[_RailRecord]] = {}
+    for target_record in target_records:
+        target_by_key.setdefault(target_record.key, []).append(target_record)
+    matches: list[tuple[_RailRecord, _RailRecord]] = []
+    for source_record in source_records:
+        candidates = target_by_key.get(source_record.key, [])
+        if len(candidates) == 1:
+            matches.append((source_record, candidates[0]))
+    return tuple(matches)
+
+
+def _duplicate_rail_conflicts(
+    records: Sequence[_RailRecord],
+    side: str,
+    tier: RailSource,
+) -> list[RailConflictDiagnostic]:
+    by_key: dict[str, list[_RailRecord]] = {}
+    for record in records:
+        by_key.setdefault(record.key, []).append(record)
+    conflicts: list[RailConflictDiagnostic] = []
+    for key, duplicates in by_key.items():
+        if len(duplicates) <= 1:
+            continue
+        refs = ",".join(record.ref for record in duplicates)
+        conflicts.append(
+            RailConflictDiagnostic(
+                reason=f"duplicate {tier.value} rail {key!r} on {side}",
+                source_ref=refs if side == "source" else "",
+                target_ref=refs if side == "target" else "",
+                priority_tier=tier,
+            )
+        )
+    return conflicts
+
+
+def _crossing_explicit_rail_conflicts(
+    source_loop: TopologyPath,
+    target_loop: TopologyPath,
+    matches: dict[tuple[str, str], RailSource],
+) -> list[RailConflictDiagnostic]:
+    source_ordinals = {point.id: point.ordinal for point in source_loop.points}
+    target_ordinals = {point.id: point.ordinal for point in target_loop.points}
+    explicit_pairs = [
+        (source_ref, target_ref)
+        for (source_ref, target_ref), tier in matches.items()
+        if tier == RailSource.EXPLICIT_ID and source_ref in source_ordinals and target_ref in target_ordinals
+    ]
+    conflicts: list[RailConflictDiagnostic] = []
+    for index, (source_a, target_a) in enumerate(explicit_pairs):
+        for source_b, target_b in explicit_pairs[index + 1 :]:
+            source_delta = source_ordinals[source_a] - source_ordinals[source_b]
+            target_delta = target_ordinals[target_a] - target_ordinals[target_b]
+            if source_delta * target_delta < 0:
+                conflicts.append(
+                    RailConflictDiagnostic(
+                        reason="crossing explicit correspondence rails",
+                        source_ref=f"{source_a},{source_b}",
+                        target_ref=f"{target_a},{target_b}",
+                        priority_tier=RailSource.EXPLICIT_ID,
+                    )
+                )
+    return conflicts
+
+
+def _is_generated_rail(record: TopologyPoint | TopologyLandmark | TopologySegment) -> bool:
+    return "generated_rail" in record.provenance
+
+
+def _generated_rail_key(point: TopologyPoint) -> str:
+    provenance = point.provenance.get("generated_rail")
+    source_parameter = getattr(provenance, "source_parameter", None)
+    return str(source_parameter or point.correspondence_id or point.name or point.id)
+
+
+def _landmark_ref(landmark: TopologyLandmark) -> str:
+    if landmark.id is not None:
+        return str(landmark.id)
+    if landmark.name is not None:
+        return str(landmark.name)
+    return f"landmark-{landmark.point_ordinal}-{landmark.parameter}"
 
 
 @dataclass(frozen=True)
@@ -5229,7 +5440,12 @@ __all__ = [
     "PlannedClosure",
     "PlannedRegionPair",
     "PlannedTransition",
+    "RailConflictDiagnostic",
+    "RailResolutionResult",
+    "RailSource",
     "LoftPlan",
+    "resolve_authored_rails",
+    "validate_rail_priority",
     "loft_profiles",
     "loft",
     "loft_plan_sections",
