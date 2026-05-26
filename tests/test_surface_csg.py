@@ -15,19 +15,25 @@ from tests.reference_images import compare_planar_loop_silhouettes
 from impression.modeling import (
     BooleanOperationError,
     PlanarSurfacePatch,
+    RevolutionSurfacePatch,
     SurfaceBody,
     SurfaceBooleanIntersectionStage,
     SurfaceBooleanOperands,
+    SurfaceBooleanPatchRef,
     SurfaceBooleanResult,
     SurfaceBooleanSplitRecord,
     SurfaceBooleanTrimmedPatchFragment,
     SurfaceCSGCurvePrimitive,
+    SurfaceCSGCurveMappingDiagnostic,
+    SurfaceCSGPatchLocalCurve,
+    SurfaceCSGPatchLocalCurveMappingResult,
     SurfaceCSGToleranceDiagnostic,
     SurfaceCSGTolerancePolicy,
     SurfaceShell,
     boolean_difference,
     boolean_intersection,
     boolean_union,
+    map_surface_csg_curve_to_patch_local,
     make_surface_csg_curve,
     make_surface_csg_line_curve,
     make_box,
@@ -45,6 +51,7 @@ from impression.modeling import (
     surface_boolean_intersection_stage,
     surface_boolean_result,
     validate_surface_csg_curve,
+    validate_surface_csg_patch_local_curve_domain,
 )
 
 
@@ -89,6 +96,59 @@ def test_surface_csg_tolerance_policy_reports_degenerate_and_ambiguous_curves() 
         SurfaceCSGTolerancePolicy(snap_tolerance=0.0)
     with pytest.raises(ValueError, match="degeneracy tolerance"):
         make_surface_csg_line_curve((0.0, 0.0, 0.0), (0.0, 0.0, 5e-4), policy=policy)
+
+
+def test_surface_csg_curve_maps_to_planar_patch_local_domain() -> None:
+    patch = PlanarSurfacePatch(family="planar", origin=(0.0, 0.0, 0.0), u_axis=(2.0, 0.0, 0.0), v_axis=(0.0, 3.0, 0.0))
+    patch_ref = SurfaceBooleanPatchRef(operand_index=0, patch_index=2)
+    curve = make_surface_csg_line_curve((0.5, 0.75, 0.0), (1.5, 2.25, 0.0))
+
+    result = map_surface_csg_curve_to_patch_local(curve, patch_ref, patch)
+
+    assert isinstance(result, SurfaceCSGPatchLocalCurveMappingResult)
+    assert result.supported is True
+    assert isinstance(result.curve, SurfaceCSGPatchLocalCurve)
+    assert result.curve.patch == patch_ref
+    assert np.allclose(result.curve.points_uv, ((0.25, 0.25), (0.75, 0.75)))
+    assert result.curve.source_curve_digest == surface_csg_curve_digest(curve)
+    assert result.diagnostics == ()
+
+
+def test_surface_csg_curve_mapping_refuses_outside_domain_and_singular_revolution() -> None:
+    patch_ref = SurfaceBooleanPatchRef(operand_index=1, patch_index=0)
+    planar_patch = PlanarSurfacePatch(family="planar", origin=(0.0, 0.0, 0.0), u_axis=(1.0, 0.0, 0.0), v_axis=(0.0, 1.0, 0.0))
+    outside_curve = make_surface_csg_line_curve((0.25, 0.25, 0.0), (2.0, 0.25, 0.0))
+    revolution_patch = RevolutionSurfacePatch(
+        family="revolution",
+        profile_curve=((1.0, 0.0, 0.0), (1.0, 0.0, 1.0)),
+    )
+    singular_curve = make_surface_csg_line_curve((0.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+
+    outside = map_surface_csg_curve_to_patch_local(outside_curve, patch_ref, planar_patch)
+    singular = map_surface_csg_curve_to_patch_local(singular_curve, patch_ref, revolution_patch)
+
+    assert outside.supported is False
+    assert all(isinstance(diagnostic, SurfaceCSGCurveMappingDiagnostic) for diagnostic in outside.diagnostics)
+    assert outside.diagnostics[0].code == "outside-domain"
+    assert singular.supported is False
+    assert singular.diagnostics[0].code == "ambiguous-curve"
+
+
+def test_surface_csg_curve_maps_to_revolution_patch_local_domain() -> None:
+    patch = RevolutionSurfacePatch(
+        family="revolution",
+        profile_curve=((1.0, 0.0, 0.0), (1.0, 0.0, 2.0)),
+    )
+    patch_ref = SurfaceBooleanPatchRef(operand_index=0, patch_index=1)
+    curve = make_surface_csg_line_curve((1.0, 0.0, 0.5), (0.0, 1.0, 1.5))
+
+    result = map_surface_csg_curve_to_patch_local(curve, patch_ref, patch)
+
+    assert result.supported is True
+    assert result.curve is not None
+    assert result.curve.points_uv[0] == pytest.approx((0.0, 0.25))
+    assert result.curve.points_uv[1] == pytest.approx((0.25, 0.75))
+    assert validate_surface_csg_patch_local_curve_domain(result.curve) == ()
 
 
 def _translated(body: SurfaceBody, offset: tuple[float, float, float]) -> SurfaceBody:
