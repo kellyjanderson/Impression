@@ -51,6 +51,7 @@ from .loft import (
     PointLifecycleEvent,
     PointLifecycleState,
     SampleCorrespondenceRecord,
+    SurfaceSampleEmissionDiagnostic,
     SyntheticSupportReference,
     LoftPlan,
     LoftAmbiguityCandidate,
@@ -65,6 +66,7 @@ from .loft import (
     loft_endcaps,
     accept_or_refuse_inferred_correspondence,
     emit_mesh_faces_from_sample_correspondence,
+    emit_surface_patches_from_sample_correspondence,
     insert_synthetic_support_reference,
     locate_parent_span,
     project_point_to_span,
@@ -77,6 +79,7 @@ from .loft import (
     validate_mesh_executor_correspondence_input,
     validate_rail_priority,
     validate_sample_correspondence,
+    validate_surface_executor_correspondence_input,
 )
 from .path3d import Arc3D, Bezier3D, Line3D, Path3D
 from .progression import (
@@ -425,6 +428,7 @@ __all__ = [
     "PointLifecycleEvent",
     "PointLifecycleState",
     "SampleCorrespondenceRecord",
+    "SurfaceSampleEmissionDiagnostic",
     "SyntheticSupportReference",
     "LoftPlan",
     "LoftAmbiguityCandidate",
@@ -434,6 +438,7 @@ __all__ = [
     "loft_plan_ambiguities",
     "accept_or_refuse_inferred_correspondence",
     "emit_mesh_faces_from_sample_correspondence",
+    "emit_surface_patches_from_sample_correspondence",
     "insert_synthetic_support_reference",
     "locate_parent_span",
     "project_point_to_span",
@@ -446,6 +451,7 @@ __all__ = [
     "validate_mesh_executor_correspondence_input",
     "validate_rail_priority",
     "validate_sample_correspondence",
+    "validate_surface_executor_correspondence_input",
     "boolean_union",
     "boolean_difference",
     "boolean_intersection",
