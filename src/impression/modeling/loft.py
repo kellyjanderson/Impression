@@ -175,6 +175,23 @@ class SurfaceSampleEmissionDiagnostic:
 
 
 @dataclass(frozen=True)
+class LoftDebugMeshResult:
+    mesh: Mesh
+    boundary: str
+    plan_samples: int
+    cap_ends: bool
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary": self.boundary,
+            "plan_samples": self.plan_samples,
+            "cap_ends": self.cap_ends,
+            "mesh_vertices": self.mesh.n_vertices,
+            "mesh_faces": self.mesh.n_faces,
+        }
+
+
+@dataclass(frozen=True)
 class _RailRecord:
     ref: str
     key: str
@@ -1157,7 +1174,9 @@ def emit_mesh_faces_from_sample_correspondence(
         vertices=vertices,
         faces=np.asarray(faces, dtype=int),
         metadata={
-            "executor": "mesh_correspondence",
+            "executor": "debug_mesh_correspondence",
+            "loft_mesh_boundary": "debug-compatibility",
+            "canonical_executor": "surface",
             "sample_records": resampled.sample_records,
             "protected_indices": resampled.protected_indices,
         },
@@ -1961,7 +1980,7 @@ def loft_sections(
         skeleton_mode=skeleton_mode,
         fairness_iterations=fairness_iterations,
     )
-    return loft_execute_plan(plan, cap_ends=cap_ends)
+    return loft_execute_plan_debug_mesh(plan, cap_ends=cap_ends)
 
 
 def loft_plan_sections(
@@ -2481,12 +2500,12 @@ def loft_plan_ambiguities(
     )
 
 
-def loft_execute_plan(
+def loft_execute_plan_debug_mesh(
     plan: LoftPlan,
     *,
     cap_ends: bool = False,
 ) -> Mesh:
-    """Execute a loft plan into a deterministic mesh."""
+    """Execute a loft plan through the explicit legacy/debug mesh boundary."""
 
     _validate_loft_plan(plan)
     plan.require_executable()
@@ -2642,7 +2661,39 @@ def loft_execute_plan(
             if base_faces_end.size:
                 faces.extend((base_faces_end[:, [0, 2, 1]] + offsets[-1][region_idx][0]).tolist())
 
-    return Mesh(np.asarray(vertices, dtype=float), np.asarray(faces, dtype=int))
+    return Mesh(
+        np.asarray(vertices, dtype=float),
+        np.asarray(faces, dtype=int),
+        metadata={
+            "loft_mesh_boundary": "debug-compatibility",
+            "canonical_executor": "surface",
+            "cap_ends": bool(cap_ends),
+        },
+    )
+
+
+def loft_execute_plan_debug_mesh_result(
+    plan: LoftPlan,
+    *,
+    cap_ends: bool = False,
+) -> LoftDebugMeshResult:
+    mesh = loft_execute_plan_debug_mesh(plan, cap_ends=cap_ends)
+    return LoftDebugMeshResult(
+        mesh=mesh,
+        boundary="debug-compatibility",
+        plan_samples=plan.samples,
+        cap_ends=cap_ends,
+    )
+
+
+def loft_execute_plan(
+    plan: LoftPlan,
+    *,
+    cap_ends: bool = False,
+) -> SurfaceBody:
+    """Execute a loft plan into the canonical surfaced body representation."""
+
+    return _loft_execute_plan_surface(plan, cap_ends=cap_ends)
 
 
 def _loft_execute_plan_surface(
@@ -6275,6 +6326,7 @@ __all__ = [
     "SurfaceSampleEmissionDiagnostic",
     "SyntheticSupportReference",
     "LoftPlan",
+    "LoftDebugMeshResult",
     "accept_or_refuse_inferred_correspondence",
     "emit_mesh_faces_from_sample_correspondence",
     "emit_surface_patches_from_sample_correspondence",
@@ -6295,6 +6347,8 @@ __all__ = [
     "loft",
     "loft_plan_sections",
     "loft_execute_plan",
+    "loft_execute_plan_debug_mesh",
+    "loft_execute_plan_debug_mesh_result",
     "loft_sections",
     "loft_endcaps",
 ]
