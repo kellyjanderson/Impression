@@ -145,6 +145,81 @@ def _validate_bspline_axis(*, control_point_count: int, degree: int, knots: tupl
     return start, end
 
 
+def _find_bspline_span(*, degree: int, knots: tuple[float, ...], control_point_count: int, parameter: float) -> int:
+    n = control_point_count - 1
+    if parameter >= knots[n + 1]:
+        return n
+    if parameter <= knots[degree]:
+        return degree
+    low = degree
+    high = n + 1
+    mid = (low + high) // 2
+    while parameter < knots[mid] or parameter >= knots[mid + 1]:
+        if parameter < knots[mid]:
+            high = mid
+        else:
+            low = mid
+        mid = (low + high) // 2
+    return mid
+
+
+def _bspline_basis_functions(span: int, parameter: float, degree: int, knots: tuple[float, ...]) -> np.ndarray:
+    left = np.zeros(degree + 1, dtype=float)
+    right = np.zeros(degree + 1, dtype=float)
+    basis = np.zeros(degree + 1, dtype=float)
+    basis[0] = 1.0
+    for j in range(1, degree + 1):
+        left[j] = parameter - knots[span + 1 - j]
+        right[j] = knots[span + j] - parameter
+        saved = 0.0
+        for r in range(j):
+            denominator = right[r + 1] + left[j - r]
+            term = 0.0 if denominator == 0.0 else basis[r] / denominator
+            basis[r] = saved + right[r + 1] * term
+            saved = left[j - r] * term
+        basis[j] = saved
+    return basis
+
+
+def _evaluate_bspline_surface_net(
+    *,
+    control_net: np.ndarray,
+    degree_u: int,
+    degree_v: int,
+    knots_u: tuple[float, ...],
+    knots_v: tuple[float, ...],
+    u: float,
+    v: float,
+) -> np.ndarray:
+    span_u = _find_bspline_span(degree=degree_u, knots=knots_u, control_point_count=control_net.shape[0], parameter=u)
+    span_v = _find_bspline_span(degree=degree_v, knots=knots_v, control_point_count=control_net.shape[1], parameter=v)
+    basis_u = _bspline_basis_functions(span_u, u, degree_u, knots_u)
+    basis_v = _bspline_basis_functions(span_v, v, degree_v, knots_v)
+    point = np.zeros(3, dtype=float)
+    for i in range(degree_u + 1):
+        u_index = span_u - degree_u + i
+        for j in range(degree_v + 1):
+            v_index = span_v - degree_v + j
+            point += basis_u[i] * basis_v[j] * control_net[u_index, v_index]
+    return point
+
+
+def _bspline_surface_derivative_net(control_net: np.ndarray, degree: int, knots: tuple[float, ...], *, axis: int) -> np.ndarray:
+    if axis == 0:
+        derived = np.zeros((control_net.shape[0] - 1, control_net.shape[1], 3), dtype=float)
+        for i in range(control_net.shape[0] - 1):
+            denominator = knots[i + degree + 1] - knots[i + 1]
+            if denominator != 0.0:
+                derived[i, :, :] = (degree / denominator) * (control_net[i + 1, :, :] - control_net[i, :, :])
+        return derived
+    derived = np.zeros((control_net.shape[0], control_net.shape[1] - 1, 3), dtype=float)
+    for j in range(control_net.shape[1] - 1):
+        denominator = knots[j + degree + 1] - knots[j + 1]
+        if denominator != 0.0:
+            derived[:, j, :] = (degree / denominator) * (control_net[:, j + 1, :] - control_net[:, j, :])
+    return derived
+
+
 def _as_matrix4(value: Sequence[Sequence[float]] | np.ndarray, *, name: str = "matrix") -> np.ndarray:
     mat = np.asarray(value, dtype=float).reshape(4, 4)
     if not np.all(np.isfinite(mat)):
@@ -865,10 +940,41 @@ class BSplineSurfacePatch(SurfacePatch):
         }
 
     def point_at(self, u: float, v: float) -> np.ndarray:
-        raise NotImplementedError("BSplineSurfacePatch evaluation is implemented by Surface Spec 141.")
+        self.validate_parameters(u, v)
+        local = _evaluate_bspline_surface_net(
+            control_net=self.control_net,
+            degree_u=self.degree_u,
+            degree_v=self.degree_v,
+            knots_u=self.knots_u,
+            knots_v=self.knots_v,
+            u=float(u),
+            v=float(v),
+        )
+        return _transform_point(self.transform_matrix, local)
 
     def derivatives_at(self, u: float, v: float) -> tuple[np.ndarray, np.ndarray]:
-        raise NotImplementedError("BSplineSurfacePatch derivatives are implemented by Surface Spec 141.")
+        self.validate_parameters(u, v)
+        du_net = _bspline_surface_derivative_net(self.control_net, self.degree_u, self.knots_u, axis=0)
+        dv_net = _bspline_surface_derivative_net(self.control_net, self.degree_v, self.knots_v, axis=1)
+        du = _evaluate_bspline_surface_net(
+            control_net=du_net,
+            degree_u=self.degree_u - 1,
+            degree_v=self.degree_v,
+            knots_u=self.knots_u[1:-1],
+            knots_v=self.knots_v,
+            u=float(u),
+            v=float(v),
+        )
+        dv = _evaluate_bspline_surface_net(
+            control_net=dv_net,
+            degree_u=self.degree_u,
+            degree_v=self.degree_v - 1,
+            knots_u=self.knots_u,
+            knots_v=self.knots_v[1:-1],
+            u=float(u),
+            v=float(v),
+        )
+        return (_transform_vector(self.transform_matrix, du), _transform_vector(self.transform_matrix, dv))
 
 
 @dataclass(frozen=True)
