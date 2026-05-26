@@ -12,6 +12,10 @@ Create the authoritative inventory of mesh-producing code paths before writing m
 
 This specification promotes the manifest candidate `Mesh Execution Inventory And Classification` into a final implementation leaf. It covers the behavior, data ownership, reuse boundary, and verification expectations needed to implement this leaf without returning to the architecture document for hidden decisions.
 
+## Implementation Artifact
+
+- [Surface Spec 159 Implementation: Mesh Execution Inventory And Classification Report](surface-159-mesh-execution-inventory-report-v1_0.md)
+
 ## Responsibilities
 
 - Functions/methods:

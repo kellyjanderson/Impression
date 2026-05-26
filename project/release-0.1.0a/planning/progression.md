@@ -374,7 +374,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 158: .impress Implicit Patch Payload Security (v1.0)](../specifications/surface-158-impress-implicit-patch-payload-security-v1_0.md)
 
 ### Mesh Execution Tessellation Boundary Architecture
-- [ ] [Surface Spec 159: Mesh Execution Inventory And Classification (v1.0)](../specifications/surface-159-mesh-execution-inventory-and-classification-v1_0.md)
+- [x] [Surface Spec 159: Mesh Execution Inventory And Classification (v1.0)](../specifications/surface-159-mesh-execution-inventory-and-classification-v1_0.md)
 - [ ] [Surface Spec 160: Primitive Surface Defaults: Box, Prism, Polyhedron (v1.0)](../specifications/surface-160-primitive-surface-defaults-box-prism-polyhedron-v1_0.md)
 - [ ] [Surface Spec 161: Primitive Surface Defaults: Cylinder, Cone, Ngon (v1.0)](../specifications/surface-161-primitive-surface-defaults-cylinder-cone-ngon-v1_0.md)
 - [ ] [Surface Spec 162: Primitive Surface Defaults: Sphere And Torus (v1.0)](../specifications/surface-162-primitive-surface-defaults-sphere-and-torus-v1_0.md)
