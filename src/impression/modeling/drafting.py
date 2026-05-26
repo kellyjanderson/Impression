@@ -371,6 +371,7 @@ def make_dimension(
                 font=font,
                 font_path=font_path,
                 color=color,
+                backend="mesh",
             )
         except FileNotFoundError:
             return meshes

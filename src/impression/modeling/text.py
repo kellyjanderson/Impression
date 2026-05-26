@@ -45,7 +45,7 @@ def make_text(
     font: str = "Arial",
     font_path: str | None = None,
     color: Sequence[float] | str | None = None,
-    backend: Backend = "mesh",
+    backend: Backend = "surface",
 ) -> Mesh | SurfaceBody:
     """Return 3D text built by extruding text profiles."""
 
@@ -124,7 +124,7 @@ def text(
     font: str = "Arial",
     font_path: str | None = None,
     color: Sequence[float] | str | None = None,
-    backend: Backend = "mesh",
+    backend: Backend = "surface",
 ) -> Mesh | SurfaceBody:
     """Alias for make_text."""
 
