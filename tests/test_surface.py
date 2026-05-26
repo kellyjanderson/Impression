@@ -678,11 +678,38 @@ def test_bspline_surface_patch_rejects_invalid_record_inputs(kwargs: dict[str, o
         BSplineSurfacePatch(**kwargs)
 
 
-def test_bspline_surface_patch_refuses_evaluation_until_evaluator_spec() -> None:
+def test_bspline_surface_patch_evaluates_points_derivatives_and_boundaries() -> None:
+    patch = BSplineSurfacePatch(
+        family="bspline",
+        transform_matrix=[
+            [1.0, 0.0, 0.0, 10.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        control_net=[
+            [(0.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            [(1.0, 0.0, 0.0), (1.0, 1.0, 1.0)],
+        ],
+    )
+
+    assert np.allclose(patch.point_at(0.0, 0.0), (10.0, 0.0, 0.0))
+    assert np.allclose(patch.point_at(1.0, 1.0), (11.0, 1.0, 1.0))
+    assert np.allclose(patch.point_at(0.5, 0.5), (10.5, 0.5, 0.25))
+
+    du, dv = patch.derivatives_at(0.5, 0.5)
+    assert np.allclose(du, (1.0, 0.0, 0.5))
+    assert np.allclose(dv, (0.0, 1.0, 0.5))
+
+
+def test_bspline_surface_patch_sampling_uses_surface_evaluator() -> None:
     patch = BSplineSurfacePatch(family="bspline")
 
-    with pytest.raises(NotImplementedError, match="Surface Spec 141"):
-        patch.point_at(0.5, 0.5)
+    samples = patch.sample_grid(2, 2)
+
+    assert samples.shape == (2, 2, 3)
+    assert np.allclose(samples[0, 0], (0.0, 0.0, 0.0))
+    assert np.allclose(samples[1, 1], (1.0, 1.0, 0.0))
 
 
 def test_planar_patch_rejects_collinear_axes_and_multiple_outer_trims() -> None:
