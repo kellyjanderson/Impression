@@ -220,7 +220,15 @@ from .csg import (
     union_meshes,
 )
 from .paths import Path
-from .group import MeshGroup, group
+from .group import (
+    MESH_GROUP_COMPATIBILITY_BOUNDARY,
+    MESH_GROUP_COMPATIBILITY_CLASSIFICATION,
+    MeshGroup,
+    MeshGroupCompatibilityDiagnostic,
+    MeshGroupCompatibilityError,
+    group,
+    mesh_group_compatibility_diagnostic,
+)
 from .ops import offset, hull
 from .heightmap import (
     HeightmapAlphaMaskPolicy,
@@ -604,8 +612,13 @@ __all__ = [
     "surface_boolean_result",
     "union_meshes",
     "Path",
+    "MESH_GROUP_COMPATIBILITY_BOUNDARY",
+    "MESH_GROUP_COMPATIBILITY_CLASSIFICATION",
     "MeshGroup",
+    "MeshGroupCompatibilityDiagnostic",
+    "MeshGroupCompatibilityError",
     "group",
+    "mesh_group_compatibility_diagnostic",
     "TransformMeshCompatibilityResult",
     "rotate",
     "translate",
