@@ -166,6 +166,15 @@ class MeshSampleEmissionDiagnostic:
 
 
 @dataclass(frozen=True)
+class SurfaceSampleEmissionDiagnostic:
+    loop_pair_id: str
+    sample_index: int | None
+    track_id: str | None
+    lifecycle_event_id: str | None
+    reason: str
+
+
+@dataclass(frozen=True)
 class _RailRecord:
     ref: str
     key: str
@@ -1156,6 +1165,63 @@ def emit_mesh_faces_from_sample_correspondence(
     if mesh_builder is not None and hasattr(mesh_builder, "append"):
         mesh_builder.append(mesh)
     return mesh
+
+
+def validate_surface_executor_correspondence_input(resampled: ResampledLoopCorrespondence) -> None:
+    loop_pair_id = str(resampled.diagnostics.get("loop_pair_id", "loop-pair"))
+    if len(resampled.source_samples) != len(resampled.target_samples):
+        diagnostic = SurfaceSampleEmissionDiagnostic(
+            loop_pair_id, None, None, None, "surface_boundary_sample_mismatch"
+        )
+        raise ValueError(f"{diagnostic.reason}: source and target boundary samples differ.")
+    if not resampled.sample_records or len(resampled.sample_records) != len(resampled.source_samples):
+        diagnostic = SurfaceSampleEmissionDiagnostic(loop_pair_id, None, None, None, "missing_sample_correspondence")
+        raise ValueError(f"{diagnostic.reason}: sample records are required.")
+    for index, record in enumerate(resampled.sample_records):
+        if record.index != index:
+            diagnostic = SurfaceSampleEmissionDiagnostic(
+                loop_pair_id,
+                index,
+                record.track_id,
+                record.lifecycle_event_id,
+                "surface_boundary_sample_mismatch",
+            )
+            raise ValueError(f"{diagnostic.reason}: record index {record.index} does not match {index}.")
+        if record.lifecycle_event_id and record.track_id is None:
+            diagnostic = SurfaceSampleEmissionDiagnostic(
+                loop_pair_id,
+                index,
+                None,
+                record.lifecycle_event_id,
+                "missing_lifecycle_support",
+            )
+            raise ValueError(f"{diagnostic.reason}: lifecycle sample lacks support track.")
+
+
+def emit_surface_patches_from_sample_correspondence(
+    resampled: ResampledLoopCorrespondence,
+    surface_builder: object | None = None,
+) -> SurfaceBody:
+    validate_surface_executor_correspondence_input(resampled)
+    start_curve = np.column_stack([resampled.source_samples, np.zeros(len(resampled.source_samples))])
+    end_curve = np.column_stack([resampled.target_samples, np.ones(len(resampled.target_samples))])
+    patch = RuledSurfacePatch(
+        family="ruled",
+        start_curve=start_curve,
+        end_curve=end_curve,
+        metadata={
+            "executor": "surface_correspondence",
+            "sample_records": resampled.sample_records,
+            "protected_indices": resampled.protected_indices,
+        },
+    )
+    body = make_surface_body(
+        (make_surface_shell((patch,), metadata={"executor": "surface_correspondence"}),),
+        metadata={"executor": "surface_correspondence", "sample_records": resampled.sample_records},
+    )
+    if surface_builder is not None and hasattr(surface_builder, "append"):
+        surface_builder.append(body)
+    return body
 
 
 @dataclass(frozen=True)
@@ -6206,10 +6272,12 @@ __all__ = [
     "PointLifecycleEvent",
     "PointLifecycleState",
     "SampleCorrespondenceRecord",
+    "SurfaceSampleEmissionDiagnostic",
     "SyntheticSupportReference",
     "LoftPlan",
     "accept_or_refuse_inferred_correspondence",
     "emit_mesh_faces_from_sample_correspondence",
+    "emit_surface_patches_from_sample_correspondence",
     "insert_synthetic_support_reference",
     "locate_parent_span",
     "project_point_to_span",
@@ -6222,6 +6290,7 @@ __all__ = [
     "validate_mesh_executor_correspondence_input",
     "validate_rail_priority",
     "validate_sample_correspondence",
+    "validate_surface_executor_correspondence_input",
     "loft_profiles",
     "loft",
     "loft_plan_sections",
