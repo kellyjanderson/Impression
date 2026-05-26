@@ -476,11 +476,10 @@ def displace_heightmap(
     if backend not in {"mesh", "surface"}:
         raise ValueError("backend must be 'mesh' or 'surface'.")
     if backend == "surface":
-        from .tessellation import tessellate_surface_body
-
-        input_mesh = tessellate_surface_body(mesh).mesh if not isinstance(mesh, Mesh) else mesh
-        displaced_mesh = _displace_heightmap_mesh_impl(
-            input_mesh,
+        if isinstance(mesh, Mesh):
+            raise ValueError("Surface displacement requires a SurfaceBody input; use backend='mesh' for Mesh inputs.")
+        return _displace_heightmap_surface_body(
+            mesh,
             image=image,
             height=height,
             projection=projection,
@@ -489,10 +488,6 @@ def displace_heightmap(
             alpha_mode=alpha_mode,
             bounds=bounds,
             quality=quality,
-        )
-        return _triangle_surface_body_from_mesh(
-            displaced_mesh,
-            metadata={"kernel": {"producer": "heightmap", "operation": "displace"}, "consumer": {"source": "heightmap"}},
         )
 
     warn_mesh_primary_api(
@@ -509,6 +504,75 @@ def displace_heightmap(
         alpha_mode=alpha_mode,
         bounds=bounds,
         quality=quality,
+    )
+
+
+def _displace_heightmap_surface_body(
+    body: "SurfaceBody",
+    *,
+    image: str | Path | Image.Image | ArrayLike,
+    height: float,
+    projection: str,
+    plane: str,
+    direction: str | Sequence[float],
+    alpha_mode: str,
+    bounds: Sequence[float] | None,
+    quality: MeshQuality | None,
+) -> "SurfaceBody":
+    if bounds is not None:
+        raise ValueError("Surface displacement bounds are not supported until projection sampling policy lands.")
+    if plane.lower() != "xy":
+        raise ValueError("Surface displacement currently supports plane='xy'; projection sampling policy owns other planes.")
+    heights, mask = _load_heightmap(image)
+    if quality is not None:
+        quality = apply_lod(quality)
+        if quality.lod == "preview":
+            heights = heights[::2, ::2]
+            mask = mask[::2, ::2]
+    if heights.shape[0] < 2 or heights.shape[1] < 2:
+        raise ValueError("Surface displacement requires at least a 2x2 heightmap sample grid.")
+    alpha_policy = resolve_heightmap_alpha_mask_policy(mask, alpha_mode=alpha_mode)
+    cache_record = heightmap_cache_key_record(image, height, 1.0, (0.0, 0.0, 0.0), alpha_mode, quality)
+    if alpha_policy.alpha_mode == "ignore":
+        heights = np.where(mask, heights, 0.0)
+    else:
+        heights = np.where(mask, heights, 0.0)
+
+    from .surface import DisplacementSurfacePatch, make_surface_body, make_surface_shell
+
+    displaced_shells = []
+    for shell in body.iter_shells(world=True):
+        patches = tuple(
+            DisplacementSurfacePatch(
+                family="displacement",
+                source_patch=patch,
+                displacement_samples=heights,
+                alpha_mask=mask,
+                alpha_mode=alpha_policy.alpha_mode,
+                height_scale=float(height),
+                direction=direction,
+                projection=projection,
+                metadata={
+                    "kernel": {
+                        "producer": "heightmap",
+                        "operation": "displace",
+                        "alpha_policy": alpha_policy.canonical_payload(),
+                        "cache_key_policy": cache_record.canonical_payload(),
+                    }
+                },
+            )
+            for patch in shell.iter_patches(world=True)
+        )
+        displaced_shells.append(
+            make_surface_shell(
+                patches,
+                connected=shell.connected,
+                metadata={"kernel": {"producer": "heightmap", "operation": "displace"}},
+            )
+        )
+    return make_surface_body(
+        tuple(displaced_shells),
+        metadata={"kernel": {"producer": "heightmap", "operation": "displace"}, "consumer": {"source": "heightmap"}},
     )
 
 

@@ -50,6 +50,7 @@ from impression.modeling import (
     boolean_union,
     build_surface_boolean_unsupported_family_diagnostic,
     compare_tessellation_modes,
+    DisplacementSurfacePatch,
     export_tessellation_request,
     flatten_surface_scene,
     handoff_surface_scene,
@@ -1308,6 +1309,12 @@ def test_every_surface_family_tessellates_through_family_adapter_metadata() -> N
         "heightmap": HeightmapSurfacePatch(
             family="heightmap",
             height_samples=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
+        ),
+        "displacement": DisplacementSurfacePatch(
+            family="displacement",
+            source_patch=PlanarSurfacePatch(family="planar"),
+            displacement_samples=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
+            direction="z",
         ),
     }
 

@@ -3,12 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from impression.modeling import (
     HeightmapAlphaMaskPolicy,
     HeightmapCacheKeyRecord,
     HeightmapSurfacePatch,
+    DisplacementSurfacePatch,
     MeshQuality,
     heightmap,
     displace_heightmap,
@@ -110,3 +112,28 @@ def test_displace_heightmap_planar():
     arr[0, 0, 3] = 0
     masked = displace_heightmap(mesh, arr, height=0.5, plane="xy", direction="z", alpha_mode="mask")
     assert masked.n_faces < mesh.n_faces
+
+
+def test_displace_heightmap_surface_backend_uses_displacement_payload():
+    surface = make_plane(size=(1.0, 1.0), center=(0.0, 0.0, 0.0))
+    image = np.ones((2, 2), dtype=float)
+
+    displaced = displace_heightmap(surface, image, height=0.5, plane="xy", direction="z", backend="surface")
+    patch = displaced.iter_patches()[0]
+    mesh = tessellate_surface_body(displaced).mesh
+    patch_mesh = tessellate_surface_patch(patch)
+
+    assert isinstance(patch, DisplacementSurfacePatch)
+    assert patch.source_patch.family == "planar"
+    assert patch.height_scale == 0.5
+    assert mesh.n_faces > 0
+    assert patch_mesh.metadata["heightmap_displacement_boundary"] == "surface-payload"
+    assert np.isclose(mesh.bounds[5] - mesh.bounds[4], 0.0, atol=1e-9)
+    assert np.isclose(mesh.bounds[4], 0.5, atol=1e-9)
+
+
+def test_displace_heightmap_surface_backend_rejects_mesh_input() -> None:
+    mesh = make_plane(size=(1.0, 1.0), center=(0.0, 0.0, 0.0), backend="mesh")
+
+    with pytest.raises(ValueError, match="Surface displacement requires a SurfaceBody"):
+        displace_heightmap(mesh, np.ones((2, 2), dtype=float), backend="surface")

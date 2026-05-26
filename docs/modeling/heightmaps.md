@@ -39,6 +39,9 @@ Options:
 ## displace_heightmap
 
 Displace an existing mesh or surface body by projecting a heightmap onto it.
+The surface route stores displacement as a surface payload referencing the
+source patches; it does not tessellate the source and wrap the result as
+canonical authored geometry.
 
 ```python
 from impression.modeling import make_box
@@ -58,10 +61,10 @@ carved = displace_heightmap(
 Options:
 
 - `projection`: currently only `"planar"` is supported.
-- `plane`: `"xy"`, `"xz"`, or `"yz"` for planar projection.
+- `plane`: `"xy"` for surface displacement in this build; the mesh compatibility route also accepts `"xz"` and `"yz"`.
 - `direction`: `"normal"`, `"x"`, `"y"`, `"z"`, or a custom vector.
 - `alpha_mode`: `"ignore"` (no displacement where alpha == 0) or `"mask"` (drop faces).
-- `bounds`: optional `(umin, umax, vmin, vmax)` to override projection bounds.
+- `bounds`: optional `(umin, umax, vmin, vmax)` to override projection bounds on the mesh compatibility route.
 - `backend`: `"mesh"` or `"surface"`.
 
 ## Notes
