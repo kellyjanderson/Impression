@@ -215,7 +215,15 @@ from .group import MeshGroup, group
 from .ops import offset, hull
 from .heightmap import heightmap, displace_heightmap
 from .drafting import make_line, make_plane, make_arrow, make_dimension
-from .text import make_text, text, text_profiles, text_sections
+from .text import (
+    TextMeshCompatibilityResult,
+    make_text,
+    make_text_mesh,
+    make_text_mesh_result,
+    text,
+    text_profiles,
+    text_sections,
+)
 from .topology import (
     GeneratedRailProvenance,
     Loop,
@@ -568,7 +576,10 @@ __all__ = [
     "make_plane",
     "make_arrow",
     "make_dimension",
+    "TextMeshCompatibilityResult",
     "make_text",
+    "make_text_mesh",
+    "make_text_mesh_result",
     "text",
     "text_profiles",
     "text_sections",

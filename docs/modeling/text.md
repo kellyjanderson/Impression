@@ -7,7 +7,7 @@ The text API is surface-first by default. Use `backend="mesh"` only for the
 legacy mesh compatibility route.
 
 ```python
-from impression.modeling import make_text, text, text_profiles, text_sections
+from impression.modeling import make_text, make_text_mesh, text, text_profiles, text_sections
 ```
 
 ## Ownership Boundary
@@ -53,8 +53,10 @@ text can evolve without inheriting public extrude-module coupling.
 - `backend`: `"surface"` by default, or `"mesh"` for legacy mesh compatibility output.
 
 Text uses FontTools to convert glyph outlines into Bezier segments. The helper
+`make_text_mesh(...)` is the explicit legacy mesh compatibility helper.
 `text_profiles(...)`/`text_sections(...)` return a list of topology-native `Section` values you
-can reuse for custom extrusions or lofts.
+can reuse for custom extrusions or lofts. Empty text returns a hidden surfaced
+placeholder by default and an empty mesh through `make_text_mesh(...)`.
 
 Current regression coverage checks more than non-empty output. The text tests
 verify profile alignment/layout, requested extrusion depth, direction-axis
