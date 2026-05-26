@@ -364,7 +364,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 148: Implicit Field Validation Security (v1.0)](../specifications/surface-148-implicit-field-validation-security-v1_0.md)
 - [x] [Surface Spec 149: Implicit Field Evaluation (v1.0)](../specifications/surface-149-implicit-field-evaluation-v1_0.md)
 - [x] [Surface Spec 150: Implicit Tessellation Bounds And Approximation Metadata (v1.0)](../specifications/surface-150-implicit-tessellation-bounds-and-approximation-metadata-v1_0.md)
-- [ ] [Surface Spec 151: Cross-Family Tessellation Adapters (v1.0)](../specifications/surface-151-cross-family-tessellation-adapters-v1_0.md)
+- [x] [Surface Spec 151: Cross-Family Tessellation Adapters (v1.0)](../specifications/surface-151-cross-family-tessellation-adapters-v1_0.md)
 - [ ] [Surface Spec 152: Cross-Family Seam Boundary Participation (v1.0)](../specifications/surface-152-cross-family-seam-boundary-participation-v1_0.md)
 - [ ] [Surface Spec 153: Family-Aware Boolean Eligibility And Diagnostics (v1.0)](../specifications/surface-153-family-aware-boolean-eligibility-and-diagnostics-v1_0.md)
 - [ ] [Surface Spec 154: .impress Analytic Patch Payloads (v1.0)](../specifications/surface-154-impress-analytic-patch-payloads-v1_0.md)
