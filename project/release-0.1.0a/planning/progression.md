@@ -397,7 +397,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 179: Thread Mesh Compatibility And Quality Budget (v1.0)](../specifications/surface-179-thread-mesh-compatibility-and-quality-budget-v1_0.md)
 - [x] [Surface Spec 180: Traditional Hinge Surface Lowering (v1.0)](../specifications/surface-180-traditional-hinge-surface-lowering-v1_0.md)
 - [x] [Surface Spec 181: Living And Bistable Hinge Surface Lowering (v1.0)](../specifications/surface-181-living-and-bistable-hinge-surface-lowering-v1_0.md)
-- [ ] [Surface Spec 182: Surface Transform API Defaults (v1.0)](../specifications/surface-182-surface-transform-api-defaults-v1_0.md)
+- [x] [Surface Spec 182: Surface Transform API Defaults (v1.0)](../specifications/surface-182-surface-transform-api-defaults-v1_0.md)
 - [ ] [Surface Spec 183: Surface Composition Public Type (v1.0)](../specifications/surface-183-surface-composition-public-type-v1_0.md)
 - [ ] [Surface Spec 184: Surface Composition Traversal And Tessellation Handoff (v1.0)](../specifications/surface-184-surface-composition-traversal-and-tessellation-handoff-v1_0.md)
 - [ ] [Surface Spec 185: MeshGroup Explicit Compatibility API (v1.0)](../specifications/surface-185-meshgroup-explicit-compatibility-api-v1_0.md)
