@@ -364,6 +364,21 @@ STEP, IGES, BREP, JT, and other CAD formats are interchange formats. They are
 valuable, but they should be implemented as adapters around the surface-native
 store rather than as the internal persistence model.
 
+### V1 Boundary Policy
+
+`.impress` V1 does not promise STEP, IGES, BREP, JT, STL, or imported-mesh
+compatibility. The only V1 persistence promise is native `SurfaceBody` truth as
+defined by this architecture and the active `.impress` schema version.
+
+The V1 reader must refuse industry-format payloads, mesh payloads, executable
+implicit/code payloads, and unknown adapter records when they appear in the
+native document root. Refusal is the correct behavior because accepting those
+records would imply an adapter contract that has not been specified.
+
+The V1 writer must not emit industry-interchange adapter state. It may emit only
+surface-native payloads, metadata that is valid JSON data, and schema fields
+defined by this architecture.
+
 Recommended adapter posture:
 
 ```text
@@ -382,6 +397,45 @@ industry formats may not represent cleanly:
 - generator provenance
 - patch-family capability flags
 - exact release-schema assumptions
+
+### Imported Mesh Classification
+
+Imported meshes are tool data, not `.impress` surface truth.
+
+An imported mesh may be represented in future work as an explicit imported mesh
+record owned by the mesh toolchain. That record must be classified separately
+from `SurfaceBody`, must not masquerade as a surface patch, and must not become
+a hidden fallback for failed surface-body loading.
+
+V1 `.impress` has no imported mesh record. If a file contains a root-level mesh
+payload, an embedded STL-like payload, or a patch whose geometry is merely a
+mesh, the loader must reject the file with an unsupported payload diagnostic.
+
+### External Adapter Placeholder
+
+Future external adapters should attach outside the native persistence path:
+
+```text
+External CAD file
+-> adapter parser / validator
+-> SurfaceBodyStore conversion report
+-> SurfaceBody runtime objects
+-> optional .impress save
+```
+
+Adapter placeholders are documentation-only in V1. No adapter placeholder in a
+`.impress` file is executable, dynamically imported, or interpreted as code.
+When adapter support is eventually specified, it must define:
+
+- supported source/target format and version
+- data-only adapter payload schema
+- validation and refusal diagnostics
+- conversion report shape
+- lossiness and unsupported-entity policy
+- security limits for external payloads
+
+Until then, STEP/IGES/BREP/JT import/export and STL mesh import remain outside
+the `.impress` native file contract.
 
 ## Security And Robustness
 
