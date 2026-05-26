@@ -19,6 +19,7 @@ from impression.io import (
     decode_surface_seam_payload,
     decode_surface_shell_payload,
     decode_trim_loop_payload,
+    decode_impress_document_payload,
     dumps_impress_json,
     encode_surface_adjacency_payload,
     encode_surface_boundary_ref_payload,
@@ -30,6 +31,8 @@ from impression.io import (
     make_impress_document_payload,
     make_impress_document_root,
     make_surface_body_store,
+    load_impress,
+    loads_impress_json,
     validate_impress_units,
     validate_impress_document_root,
     validate_surface_body_store,
@@ -218,6 +221,7 @@ def test_make_impress_document_payload_serializes_surface_bodies() -> None:
         "bodies": [{"body_id": "body-0001", "stable_identity": body.stable_identity, "body_ref": "body-0001"}]
     }
     assert list(payload["bodies"]) == ["body-0001"]  # type: ignore[arg-type]
+    assert len(payload["patches"]) == 1  # type: ignore[arg-type]
 
 
 def test_dumps_impress_json_is_byte_stable_for_equivalent_payloads() -> None:
@@ -228,6 +232,7 @@ def test_dumps_impress_json_is_byte_stable_for_equivalent_payloads() -> None:
         "bodies": payload_a["bodies"],
         "format": payload_a["format"],
         "body_store": payload_a["body_store"],
+        "patches": payload_a["patches"],
         "units": payload_a["units"],
         "schema_version": payload_a["schema_version"],
     }
@@ -251,6 +256,80 @@ def test_write_and_save_impress_write_deterministic_json(tmp_path) -> None:
 
     assert payload_path.read_text(encoding="utf-8") == dumps_impress_json(payload)
     assert saved_path.read_text(encoding="utf-8") == dumps_impress_json(make_impress_document_payload([body]))
+
+
+def test_load_impress_round_trips_saved_surface_bodies(tmp_path) -> None:
+    patches = [
+        PlanarSurfacePatch(family="planar", origin=(0.0, 0.0, 0.0)),
+        PlanarSurfacePatch(family="planar", origin=(1.0, 0.0, 0.0)),
+    ]
+    seam = SurfaceSeam("join", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")))
+    adjacency = SurfaceAdjacencyRecord(
+        source=SurfaceBoundaryRef(0, "right"),
+        target=SurfaceBoundaryRef(1, "left"),
+        seam_id="join",
+    )
+    body = make_surface_body([make_surface_shell(patches, seams=(seam,), adjacency=(adjacency,))])
+    path = tmp_path / "roundtrip.impress"
+
+    save_impress([body], path, units={"length": "mm"}, metadata={"purpose": "load"})
+    loaded = load_impress(path)
+
+    assert loaded.path == path
+    assert loaded.root.units == ImpressUnits(length="mm")
+    assert loaded.root.metadata == {"purpose": "load"}
+    assert [loaded_body.stable_identity for loaded_body in loaded.bodies] == [body.stable_identity]
+    assert loaded.body_store.bodies[0].body is not None
+    assert loaded.body_store.bodies[0].body.stable_identity == body.stable_identity
+
+
+def test_loads_impress_json_returns_load_result_without_path() -> None:
+    body = _single_patch_body()
+
+    loaded = loads_impress_json(dumps_impress_json(make_impress_document_payload([body])))
+
+    assert loaded.path is None
+    assert [loaded_body.stable_identity for loaded_body in loaded.bodies] == [body.stable_identity]
+
+
+def test_decode_impress_document_payload_rejects_invalid_body_and_patch_references() -> None:
+    body = _single_patch_body()
+    payload = make_impress_document_payload([body])
+    body_payload = dict(payload["bodies"])  # type: ignore[arg-type]
+    body_payload["extra-body"] = body_payload["body-0001"]
+    payload["bodies"] = body_payload
+
+    with pytest.raises(ImpressFormatError, match="bodies must exactly match"):
+        decode_impress_document_payload(payload)
+
+    payload = make_impress_document_payload([body])
+    patches = dict(payload["patches"])  # type: ignore[arg-type]
+    patches["missing-patch"] = next(iter(patches.values()))
+    payload["patches"] = patches
+    with pytest.raises(ImpressFormatError, match="stable_identity does not match"):
+        decode_impress_document_payload(payload)
+
+
+def test_load_impress_rejects_malformed_json_schema_and_invalid_payload(tmp_path) -> None:
+    malformed = tmp_path / "malformed.impress"
+    malformed.write_text("{", encoding="utf-8")
+    with pytest.raises(ImpressFormatError, match="Malformed"):
+        load_impress(malformed)
+
+    unsupported = tmp_path / "unsupported.impress"
+    unsupported.write_text('{"format":"impress","schema_version":"999.0"}', encoding="utf-8")
+    with pytest.raises(UnsupportedImpressSchemaVersion):
+        load_impress(unsupported)
+
+    invalid = tmp_path / "invalid.impress"
+    invalid.write_text(dumps_impress_json({"format": "impress", "schema_version": CURRENT_IMPRESS_SCHEMA_VERSION}), encoding="utf-8")
+    with pytest.raises(ImpressFormatError, match="body_store"):
+        load_impress(invalid)
+
+
+def test_load_impress_reports_read_errors(tmp_path) -> None:
+    with pytest.raises(ImpressFormatError, match="Unable to read"):
+        load_impress(tmp_path / "missing.impress")
 
 
 def test_dumps_impress_json_accepts_save_options() -> None:
