@@ -379,11 +379,14 @@ def test_internal_surface_prism_returns_surface_body_and_public_api_defaults_sur
     assert result.mesh.n_faces > 0
 
 
-def test_internal_surface_torus_returns_closed_surface_body_and_public_api_stays_mesh() -> None:
+def test_internal_surface_torus_returns_closed_surface_body_and_public_api_defaults_surface() -> None:
     surface_torus = make_surface_torus(major_radius=2.0, minor_radius=0.5, n_theta=32, n_phi=16)
-    mesh_torus = make_torus(major_radius=2.0, minor_radius=0.5, n_theta=32, n_phi=16)
+    public_torus = make_torus(major_radius=2.0, minor_radius=0.5, n_theta=32, n_phi=16)
+    mesh_torus = make_torus(major_radius=2.0, minor_radius=0.5, n_theta=32, n_phi=16, backend="mesh")
 
     assert isinstance(surface_torus, SurfaceBody)
+    assert isinstance(public_torus, SurfaceBody)
+    assert public_torus.stable_identity == surface_torus.stable_identity
     assert surface_torus.shell_count == 1
     assert surface_torus.patch_count == 1
     assert [patch.family for patch in surface_torus.iter_patches(world=False)] == ["revolution"]
@@ -430,11 +433,14 @@ def test_internal_surface_torus_uses_attached_transform_for_direction_and_center
     assert bounds == (4.5, 5.5, 3.5, 8.5, 4.5, 9.5)
 
 
-def test_internal_surface_sphere_returns_closed_surface_body_and_public_api_stays_mesh() -> None:
+def test_internal_surface_sphere_returns_closed_surface_body_and_public_api_defaults_surface() -> None:
     surface_sphere = make_surface_sphere(radius=1.0, center=(0.0, 0.0, 0.0), theta_resolution=32, phi_resolution=16)
-    mesh_sphere = make_sphere(radius=1.0, center=(0.0, 0.0, 0.0), theta_resolution=32, phi_resolution=16)
+    public_sphere = make_sphere(radius=1.0, center=(0.0, 0.0, 0.0), theta_resolution=32, phi_resolution=16)
+    mesh_sphere = make_sphere(radius=1.0, center=(0.0, 0.0, 0.0), theta_resolution=32, phi_resolution=16, backend="mesh")
 
     assert isinstance(surface_sphere, SurfaceBody)
+    assert isinstance(public_sphere, SurfaceBody)
+    assert public_sphere.stable_identity == surface_sphere.stable_identity
     assert surface_sphere.shell_count == 1
     assert surface_sphere.patch_count == 1
     assert [patch.family for patch in surface_sphere.iter_patches(world=False)] == ["revolution"]
