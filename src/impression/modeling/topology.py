@@ -181,6 +181,61 @@ class TopologySegment:
         object.__setattr__(self, "provenance", provenance)
 
 
+def _normalize_lifecycle_parent(parent: tuple[str, str] | Sequence[str]) -> tuple[str, str]:
+    parent_items = tuple(str(item) for item in parent)
+    if len(parent_items) != 2 or not all(parent_items):
+        raise ValueError("Lifecycle parent must be a two-item point span.")
+    if parent_items[0] == parent_items[1]:
+        raise ValueError("Lifecycle parent span endpoints must be distinct.")
+    return parent_items
+
+
+def _normalize_lifecycle_points(
+    points: Iterable[tuple[str, Sequence[float]]] | None,
+) -> tuple[tuple[str, tuple[float, float]], ...]:
+    normalized: list[tuple[str, tuple[float, float]]] = []
+    for name, coordinates in points or ():
+        point_name = str(name)
+        if not point_name:
+            raise ValueError("Lifecycle point names must not be empty.")
+        point = _require_finite_vec2(coordinates, "lifecycle point coordinates")
+        normalized.append((point_name, (float(point[0]), float(point[1]))))
+    return tuple(normalized)
+
+
+@dataclass(frozen=True)
+class TopologyLifecycleBuilderRequest:
+    request_type: str
+    parent: tuple[str, str] | Sequence[str]
+    points: tuple[tuple[str, Sequence[float]], ...] | Iterable[tuple[str, Sequence[float]]] = ()
+    curve: object | None = None
+    name: str | None = None
+    radius: float | None = None
+    names: tuple[str, ...] | Iterable[str] = ()
+    provenance: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        request_type = str(self.request_type)
+        if request_type not in {"birth_span", "birth_arc", "death_span"}:
+            raise ValueError("TopologyLifecycleBuilderRequest request_type is invalid.")
+        parent = _normalize_lifecycle_parent(self.parent)
+        points = _normalize_lifecycle_points(self.points)
+        names = tuple(str(name) for name in self.names)
+        if any(not name for name in names):
+            raise ValueError("Lifecycle target names must not be empty.")
+        radius = self.radius
+        if radius is not None:
+            radius = float(radius)
+            if not np.isfinite(radius) or radius <= 0:
+                raise ValueError("radius must be positive.")
+        object.__setattr__(self, "request_type", request_type)
+        object.__setattr__(self, "parent", parent)
+        object.__setattr__(self, "points", points)
+        object.__setattr__(self, "names", names)
+        object.__setattr__(self, "radius", radius)
+        object.__setattr__(self, "provenance", _normalize_provenance(self.provenance))
+
+
 @dataclass(frozen=True)
 class TopologyPath:
     id: str = "topology-path"
@@ -386,7 +441,7 @@ class TopologyPathBuilder:
     points: list[TopologyPoint] = field(default_factory=list)
     segments: list[TopologySegment] = field(default_factory=list)
     landmarks: list[TopologyLandmark] = field(default_factory=list)
-    lifecycle_requests: list[dict[str, object]] = field(default_factory=list)
+    lifecycle_requests: list[TopologyLifecycleBuilderRequest] = field(default_factory=list)
 
     def point(
         self,
@@ -435,8 +490,18 @@ class TopologyPathBuilder:
         return self
 
     def birth_span(self, parent: tuple[str, str], *, points: Iterable[tuple[str, Sequence[float]]]) -> "TopologyPathBuilder":
-        self.lifecycle_requests.append({"request_type": "birth_span", "parent": tuple(parent), "points": tuple(points)})
-        for name, coordinates in points:
+        point_items = _normalize_lifecycle_points(points)
+        if not point_items:
+            raise ValueError("birth_span requires at least one point.")
+        self.lifecycle_requests.append(
+            TopologyLifecycleBuilderRequest(
+                request_type="birth_span",
+                parent=parent,
+                points=point_items,
+                provenance={"source": "builder.birth_span"},
+            )
+        )
+        for name, coordinates in point_items:
             self.point(name, coordinates, correspond=name, role="feature")
         return self
 
@@ -450,20 +515,62 @@ class TopologyPathBuilder:
         radius: float,
         correspond: str | None = None,
     ) -> "TopologyPathBuilder":
-        if radius <= 0:
+        start_point = _require_finite_vec2(start, "birth_arc start")
+        end_point = _require_finite_vec2(end, "birth_arc end")
+        if np.allclose(start_point, end_point):
+            raise ValueError("birth_arc endpoints must be distinct.")
+        if not np.isfinite(float(radius)) or radius <= 0:
             raise ValueError("radius must be positive.")
+        curve = {
+            "kind": "birth_arc",
+            "start": (float(start_point[0]), float(start_point[1])),
+            "end": (float(end_point[0]), float(end_point[1])),
+            "radius": float(radius),
+        }
         self.lifecycle_requests.append(
-            {
-                "request_type": "birth_arc",
-                "parent": tuple(parent),
-                "name": name,
-                "start": tuple(start),
-                "end": tuple(end),
-                "radius": float(radius),
-            }
+            TopologyLifecycleBuilderRequest(
+                request_type="birth_arc",
+                parent=parent,
+                points=((f"{name}-start", curve["start"]), (f"{name}-end", curve["end"])),
+                curve=curve,
+                name=name,
+                radius=radius,
+                provenance={"source": "builder.birth_arc"},
+            )
         )
-        self.point(f"{name}-start", start, correspond=correspond or f"{name}-start", role="tangent_transition")
-        self.point(f"{name}-end", end, correspond=correspond or f"{name}-end", role="tangent_transition")
+        self.point(f"{name}-start", curve["start"], correspond=correspond or f"{name}-start", role="tangent_transition")
+        self.point(f"{name}-end", curve["end"], correspond=correspond or f"{name}-end", role="tangent_transition")
+        segment_id = derive_stable_id(name)
+        segment_landmarks = (
+            TopologyLandmark(
+                name=f"{name}-start",
+                segment_id=segment_id,
+                parameter=0.0,
+                role="tangent_transition",
+                correspondence_id=correspond or f"{name}-start",
+                provenance={"source": "builder.birth_arc"},
+            ),
+            TopologyLandmark(
+                name=f"{name}-end",
+                segment_id=segment_id,
+                parameter=1.0,
+                role="tangent_transition",
+                correspondence_id=correspond or f"{name}-end",
+                provenance={"source": "builder.birth_arc"},
+            ),
+        )
+        self.segments.append(
+            TopologySegment(
+                id=segment_id,
+                name=name,
+                source_kind="curve",
+                curve=curve,
+                correspondence_id=correspond or name,
+                landmarks=segment_landmarks,
+                provenance={"source": "builder.birth_arc"},
+            )
+        )
+        self.landmarks.extend(segment_landmarks)
         return self
 
     def death_span(
@@ -473,12 +580,18 @@ class TopologyPathBuilder:
         points: Iterable[tuple[str, Sequence[float]]] | None = None,
         names: Iterable[str] | None = None,
     ) -> "TopologyPathBuilder":
-        point_items = tuple(points or ())
-        name_items = tuple(names or ())
+        point_items = _normalize_lifecycle_points(points)
+        name_items = tuple(str(name) for name in names or ())
         if not point_items and not name_items:
             raise ValueError("death_span requires points or names.")
         self.lifecycle_requests.append(
-            {"request_type": "death_span", "parent": tuple(parent), "points": point_items, "names": name_items}
+            TopologyLifecycleBuilderRequest(
+                request_type="death_span",
+                parent=parent,
+                points=point_items,
+                names=name_items,
+                provenance={"source": "builder.death_span"},
+            )
         )
         for name, coordinates in point_items:
             self.point(name, coordinates, correspond=name, role="feature")
@@ -487,6 +600,7 @@ class TopologyPathBuilder:
     def build(self) -> TopologyPath:
         metadata: dict[str, object] = {"source": "builder"}
         if self.lifecycle_requests:
+            self._validate_lifecycle_requests()
             metadata["lifecycle_requests"] = tuple(self.lifecycle_requests)
         return TopologyPath(
             id=self.id,
@@ -500,6 +614,18 @@ class TopologyPathBuilder:
             landmarks=tuple(self.landmarks),
             metadata=metadata,
         )
+
+    def _validate_lifecycle_requests(self) -> None:
+        known_refs = {str(point.id) for point in self.points}
+        known_refs.update(str(point.name) for point in self.points if point.name is not None)
+        for request in self.lifecycle_requests:
+            unknown_parent_refs = [ref for ref in request.parent if ref not in known_refs]
+            if unknown_parent_refs:
+                raise ValueError(f"Lifecycle parent references unknown point names: {unknown_parent_refs!r}.")
+            if request.request_type == "death_span":
+                unknown_names = [name for name in request.names if name not in known_refs]
+                if unknown_names:
+                    raise ValueError(f"death_span references unknown point names: {unknown_names!r}.")
 
 
 def validate_topology_identity_records(path: TopologyPath) -> None:
@@ -1258,6 +1384,7 @@ __all__ = [
     "Region",
     "Section",
     "TopologyLandmark",
+    "TopologyLifecycleBuilderRequest",
     "TopologyPath",
     "TopologyPathBuilder",
     "TopologyPathSamplingPolicy",
