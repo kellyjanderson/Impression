@@ -47,6 +47,7 @@ import numpy as np
 from impression.modeling.path3d import Path3D
 from impression.modeling.surface import (
     BSplineSurfacePatch,
+    ImplicitSurfacePatch,
     NURBSSurfacePatch,
     ParameterDomain,
     PlanarSurfacePatch,
@@ -61,6 +62,7 @@ from impression.modeling.surface import (
     TrimLoop,
     make_surface_body,
     make_surface_shell,
+    make_implicit_field_node,
 )
 
 
@@ -382,7 +384,7 @@ def test_impress_acceptance_round_trip_preserves_identity_and_metadata(tmp_path)
             lambda payload: payload["patches"].update(  # type: ignore[index,union-attr]
                 {
                     "implicit-patch": {
-                        "kind": "ImplicitFieldSurfacePatch",
+                        "kind": "ImplicitSurfacePatch",
                         "family": "implicit",
                         "domain": {"u_range": [0.0, 1.0], "v_range": [0.0, 1.0], "normalized": True},
                         "capability_flags": [],
@@ -393,7 +395,7 @@ def test_impress_acceptance_round_trip_preserves_identity_and_metadata(tmp_path)
                     }
                 }
             ),
-            "Unsupported SurfacePatch kind",
+            "Unsupported ImplicitSurfacePatch geometry fields",
         ),
         (
             lambda payload: payload["body_store"]["bodies"][0].update({"stable_identity": "not-the-body"}),  # type: ignore[index,union-attr]
@@ -826,6 +828,33 @@ def test_encode_decode_subdivision_surface_patch_payload_round_trips_cage_crease
     assert decoded.creases == (SubdivisionCrease((0, 1), sharpness=2.5),)
 
 
+def test_encode_decode_implicit_surface_patch_payload_round_trips_safe_field_tree() -> None:
+    field = make_implicit_field_node(
+        "union",
+        children=(
+            make_implicit_field_node("sphere", parameters={"center": (0.0, 0.0, 0.0), "radius": 0.75}),
+            make_implicit_field_node("box", parameters={"center": (0.5, 0.0, 0.0), "half_extents": (0.25, 0.5, 0.5)}),
+        ),
+    )
+    patch = ImplicitSurfacePatch(
+        family="implicit",
+        field=field,
+        bounds=(-1.0, 1.0, -1.5, 1.5, -2.0, 2.0),
+    )
+
+    payload = encode_surface_patch_payload(patch)
+    decoded = decode_surface_patch_payload(payload)
+
+    assert payload["geometry"] == {
+        "payload_version": 1,
+        "field": field.canonical_payload(),
+        "bounds": [-1.0, 1.0, -1.5, 1.5, -2.0, 2.0],
+    }
+    assert decoded.stable_identity == patch.stable_identity
+    assert isinstance(decoded, ImplicitSurfacePatch)
+    assert decoded.bounds == (-1.0, 1.0, -1.5, 1.5, -2.0, 2.0)
+
+
 def test_decode_surface_patch_payload_rejects_invalid_family_dispatch() -> None:
     patch = PlanarSurfacePatch(family="planar")
     payload = encode_surface_patch_payload(patch)
@@ -937,6 +966,41 @@ def test_decode_sweep_surface_patch_payload_rejects_invalid_geometry(mutation, m
 )
 def test_decode_subdivision_surface_patch_payload_rejects_invalid_geometry(mutation, message: str) -> None:
     patch = SubdivisionSurfacePatch(family="subdivision")
+    payload = encode_surface_patch_payload(patch)
+    geometry = dict(payload["geometry"])  # type: ignore[arg-type]
+    mutation(geometry)
+    payload["geometry"] = geometry
+
+    with pytest.raises(ImpressFormatError, match=message):
+        decode_surface_patch_payload(payload)
+
+
+@pytest.mark.parametrize(
+    "mutation, message",
+    [
+        (lambda geometry: geometry.pop("payload_version"), "payload_version"),
+        (lambda geometry: geometry.update({"payload_version": 2}), "payload_version"),
+        (lambda geometry: geometry.update({"mesh": {"vertices": []}}), "Unsupported ImplicitSurfacePatch geometry fields"),
+        (lambda geometry: geometry.update({"bounds": [0.0, 0.0, -1.0, 1.0, -1.0, 1.0]}), "positive span"),
+        (lambda geometry: geometry.update({"field": {"kind": "python_eval", "parameters": {}, "children": []}}), "Unsupported implicit field node kind"),
+        (lambda geometry: geometry.update({"field": {"kind": "sphere", "parameters": {"eval": "boom"}, "children": []}}), "Unsafe implicit field payload"),
+        (
+            lambda geometry: geometry.update(
+                {
+                    "field": {
+                        "kind": "sphere",
+                        "parameters": {"label": "__import__('os')"},
+                        "children": [],
+                    }
+                }
+            ),
+            "Unsafe implicit field payload",
+        ),
+        (lambda geometry: geometry.update({"field": {"kind": "sphere", "code": "x"}}), "Unsupported implicit field node fields"),
+    ],
+)
+def test_decode_implicit_surface_patch_payload_rejects_unsafe_or_invalid_geometry(mutation, message: str) -> None:
+    patch = ImplicitSurfacePatch(family="implicit")
     payload = encode_surface_patch_payload(patch)
     geometry = dict(payload["geometry"])  # type: ignore[arg-type]
     mutation(geometry)
