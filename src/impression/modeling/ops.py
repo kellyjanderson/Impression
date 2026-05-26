@@ -7,7 +7,7 @@ from impression.modeling.drawing2d import Path2D
 from impression.modeling.group import MeshGroup
 from impression.modeling.topology import Region, Section
 
-from ._ops_mesh import hull_mesh
+from .mesh_tools import hull_mesh
 from ._ops_planar import hull_planar, is_planar_shape, offset_planar
 
 
@@ -45,7 +45,7 @@ def hull(shapes: Iterable[Mesh | MeshGroup | Section | Region | Path2D]) -> Mesh
     Dispatches to internal domain modules:
 
     - planar inputs (`Section`, `Region`, `Path2D`) -> `_ops_planar`
-    - mesh inputs (`Mesh`, `MeshGroup`) -> `_ops_mesh`
+    - mesh inputs (`Mesh`, `MeshGroup`) -> `modeling.mesh_tools`
 
     Mesh hull behavior is retained as an explicit standalone utility. It is not
     canonical surfaced modeling truth.
