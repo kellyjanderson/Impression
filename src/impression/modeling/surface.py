@@ -1364,6 +1364,21 @@ IMPLICIT_FIELD_NODE_KINDS: frozenset[str] = frozenset(
         "negate",
     }
 )
+_IMPLICIT_EXECUTABLE_PARAMETER_NAMES = frozenset(
+    {
+        "__builtins__",
+        "callable",
+        "code",
+        "eval",
+        "exec",
+        "function",
+        "globals",
+        "import",
+        "lambda",
+        "locals",
+        "module",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -1678,6 +1693,48 @@ class ImplicitFieldNode:
         }
 
 
+@dataclass(frozen=True)
+class ImplicitFieldSafetyPolicy:
+    """Bounds and refusal rules for declarative implicit field payloads."""
+
+    max_nodes: int = 64
+    max_depth: int = 16
+    max_children_per_node: int = 8
+    max_parameters_per_node: int = 16
+    max_string_length: int = 128
+
+    def __post_init__(self) -> None:
+        for name in ("max_nodes", "max_depth", "max_children_per_node", "max_parameters_per_node", "max_string_length"):
+            value = int(getattr(self, name))
+            if value <= 0:
+                raise ValueError(f"ImplicitFieldSafetyPolicy.{name} must be > 0.")
+            object.__setattr__(self, name, value)
+
+
+@dataclass(frozen=True)
+class ImplicitFieldValidationDiagnostic:
+    """Diagnostic returned after an implicit field safety pass."""
+
+    safe: bool
+    node_count: int
+    max_depth: int
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "safe", bool(self.safe))
+        object.__setattr__(self, "node_count", int(self.node_count))
+        object.__setattr__(self, "max_depth", int(self.max_depth))
+        object.__setattr__(self, "reason", str(self.reason))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "safe": self.safe,
+            "node_count": self.node_count,
+            "max_depth": self.max_depth,
+            "reason": self.reason,
+        }
+
+
 def _coerce_implicit_field_node(value: object) -> ImplicitFieldNode:
     if isinstance(value, ImplicitFieldNode):
         return value
@@ -1693,6 +1750,62 @@ def _coerce_implicit_field_node(value: object) -> ImplicitFieldNode:
             children=tuple(value.get("children", ())),
         )
     raise ValueError("Implicit field nodes must be ImplicitFieldNode instances or dictionaries.")
+
+
+def _implicit_parameter_has_executable_shape(name: str, value: object, policy: ImplicitFieldSafetyPolicy) -> bool:
+    normalized_name = name.strip().lower()
+    if normalized_name in _IMPLICIT_EXECUTABLE_PARAMETER_NAMES or normalized_name.startswith("__"):
+        return True
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if len(value) > policy.max_string_length:
+            return True
+        return any(token in text for token in ("__", "import ", "eval(", "exec(", "lambda "))
+    if isinstance(value, tuple):
+        return any(_implicit_parameter_has_executable_shape(name, item, policy) for item in value)
+    if isinstance(value, dict):
+        return any(_implicit_parameter_has_executable_shape(str(key), nested_value, policy) for key, nested_value in value.items())
+    return False
+
+
+def assess_implicit_field_security(
+    node: ImplicitFieldNode | dict[str, object],
+    *,
+    policy: ImplicitFieldSafetyPolicy | None = None,
+) -> ImplicitFieldValidationDiagnostic:
+    policy = ImplicitFieldSafetyPolicy() if policy is None else policy
+    root = _coerce_implicit_field_node(node)
+    node_count = 0
+    observed_depth = 0
+    stack: list[tuple[ImplicitFieldNode, int]] = [(root, 1)]
+    while stack:
+        current, depth = stack.pop()
+        node_count += 1
+        observed_depth = max(observed_depth, depth)
+        if node_count > policy.max_nodes:
+            return ImplicitFieldValidationDiagnostic(False, node_count, observed_depth, "implicit field tree exceeds max_nodes")
+        if depth > policy.max_depth:
+            return ImplicitFieldValidationDiagnostic(False, node_count, observed_depth, "implicit field tree exceeds max_depth")
+        if len(current.children) > policy.max_children_per_node:
+            return ImplicitFieldValidationDiagnostic(False, node_count, observed_depth, "implicit field node exceeds max_children_per_node")
+        if len(current.parameters) > policy.max_parameters_per_node:
+            return ImplicitFieldValidationDiagnostic(False, node_count, observed_depth, "implicit field node exceeds max_parameters_per_node")
+        for key, value in current.parameters.items():
+            if _implicit_parameter_has_executable_shape(key, value, policy):
+                return ImplicitFieldValidationDiagnostic(False, node_count, observed_depth, "implicit field parameter has executable shape")
+        stack.extend((child, depth + 1) for child in reversed(current.children))
+    return ImplicitFieldValidationDiagnostic(True, node_count, observed_depth)
+
+
+def validate_implicit_field_security(
+    node: ImplicitFieldNode | dict[str, object],
+    *,
+    policy: ImplicitFieldSafetyPolicy | None = None,
+) -> ImplicitFieldValidationDiagnostic:
+    diagnostic = assess_implicit_field_security(node, policy=policy)
+    if not diagnostic.safe:
+        raise ValueError(f"Unsafe implicit field payload: {diagnostic.reason}.")
+    return diagnostic
 
 
 def make_implicit_field_node(
@@ -1718,6 +1831,7 @@ class ImplicitSurfacePatch(SurfacePatch):
         if self.family != "implicit":
             raise ValueError("ImplicitSurfacePatch.family must be 'implicit'.")
         field_node = _coerce_implicit_field_node(self.field)
+        validate_implicit_field_security(field_node)
         bounds = _as_bounds3(self.bounds, name="ImplicitSurfacePatch.bounds")
         object.__setattr__(self, "field", field_node)
         object.__setattr__(self, "bounds", bounds)
@@ -1977,8 +2091,12 @@ __all__ = [
     "SubdivisionRefinementResult",
     "SubdivisionSurfacePatch",
     "ImplicitFieldNode",
+    "ImplicitFieldSafetyPolicy",
+    "ImplicitFieldValidationDiagnostic",
     "ImplicitSurfacePatch",
+    "assess_implicit_field_security",
     "make_implicit_field_node",
+    "validate_implicit_field_security",
     "refine_subdivision_control_cage",
     "SurfaceShell",
     "SurfaceBody",

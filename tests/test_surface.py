@@ -43,6 +43,8 @@ from impression.modeling import (
     handoff_surface_scene,
     IMPLICIT_FIELD_NODE_KINDS,
     ImplicitFieldNode,
+    ImplicitFieldSafetyPolicy,
+    ImplicitFieldValidationDiagnostic,
     ImplicitSurfacePatch,
     make_surface_consumer_collection,
     make_surface_mesh_adapter,
@@ -75,7 +77,9 @@ from impression.modeling import (
     make_surface_body,
     make_surface_shell,
     make_implicit_field_node,
+    assess_implicit_field_security,
     refine_subdivision_control_cage,
+    validate_implicit_field_security,
     tessellate_surface_body,
     tessellate_surface_patch,
 )
@@ -1011,6 +1015,72 @@ def test_implicit_surface_patch_refuses_evaluation_until_field_evaluator_exists(
 
     with pytest.raises(NotImplementedError, match="Surface Spec 149"):
         patch.derivatives_at(0.5, 0.5)
+
+
+def test_implicit_field_security_accepts_safe_bounded_tree() -> None:
+    node = make_implicit_field_node(
+        "union",
+        children=(
+            make_implicit_field_node("sphere", parameters={"radius": 1.0}),
+            make_implicit_field_node("box", parameters={"half_extents": (1.0, 1.0, 1.0)}),
+        ),
+    )
+
+    diagnostic = validate_implicit_field_security(node)
+
+    assert isinstance(diagnostic, ImplicitFieldValidationDiagnostic)
+    assert diagnostic.safe is True
+    assert diagnostic.node_count == 3
+    assert diagnostic.max_depth == 2
+    assert diagnostic.canonical_payload()["reason"] == ""
+
+
+@pytest.mark.parametrize(
+    "node, policy, message",
+    [
+        (
+            make_implicit_field_node("sphere", parameters={"code": "x + y"}),
+            None,
+            "executable shape",
+        ),
+        (
+            make_implicit_field_node("sphere", parameters={"label": "__import__('os')"}),
+            None,
+            "executable shape",
+        ),
+        (
+            make_implicit_field_node("union", children=tuple(make_implicit_field_node("sphere") for _index in range(3))),
+            ImplicitFieldSafetyPolicy(max_children_per_node=2),
+            "max_children_per_node",
+        ),
+        (
+            make_implicit_field_node("union", children=(make_implicit_field_node("translate", children=(make_implicit_field_node("sphere"),)),)),
+            ImplicitFieldSafetyPolicy(max_depth=2),
+            "max_depth",
+        ),
+        (
+            make_implicit_field_node("union", children=(make_implicit_field_node("sphere"), make_implicit_field_node("box"))),
+            ImplicitFieldSafetyPolicy(max_nodes=2),
+            "max_nodes",
+        ),
+    ],
+)
+def test_implicit_field_security_refuses_unsafe_payloads(
+    node: ImplicitFieldNode,
+    policy: ImplicitFieldSafetyPolicy | None,
+    message: str,
+) -> None:
+    diagnostic = assess_implicit_field_security(node, policy=policy)
+    assert diagnostic.safe is False
+    assert message in diagnostic.reason
+
+    with pytest.raises(ValueError, match=message):
+        validate_implicit_field_security(node, policy=policy)
+
+
+def test_implicit_surface_patch_constructor_runs_security_validator() -> None:
+    with pytest.raises(ValueError, match="Unsafe implicit field payload"):
+        ImplicitSurfacePatch(family="implicit", field=make_implicit_field_node("sphere", parameters={"eval": "boom"}))
 
 
 def test_planar_patch_rejects_collinear_axes_and_multiple_outer_trims() -> None:
