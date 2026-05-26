@@ -353,7 +353,7 @@ Only final leaf specifications appear here.
 
 ### Full Surface Patch Family Architecture
 - [x] [Surface Spec 139: Patch Family Capability Matrix And Spec 66 Retirement (v1.0)](../specifications/surface-139-patch-family-capability-matrix-and-spec-66-retirement-v1_0.md)
-- [ ] [Surface Spec 140: B-Spline Surface Patch Record And Validation (v1.0)](../specifications/surface-140-b-spline-surface-patch-record-and-validation-v1_0.md)
+- [x] [Surface Spec 140: B-Spline Surface Patch Record And Validation (v1.0)](../specifications/surface-140-b-spline-surface-patch-record-and-validation-v1_0.md)
 - [ ] [Surface Spec 141: B-Spline Surface Evaluation And Derivatives (v1.0)](../specifications/surface-141-b-spline-surface-evaluation-and-derivatives-v1_0.md)
 - [ ] [Surface Spec 142: NURBS Surface Patch (v1.0)](../specifications/surface-142-nurbs-surface-patch-v1_0.md)
 - [ ] [Surface Spec 143: Sweep Surface Patch Payload And Frame Policy (v1.0)](../specifications/surface-143-sweep-surface-patch-payload-and-frame-policy-v1_0.md)

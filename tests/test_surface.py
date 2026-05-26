@@ -36,6 +36,7 @@ from impression.modeling import (
     SURFACE_SPEC_66_RETIREMENT_NOTE,
     AdapterLossiness,
     analysis_tessellation_request,
+    BSplineSurfacePatch,
     compare_tessellation_modes,
     export_tessellation_request,
     flatten_surface_scene,
@@ -625,6 +626,63 @@ def test_revolution_patch_rejects_zero_sweep() -> None:
             profile_curve=((1.0, 0.0, 0.0), (1.0, 0.0, 1.0)),
             sweep_angle_deg=0.0,
         )
+
+
+def test_bspline_surface_patch_owns_knots_control_net_and_domain() -> None:
+    patch = BSplineSurfacePatch(
+        family="bspline",
+        degree_u=2,
+        degree_v=1,
+        knots_u=(0.0, 0.0, 0.0, 1.0, 1.0, 1.0),
+        knots_v=(0.0, 0.0, 1.0, 1.0),
+        control_net=[
+            [(0.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            [(0.5, 0.0, 0.25), (0.5, 1.0, 0.25)],
+            [(1.0, 0.0, 0.0), (1.0, 1.0, 0.0)],
+        ],
+    )
+
+    assert patch.family == "bspline"
+    assert patch.degree_u == 2
+    assert patch.degree_v == 1
+    assert patch.control_net.shape == (3, 2, 3)
+    assert patch.domain.u_range == (0.0, 1.0)
+    assert patch.geometry_payload()["knots_u"] == (0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"family": "nurbs"}, "family must be 'bspline'"),
+        ({"family": "bspline", "degree_u": 0}, "degree_u must be >= 1"),
+        ({"family": "bspline", "knots_u": (0.0, 1.0, 0.0, 1.0)}, "knots_u must be nondecreasing"),
+        (
+            {"family": "bspline", "control_net": [[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]]},
+            "at least two control points",
+        ),
+        (
+            {"family": "bspline", "knots_u": (0.0, 0.0, 0.5, 1.0, 1.0)},
+            "knot vector length",
+        ),
+        (
+            {
+                "family": "bspline",
+                "domain": ParameterDomain((0.0, 2.0), (0.0, 1.0)),
+            },
+            "domain must match",
+        ),
+    ],
+)
+def test_bspline_surface_patch_rejects_invalid_record_inputs(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        BSplineSurfacePatch(**kwargs)
+
+
+def test_bspline_surface_patch_refuses_evaluation_until_evaluator_spec() -> None:
+    patch = BSplineSurfacePatch(family="bspline")
+
+    with pytest.raises(NotImplementedError, match="Surface Spec 141"):
+        patch.point_at(0.5, 0.5)
 
 
 def test_planar_patch_rejects_collinear_axes_and_multiple_outer_trims() -> None:

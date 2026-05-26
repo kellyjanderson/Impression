@@ -103,6 +103,48 @@ def _as_points3(value: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> 
     return pts
 
 
+def _as_control_net3(value: Sequence[Sequence[Sequence[float]]] | np.ndarray, *, name: str) -> np.ndarray:
+    net = np.asarray(value, dtype=float)
+    if net.ndim != 3 or net.shape[2] != 3:
+        raise ValueError(f"{name} must be a 3D control net with shape (u_count, v_count, 3).")
+    if net.shape[0] < 2 or net.shape[1] < 2:
+        raise ValueError(f"{name} must contain at least two control points along each parameter direction.")
+    if not np.all(np.isfinite(net)):
+        raise ValueError(f"{name} must contain only finite values.")
+    return net
+
+
+def _normalize_degree(value: int, *, name: str) -> int:
+    degree = int(value)
+    if degree < 1:
+        raise ValueError(f"{name} must be >= 1.")
+    return degree
+
+
+def _normalize_knot_vector(values: Sequence[float], *, name: str) -> tuple[float, ...]:
+    knots = tuple(float(value) for value in values)
+    if len(knots) < 4:
+        raise ValueError(f"{name} is too short.")
+    if not all(np.isfinite(value) for value in knots):
+        raise ValueError(f"{name} values must be finite.")
+    if any(b < a for a, b in zip(knots, knots[1:])):
+        raise ValueError(f"{name} must be nondecreasing.")
+    return knots
+
+
+def _validate_bspline_axis(*, control_point_count: int, degree: int, knots: tuple[float, ...], name: str) -> tuple[float, float]:
+    if control_point_count <= degree:
+        raise ValueError(f"{name} control point count must be greater than degree.")
+    expected = control_point_count + degree + 1
+    if len(knots) != expected:
+        raise ValueError(f"{name} knot vector length must equal control_point_count + degree + 1.")
+    start = float(knots[degree])
+    end = float(knots[-degree - 1])
+    if not np.isfinite(start) or not np.isfinite(end) or end <= start:
+        raise ValueError(f"{name} parameter range must be finite and increasing.")
+    return start, end
+
+
 def _as_matrix4(value: Sequence[Sequence[float]] | np.ndarray, *, name: str = "matrix") -> np.ndarray:
     mat = np.asarray(value, dtype=float).reshape(4, 4)
     if not np.all(np.isfinite(mat)):
@@ -767,6 +809,69 @@ class RevolutionSurfacePatch(SurfacePatch):
 
 
 @dataclass(frozen=True)
+class BSplineSurfacePatch(SurfacePatch):
+    """A non-rational tensor-product B-spline surface patch record."""
+
+    degree_u: int = 1
+    degree_v: int = 1
+    knots_u: tuple[float, ...] = (0.0, 0.0, 1.0, 1.0)
+    knots_v: tuple[float, ...] = (0.0, 0.0, 1.0, 1.0)
+    control_net: np.ndarray = field(
+        default_factory=lambda: np.array(
+            [
+                [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                [[1.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+            ],
+            dtype=float,
+        )
+    )
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.family != "bspline":
+            raise ValueError("BSplineSurfacePatch.family must be 'bspline'.")
+        degree_u = _normalize_degree(self.degree_u, name="degree_u")
+        degree_v = _normalize_degree(self.degree_v, name="degree_v")
+        knots_u = _normalize_knot_vector(self.knots_u, name="knots_u")
+        knots_v = _normalize_knot_vector(self.knots_v, name="knots_v")
+        control_net = _as_control_net3(self.control_net, name="control_net")
+        u_range = _validate_bspline_axis(
+            control_point_count=control_net.shape[0],
+            degree=degree_u,
+            knots=knots_u,
+            name="u",
+        )
+        v_range = _validate_bspline_axis(
+            control_point_count=control_net.shape[1],
+            degree=degree_v,
+            knots=knots_v,
+            name="v",
+        )
+        if not np.allclose(self.domain.u_range, u_range) or not np.allclose(self.domain.v_range, v_range):
+            raise ValueError("BSplineSurfacePatch domain must match knot parameter ranges.")
+        object.__setattr__(self, "degree_u", degree_u)
+        object.__setattr__(self, "degree_v", degree_v)
+        object.__setattr__(self, "knots_u", knots_u)
+        object.__setattr__(self, "knots_v", knots_v)
+        object.__setattr__(self, "control_net", control_net)
+
+    def geometry_payload(self) -> dict[str, object]:
+        return {
+            "degree_u": self.degree_u,
+            "degree_v": self.degree_v,
+            "knots_u": self.knots_u,
+            "knots_v": self.knots_v,
+            "control_net": self.control_net,
+        }
+
+    def point_at(self, u: float, v: float) -> np.ndarray:
+        raise NotImplementedError("BSplineSurfacePatch evaluation is implemented by Surface Spec 141.")
+
+    def derivatives_at(self, u: float, v: float) -> tuple[np.ndarray, np.ndarray]:
+        raise NotImplementedError("BSplineSurfacePatch derivatives are implemented by Surface Spec 141.")
+
+
+@dataclass(frozen=True)
 class SurfaceShell:
     """An ordered collection of patches that form one shell."""
 
@@ -994,6 +1099,7 @@ __all__ = [
     "PlanarSurfacePatch",
     "RuledSurfacePatch",
     "RevolutionSurfacePatch",
+    "BSplineSurfacePatch",
     "SurfaceShell",
     "SurfaceBody",
     "make_surface_shell",
