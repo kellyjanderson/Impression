@@ -11,12 +11,17 @@ from impression.io import (
     ImpressUnits,
     SurfaceBodyStore,
     UnsupportedImpressSchemaVersion,
+    decode_surface_body_payload,
+    decode_surface_shell_payload,
+    encode_surface_body_payload,
+    encode_surface_shell_payload,
     make_impress_document_root,
     make_surface_body_store,
     validate_impress_units,
     validate_impress_document_root,
     validate_surface_body_store,
 )
+import numpy as np
 from impression.modeling.surface import PlanarSurfacePatch, make_surface_body, make_surface_shell
 
 
@@ -172,3 +177,70 @@ def test_surface_body_store_rejects_entry_identity_mismatch() -> None:
 
     with pytest.raises(ImpressFormatError, match="stable_identity does not match"):
         SurfaceBodyStore((ImpressBodyEntry(body_id="body-a", stable_identity="not-the-body", body=body),))
+
+
+def test_encode_decode_surface_shell_payload_round_trips_container_fields() -> None:
+    patch = PlanarSurfacePatch(family="planar", metadata={"kernel": {"name": "face"}})
+    shell = make_surface_shell([patch], connected=False, metadata={"consumer": {"label": "shell"}})
+
+    payload = encode_surface_shell_payload(shell)
+    decoded = decode_surface_shell_payload(payload, patches=[patch])
+
+    assert payload["patches"] == [patch.stable_identity]
+    assert decoded.connected is False
+    assert decoded.metadata == {"consumer": {"label": "shell"}}
+    assert decoded.patches == (patch,)
+
+
+def test_encode_decode_surface_body_payload_round_trips_container_fields() -> None:
+    body = _single_patch_body().with_transform(
+        [
+            [1.0, 0.0, 0.0, 3.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    payload = encode_surface_body_payload(body)
+    decoded = decode_surface_body_payload(payload, shells=body.shells)
+
+    assert payload["shell_count"] == 1
+    assert len(payload["shells"]) == 1
+    assert decoded.metadata == body.metadata
+    assert np.allclose(decoded.transform_matrix, body.transform_matrix)
+    assert decoded.shells == body.shells
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"patch_count": 1, "patches": "patch-a"},
+        {"patch_count": 0, "patches": []},
+        {"patch_count": 2, "patches": ["patch-a"]},
+        {"patch_count": 1, "patches": ["patch-a"], "metadata": []},
+        {"patch_count": 1, "patches": ["patch-a"], "seams": [{"id": "seam"}]},
+        {"patch_count": 1, "patches": ["patch-a"], "transform_matrix": [[float("nan")]]},
+    ],
+)
+def test_decode_surface_shell_payload_rejects_invalid_container_payloads(payload: dict[str, object]) -> None:
+    patch = PlanarSurfacePatch(family="planar")
+    with pytest.raises(ImpressFormatError):
+        decode_surface_shell_payload(payload, patches=[patch])
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"shell_count": 1, "shells": "shell-a"},
+        {"shell_count": 0, "shells": []},
+        {"shell_count": 2, "shells": [{}]},
+        {"shell_count": 1, "shells": [{}], "metadata": []},
+        {"shell_count": 1, "shells": [{}], "transform_matrix": [[float("inf")]]},
+    ],
+)
+def test_decode_surface_body_payload_rejects_invalid_container_payloads(payload: dict[str, object]) -> None:
+    body = _single_patch_body()
+    with pytest.raises(ImpressFormatError):
+        decode_surface_body_payload(payload, shells=body.shells)
