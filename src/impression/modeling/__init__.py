@@ -260,6 +260,8 @@ from .surface import (
 from .tessellation import (
     AdapterLossiness,
     CrossModeDriftReport,
+    ImplicitApproximationMetadata,
+    ImplicitTessellationBoundsDiagnostic,
     NormalizedTessellationRequest,
     SurfaceConsumerCollection,
     SurfaceConsumerRecord,
@@ -574,6 +576,8 @@ __all__ = [
     "make_surface_body",
     "AdapterLossiness",
     "CrossModeDriftReport",
+    "ImplicitApproximationMetadata",
+    "ImplicitTessellationBoundsDiagnostic",
     "NormalizedTessellationRequest",
     "SurfaceConsumerCollection",
     "SurfaceConsumerRecord",
