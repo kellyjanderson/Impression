@@ -8,6 +8,8 @@ from typing import Any, Iterable, Literal, Sequence
 
 import numpy as np
 
+from impression.modeling.path3d import Path3D
+
 
 @dataclass(frozen=True)
 class PatchFamilyCapabilityRecord:
@@ -98,6 +100,15 @@ def _as_points3(value: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> 
     pts = np.asarray(value, dtype=float).reshape(-1, 3)
     if pts.shape[0] < 2:
         raise ValueError(f"{name} must contain at least two 3D points.")
+    if not np.all(np.isfinite(pts)):
+        raise ValueError(f"{name} must contain only finite values.")
+    return pts
+
+
+def _as_points2(value: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    pts = np.asarray(value, dtype=float).reshape(-1, 2)
+    if pts.shape[0] < 2:
+        raise ValueError(f"{name} must contain at least two 2D points.")
     if not np.all(np.isfinite(pts)):
         raise ValueError(f"{name} must contain only finite values.")
     return pts
@@ -1127,6 +1138,59 @@ class NURBSSurfacePatch(SurfacePatch):
         return (_transform_vector(self.transform_matrix, du), _transform_vector(self.transform_matrix, dv))
 
 
+FrameTransportPolicy = Literal["parallel_transport", "frenet", "fixed"]
+
+
+@dataclass(frozen=True)
+class SweepSurfacePatch(SurfacePatch):
+    """A sweep surface payload over a 2D profile and a 3D path."""
+
+    profile_points_uv: np.ndarray = field(default_factory=lambda: np.array([[0.0, 0.0], [1.0, 0.0]], dtype=float))
+    path: Path3D = field(default_factory=lambda: Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.0, 1.0)]))
+    frame_policy: FrameTransportPolicy = "parallel_transport"
+    profile_reference: str | None = None
+    path_reference: str | None = None
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.family != "sweep":
+            raise ValueError("SweepSurfacePatch.family must be 'sweep'.")
+        profile_points = _as_points2(self.profile_points_uv, name="profile_points_uv")
+        if not isinstance(self.path, Path3D):
+            raise ValueError("SweepSurfacePatch.path must be a Path3D.")
+        path_points = self.path.sample()
+        if path_points.shape[0] < 2:
+            raise ValueError("SweepSurfacePatch.path must sample to at least two 3D points.")
+        frame_policy = str(self.frame_policy)
+        if frame_policy not in {"parallel_transport", "frenet", "fixed"}:
+            raise ValueError("SweepSurfacePatch.frame_policy must be parallel_transport, frenet, or fixed.")
+        profile_reference = None if self.profile_reference is None else str(self.profile_reference).strip()
+        path_reference = None if self.path_reference is None else str(self.path_reference).strip()
+        if profile_reference == "":
+            raise ValueError("SweepSurfacePatch.profile_reference must be non-empty when provided.")
+        if path_reference == "":
+            raise ValueError("SweepSurfacePatch.path_reference must be non-empty when provided.")
+        object.__setattr__(self, "profile_points_uv", profile_points)
+        object.__setattr__(self, "frame_policy", frame_policy)
+        object.__setattr__(self, "profile_reference", profile_reference)
+        object.__setattr__(self, "path_reference", path_reference)
+
+    def geometry_payload(self) -> dict[str, object]:
+        return {
+            "profile_points_uv": self.profile_points_uv,
+            "path_points": self.path.sample(),
+            "frame_policy": self.frame_policy,
+            "profile_reference": self.profile_reference,
+            "path_reference": self.path_reference,
+        }
+
+    def point_at(self, u: float, v: float) -> np.ndarray:
+        raise NotImplementedError("SweepSurfacePatch evaluation is implemented by Surface Spec 144.")
+
+    def derivatives_at(self, u: float, v: float) -> tuple[np.ndarray, np.ndarray]:
+        raise NotImplementedError("SweepSurfacePatch derivatives are implemented by Surface Spec 144.")
+
+
 @dataclass(frozen=True)
 class SurfaceShell:
     """An ordered collection of patches that form one shell."""
@@ -1357,6 +1421,7 @@ __all__ = [
     "RevolutionSurfacePatch",
     "BSplineSurfacePatch",
     "NURBSSurfacePatch",
+    "SweepSurfacePatch",
     "SurfaceShell",
     "SurfaceBody",
     "make_surface_shell",

@@ -49,6 +49,7 @@ from impression.modeling import (
     NURBSSurfacePatch,
     normalize_tessellation_request,
     ParameterDomain,
+    Path3D,
     PlanarSurfacePatch,
     preview_tessellation_request,
     RevolutionSurfacePatch,
@@ -62,6 +63,7 @@ from impression.modeling import (
     SurfaceSceneNode,
     SurfaceSeam,
     SurfaceShell,
+    SweepSurfacePatch,
     TessellationRequest,
     TrimLoop,
     make_surface_body,
@@ -762,6 +764,49 @@ def test_nurbs_surface_patch_with_unit_weights_matches_bspline_patch() -> None:
 def test_nurbs_surface_patch_rejects_invalid_weight_inputs(kwargs: dict[str, object], message: str) -> None:
     with pytest.raises(ValueError, match=message):
         NURBSSurfacePatch(**kwargs)
+
+
+def test_sweep_surface_patch_owns_profile_path_and_frame_policy() -> None:
+    path = Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.0, 2.0)])
+    patch = SweepSurfacePatch(
+        family="sweep",
+        profile_points_uv=[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)],
+        path=path,
+        frame_policy="fixed",
+        profile_reference="profile:outer",
+        path_reference="path:centerline",
+    )
+
+    payload = patch.geometry_payload()
+    assert patch.family == "sweep"
+    assert patch.frame_policy == "fixed"
+    assert patch.profile_reference == "profile:outer"
+    assert patch.path_reference == "path:centerline"
+    assert np.allclose(payload["path_points"], path.sample())
+    assert np.allclose(payload["profile_points_uv"], [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)])
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"family": "ruled"}, "family must be 'sweep'"),
+        ({"family": "sweep", "profile_points_uv": [(0.0, 0.0)]}, "at least two 2D points"),
+        ({"family": "sweep", "path": object()}, "path must be a Path3D"),
+        ({"family": "sweep", "frame_policy": "magic"}, "frame_policy"),
+        ({"family": "sweep", "profile_reference": "  "}, "profile_reference"),
+        ({"family": "sweep", "path_reference": "  "}, "path_reference"),
+    ],
+)
+def test_sweep_surface_patch_rejects_invalid_payload_inputs(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        SweepSurfacePatch(**kwargs)
+
+
+def test_sweep_surface_patch_refuses_evaluation_until_evaluator_spec() -> None:
+    patch = SweepSurfacePatch(family="sweep")
+
+    with pytest.raises(NotImplementedError, match="Surface Spec 144"):
+        patch.point_at(0.0, 0.0)
 
 
 def test_planar_patch_rejects_collinear_axes_and_multiple_outer_trims() -> None:
