@@ -1995,11 +1995,11 @@ class ImplicitSurfacePatch(SurfacePatch):
 
     def point_at(self, u: float, v: float) -> np.ndarray:
         self.validate_parameters(u, v)
-        raise NotImplementedError("ImplicitSurfacePatch parametric surface extraction is implemented by Surface Spec 150.")
+        raise NotImplementedError("ImplicitSurfacePatch has no canonical parametric point_at; use field_value_at or tessellation.")
 
     def derivatives_at(self, u: float, v: float) -> tuple[np.ndarray, np.ndarray]:
         self.validate_parameters(u, v)
-        raise NotImplementedError("ImplicitSurfacePatch parametric derivatives are implemented by Surface Spec 150.")
+        raise NotImplementedError("ImplicitSurfacePatch has no canonical parametric derivatives; use field_value_at or tessellation.")
 
     def bounds_estimate(self, *, u_count: int = 3, v_count: int = 3) -> tuple[float, float, float, float, float, float]:
         del u_count, v_count

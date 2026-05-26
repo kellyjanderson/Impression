@@ -42,12 +42,14 @@ from impression.modeling import (
     flatten_surface_scene,
     handoff_surface_scene,
     IMPLICIT_FIELD_NODE_KINDS,
+    ImplicitApproximationMetadata,
     ImplicitFieldEvaluationDomain,
     ImplicitFieldEvaluationResult,
     ImplicitFieldNode,
     ImplicitFieldSafetyPolicy,
     ImplicitFieldValidationDiagnostic,
     ImplicitSurfacePatch,
+    ImplicitTessellationBoundsDiagnostic,
     make_surface_consumer_collection,
     make_surface_mesh_adapter,
     make_surface_scene_group,
@@ -1011,13 +1013,13 @@ def test_implicit_surface_patch_rejects_unsupported_payloads(factory: object, me
         factory()
 
 
-def test_implicit_surface_patch_refuses_parametric_extraction_until_tessellation_spec() -> None:
+def test_implicit_surface_patch_refuses_parametric_extraction_without_exact_surface() -> None:
     patch = ImplicitSurfacePatch(family="implicit")
 
-    with pytest.raises(NotImplementedError, match="Surface Spec 150"):
+    with pytest.raises(NotImplementedError, match="no canonical parametric point_at"):
         patch.point_at(0.5, 0.5)
 
-    with pytest.raises(NotImplementedError, match="Surface Spec 150"):
+    with pytest.raises(NotImplementedError, match="no canonical parametric derivatives"):
         patch.derivatives_at(0.5, 0.5)
 
 
@@ -1142,6 +1144,53 @@ def test_implicit_surface_patch_exposes_field_value_and_domain_helpers() -> None
 def test_implicit_field_evaluator_refuses_invalid_runtime_payloads(node: ImplicitFieldNode, point: tuple[float, float, float], message: str) -> None:
     with pytest.raises(ValueError, match=message):
         evaluate_implicit_field(node, point)
+
+
+def test_implicit_surface_patch_tessellates_with_bounds_and_approximation_metadata() -> None:
+    patch = ImplicitSurfacePatch(family="implicit", field=make_implicit_field_node("sphere", parameters={"radius": 0.75}))
+
+    mesh = tessellate_surface_patch(patch, preview_tessellation_request())
+
+    diagnostic = mesh.metadata["implicit_bounds_diagnostic"]
+    approximation = mesh.metadata["implicit_approximation"]
+    assert mesh.vertices.shape[0] > 0
+    assert mesh.faces.shape[0] > 0
+    assert mesh.metadata["surface_family"] == "implicit"
+    assert diagnostic["within_bounds"] is True
+    assert diagnostic["estimated_cells"] <= diagnostic["max_cells"]
+    assert approximation["method"] == "bounded_sampled_sign_change_quads"
+    assert approximation["exact"] is False
+    assert approximation["active_cells"] > 0
+    assert mesh.metadata["implicit_approximation_boundary"] == "tessellation"
+
+
+def test_implicit_tessellation_refuses_unbounded_sampling_request() -> None:
+    patch = ImplicitSurfacePatch(
+        family="implicit",
+        field=make_implicit_field_node("sphere", parameters={"radius": 1.0}),
+        bounds=(-100.0, 100.0, -100.0, 100.0, -100.0, 100.0),
+    )
+
+    with pytest.raises(ValueError, match="bounded sampling limit"):
+        tessellate_surface_patch(patch, analysis_tessellation_request())
+
+
+def test_implicit_tessellation_metadata_records_are_canonical() -> None:
+    diagnostic = ImplicitTessellationBoundsDiagnostic(
+        bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+        samples=(5, 5, 5),
+        estimated_cells=64,
+    )
+    metadata = ImplicitApproximationMetadata(
+        method="bounded_sampled_sign_change_quads",
+        isovalue=0.0,
+        samples=(5, 5, 5),
+        active_cells=8,
+    )
+
+    assert diagnostic.within_bounds is True
+    assert diagnostic.canonical_payload()["samples"] == (5, 5, 5)
+    assert metadata.canonical_payload()["exact"] is False
 
 
 def test_planar_patch_rejects_collinear_axes_and_multiple_outer_trims() -> None:

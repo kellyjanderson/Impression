@@ -9,6 +9,8 @@ from impression.mesh import Mesh, MeshAnalysis, analyze_mesh, combine_meshes
 
 from ._legacy_mesh_deprecation import warn_mesh_primary_api
 from .surface import (
+    ImplicitFieldEvaluationDomain,
+    ImplicitSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
     SubdivisionSurfacePatch,
@@ -25,6 +27,8 @@ TessellationOutput = Literal["mesh"]
 TessellationQualityPreset = Literal["preview", "balanced", "fine", "analysis"]
 SurfaceOutputClassification = Literal["open", "closed"]
 AdapterLossiness = Literal["lossless", "lossy"]
+
+_MAX_IMPLICIT_TESSELLATION_CELLS = 100_000
 
 _QUALITY_PRESETS: dict[TessellationQualityPreset, dict[str, object]] = {
     "preview": {
@@ -433,6 +437,110 @@ def _subdivision_patch_mesh(patch: SubdivisionSurfacePatch, request: NormalizedT
     )
 
 
+def _implicit_samples_for_request(
+    patch: ImplicitSurfacePatch,
+    request: NormalizedTessellationRequest,
+) -> ImplicitTessellationBoundsDiagnostic:
+    xmin, xmax, ymin, ymax, zmin, zmax = patch.bounds
+    spans = np.asarray([xmax - xmin, ymax - ymin, zmax - zmin], dtype=float)
+    samples = tuple(max(3, int(np.ceil(span / request.max_edge_length)) + 1) for span in spans)
+    estimated_cells = int(np.prod([sample - 1 for sample in samples]))
+    diagnostic = ImplicitTessellationBoundsDiagnostic(
+        bounds=patch.bounds,
+        samples=samples,
+        estimated_cells=estimated_cells,
+    )
+    if not diagnostic.within_bounds:
+        raise ValueError(
+            "Implicit tessellation request exceeds bounded sampling limit: "
+            f"{diagnostic.estimated_cells} cells requested, max {diagnostic.max_cells}."
+        )
+    return diagnostic
+
+
+def _implicit_patch_mesh(patch: ImplicitSurfacePatch, request: NormalizedTessellationRequest) -> Mesh:
+    diagnostic = _implicit_samples_for_request(patch, request)
+    domain = ImplicitFieldEvaluationDomain(bounds=patch.bounds, samples=diagnostic.samples)
+    values = patch.evaluate_domain(samples=diagnostic.samples)
+    xmin, xmax, ymin, ymax, zmin, zmax = patch.bounds
+    xs = np.linspace(xmin, xmax, diagnostic.samples[0])
+    ys = np.linspace(ymin, ymax, diagnostic.samples[1])
+    zs = np.linspace(zmin, zmax, diagnostic.samples[2])
+    vertices: list[np.ndarray] = []
+    faces: list[list[int]] = []
+    active_cells = 0
+
+    def add_quad(corners: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]) -> None:
+        start = len(vertices)
+        vertices.extend(np.asarray(corner, dtype=float) for corner in corners)
+        faces.append([start, start + 1, start + 2])
+        faces.append([start, start + 2, start + 3])
+
+    for z_index in range(diagnostic.samples[2] - 1):
+        for y_index in range(diagnostic.samples[1] - 1):
+            for x_index in range(diagnostic.samples[0] - 1):
+                cell_values = values[z_index : z_index + 2, y_index : y_index + 2, x_index : x_index + 2]
+                if not (np.min(cell_values) <= 0.0 <= np.max(cell_values)):
+                    continue
+                active_cells += 1
+                x0, x1 = xs[x_index], xs[x_index + 1]
+                y0, y1 = ys[y_index], ys[y_index + 1]
+                z0, z1 = zs[z_index], zs[z_index + 1]
+                center = np.array([(x0 + x1) * 0.5, (y0 + y1) * 0.5, (z0 + z1) * 0.5], dtype=float)
+                half = np.array([(x1 - x0), (y1 - y0), (z1 - z0)], dtype=float) * 0.45
+                gradients = np.gradient(cell_values.astype(float))
+                axis = int(np.argmax([float(np.mean(np.abs(gradient))) for gradient in gradients]))
+                if axis == 0:
+                    add_quad(
+                        (
+                            center + np.array([-half[0], -half[1], 0.0]),
+                            center + np.array([half[0], -half[1], 0.0]),
+                            center + np.array([half[0], half[1], 0.0]),
+                            center + np.array([-half[0], half[1], 0.0]),
+                        )
+                    )
+                elif axis == 1:
+                    add_quad(
+                        (
+                            center + np.array([-half[0], 0.0, -half[2]]),
+                            center + np.array([half[0], 0.0, -half[2]]),
+                            center + np.array([half[0], 0.0, half[2]]),
+                            center + np.array([-half[0], 0.0, half[2]]),
+                        )
+                    )
+                else:
+                    add_quad(
+                        (
+                            center + np.array([0.0, -half[1], -half[2]]),
+                            center + np.array([0.0, half[1], -half[2]]),
+                            center + np.array([0.0, half[1], half[2]]),
+                            center + np.array([0.0, -half[1], half[2]]),
+                        )
+                    )
+
+    transformed_vertices = np.asarray(
+        [patch.transform_matrix[:3, :3] @ vertex + patch.transform_matrix[:3, 3] for vertex in vertices],
+        dtype=float,
+    )
+    approximation = ImplicitApproximationMetadata(
+        method="bounded_sampled_sign_change_quads",
+        isovalue=0.0,
+        samples=domain.samples,
+        active_cells=active_cells,
+    )
+    return Mesh(
+        vertices=transformed_vertices.reshape(-1, 3),
+        faces=np.asarray(faces, dtype=int),
+        metadata={
+            "surface_family": patch.family,
+            "surface_patch_id": patch.stable_identity,
+            "implicit_bounds_diagnostic": diagnostic.canonical_payload(),
+            "implicit_approximation": approximation.canonical_payload(),
+            "implicit_approximation_boundary": "tessellation",
+        },
+    )
+
+
 @dataclass(frozen=True)
 class TessellationRequest:
     """Consumer-facing tessellation request with deterministic defaulting."""
@@ -516,6 +624,61 @@ class SurfaceTessellationResult:
     classification: SurfaceOutputClassification
     body_identity: str
     analysis: MeshAnalysis
+
+
+@dataclass(frozen=True)
+class ImplicitTessellationBoundsDiagnostic:
+    """Bounded sampling decision for an implicit patch tessellation request."""
+
+    bounds: tuple[float, float, float, float, float, float]
+    samples: tuple[int, int, int]
+    estimated_cells: int
+    max_cells: int = _MAX_IMPLICIT_TESSELLATION_CELLS
+
+    def __post_init__(self) -> None:
+        samples = tuple(int(value) for value in self.samples)
+        if len(samples) != 3 or any(value < 2 for value in samples):
+            raise ValueError("ImplicitTessellationBoundsDiagnostic.samples must contain three values >= 2.")
+        estimated_cells = int(self.estimated_cells)
+        max_cells = int(self.max_cells)
+        if estimated_cells < 1 or max_cells < 1:
+            raise ValueError("Implicit tessellation cell counts must be positive.")
+        object.__setattr__(self, "bounds", tuple(float(value) for value in self.bounds))
+        object.__setattr__(self, "samples", samples)
+        object.__setattr__(self, "estimated_cells", estimated_cells)
+        object.__setattr__(self, "max_cells", max_cells)
+
+    @property
+    def within_bounds(self) -> bool:
+        return self.estimated_cells <= self.max_cells
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "bounds": self.bounds,
+            "samples": self.samples,
+            "estimated_cells": self.estimated_cells,
+            "max_cells": self.max_cells,
+            "within_bounds": self.within_bounds,
+        }
+
+
+@dataclass(frozen=True)
+class ImplicitApproximationMetadata:
+    """Metadata describing an implicit patch mesh approximation."""
+
+    method: str
+    isovalue: float
+    samples: tuple[int, int, int]
+    active_cells: int
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "method": self.method,
+            "isovalue": float(self.isovalue),
+            "samples": tuple(int(value) for value in self.samples),
+            "active_cells": int(self.active_cells),
+            "exact": False,
+        }
 
 
 @dataclass(frozen=True)
@@ -629,7 +792,9 @@ def tessellate_surface_patch(
     request: TessellationRequest | NormalizedTessellationRequest | None = None,
 ) -> Mesh:
     normalized = request if isinstance(request, NormalizedTessellationRequest) else normalize_tessellation_request(request)
-    if isinstance(patch, SubdivisionSurfacePatch):
+    if isinstance(patch, ImplicitSurfacePatch):
+        mesh = _implicit_patch_mesh(patch, normalized)
+    elif isinstance(patch, SubdivisionSurfacePatch):
         mesh = _subdivision_patch_mesh(patch, normalized)
     elif _uses_rectangular_grid_tessellation(patch):
         u_count, v_count = _rectangular_grid_counts(normalized)
@@ -675,7 +840,7 @@ def tessellate_surface_shell(
     world_patches = shell.iter_patches(world=True)
     if not world_patches:
         return Mesh(np.zeros((0, 3), dtype=float), np.zeros((0, 3), dtype=int), metadata={"surface_shell_id": shell.stable_identity})
-    if any(isinstance(patch, SubdivisionSurfacePatch) for patch in world_patches):
+    if any(isinstance(patch, (ImplicitSurfacePatch, SubdivisionSurfacePatch)) for patch in world_patches):
         mesh = combine_meshes([tessellate_surface_patch(patch, normalized) for patch in world_patches])
         mesh.metadata.update(
             {
@@ -683,6 +848,7 @@ def tessellate_surface_shell(
                 "tessellation_request": normalized.canonical_payload(),
                 "surface_shell_classification": _classify_shell(shell),
                 "subdivision_approximation_boundary": "tessellation",
+                "implicit_approximation_boundary": "tessellation",
             }
         )
         return mesh
@@ -833,6 +999,8 @@ def make_surface_consumer_collection(
 __all__ = [
     "AdapterLossiness",
     "CrossModeDriftReport",
+    "ImplicitApproximationMetadata",
+    "ImplicitTessellationBoundsDiagnostic",
     "NormalizedTessellationRequest",
     "SurfaceConsumerCollection",
     "SurfaceConsumerRecord",
