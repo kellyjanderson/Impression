@@ -29,9 +29,11 @@ from impression.modeling._surface_primitives import (
 )
 from impression.modeling._surface_ops import make_surface_linear_extrude, make_surface_rotate_extrude
 from impression.modeling import (
-    DEFERRED_V1_PATCH_FAMILIES,
+    PATCH_FAMILY_CAPABILITY_MATRIX,
     PATCH_FAMILY_FEATURE_COVERAGE,
     REQUIRED_V1_PATCH_FAMILIES,
+    SUPPORTED_SURFACE_PATCH_FAMILIES,
+    SURFACE_SPEC_66_RETIREMENT_NOTE,
     AdapterLossiness,
     analysis_tessellation_request,
     compare_tessellation_modes,
@@ -461,8 +463,17 @@ def test_private_surface_builders_do_not_leak_through_public_modeling_namespace(
 
 def test_patch_family_scope_constants_are_explicit() -> None:
     assert REQUIRED_V1_PATCH_FAMILIES == ("planar", "ruled", "revolution")
-    assert "nurbs" in DEFERRED_V1_PATCH_FAMILIES
-    assert PATCH_FAMILY_FEATURE_COVERAGE["planar"] == ("caps", "planar-primitives", "trimmed-faces")
+    assert "nurbs" in SUPPORTED_SURFACE_PATCH_FAMILIES
+    assert PATCH_FAMILY_CAPABILITY_MATRIX["nurbs"].support_phase == "planned"
+    assert PATCH_FAMILY_CAPABILITY_MATRIX["planar"].support_phase == "available"
+    assert "architecturally deferred" in SURFACE_SPEC_66_RETIREMENT_NOTE
+    assert PATCH_FAMILY_FEATURE_COVERAGE["planar"] == (
+        "caps",
+        "planar-primitives",
+        "trimmed-faces",
+        "tessellation",
+        ".impress",
+    )
 
 
 def test_parameter_domain_validates_positive_spans() -> None:
