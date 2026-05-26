@@ -276,11 +276,14 @@ def test_internal_surface_rotate_extrude_rejects_profiles_that_cross_axis() -> N
         make_surface_rotate_extrude(shape, angle_deg=360.0, segments=24)
 
 
-def test_internal_surface_cylinder_returns_surface_body_and_public_api_stays_mesh() -> None:
+def test_internal_surface_cylinder_returns_surface_body_and_public_api_defaults_surface() -> None:
     surface_cylinder = make_surface_cylinder(radius=1.0, height=2.0, resolution=32)
-    mesh_cylinder = make_cylinder(radius=1.0, height=2.0, resolution=32)
+    public_cylinder = make_cylinder(radius=1.0, height=2.0, resolution=32)
+    mesh_cylinder = make_cylinder(radius=1.0, height=2.0, resolution=32, backend="mesh")
 
     assert isinstance(surface_cylinder, SurfaceBody)
+    assert isinstance(public_cylinder, SurfaceBody)
+    assert public_cylinder.stable_identity == surface_cylinder.stable_identity
     assert surface_cylinder.shell_count == 1
     assert surface_cylinder.patch_count == 6
     assert [patch.family for patch in surface_cylinder.iter_patches(world=False)].count("revolution") == 4
@@ -305,11 +308,14 @@ def test_internal_surface_cylinder_uses_attached_transform_for_direction_and_cen
     assert bounds == (4.0, 6.0, 5.0, 7.0, 6.0, 8.0)
 
 
-def test_internal_surface_cone_returns_surface_body_and_public_api_stays_mesh() -> None:
+def test_internal_surface_cone_returns_surface_body_and_public_api_defaults_surface() -> None:
     surface_cone = make_surface_cone(bottom_diameter=2.0, top_diameter=0.0, height=2.0, resolution=32)
-    mesh_cone = make_cone(bottom_diameter=2.0, top_diameter=0.0, height=2.0, resolution=32)
+    public_cone = make_cone(bottom_diameter=2.0, top_diameter=0.0, height=2.0, resolution=32)
+    mesh_cone = make_cone(bottom_diameter=2.0, top_diameter=0.0, height=2.0, resolution=32, backend="mesh")
 
     assert isinstance(surface_cone, SurfaceBody)
+    assert isinstance(public_cone, SurfaceBody)
+    assert public_cone.stable_identity == surface_cone.stable_identity
     assert surface_cone.shell_count == 1
     assert surface_cone.patch_count == 5
     assert [patch.family for patch in surface_cone.iter_patches(world=False)].count("revolution") == 4
@@ -335,11 +341,14 @@ def test_internal_surface_cone_uses_attached_transform_for_direction_and_center(
     assert bounds == (4.0, 6.0, 5.0, 7.0, 6.0, 8.0)
 
 
-def test_internal_surface_ngon_returns_surface_body_and_public_api_stays_mesh() -> None:
+def test_internal_surface_ngon_returns_surface_body_and_public_api_defaults_surface() -> None:
     surface_ngon = make_surface_ngon(sides=6, radius=1.0, height=2.0)
-    mesh_ngon = make_ngon(sides=6, radius=1.0, height=2.0)
+    public_ngon = make_ngon(sides=6, radius=1.0, height=2.0)
+    mesh_ngon = make_ngon(sides=6, radius=1.0, height=2.0, backend="mesh")
 
     assert isinstance(surface_ngon, SurfaceBody)
+    assert isinstance(public_ngon, SurfaceBody)
+    assert public_ngon.stable_identity == surface_ngon.stable_identity
     assert surface_ngon.shell_count == 1
     assert surface_ngon.patch_count == 8
     assert [patch.family for patch in surface_ngon.iter_patches(world=False)].count("ruled") == 6
