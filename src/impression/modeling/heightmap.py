@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Sequence
 
@@ -20,6 +21,42 @@ ArrayLike = np.ndarray
 Backend = Literal["mesh", "surface"]
 
 _HEIGHTMAP_CACHE = LRUCache(max_size=32)
+
+
+@dataclass(frozen=True)
+class HeightmapAlphaMaskPolicy:
+    alpha_mode: Literal["mask", "ignore"]
+    masked_sample_count: int
+    total_sample_count: int
+
+    @property
+    def has_masked_samples(self) -> bool:
+        return self.masked_sample_count > 0
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "alpha_mode": self.alpha_mode,
+            "masked_sample_count": self.masked_sample_count,
+            "total_sample_count": self.total_sample_count,
+            "has_masked_samples": self.has_masked_samples,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapCacheKeyRecord:
+    cache_key: tuple | None
+    reason: str
+
+    @property
+    def cacheable(self) -> bool:
+        return self.cache_key is not None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cache_key": self.cache_key,
+            "cacheable": self.cacheable,
+            "reason": self.reason,
+        }
 
 
 def _as_scale(value: float | Sequence[float]) -> tuple[float, float]:
@@ -75,6 +112,39 @@ def _load_heightmap(image: str | Path | Image.Image | ArrayLike) -> tuple[np.nda
     if isinstance(image, np.ndarray):
         return _normalize_image_array(image)
     raise TypeError("heightmap expects a file path, PIL image, or numpy array.")
+
+
+def resolve_heightmap_alpha_mask_policy(
+    mask: np.ndarray,
+    *,
+    alpha_mode: str,
+) -> HeightmapAlphaMaskPolicy:
+    mode = str(alpha_mode).lower()
+    if mode not in {"mask", "ignore"}:
+        raise ValueError("alpha_mode must be 'mask' or 'ignore'.")
+    mask_arr = np.asarray(mask, dtype=bool)
+    return HeightmapAlphaMaskPolicy(
+        alpha_mode=mode,  # type: ignore[arg-type]
+        masked_sample_count=int(np.size(mask_arr) - np.count_nonzero(mask_arr)),
+        total_sample_count=int(np.size(mask_arr)),
+    )
+
+
+def heightmap_cache_key_record(
+    image: str | Path | Image.Image | ArrayLike,
+    height: float,
+    xy_scale: float | Sequence[float],
+    center: Sequence[float],
+    alpha_mode: str,
+    quality: MeshQuality | None,
+) -> HeightmapCacheKeyRecord:
+    cache_key = _heightmap_cache_key(image, height, xy_scale, center, alpha_mode, quality)
+    if cache_key is None:
+        reason = "uncacheable-source"
+        if isinstance(image, (str, Path)):
+            reason = "path-stat-unavailable"
+        return HeightmapCacheKeyRecord(cache_key=None, reason=reason)
+    return HeightmapCacheKeyRecord(cache_key=cache_key, reason="cache-key-valid")
 
 
 def _triangle_surface_body_from_mesh(mesh: Mesh, *, metadata: dict[str, object] | None = None) -> "SurfaceBody":
@@ -143,8 +213,8 @@ def _heightmap_mesh_impl(
     alpha_mode: str,
     quality: MeshQuality | None,
 ) -> Mesh:
-    cache_key = _heightmap_cache_key(image, height, xy_scale, center, alpha_mode, quality)
-    cached = _HEIGHTMAP_CACHE.get(cache_key) if cache_key is not None else None
+    cache_record = heightmap_cache_key_record(image, height, xy_scale, center, alpha_mode, quality)
+    cached = _HEIGHTMAP_CACHE.get(cache_record.cache_key) if cache_record.cache_key is not None else None
     if cached is not None:
         return cached.copy()
 
@@ -190,8 +260,9 @@ def _heightmap_mesh_impl(
 
     faces_arr = np.asarray(faces, dtype=int) if faces else np.zeros((0, 3), dtype=int)
     mesh = Mesh(vertices, faces_arr)
-    if cache_key is not None:
-        _HEIGHTMAP_CACHE.set(cache_key, mesh.copy())
+    mesh.metadata.update({"heightmap_cache_key_policy": cache_record.canonical_payload()})
+    if cache_record.cache_key is not None:
+        _HEIGHTMAP_CACHE.set(cache_record.cache_key, mesh.copy())
     return mesh
 
 
@@ -214,6 +285,8 @@ def make_heightmap_surface_patch(
             mask = mask[::2, ::2]
     if heights.shape[0] < 2 or heights.shape[1] < 2:
         raise ValueError("Heightmap surface payload requires at least a 2x2 sample grid.")
+    alpha_policy = resolve_heightmap_alpha_mask_policy(mask, alpha_mode=alpha_mode)
+    cache_record = heightmap_cache_key_record(image, height, xy_scale, center, alpha_mode, quality)
     if alpha_mode == "ignore":
         heights = np.where(mask, heights, 0.0)
     elif alpha_mode == "mask":
@@ -223,6 +296,8 @@ def make_heightmap_surface_patch(
     return HeightmapSurfacePatch(
         family="heightmap",
         height_samples=heights,
+        alpha_mask=mask,
+        alpha_mode=alpha_policy.alpha_mode,
         xy_scale=_as_scale(xy_scale),
         center=np.asarray(center, dtype=float).reshape(3),
         height_scale=float(height),
@@ -230,7 +305,8 @@ def make_heightmap_surface_patch(
             "kernel": {
                 "producer": "heightmap",
                 "sample_shape": tuple(int(value) for value in heights.shape),
-                "alpha_mode": alpha_mode,
+                "alpha_policy": alpha_policy.canonical_payload(),
+                "cache_key_policy": cache_record.canonical_payload(),
             }
         },
     )
@@ -535,4 +611,12 @@ def _heightmap_cache_key(
     return None
 
 
-__all__ = ["heightmap", "displace_heightmap", "make_heightmap_surface_patch"]
+__all__ = [
+    "HeightmapAlphaMaskPolicy",
+    "HeightmapCacheKeyRecord",
+    "heightmap",
+    "displace_heightmap",
+    "heightmap_cache_key_record",
+    "make_heightmap_surface_patch",
+    "resolve_heightmap_alpha_mask_policy",
+]

@@ -213,7 +213,15 @@ from .csg import (
 from .paths import Path
 from .group import MeshGroup, group
 from .ops import offset, hull
-from .heightmap import heightmap, displace_heightmap, make_heightmap_surface_patch
+from .heightmap import (
+    HeightmapAlphaMaskPolicy,
+    HeightmapCacheKeyRecord,
+    heightmap,
+    displace_heightmap,
+    heightmap_cache_key_record,
+    make_heightmap_surface_patch,
+    resolve_heightmap_alpha_mask_policy,
+)
 from .drafting import make_line, make_plane, make_arrow, make_dimension
 from .text import (
     TextMeshCompatibilityResult,
@@ -573,7 +581,11 @@ __all__ = [
     "hull",
     "heightmap",
     "displace_heightmap",
+    "HeightmapAlphaMaskPolicy",
+    "HeightmapCacheKeyRecord",
+    "heightmap_cache_key_record",
     "make_heightmap_surface_patch",
+    "resolve_heightmap_alpha_mask_policy",
     "make_line",
     "make_plane",
     "make_arrow",
