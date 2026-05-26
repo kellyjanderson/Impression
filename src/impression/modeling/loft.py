@@ -101,6 +101,34 @@ class InferenceResult:
 
 
 @dataclass(frozen=True)
+class ParentSpanMatch:
+    source_track_ref: str
+    target_track_ref: str
+    span_parameter: float
+    confidence: float
+    source: str
+
+
+@dataclass(frozen=True)
+class PointLifecycleRefusalDiagnostic:
+    reason: str
+    point_ref: str
+    candidate_spans: tuple[ParentSpanMatch, ...] = ()
+    required_rail_hint: str | None = None
+
+
+@dataclass(frozen=True)
+class PointLifecycleResolution:
+    events: tuple["PointLifecycleEvent", ...] = ()
+    synthetic_supports: tuple["SyntheticSupportReference", ...] = ()
+    refusals: tuple[PointLifecycleRefusalDiagnostic, ...] = ()
+
+    @property
+    def accepted(self) -> bool:
+        return not self.refusals
+
+
+@dataclass(frozen=True)
 class _RailRecord:
     ref: str
     key: str
@@ -692,6 +720,240 @@ def validate_point_lifecycle_events(events: Iterable[PointLifecycleEvent]) -> No
         if event.id in seen_ids:
             raise ValueError(f"Duplicate PointLifecycleEvent id {event.id!r}.")
         seen_ids.add(event.id)
+
+
+def resolve_point_birth_death_events(
+    loop_pair: dict[str, object],
+    rail_result: RailResolutionResult,
+    tolerance_policy: dict[str, object] | None = None,
+) -> PointLifecycleResolution:
+    source_path = loop_pair.get("source")
+    target_path = loop_pair.get("target")
+    if not isinstance(source_path, TopologyPath) or not isinstance(target_path, TopologyPath):
+        raise TypeError("resolve_point_birth_death_events requires loop_pair source and target TopologyPath values.")
+    station_interval = tuple(loop_pair.get("station_interval", (0, 1)))
+    loop_ref = str(loop_pair.get("loop_ref", "loop"))
+    min_span = _min_point_correspondence_span(tolerance_policy)
+    source_by_id = {point.id: point for point in source_path.points}
+    target_by_id = {point.id: point for point in target_path.points}
+    source_to_target = {
+        source_ref: target_ref
+        for source_ref, target_ref in rail_result.matches
+        if source_ref in source_by_id and target_ref in target_by_id
+    }
+    target_to_source = {target_ref: source_ref for source_ref, target_ref in source_to_target.items()}
+    events: list[PointLifecycleEvent] = []
+    supports: list[SyntheticSupportReference] = []
+    refusals: list[PointLifecycleRefusalDiagnostic] = []
+
+    source_correspondence_ids = {point.correspondence_id for point in source_path.points if point.correspondence_id}
+    target_correspondence_ids = {point.correspondence_id for point in target_path.points if point.correspondence_id}
+
+    for target_point in target_path.points:
+        if target_point.id in target_to_source:
+            continue
+        if target_point.correspondence_id in source_correspondence_ids:
+            refusals.append(_lifecycle_refusal("explicit_correspondence_conflict", target_point.id))
+            continue
+        span = _adjacent_stable_span(target_point, target_path, target_to_source, source_by_id, source_path)
+        if span is None:
+            refusals.append(_lifecycle_refusal("missing_parent_span", target_point.id))
+            continue
+        source_start, source_end, target_start, target_end = span
+        try:
+            parameter = project_point_to_span(target_point.coordinates, (target_start.coordinates, target_end.coordinates))
+        except ValueError:
+            parent_match = ParentSpanMatch(source_start.id, source_end.id, 0.0, 0.0, "adjacent_stable_tracks")
+            refusals.append(_lifecycle_refusal("collapsed_parent_span", target_point.id, (parent_match,)))
+            continue
+        support_coordinates = _interpolate_span(source_start.coordinates, source_end.coordinates, parameter)
+        span_length = float(np.linalg.norm(source_end.coordinates - source_start.coordinates))
+        parent_match = ParentSpanMatch(source_start.id, source_end.id, parameter, 1.0, "adjacent_stable_tracks")
+        if span_length < min_span:
+            refusals.append(_lifecycle_refusal("collapsed_parent_span", target_point.id, (parent_match,)))
+            continue
+        event_id = f"birth-{target_point.id}"
+        events.append(
+            PointLifecycleEvent(
+                id=event_id,
+                event_type="point_birth",
+                station_interval=station_interval,
+                loop_ref=loop_ref,
+                point_ref=target_point.id,
+                correspondence_id=str(target_point.correspondence_id or target_point.id),
+                parent_span_ref=(source_start.id, source_end.id),
+                source="authored",
+                interpolation_policy="span_parameter",
+                diagnostics={"parent_span": parent_match},
+            )
+        )
+        supports.append(
+            SyntheticSupportReference(
+                id=f"support-{event_id}",
+                source_event_id=event_id,
+                station_index=int(station_interval[0]),
+                span_ref=(source_start.id, source_end.id),
+                span_parameter=parameter,
+                coordinates=support_coordinates,
+            )
+        )
+
+    for source_point in source_path.points:
+        if source_point.id in source_to_target:
+            continue
+        if source_point.correspondence_id in target_correspondence_ids:
+            refusals.append(_lifecycle_refusal("explicit_correspondence_conflict", source_point.id))
+            continue
+        span = _adjacent_stable_span(source_point, source_path, source_to_target, target_by_id, target_path)
+        if span is None:
+            refusals.append(_lifecycle_refusal("missing_parent_span", source_point.id))
+            continue
+        target_start, target_end, source_start, source_end = span
+        try:
+            parameter = project_point_to_span(source_point.coordinates, (source_start.coordinates, source_end.coordinates))
+        except ValueError:
+            parent_match = ParentSpanMatch(target_start.id, target_end.id, 0.0, 0.0, "adjacent_stable_tracks")
+            refusals.append(_lifecycle_refusal("collapsed_parent_span", source_point.id, (parent_match,)))
+            continue
+        support_coordinates = _interpolate_span(target_start.coordinates, target_end.coordinates, parameter)
+        span_length = float(np.linalg.norm(target_end.coordinates - target_start.coordinates))
+        parent_match = ParentSpanMatch(target_start.id, target_end.id, parameter, 1.0, "adjacent_stable_tracks")
+        if span_length < min_span:
+            refusals.append(_lifecycle_refusal("collapsed_parent_span", source_point.id, (parent_match,)))
+            continue
+        event_id = f"death-{source_point.id}"
+        events.append(
+            PointLifecycleEvent(
+                id=event_id,
+                event_type="point_death",
+                station_interval=station_interval,
+                loop_ref=loop_ref,
+                point_ref=source_point.id,
+                correspondence_id=str(source_point.correspondence_id or source_point.id),
+                parent_span_ref=(target_start.id, target_end.id),
+                source="authored",
+                interpolation_policy="span_parameter",
+                diagnostics={"parent_span": parent_match},
+            )
+        )
+        supports.append(
+            SyntheticSupportReference(
+                id=f"support-{event_id}",
+                source_event_id=event_id,
+                station_index=int(station_interval[1]),
+                span_ref=(target_start.id, target_end.id),
+                span_parameter=parameter,
+                coordinates=support_coordinates,
+            )
+        )
+    if refusals:
+        return PointLifecycleResolution(refusals=tuple(refusals))
+    validate_point_lifecycle_events(events)
+    return PointLifecycleResolution(events=tuple(events), synthetic_supports=tuple(supports))
+
+
+def locate_parent_span(point_ref: str, stable_tracks: Sequence[tuple[str, str, Sequence[float], Sequence[float], Sequence[float]]]) -> ParentSpanMatch:
+    candidates: list[ParentSpanMatch] = []
+    for source_track_ref, target_track_ref, start, end, point in stable_tracks:
+        parameter = project_point_to_span(point, (start, end))
+        if 0.0 <= parameter <= 1.0:
+            candidates.append(ParentSpanMatch(source_track_ref, target_track_ref, parameter, 1.0, "projection"))
+    if not candidates:
+        raise ValueError(f"missing_parent_span for {point_ref!r}.")
+    if len(candidates) > 1:
+        raise ValueError(f"ambiguous_parent_span for {point_ref!r}.")
+    return candidates[0]
+
+
+def project_point_to_span(point: Sequence[float], span: tuple[Sequence[float], Sequence[float]]) -> float:
+    point_vec = np.asarray(point, dtype=float).reshape(2)
+    start = np.asarray(span[0], dtype=float).reshape(2)
+    end = np.asarray(span[1], dtype=float).reshape(2)
+    delta = end - start
+    denom = float(np.dot(delta, delta))
+    if denom <= 1e-24:
+        raise ValueError("collapsed_parent_span")
+    return float(np.clip(np.dot(point_vec - start, delta) / denom, 0.0, 1.0))
+
+
+def insert_synthetic_support_reference(
+    event: PointLifecycleEvent,
+    *,
+    station_index: int,
+    span_ref: tuple[str, str],
+    span_parameter: float,
+    coordinates: Sequence[float],
+) -> SyntheticSupportReference:
+    return SyntheticSupportReference(
+        id=f"support-{event.id}",
+        source_event_id=event.id,
+        station_index=station_index,
+        span_ref=span_ref,
+        span_parameter=span_parameter,
+        coordinates=coordinates,
+    )
+
+
+def _adjacent_stable_span(
+    point: TopologyPoint,
+    point_path: TopologyPath,
+    point_to_other_ref: dict[str, str],
+    other_by_id: dict[str, TopologyPoint],
+    other_path: TopologyPath,
+) -> tuple[TopologyPoint, TopologyPoint, TopologyPoint, TopologyPoint] | None:
+    stable_points = [candidate for candidate in point_path.points if candidate.id in point_to_other_ref]
+    if len(stable_points) < 2:
+        return None
+    ordered = sorted(stable_points, key=lambda candidate: candidate.ordinal)
+    before = [candidate for candidate in ordered if candidate.ordinal < point.ordinal]
+    after = [candidate for candidate in ordered if candidate.ordinal > point.ordinal]
+    if not before or not after:
+        return None
+    start = before[-1]
+    end = after[0]
+    other_start = other_by_id[point_to_other_ref[start.id]]
+    other_end = other_by_id[point_to_other_ref[end.id]]
+    if other_start.ordinal > other_end.ordinal:
+        return None
+    return other_start, other_end, start, end
+
+
+def _interpolate_span(start: Sequence[float], end: Sequence[float], parameter: float) -> tuple[float, float]:
+    start_vec = np.asarray(start, dtype=float).reshape(2)
+    end_vec = np.asarray(end, dtype=float).reshape(2)
+    point = start_vec + (end_vec - start_vec) * float(parameter)
+    return (float(point[0]), float(point[1]))
+
+
+def _min_point_correspondence_span(tolerance_policy: dict[str, object] | None) -> float:
+    if not tolerance_policy:
+        return 1e-9
+    collapse = tolerance_policy.get("collapse_degeneracy", {})
+    if isinstance(collapse, dict) and "min_point_correspondence_span" in collapse:
+        return float(collapse["min_point_correspondence_span"])
+    if "min_point_correspondence_span" in tolerance_policy:
+        return float(tolerance_policy["min_point_correspondence_span"])
+    return 1e-9
+
+
+def _lifecycle_refusal(
+    reason: str,
+    point_ref: str,
+    candidate_spans: tuple[ParentSpanMatch, ...] = (),
+) -> PointLifecycleRefusalDiagnostic:
+    hints = {
+        "missing_parent_span": "Add stable neighboring rails or an explicit parent span.",
+        "ambiguous_parent_span": "Name the intended parent span.",
+        "collapsed_parent_span": "Increase span length or add a non-collapsed rail.",
+        "birth_death_order_inversion": "Keep lifecycle points between stable parent rails.",
+        "explicit_correspondence_conflict": "Remove the duplicate explicit correspondence id or make the lifecycle rail explicit.",
+    }
+    return PointLifecycleRefusalDiagnostic(
+        reason=reason,
+        point_ref=point_ref,
+        candidate_spans=candidate_spans,
+        required_rail_hint=hints.get(reason),
+    )
 
 
 @dataclass(frozen=True)
@@ -5731,6 +5993,9 @@ __all__ = [
     "InferenceCandidateScore",
     "InferenceRefusalDiagnostic",
     "InferenceResult",
+    "ParentSpanMatch",
+    "PointLifecycleRefusalDiagnostic",
+    "PointLifecycleResolution",
     "RailConflictDiagnostic",
     "RailResolutionResult",
     "RailSource",
@@ -5739,7 +6004,11 @@ __all__ = [
     "SyntheticSupportReference",
     "LoftPlan",
     "accept_or_refuse_inferred_correspondence",
+    "insert_synthetic_support_reference",
+    "locate_parent_span",
+    "project_point_to_span",
     "resolve_authored_rails",
+    "resolve_point_birth_death_events",
     "score_correspondence_candidates",
     "validate_point_lifecycle_event",
     "validate_point_lifecycle_events",
