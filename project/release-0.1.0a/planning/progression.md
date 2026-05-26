@@ -320,7 +320,7 @@ Only final leaf specifications appear here.
 - [x] [Loft Spec 57: Point Lifecycle Event Records (v1.0)](../specifications/loft-57-point-lifecycle-event-records-v1_0.md)
 - [x] [Loft Spec 58: Birth/Death Synthetic Support Resolution (v1.0)](../specifications/loft-58-birth-death-synthetic-support-resolution-v1_0.md)
 - [x] [Loft Spec 59: Correspondence-Preserving Resampling Contract (v1.0)](../specifications/loft-59-correspondence-preserving-resampling-contract-v1_0.md)
-- [ ] [Loft Spec 60: Mesh Executor Correspondence Consumption (v1.0)](../specifications/loft-60-mesh-executor-correspondence-consumption-v1_0.md)
+- [x] [Loft Spec 60: Mesh Executor Correspondence Consumption (v1.0)](../specifications/loft-60-mesh-executor-correspondence-consumption-v1_0.md)
 - [ ] [Loft Spec 61: Surface Executor Correspondence Consumption (v1.0)](../specifications/loft-61-surface-executor-correspondence-consumption-v1_0.md)
 
 ## Polish Specifications
