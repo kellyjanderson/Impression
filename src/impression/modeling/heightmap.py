@@ -60,6 +60,23 @@ class HeightmapCacheKeyRecord:
 
 
 @dataclass(frozen=True)
+class HeightmapMeshCompatibilityResult:
+    mesh: Mesh
+    alpha_policy: HeightmapAlphaMaskPolicy
+    cache_policy: HeightmapCacheKeyRecord
+    boundary: Literal["explicit-mesh-compatibility"] = "explicit-mesh-compatibility"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary": self.boundary,
+            "mesh_vertices": self.mesh.n_vertices,
+            "mesh_faces": self.mesh.n_faces,
+            "alpha_policy": self.alpha_policy.canonical_payload(),
+            "cache_key_policy": self.cache_policy.canonical_payload(),
+        }
+
+
+@dataclass(frozen=True)
 class HeightmapProjectionBoundsPolicy:
     projection: Literal["planar"]
     plane: Literal["xy", "xz", "yz"]
@@ -188,6 +205,41 @@ def heightmap_cache_key_record(
             reason = "path-stat-unavailable"
         return HeightmapCacheKeyRecord(cache_key=None, reason=reason)
     return HeightmapCacheKeyRecord(cache_key=cache_key, reason="cache-key-valid")
+
+
+def heightmap_mesh_compatibility_result(
+    image: str | Path | Image.Image | ArrayLike,
+    *,
+    height: float = 1.0,
+    xy_scale: float | Sequence[float] = 1.0,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    alpha_mode: str = "mask",
+    quality: MeshQuality | None = None,
+) -> HeightmapMeshCompatibilityResult:
+    """Create an explicit mesh-compatibility heightmap result.
+
+    This helper keeps mesh heightfield generation visible as compatibility data
+    instead of allowing callers to mistake the mesh for authored surface truth.
+    """
+
+    _, mask = _load_heightmap(image)
+    if quality is not None:
+        quality = apply_lod(quality)
+        if quality.lod == "preview":
+            mask = mask[::2, ::2]
+    alpha_policy = resolve_heightmap_alpha_mask_policy(mask, alpha_mode=alpha_mode)
+    cache_policy = heightmap_cache_key_record(image, height, xy_scale, center, alpha_mode, quality)
+    mesh = _heightmap_mesh_impl(
+        image,
+        height=height,
+        xy_scale=xy_scale,
+        center=center,
+        alpha_mode=alpha_mode,
+        quality=quality,
+    )
+    result = HeightmapMeshCompatibilityResult(mesh=mesh, alpha_policy=alpha_policy, cache_policy=cache_policy)
+    mesh.metadata.update({"heightmap_mesh_compatibility": result.canonical_payload()})
+    return result
 
 
 def _as_planar_projection(projection: str) -> Literal["planar"]:
@@ -481,14 +533,14 @@ def heightmap(
         "heightmap",
         replacement="a future surface-native heightfield path",
     )
-    return _heightmap_mesh_impl(
+    return heightmap_mesh_compatibility_result(
         image,
         height=height,
         xy_scale=xy_scale,
         center=center,
         alpha_mode=alpha_mode,
         quality=quality,
-    )
+    ).mesh
 
 
 def _vertex_normals(mesh: Mesh) -> np.ndarray:
@@ -822,11 +874,13 @@ def _heightmap_cache_key(
 __all__ = [
     "HeightmapAlphaMaskPolicy",
     "HeightmapCacheKeyRecord",
+    "HeightmapMeshCompatibilityResult",
     "HeightmapProjectionBoundsPolicy",
     "HeightmapSampleCoordinateRecord",
     "heightmap",
     "displace_heightmap",
     "heightmap_cache_key_record",
+    "heightmap_mesh_compatibility_result",
     "heightmap_sample_coordinate_record",
     "make_heightmap_surface_patch",
     "resolve_heightmap_projection_bounds_policy",

@@ -9,6 +9,7 @@ from PIL import Image
 from impression.modeling import (
     HeightmapAlphaMaskPolicy,
     HeightmapCacheKeyRecord,
+    HeightmapMeshCompatibilityResult,
     HeightmapProjectionBoundsPolicy,
     HeightmapSampleCoordinateRecord,
     HeightmapSurfacePatch,
@@ -19,6 +20,7 @@ from impression.modeling import (
     heightmap,
     displace_heightmap,
     heightmap_cache_key_record,
+    heightmap_mesh_compatibility_result,
     heightmap_sample_coordinate_record,
     make_surface_body,
     make_surface_shell,
@@ -107,6 +109,18 @@ def test_heightmap_alpha_and_cache_policy_records_are_explicit(tmp_path: Path):
     assert cache_record.cacheable is True
     assert array_cache_record.cacheable is False
     assert array_cache_record.reason == "uncacheable-source"
+
+
+def test_heightmap_mesh_compatibility_result_marks_explicit_mesh_boundary():
+    image = np.ones((2, 2), dtype=float)
+
+    result = heightmap_mesh_compatibility_result(image, height=0.5, alpha_mode="ignore")
+    mesh = heightmap(image, height=0.5, alpha_mode="ignore", backend="mesh")
+
+    assert isinstance(result, HeightmapMeshCompatibilityResult)
+    assert result.boundary == "explicit-mesh-compatibility"
+    assert result.mesh.metadata["heightmap_mesh_compatibility"]["boundary"] == "explicit-mesh-compatibility"
+    assert mesh.metadata["heightmap_mesh_compatibility"]["mesh_faces"] == mesh.n_faces
 
 
 def test_displace_heightmap_planar():
