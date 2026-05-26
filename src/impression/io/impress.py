@@ -10,6 +10,8 @@ from typing import Mapping, Sequence
 import numpy as np
 
 from impression.modeling.surface import (
+    BSplineSurfacePatch,
+    NURBSSurfacePatch,
     ParameterDomain,
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
@@ -31,8 +33,11 @@ _PATCH_KIND_FAMILIES = {
     "PlanarSurfacePatch": "planar",
     "RuledSurfacePatch": "ruled",
     "RevolutionSurfacePatch": "revolution",
+    "BSplineSurfacePatch": "bspline",
+    "NURBSSurfacePatch": "nurbs",
 }
 _ANALYTIC_PATCH_PAYLOAD_VERSION = 1
+_SPLINE_PATCH_PAYLOAD_VERSION = 1
 
 
 class ImpressFormatError(ValueError):
@@ -735,6 +740,45 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 start_angle_deg=_validate_float_payload(geometry.get("start_angle_deg"), "start_angle_deg"),
                 sweep_angle_deg=_validate_float_payload(geometry.get("sweep_angle_deg"), "sweep_angle_deg"),
             )
+        if kind == "BSplineSurfacePatch":
+            _validate_patch_geometry_fields(
+                geometry,
+                kind=kind,
+                allowed_fields={"payload_version", "degree_u", "degree_v", "knots_u", "knots_v", "control_net"},
+                expected_payload_version=_SPLINE_PATCH_PAYLOAD_VERSION,
+            )
+            return BSplineSurfacePatch(
+                **common,
+                degree_u=_validate_positive_int_payload(geometry.get("degree_u"), "degree_u"),
+                degree_v=_validate_positive_int_payload(geometry.get("degree_v"), "degree_v"),
+                knots_u=_validate_float_tuple_payload(geometry.get("knots_u"), "knots_u"),
+                knots_v=_validate_float_tuple_payload(geometry.get("knots_v"), "knots_v"),
+                control_net=_validate_control_net3_payload(geometry.get("control_net"), "control_net"),
+            )
+        if kind == "NURBSSurfacePatch":
+            _validate_patch_geometry_fields(
+                geometry,
+                kind=kind,
+                allowed_fields={
+                    "payload_version",
+                    "degree_u",
+                    "degree_v",
+                    "knots_u",
+                    "knots_v",
+                    "control_net",
+                    "weights",
+                },
+                expected_payload_version=_SPLINE_PATCH_PAYLOAD_VERSION,
+            )
+            return NURBSSurfacePatch(
+                **common,
+                degree_u=_validate_positive_int_payload(geometry.get("degree_u"), "degree_u"),
+                degree_v=_validate_positive_int_payload(geometry.get("degree_v"), "degree_v"),
+                knots_u=_validate_float_tuple_payload(geometry.get("knots_u"), "knots_u"),
+                knots_v=_validate_float_tuple_payload(geometry.get("knots_v"), "knots_v"),
+                control_net=_validate_control_net3_payload(geometry.get("control_net"), "control_net"),
+                weights=_validate_weight_net_payload(geometry.get("weights"), "weights"),
+            )
     except (TypeError, ValueError) as exc:
         raise ImpressFormatError(str(exc)) from exc
     raise ImpressFormatError(f"Unsupported SurfacePatch kind {kind!r}.")
@@ -961,6 +1005,25 @@ def _encode_patch_geometry_payload(patch: SurfacePatch) -> dict[str, object]:
             "start_angle_deg": float(geometry["start_angle_deg"]),
             "sweep_angle_deg": float(geometry["sweep_angle_deg"]),
         }
+    if isinstance(patch, BSplineSurfacePatch):
+        return {
+            "payload_version": _SPLINE_PATCH_PAYLOAD_VERSION,
+            "degree_u": int(geometry["degree_u"]),
+            "degree_v": int(geometry["degree_v"]),
+            "knots_u": _array_payload(geometry["knots_u"]),
+            "knots_v": _array_payload(geometry["knots_v"]),
+            "control_net": _array_payload(geometry["control_net"]),
+        }
+    if isinstance(patch, NURBSSurfacePatch):
+        return {
+            "payload_version": _SPLINE_PATCH_PAYLOAD_VERSION,
+            "degree_u": int(geometry["degree_u"]),
+            "degree_v": int(geometry["degree_v"]),
+            "knots_u": _array_payload(geometry["knots_u"]),
+            "knots_v": _array_payload(geometry["knots_v"]),
+            "control_net": _array_payload(geometry["control_net"]),
+            "weights": _array_payload(geometry["weights"]),
+        }
     raise ImpressFormatError(f"Unsupported SurfacePatch kind {type(patch).__name__!r}.")
 
 
@@ -969,15 +1032,16 @@ def _validate_patch_geometry_fields(
     *,
     kind: str,
     allowed_fields: set[str],
+    expected_payload_version: int = _ANALYTIC_PATCH_PAYLOAD_VERSION,
 ) -> None:
     unknown_keys = set(geometry) - allowed_fields
     if unknown_keys:
         keys = ", ".join(sorted(str(key) for key in unknown_keys))
         raise ImpressFormatError(f"Unsupported {kind} geometry fields: {keys}.")
     payload_version = geometry.get("payload_version")
-    if payload_version != _ANALYTIC_PATCH_PAYLOAD_VERSION:
+    if payload_version != expected_payload_version:
         raise ImpressFormatError(
-            f"{kind} geometry payload_version must be {_ANALYTIC_PATCH_PAYLOAD_VERSION}."
+            f"{kind} geometry payload_version must be {expected_payload_version}."
         )
 
 
@@ -1010,6 +1074,12 @@ def _validate_nonnegative_int_payload(payload: object, name: str) -> int:
     return payload
 
 
+def _validate_positive_int_payload(payload: object, name: str) -> int:
+    if not isinstance(payload, int) or isinstance(payload, bool) or payload < 1:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be a positive integer.")
+    return payload
+
+
 def _validate_vec3_payload(payload: object, name: str) -> np.ndarray:
     try:
         vector = np.asarray(payload, dtype=float).reshape(3)
@@ -1032,6 +1102,32 @@ def _validate_points3_payload(payload: object, name: str) -> np.ndarray:
     return points
 
 
+def _validate_control_net3_payload(payload: object, name: str) -> np.ndarray:
+    try:
+        control_net = np.asarray(payload, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be a numeric 3D control net.") from exc
+    if control_net.ndim != 3 or control_net.shape[2] != 3 or control_net.shape[0] < 2 or control_net.shape[1] < 2:
+        raise ImpressFormatError(
+            f"SurfacePatch geometry {name} must be a 3D control net with shape (u_count, v_count, 3)."
+        )
+    if not np.all(np.isfinite(control_net)):
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must contain only finite values.")
+    return control_net
+
+
+def _validate_weight_net_payload(payload: object, name: str) -> np.ndarray:
+    try:
+        weights = np.asarray(payload, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be a numeric 2D weight net.") from exc
+    if weights.ndim != 2 or weights.shape[0] < 2 or weights.shape[1] < 2:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be a 2D weight net.")
+    if not np.all(np.isfinite(weights)) or np.any(weights <= 0.0):
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must contain only finite positive values.")
+    return weights
+
+
 def _validate_points2_payload(payload: object, name: str) -> np.ndarray:
     try:
         points = np.asarray(payload, dtype=float)
@@ -1052,6 +1148,15 @@ def _validate_float_payload(payload: object, name: str) -> float:
     if not np.isfinite(value):
         raise ImpressFormatError(f"SurfacePatch geometry {name} must be finite.")
     return value
+
+
+def _validate_float_tuple_payload(payload: object, name: str) -> tuple[float, ...]:
+    if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)):
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be a numeric array.")
+    values = tuple(_validate_float_payload(value, f"{name}[]") for value in payload)
+    if not values:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must not be empty.")
+    return values
 
 
 def validate_impress_document_root(root: Mapping[str, object]) -> ImpressDocumentRoot:
