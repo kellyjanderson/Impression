@@ -27,14 +27,14 @@ def test_traditional_hinge_pair_parts() -> None:
 
 
 def test_living_hinge_generates_cut_pattern() -> None:
-    living = make_living_hinge(width=48.0, height=20.0, hinge_band_width=12.0, slit_pitch=1.8)
+    living = make_living_hinge(width=48.0, height=20.0, hinge_band_width=12.0, slit_pitch=1.8, backend="mesh")
     assert living.n_faces > 12
     xmin, xmax, _, _, _, _ = living.bounds
     assert (xmax - xmin) == pytest.approx(48.0)
 
 
 def test_bistable_hinge_generates_mesh() -> None:
-    mesh = make_bistable_hinge(width=40.0, preload_offset=2.0)
+    mesh = make_bistable_hinge(width=40.0, preload_offset=2.0, backend="mesh")
     assert mesh.n_vertices > 0
     assert mesh.n_faces > 0
 
