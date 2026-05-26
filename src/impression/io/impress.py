@@ -61,6 +61,26 @@ class UnsupportedImpressSchemaVersion(ImpressFormatError):
 
 
 @dataclass(frozen=True)
+class InvalidSurfaceWrapperDiagnostic:
+    """Diagnostic for mesh-derived wrappers that cannot be persisted as surface truth."""
+
+    patch_identity: str
+    patch_kind: str
+    family: str
+    producer: str
+    reason: str
+
+    def to_json_object(self) -> dict[str, object]:
+        return {
+            "patch_identity": self.patch_identity,
+            "patch_kind": self.patch_kind,
+            "family": self.family,
+            "producer": self.producer,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
 class ImpressUnits:
     """Symbolic `.impress` file units.
 
@@ -638,6 +658,12 @@ def encode_surface_patch_payload(patch: SurfacePatch) -> dict[str, object]:
 
     if not isinstance(patch, SurfacePatch):
         raise ImpressFormatError("encode_surface_patch_payload requires a SurfacePatch.")
+    diagnostic = validate_surface_patch_serialization_guard(patch)
+    if diagnostic is not None:
+        raise ImpressFormatError(
+            "Refusing to serialize mesh-derived surface wrapper as `.impress` surface truth: "
+            f"{diagnostic.reason}."
+        )
     _validate_patch_kind_family(type(patch).__name__, patch.family)
     return {
         "kind": type(patch).__name__,
@@ -853,6 +879,27 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
     except (TypeError, ValueError) as exc:
         raise ImpressFormatError(str(exc)) from exc
     raise ImpressFormatError(f"Unsupported SurfacePatch kind {kind!r}.")
+
+
+def validate_surface_patch_serialization_guard(patch: SurfacePatch) -> InvalidSurfaceWrapperDiagnostic | None:
+    """Return a diagnostic when a patch is a mesh-derived wrapper, otherwise None."""
+
+    if not isinstance(patch, SurfacePatch):
+        raise ImpressFormatError("validate_surface_patch_serialization_guard requires a SurfacePatch.")
+    metadata = patch.metadata
+    kernel = metadata.get("kernel") if isinstance(metadata, Mapping) else None
+    if not isinstance(kernel, Mapping):
+        return None
+    producer = kernel.get("producer")
+    if producer == "heightmap" and "triangle_face_index" in kernel:
+        return InvalidSurfaceWrapperDiagnostic(
+            patch_identity=patch.stable_identity,
+            patch_kind=type(patch).__name__,
+            family=patch.family,
+            producer=str(producer),
+            reason="heightmap triangle wrappers are mesh compatibility data, not native surface payloads",
+        )
+    return None
 
 
 def encode_surface_shell_payload(shell: SurfaceShell) -> dict[str, object]:

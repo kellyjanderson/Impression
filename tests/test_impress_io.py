@@ -13,6 +13,7 @@ from impression.io import (
     ImpressFormatError,
     ImpressSaveOptions,
     ImpressUnits,
+    InvalidSurfaceWrapperDiagnostic,
     SurfaceBodyStore,
     UnsupportedImpressSchemaVersion,
     atomic_write_text,
@@ -39,6 +40,7 @@ from impression.io import (
     loads_impress_json,
     validate_impress_units,
     validate_impress_document_root,
+    validate_surface_patch_serialization_guard,
     validate_surface_body_store,
     save_impress,
     write_impress_json,
@@ -276,6 +278,22 @@ def test_make_impress_document_payload_serializes_surface_bodies() -> None:
     }
     assert list(payload["bodies"]) == ["body-0001"]  # type: ignore[arg-type]
     assert len(payload["patches"]) == 1  # type: ignore[arg-type]
+
+
+def test_impress_refuses_heightmap_triangle_wrapper_surface_truth() -> None:
+    wrapper_patch = PlanarSurfacePatch(
+        family="planar",
+        metadata={"kernel": {"producer": "heightmap", "triangle_face_index": 0}},
+    )
+    body = make_surface_body((make_surface_shell((wrapper_patch,), connected=False),))
+    diagnostic = validate_surface_patch_serialization_guard(wrapper_patch)
+
+    assert isinstance(diagnostic, InvalidSurfaceWrapperDiagnostic)
+    assert diagnostic.to_json_object()["producer"] == "heightmap"
+    with pytest.raises(ImpressFormatError, match="mesh-derived surface wrapper"):
+        encode_surface_patch_payload(wrapper_patch)
+    with pytest.raises(ImpressFormatError, match="heightmap triangle wrappers"):
+        make_impress_document_payload([body])
 
 
 def test_dumps_impress_json_is_byte_stable_for_equivalent_payloads() -> None:
