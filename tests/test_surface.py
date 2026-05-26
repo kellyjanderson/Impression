@@ -67,6 +67,8 @@ from impression.modeling import (
     SurfaceBody,
     SurfaceBoundaryRef,
     SurfaceConsumerCollection,
+    SurfaceFamilyTessellationAdapter,
+    SURFACE_FAMILY_TESSELLATION_ADAPTERS,
     SubdivisionCrease,
     SubdivisionRefinementResult,
     SubdivisionSurfacePatch,
@@ -88,6 +90,7 @@ from impression.modeling import (
     validate_implicit_field_security,
     tessellate_surface_body,
     tessellate_surface_patch,
+    tessellate_surface_shell,
 )
 
 
@@ -1191,6 +1194,77 @@ def test_implicit_tessellation_metadata_records_are_canonical() -> None:
     assert diagnostic.within_bounds is True
     assert diagnostic.canonical_payload()["samples"] == (5, 5, 5)
     assert metadata.canonical_payload()["exact"] is False
+
+
+def test_surface_family_tessellation_adapter_registry_covers_supported_families() -> None:
+    assert set(SURFACE_FAMILY_TESSELLATION_ADAPTERS) == set(SUPPORTED_SURFACE_PATCH_FAMILIES)
+    for family, adapter in SURFACE_FAMILY_TESSELLATION_ADAPTERS.items():
+        assert isinstance(adapter, SurfaceFamilyTessellationAdapter)
+        assert adapter.family == family
+        assert adapter.canonical_payload()["family"] == family
+
+
+def test_every_surface_family_tessellates_through_family_adapter_metadata() -> None:
+    patches = {
+        "planar": PlanarSurfacePatch(family="planar"),
+        "ruled": RuledSurfacePatch(family="ruled"),
+        "revolution": RevolutionSurfacePatch(
+            family="revolution",
+            profile_curve=((1.0, 0.0, 0.0), (1.0, 0.0, 1.0)),
+        ),
+        "bspline": BSplineSurfacePatch(family="bspline"),
+        "nurbs": NURBSSurfacePatch(family="nurbs"),
+        "sweep": SweepSurfacePatch(
+            family="sweep",
+            path=Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.0, 1.0)]),
+            profile_points_uv=[(0.0, 0.0), (1.0, 0.0)],
+        ),
+        "subdivision": SubdivisionSurfacePatch(family="subdivision", subdivision_level=1),
+        "implicit": ImplicitSurfacePatch(
+            family="implicit",
+            field=make_implicit_field_node("sphere", parameters={"radius": 0.75}),
+        ),
+    }
+
+    for family in SUPPORTED_SURFACE_PATCH_FAMILIES:
+        mesh = tessellate_surface_patch(patches[family], preview_tessellation_request())
+        adapter_metadata = mesh.metadata["tessellation_family_adapter"]
+        assert mesh.vertices.shape[0] > 0
+        assert mesh.faces.shape[0] > 0
+        assert mesh.metadata["surface_family"] == family
+        assert adapter_metadata["family"] == family
+        assert mesh.metadata["tessellation_adapter_boundary"] == "tessellation"
+
+
+def test_family_adapter_dispatch_refuses_unsupported_surface_family() -> None:
+    patch = PlanarSurfacePatch(family="unsupported")
+
+    with pytest.raises(ValueError, match="Unsupported surface patch family"):
+        tessellate_surface_patch(patch)
+
+
+def test_shell_tessellation_records_family_adapters_and_welds_supported_seam_boundaries() -> None:
+    planar = PlanarSurfacePatch(family="planar")
+    ruled = RuledSurfacePatch(
+        family="ruled",
+        start_curve=((1.0, 0.0, 0.0), (1.0, 1.0, 0.0)),
+        end_curve=((2.0, 0.0, 0.0), (2.0, 1.0, 0.0)),
+    )
+    shell = SurfaceShell(
+        patches=(planar, ruled),
+        seams=(
+            SurfaceSeam(
+                seam_id="planar-ruled",
+                boundaries=(SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")),
+            ),
+        ),
+    )
+
+    mesh = tessellate_surface_shell(shell, preview_tessellation_request())
+
+    assert mesh.vertices.shape[0] == 6
+    assert {adapter["family"] for adapter in mesh.metadata["tessellation_family_adapters"]} == {"planar", "ruled"}
+    assert all(adapter["supports_seam_boundaries"] is True for adapter in mesh.metadata["tessellation_family_adapters"])
 
 
 def test_planar_patch_rejects_collinear_axes_and_multiple_outer_trims() -> None:
