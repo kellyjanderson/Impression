@@ -683,6 +683,7 @@ def test_encode_decode_planar_surface_patch_payload_round_trips_base_fields() ->
     assert payload["family"] == "planar"
     assert payload["domain"] == {"u_range": [-1.0, 1.0], "v_range": [2.0, 4.0], "normalized": False}
     assert payload["capability_flags"] == ["evaluatable", "tessellatable"]
+    assert payload["geometry"]["payload_version"] == 1
     assert decoded.stable_identity == patch.stable_identity
     assert decoded.metadata == patch.metadata
 
@@ -702,8 +703,13 @@ def test_encode_decode_ruled_and_revolution_surface_patch_payloads_round_trip() 
         sweep_angle_deg=180.0,
     )
 
-    assert decode_surface_patch_payload(encode_surface_patch_payload(ruled)).stable_identity == ruled.stable_identity
-    assert decode_surface_patch_payload(encode_surface_patch_payload(revolution)).stable_identity == revolution.stable_identity
+    ruled_payload = encode_surface_patch_payload(ruled)
+    revolution_payload = encode_surface_patch_payload(revolution)
+
+    assert ruled_payload["geometry"]["payload_version"] == 1
+    assert revolution_payload["geometry"]["payload_version"] == 1
+    assert decode_surface_patch_payload(ruled_payload).stable_identity == ruled.stable_identity
+    assert decode_surface_patch_payload(revolution_payload).stable_identity == revolution.stable_identity
 
 
 def test_decode_surface_patch_payload_rejects_invalid_family_dispatch() -> None:
@@ -723,6 +729,25 @@ def test_decode_surface_patch_payload_uses_constructor_validation() -> None:
     payload["geometry"] = geometry
 
     with pytest.raises(ImpressFormatError, match="linearly independent"):
+        decode_surface_patch_payload(payload)
+
+
+@pytest.mark.parametrize("mutation, message", [
+    (lambda geometry: geometry.pop("payload_version"), "payload_version"),
+    (lambda geometry: geometry.update({"payload_version": 2}), "payload_version"),
+    (lambda geometry: geometry.update({"mesh": {"vertices": []}}), "Unsupported PlanarSurfacePatch geometry fields"),
+])
+def test_decode_analytic_surface_patch_payload_rejects_unversioned_or_unknown_geometry(
+    mutation,
+    message: str,
+) -> None:
+    patch = PlanarSurfacePatch(family="planar")
+    payload = encode_surface_patch_payload(patch)
+    geometry = dict(payload["geometry"])  # type: ignore[arg-type]
+    mutation(geometry)
+    payload["geometry"] = geometry
+
+    with pytest.raises(ImpressFormatError, match=message):
         decode_surface_patch_payload(payload)
 
 

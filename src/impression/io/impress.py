@@ -32,6 +32,7 @@ _PATCH_KIND_FAMILIES = {
     "RuledSurfacePatch": "ruled",
     "RevolutionSurfacePatch": "revolution",
 }
+_ANALYTIC_PATCH_PAYLOAD_VERSION = 1
 
 
 class ImpressFormatError(ValueError):
@@ -691,6 +692,11 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
     }
     try:
         if kind == "PlanarSurfacePatch":
+            _validate_patch_geometry_fields(
+                geometry,
+                kind=kind,
+                allowed_fields={"payload_version", "origin", "u_axis", "v_axis"},
+            )
             return PlanarSurfacePatch(
                 **common,
                 origin=_validate_vec3_payload(geometry.get("origin"), "origin"),
@@ -698,12 +704,29 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 v_axis=_validate_vec3_payload(geometry.get("v_axis"), "v_axis"),
             )
         if kind == "RuledSurfacePatch":
+            _validate_patch_geometry_fields(
+                geometry,
+                kind=kind,
+                allowed_fields={"payload_version", "start_curve", "end_curve"},
+            )
             return RuledSurfacePatch(
                 **common,
                 start_curve=_validate_points3_payload(geometry.get("start_curve"), "start_curve"),
                 end_curve=_validate_points3_payload(geometry.get("end_curve"), "end_curve"),
             )
         if kind == "RevolutionSurfacePatch":
+            _validate_patch_geometry_fields(
+                geometry,
+                kind=kind,
+                allowed_fields={
+                    "payload_version",
+                    "profile_curve",
+                    "axis_origin",
+                    "axis_direction",
+                    "start_angle_deg",
+                    "sweep_angle_deg",
+                },
+            )
             return RevolutionSurfacePatch(
                 **common,
                 profile_curve=_validate_points3_payload(geometry.get("profile_curve"), "profile_curve"),
@@ -918,17 +941,20 @@ def _encode_patch_geometry_payload(patch: SurfacePatch) -> dict[str, object]:
     geometry = patch.geometry_payload()
     if isinstance(patch, PlanarSurfacePatch):
         return {
+            "payload_version": _ANALYTIC_PATCH_PAYLOAD_VERSION,
             "origin": _array_payload(geometry["origin"]),
             "u_axis": _array_payload(geometry["u_axis"]),
             "v_axis": _array_payload(geometry["v_axis"]),
         }
     if isinstance(patch, RuledSurfacePatch):
         return {
+            "payload_version": _ANALYTIC_PATCH_PAYLOAD_VERSION,
             "start_curve": _array_payload(geometry["start_curve"]),
             "end_curve": _array_payload(geometry["end_curve"]),
         }
     if isinstance(patch, RevolutionSurfacePatch):
         return {
+            "payload_version": _ANALYTIC_PATCH_PAYLOAD_VERSION,
             "profile_curve": _array_payload(geometry["profile_curve"]),
             "axis_origin": _array_payload(geometry["axis_origin"]),
             "axis_direction": _array_payload(geometry["axis_direction"]),
@@ -936,6 +962,23 @@ def _encode_patch_geometry_payload(patch: SurfacePatch) -> dict[str, object]:
             "sweep_angle_deg": float(geometry["sweep_angle_deg"]),
         }
     raise ImpressFormatError(f"Unsupported SurfacePatch kind {type(patch).__name__!r}.")
+
+
+def _validate_patch_geometry_fields(
+    geometry: Mapping[str, object],
+    *,
+    kind: str,
+    allowed_fields: set[str],
+) -> None:
+    unknown_keys = set(geometry) - allowed_fields
+    if unknown_keys:
+        keys = ", ".join(sorted(str(key) for key in unknown_keys))
+        raise ImpressFormatError(f"Unsupported {kind} geometry fields: {keys}.")
+    payload_version = geometry.get("payload_version")
+    if payload_version != _ANALYTIC_PATCH_PAYLOAD_VERSION:
+        raise ImpressFormatError(
+            f"{kind} geometry payload_version must be {_ANALYTIC_PATCH_PAYLOAD_VERSION}."
+        )
 
 
 def _validate_patch_kind_family(kind: str, family: str) -> None:
