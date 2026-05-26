@@ -356,7 +356,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 140: B-Spline Surface Patch Record And Validation (v1.0)](../specifications/surface-140-b-spline-surface-patch-record-and-validation-v1_0.md)
 - [x] [Surface Spec 141: B-Spline Surface Evaluation And Derivatives (v1.0)](../specifications/surface-141-b-spline-surface-evaluation-and-derivatives-v1_0.md)
 - [x] [Surface Spec 142: NURBS Surface Patch (v1.0)](../specifications/surface-142-nurbs-surface-patch-v1_0.md)
-- [ ] [Surface Spec 143: Sweep Surface Patch Payload And Frame Policy (v1.0)](../specifications/surface-143-sweep-surface-patch-payload-and-frame-policy-v1_0.md)
+- [x] [Surface Spec 143: Sweep Surface Patch Payload And Frame Policy (v1.0)](../specifications/surface-143-sweep-surface-patch-payload-and-frame-policy-v1_0.md)
 - [ ] [Surface Spec 144: Sweep Surface Evaluation And Tessellation (v1.0)](../specifications/surface-144-sweep-surface-evaluation-and-tessellation-v1_0.md)
 - [ ] [Surface Spec 145: Subdivision Surface Control Cage And Crease Payload (v1.0)](../specifications/surface-145-subdivision-surface-control-cage-and-crease-payload-v1_0.md)
 - [ ] [Surface Spec 146: Subdivision Surface Evaluation And Tessellation (v1.0)](../specifications/surface-146-subdivision-surface-evaluation-and-tessellation-v1_0.md)
