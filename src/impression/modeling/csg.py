@@ -19,6 +19,7 @@ from .surface import (
     SurfaceBoundaryRef,
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
+    RuledSurfacePatch,
     SurfaceBody,
     SurfaceSeam,
     TrimLoop,
@@ -42,6 +43,7 @@ SurfaceCSGToleranceDiagnosticCode = Literal[
     "ambiguous-curve",
     "outside-domain",
 ]
+SurfaceCSGPlanarRelation = Literal["crossing", "parallel", "coincident", "disjoint", "touching", "unsupported-linear"]
 
 
 class BooleanOperationError(RuntimeError):
@@ -280,6 +282,46 @@ class SurfaceCSGPatchLocalCurveMappingResult:
     @property
     def supported(self) -> bool:
         return self.curve is not None and not self.diagnostics
+
+
+@dataclass(frozen=True)
+class SurfaceCSGPlanarRelationDiagnostic:
+    """Explicit diagnostic for a low-order analytic CSG relation."""
+
+    relation: SurfaceCSGPlanarRelation
+    message: str
+    first_patch: SurfaceBooleanPatchRef
+    second_patch: SurfaceBooleanPatchRef
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "first_patch": {
+                "operand_index": self.first_patch.operand_index,
+                "patch_index": self.first_patch.patch_index,
+            },
+            "message": self.message,
+            "relation": self.relation,
+            "second_patch": {
+                "operand_index": self.second_patch.operand_index,
+                "patch_index": self.second_patch.patch_index,
+            },
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGAnalyticIntersectionRecord:
+    """Analytic low-order patch intersection result."""
+
+    first_patch: SurfaceBooleanPatchRef
+    second_patch: SurfaceBooleanPatchRef
+    relation: SurfaceCSGPlanarRelation
+    curve: SurfaceCSGCurvePrimitive | None = None
+    patch_local_curves: tuple[SurfaceCSGPatchLocalCurve, ...] = ()
+    diagnostics: tuple[SurfaceCSGPlanarRelationDiagnostic, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return self.curve is not None and self.relation == "crossing" and not self.diagnostics
 
 
 @dataclass(frozen=True)
@@ -843,6 +885,204 @@ def map_surface_csg_curve_to_patch_local(
             diagnostics=domain_diagnostics,
         )
     return SurfaceCSGPatchLocalCurveMappingResult(source_curve=curve, patch=patch_ref, curve=local_curve)
+
+
+def _surface_csg_planar_relation_diagnostic(
+    relation: SurfaceCSGPlanarRelation,
+    message: str,
+    first_ref: SurfaceBooleanPatchRef,
+    second_ref: SurfaceBooleanPatchRef,
+) -> SurfaceCSGPlanarRelationDiagnostic:
+    return SurfaceCSGPlanarRelationDiagnostic(
+        relation=relation,
+        message=message,
+        first_patch=first_ref,
+        second_patch=second_ref,
+    )
+
+
+def _planar_patch_frame(patch: PlanarSurfacePatch) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    u0, v0 = patch.domain.u_range[0], patch.domain.v_range[0]
+    origin = patch.point_at(u0, v0)
+    du, dv = patch.derivatives_at(u0, v0)
+    normal = np.cross(du, dv)
+    norm = float(np.linalg.norm(normal))
+    if norm <= 0.0:
+        raise ValueError("Planar patch has degenerate parameter frame.")
+    return origin, du, dv
+
+
+def _planar_patch_normal(patch: PlanarSurfacePatch) -> np.ndarray:
+    _origin, du, dv = _planar_patch_frame(patch)
+    normal = np.cross(du, dv)
+    return normal / float(np.linalg.norm(normal))
+
+
+def _line_parameter_interval_for_planar_patch(
+    patch: PlanarSurfacePatch,
+    line_point: np.ndarray,
+    line_direction: np.ndarray,
+    *,
+    policy: SurfaceCSGTolerancePolicy,
+) -> tuple[float, float] | None:
+    u0, u1 = patch.domain.u_range
+    v0, v1 = patch.domain.v_range
+    uv_point = np.asarray(_planar_patch_point_to_uv(patch, line_point), dtype=float)
+    uv_direction = np.asarray(_planar_patch_point_to_uv(patch, line_point + line_direction), dtype=float) - uv_point
+    low = -float("inf")
+    high = float("inf")
+    for value, direction, minimum, maximum in (
+        (uv_point[0], uv_direction[0], float(u0), float(u1)),
+        (uv_point[1], uv_direction[1], float(v0), float(v1)),
+    ):
+        if abs(direction) <= policy.degeneracy_tolerance:
+            if value < minimum - policy.domain_tolerance or value > maximum + policy.domain_tolerance:
+                return None
+            continue
+        t0 = (minimum - value) / direction
+        t1 = (maximum - value) / direction
+        low = max(low, min(t0, t1))
+        high = min(high, max(t0, t1))
+    if high < low - policy.domain_tolerance:
+        return None
+    return (low, high)
+
+
+def intersect_planar_linear_patch_pair(
+    first_ref: SurfaceBooleanPatchRef,
+    first_patch: PlanarSurfacePatch | RuledSurfacePatch,
+    second_ref: SurfaceBooleanPatchRef,
+    second_patch: PlanarSurfacePatch | RuledSurfacePatch,
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> SurfaceCSGAnalyticIntersectionRecord:
+    """Intersect a low-order planar/linear patch pair without mesh fallback."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    if isinstance(first_patch, RuledSurfacePatch) or isinstance(second_patch, RuledSurfacePatch):
+        return SurfaceCSGAnalyticIntersectionRecord(
+            first_patch=first_ref,
+            second_patch=second_ref,
+            relation="unsupported-linear",
+            diagnostics=(
+                _surface_csg_planar_relation_diagnostic(
+                    "unsupported-linear",
+                    "Ruled patch analytic intersection is gated for the later linear intersection implementation.",
+                    first_ref,
+                    second_ref,
+                ),
+            ),
+        )
+    first_normal = _planar_patch_normal(first_patch)
+    second_normal = _planar_patch_normal(second_patch)
+    first_origin = first_patch.point_at(first_patch.domain.u_range[0], first_patch.domain.v_range[0])
+    second_origin = second_patch.point_at(second_patch.domain.u_range[0], second_patch.domain.v_range[0])
+    direction = np.cross(first_normal, second_normal)
+    direction_norm = float(np.linalg.norm(direction))
+    if direction_norm <= normalized_policy.degeneracy_tolerance:
+        offset = abs(float(np.dot(first_normal, second_origin - first_origin)))
+        relation: SurfaceCSGPlanarRelation = "coincident" if offset <= normalized_policy.equality_tolerance else "parallel"
+        return SurfaceCSGAnalyticIntersectionRecord(
+            first_patch=first_ref,
+            second_patch=second_ref,
+            relation=relation,
+            diagnostics=(
+                _surface_csg_planar_relation_diagnostic(
+                    relation,
+                    f"Planar patches are {relation}; no unique intersection curve is emitted.",
+                    first_ref,
+                    second_ref,
+                ),
+            ),
+        )
+    direction /= direction_norm
+    system = np.vstack((first_normal, second_normal, direction))
+    rhs = np.array(
+        [
+            float(np.dot(first_normal, first_origin)),
+            float(np.dot(second_normal, second_origin)),
+            0.0,
+        ],
+        dtype=float,
+    )
+    try:
+        line_point = np.linalg.solve(system, rhs)
+    except np.linalg.LinAlgError:
+        return SurfaceCSGAnalyticIntersectionRecord(
+            first_patch=first_ref,
+            second_patch=second_ref,
+            relation="parallel",
+            diagnostics=(
+                _surface_csg_planar_relation_diagnostic(
+                    "parallel",
+                    "Planar patch intersection system is singular.",
+                    first_ref,
+                    second_ref,
+                ),
+            ),
+        )
+    first_interval = _line_parameter_interval_for_planar_patch(
+        first_patch, line_point, direction, policy=normalized_policy
+    )
+    second_interval = _line_parameter_interval_for_planar_patch(
+        second_patch, line_point, direction, policy=normalized_policy
+    )
+    if first_interval is None or second_interval is None:
+        return SurfaceCSGAnalyticIntersectionRecord(
+            first_patch=first_ref,
+            second_patch=second_ref,
+            relation="disjoint",
+            diagnostics=(
+                _surface_csg_planar_relation_diagnostic(
+                    "disjoint",
+                    "Finite planar patch domains do not overlap along the plane intersection line.",
+                    first_ref,
+                    second_ref,
+                ),
+            ),
+        )
+    seg_min = max(first_interval[0], second_interval[0])
+    seg_max = min(first_interval[1], second_interval[1])
+    if seg_max - seg_min <= normalized_policy.degeneracy_tolerance:
+        return SurfaceCSGAnalyticIntersectionRecord(
+            first_patch=first_ref,
+            second_patch=second_ref,
+            relation="touching",
+            diagnostics=(
+                _surface_csg_planar_relation_diagnostic(
+                    "touching",
+                    "Finite planar patch domains touch without a non-degenerate intersection segment.",
+                    first_ref,
+                    second_ref,
+                ),
+            ),
+        )
+    start = line_point + direction * seg_min
+    end = line_point + direction * seg_max
+    curve = make_surface_csg_line_curve(start, end, policy=normalized_policy)
+    first_mapping = map_surface_csg_curve_to_patch_local(curve, first_ref, first_patch, policy=normalized_policy)
+    second_mapping = map_surface_csg_curve_to_patch_local(curve, second_ref, second_patch, policy=normalized_policy)
+    if not first_mapping.supported or first_mapping.curve is None or not second_mapping.supported or second_mapping.curve is None:
+        return SurfaceCSGAnalyticIntersectionRecord(
+            first_patch=first_ref,
+            second_patch=second_ref,
+            relation="disjoint",
+            diagnostics=(
+                _surface_csg_planar_relation_diagnostic(
+                    "disjoint",
+                    "Analytic line segment could not be mapped into both patch domains.",
+                    first_ref,
+                    second_ref,
+                ),
+            ),
+        )
+    return SurfaceCSGAnalyticIntersectionRecord(
+        first_patch=first_ref,
+        second_patch=second_ref,
+        relation="crossing",
+        curve=curve,
+        patch_local_curves=(first_mapping.curve, second_mapping.curve),
+    )
 
 
 def _ensure_backend(backend: BooleanBackend) -> None:
@@ -2022,64 +2262,32 @@ def _intersect_axis_aligned_patch_pair(
     *,
     epsilon: float = 1e-9,
 ) -> SurfaceBooleanCutCurve | None:
-    if first.axis == second.axis:
-        if abs(first.coordinate - second.coordinate) <= epsilon:
-            other_axes = tuple(axis for axis in (0, 1, 2) if axis != first.axis)
-            overlap_a = min(first.max_corner[other_axes[0]], second.max_corner[other_axes[0]]) - max(
-                first.min_corner[other_axes[0]], second.min_corner[other_axes[0]]
-            )
-            overlap_b = min(first.max_corner[other_axes[1]], second.max_corner[other_axes[1]]) - max(
-                first.min_corner[other_axes[1]], second.min_corner[other_axes[1]]
-            )
-            if overlap_a > epsilon and overlap_b > epsilon:
-                return None
-        return None
-
-    remaining_axis = next(axis for axis in (0, 1, 2) if axis not in {first.axis, second.axis})
-    if not (second.min_corner[first.axis] - epsilon <= first.coordinate <= second.max_corner[first.axis] + epsilon):
-        return None
-    if not (first.min_corner[second.axis] - epsilon <= second.coordinate <= first.max_corner[second.axis] + epsilon):
-        return None
-    seg_min = max(first.min_corner[remaining_axis], second.min_corner[remaining_axis])
-    seg_max = min(first.max_corner[remaining_axis], second.max_corner[remaining_axis])
-    if seg_max - seg_min <= epsilon:
-        return None
-
-    start = np.zeros(3, dtype=float)
-    end = np.zeros(3, dtype=float)
-    start[first.axis] = first.coordinate
-    start[second.axis] = second.coordinate
-    start[remaining_axis] = seg_min
-    end[:] = start
-    end[remaining_axis] = seg_max
-    points_3d = (
-        (float(start[0]), float(start[1]), float(start[2])),
-        (float(end[0]), float(end[1]), float(end[2])),
-    )
-    curve = make_surface_csg_line_curve(points_3d[0], points_3d[1])
     first_ref = SurfaceBooleanPatchRef(first.operand_index, first.patch_index)
     second_ref = SurfaceBooleanPatchRef(second.operand_index, second.patch_index)
-    first_mapping = map_surface_csg_curve_to_patch_local(curve, first_ref, first.patch)
-    second_mapping = map_surface_csg_curve_to_patch_local(curve, second_ref, second.patch)
-    if not first_mapping.supported or first_mapping.curve is None:
-        return None
-    if not second_mapping.supported or second_mapping.curve is None:
+    record = intersect_planar_linear_patch_pair(
+        first_ref,
+        first.patch,
+        second_ref,
+        second.patch,
+        policy={"degeneracy_tolerance": epsilon, "domain_tolerance": epsilon},
+    )
+    if not record.supported or record.curve is None or len(record.patch_local_curves) != 2:
         return None
     first_trim = SurfaceBooleanTrimFragment(
         patch=first_ref,
-        points_uv=first_mapping.curve.points_uv,
+        points_uv=record.patch_local_curves[0].points_uv,
     )
     second_trim = SurfaceBooleanTrimFragment(
         patch=second_ref,
-        points_uv=second_mapping.curve.points_uv,
+        points_uv=record.patch_local_curves[1].points_uv,
     )
     return SurfaceBooleanCutCurve(
-        cut_curve_id=_cut_curve_id(first_ref, second_ref, points_3d),
-        points_3d=points_3d,
+        cut_curve_id=_cut_curve_id(first_ref, second_ref, record.curve.points_3d),
+        points_3d=record.curve.points_3d,
         patches=(first_ref, second_ref),
         trim_fragments=(first_trim, second_trim),
-        curve=curve,
-        patch_local_curves=(first_mapping.curve, second_mapping.curve),
+        curve=record.curve,
+        patch_local_curves=record.patch_local_curves,
     )
 
 
