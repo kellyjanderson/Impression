@@ -66,6 +66,7 @@ from impression.modeling import (
     make_surface_mesh_adapter,
     make_surface_scene_group,
     make_surface_scene_node,
+    make_surface_to_mesh_adapter_record,
     mesh_from_surface_body,
     NURBSSurfacePatch,
     normalize_tessellation_request,
@@ -97,7 +98,10 @@ from impression.modeling import (
     SurfaceSceneNode,
     SurfaceSeam,
     SurfaceShell,
+    SurfaceToMeshAdapterRecord,
+    SURFACE_TO_MESH_HELPER_CONTRACT,
     SweepSurfacePatch,
+    TessellationBoundaryViolationDiagnostic,
     TessellationRequest,
     TrimLoop,
     classify_surface_seam_continuity,
@@ -115,6 +119,7 @@ from impression.modeling import (
     surface_boolean_result,
     validate_implicit_field_security,
     validate_surface_seam_participation,
+    validate_tessellation_helper_boundary_input,
     tessellate_surface_body,
     tessellate_surface_patch,
     tessellate_surface_shell,
@@ -1604,6 +1609,21 @@ def test_tessellation_request_normalization_is_deterministic() -> None:
             max_edge_length=0.2,
         )
     ).cache_key
+
+
+def test_tessellation_helper_contract_accepts_only_surface_boundary_inputs() -> None:
+    body = make_surface_box(size=(1.0, 1.0, 1.0))
+    record = make_surface_to_mesh_adapter_record(body, preview_tessellation_request())
+    diagnostic = validate_tessellation_helper_boundary_input({"kind": "box", "size": (1.0, 1.0, 1.0)})
+
+    assert isinstance(record, SurfaceToMeshAdapterRecord)
+    assert record.source_type == "SurfaceBody"
+    assert record.source_identity == body.stable_identity
+    assert record.helper_contract == SURFACE_TO_MESH_HELPER_CONTRACT
+    assert record.helper_contract.consumes_authored_primitive_arguments is False
+    assert isinstance(diagnostic, TessellationBoundaryViolationDiagnostic)
+    assert diagnostic.received_type == "dict"
+    assert "SurfaceBody" in diagnostic.expected_inputs
 
 
 def test_planar_patch_tessellates_to_mesh_from_domain_or_trim() -> None:

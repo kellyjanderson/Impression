@@ -267,3 +267,26 @@ def torus_mesh(major_radius: float, minor_radius: float, n_theta: int, n_phi: in
     if faces_arr.size:
         faces_arr = faces_arr[:, [0, 2, 1]]
     return Mesh(points_arr, faces_arr)
+
+
+def orient_mesh(mesh: Mesh, direction: Sequence[float]) -> Mesh:
+    target = np.asarray(direction, dtype=float)
+    target_norm = np.linalg.norm(target)
+    if target_norm == 0:
+        raise ValueError("Direction vector must be non-zero.")
+    target = target / target_norm
+    default = np.array([0.0, 0.0, 1.0])
+    if np.allclose(target, default):
+        return mesh.copy()
+    axis = np.cross(default, target)
+    axis_norm = np.linalg.norm(axis)
+    if axis_norm == 0:
+        axis = np.array([1.0, 0.0, 0.0])
+        angle_deg = 180.0
+    else:
+        axis = axis / axis_norm
+        angle_rad = np.arccos(np.clip(np.dot(default, target), -1.0, 1.0))
+        angle_deg = np.degrees(angle_rad)
+    rotated = mesh.copy()
+    rotated.rotate_vector(axis, angle_deg, point=(0.0, 0.0, 0.0), inplace=True)
+    return rotated
