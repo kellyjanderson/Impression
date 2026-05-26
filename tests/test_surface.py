@@ -58,6 +58,8 @@ from impression.modeling import (
     SurfaceBody,
     SurfaceBoundaryRef,
     SurfaceConsumerCollection,
+    SubdivisionCrease,
+    SubdivisionSurfacePatch,
     SurfaceMeshAdapter,
     SurfaceSceneGroup,
     SurfaceSceneNode,
@@ -829,6 +831,70 @@ def test_sweep_surface_patch_tessellates_through_surface_boundary() -> None:
     assert mesh.vertices.shape[0] > 0
     assert mesh.faces.shape[0] > 0
     assert mesh.metadata["surface_family"] == "sweep"
+
+
+def test_subdivision_surface_patch_owns_control_cage_and_creases() -> None:
+    patch = SubdivisionSurfacePatch(
+        family="subdivision",
+        control_points=[
+            (0.0, 0.0, 0.0),
+            (2.0, 0.0, 0.0),
+            (2.0, 1.0, 0.0),
+            (0.0, 1.0, 0.0),
+        ],
+        faces=((0, 1, 2, 3),),
+        creases=(SubdivisionCrease((1, 0), sharpness=2.5),),
+        subdivision_level=2,
+    )
+
+    payload = patch.geometry_payload()
+    assert patch.family == "subdivision"
+    assert patch.control_points.shape == (4, 3)
+    assert patch.faces == ((0, 1, 2, 3),)
+    assert patch.creases[0].edge == (0, 1)
+    assert payload["scheme"] == "catmull_clark"
+    assert payload["subdivision_level"] == 2
+    assert payload["creases"] == [{"edge": (0, 1), "sharpness": 2.5}]
+    assert patch.bounds_estimate() == (0.0, 2.0, 0.0, 1.0, 0.0, 0.0)
+    assert isinstance(patch.stable_identity, str)
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"family": "sweep"}, "family must be 'subdivision'"),
+        ({"family": "subdivision", "control_points": [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]}, "at least three"),
+        ({"family": "subdivision", "faces": ((0, 1),)}, "at least three vertices"),
+        ({"family": "subdivision", "faces": ((0, 1, 1),)}, "may not repeat"),
+        ({"family": "subdivision", "faces": ((0, 1, 4),)}, "outside the cage"),
+        (
+            {"family": "subdivision", "creases": (SubdivisionCrease((0, 2), sharpness=1.0),)},
+            "existing cage edges",
+        ),
+        (
+            {
+                "family": "subdivision",
+                "creases": (SubdivisionCrease((0, 1), sharpness=1.0), SubdivisionCrease((1, 0), sharpness=2.0)),
+            },
+            "unique per cage edge",
+        ),
+        ({"family": "subdivision", "subdivision_level": -1}, "subdivision_level"),
+        ({"family": "subdivision", "scheme": "loop"}, "scheme"),
+    ],
+)
+def test_subdivision_surface_patch_rejects_invalid_payload_inputs(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        SubdivisionSurfacePatch(**kwargs)
+
+
+def test_subdivision_surface_patch_refuses_evaluation_until_subdivision_executor_exists() -> None:
+    patch = SubdivisionSurfacePatch(family="subdivision")
+
+    with pytest.raises(NotImplementedError, match="Surface Spec 146"):
+        patch.point_at(0.5, 0.5)
+
+    with pytest.raises(NotImplementedError, match="Surface Spec 146"):
+        patch.derivatives_at(0.5, 0.5)
 
 
 def test_planar_patch_rejects_collinear_axes_and_multiple_outer_trims() -> None:
