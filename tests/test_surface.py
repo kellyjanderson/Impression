@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 import impression.modeling as modeling
+import impression.modeling.csg as csg_module
 from impression.mesh import Mesh
 from impression.modeling import (
     make_box,
@@ -94,8 +95,10 @@ from impression.modeling import (
     SURFACE_FAMILY_TESSELLATION_ADAPTERS,
     SurfaceBooleanFamilyEligibilityResult,
     SurfaceBooleanFamilyPairSupport,
+    SurfaceBooleanOperands,
     SurfaceBooleanUnsupportedFamilyDiagnostic,
     SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX,
+    SURFACE_BOOLEAN_OPERATIONS,
     SurfaceSeamParticipationRecord,
     SurfaceSeamValidationResult,
     SubdivisionCrease,
@@ -130,6 +133,7 @@ from impression.modeling import (
     refine_subdivision_control_cage,
     surface_adjacency_from_seams,
     surface_boolean_family_eligibility,
+    surface_boolean_family_pair_support,
     surface_boolean_result,
     surface_composition_to_consumer_collection,
     surface_group,
@@ -2097,10 +2101,34 @@ def test_surface_boolean_family_eligibility_supports_current_planar_pair_matrix(
     assert all(isinstance(pair, SurfaceBooleanFamilyPairSupport) for pair in eligibility.family_pairs)
 
 
+def test_surface_boolean_family_pair_matrix_declares_every_known_family_pair() -> None:
+    expected_count = len(SURFACE_BOOLEAN_OPERATIONS) * len(PATCH_FAMILY_CAPABILITY_MATRIX) ** 2
+
+    assert len(SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX) == expected_count
+    for operation in SURFACE_BOOLEAN_OPERATIONS:
+        for left_family in PATCH_FAMILY_CAPABILITY_MATRIX:
+            for right_family in PATCH_FAMILY_CAPABILITY_MATRIX:
+                record = surface_boolean_family_pair_support(operation, left_family, right_family)
+
+                assert isinstance(record, SurfaceBooleanFamilyPairSupport)
+                assert record.operation == operation
+                assert record.left_family == left_family
+                assert record.right_family == right_family
+                if (
+                    PATCH_FAMILY_CAPABILITY_MATRIX[left_family].support_phase == "available"
+                    and PATCH_FAMILY_CAPABILITY_MATRIX[right_family].support_phase == "available"
+                ):
+                    assert record.supported is True
+                    assert record.required_future_capability is None
+                else:
+                    assert record.supported is False
+                    assert record.required_future_capability
+
+
 def test_surface_boolean_family_eligibility_reports_unsupported_mixed_family_without_mesh_fallback() -> None:
     box = make_surface_box(size=(1.0, 1.0, 1.0), center=(0.0, 0.0, 0.0))
-    sphere = make_surface_sphere(radius=0.5, center=(2.0, 0.0, 0.0))
-    operands = prepare_surface_boolean_operands("union", (box, sphere))
+    bspline_body = make_surface_body([make_surface_shell([BSplineSurfacePatch(family="bspline")])])
+    operands = SurfaceBooleanOperands(operation="union", bodies=(box, bspline_body))
 
     eligibility = surface_boolean_family_eligibility(operands)
     result = surface_boolean_result("union", operands)
@@ -2112,7 +2140,7 @@ def test_surface_boolean_family_eligibility_reports_unsupported_mixed_family_wit
     assert result.body is None
     assert result.failure_reason is not None
     assert "unsupported surface boolean family pair" in result.failure_reason
-    assert "revolution" in result.failure_reason
+    assert "bspline" in result.failure_reason
 
 
 def test_surface_boolean_unsupported_family_diagnostic_builder_refuses_supported_pair() -> None:
@@ -2124,13 +2152,29 @@ def test_surface_boolean_unsupported_family_diagnostic_builder_refuses_supported
 
 def test_surface_backend_boolean_api_uses_family_diagnostic_result_for_unsupported_pairs() -> None:
     box = make_surface_box(size=(1.0, 1.0, 1.0), center=(0.0, 0.0, 0.0))
-    sphere = make_surface_sphere(radius=0.5, center=(2.0, 0.0, 0.0))
+    bspline_body = make_surface_body([make_surface_shell([BSplineSurfacePatch(family="bspline")])])
 
-    result = boolean_union((box, sphere), backend="surface")
+    result = boolean_union((box, bspline_body), backend="surface")
 
     assert result.status == "unsupported"
     assert result.failure_reason is not None
     assert "operand-family-eligibility" in result.failure_reason
+
+
+def test_surface_boolean_family_refusal_gate_never_invokes_mesh_boolean(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_mesh_boolean(*args: object, **kwargs: object) -> None:
+        raise AssertionError("surface CSG family refusal must not reach mesh boolean execution")
+
+    monkeypatch.setattr(csg_module, "_apply_boolean", fail_mesh_boolean)
+    box = make_surface_box(size=(1.0, 1.0, 1.0), center=(0.0, 0.0, 0.0))
+    bspline_body = make_surface_body([make_surface_shell([BSplineSurfacePatch(family="bspline")])])
+
+    result = boolean_union((box, bspline_body), backend="surface")
+
+    assert result.status == "unsupported"
+    assert result.body is None
+    assert result.failure_reason is not None
+    assert "surface boolean union support for planar/bspline" in result.failure_reason
 
 
 def test_cross_mode_drift_report_stays_on_same_surface_truth() -> None:

@@ -1899,7 +1899,7 @@ def loft_profiles(
     fairness_weight: float = 0.2,
     skeleton_mode: str = "auto",
     fairness_iterations: int = 12,
-) -> Mesh:
+) -> SurfaceBody:
     """Loft a sequence of planar sections/profiles, optionally along a path."""
 
     if quality is not None:
@@ -1937,7 +1937,7 @@ def loft_profiles(
         bezier_samples=bezier_samples,
     )
     stations = _build_profile_section_stations(loft_sections_input, positions)
-    mesh = loft_sections(
+    body = loft_sections(
         stations,
         samples=samples,
         cap_ends=cap_ends,
@@ -1962,8 +1962,8 @@ def loft_profiles(
     )
     color = getattr(normalized_profiles[0], "color", None)
     if color is not None:
-        set_mesh_color(mesh, color)
-    return mesh
+        body.metadata.setdefault("consumer", {})["color"] = color
+    return body
 
 
 def loft(
@@ -1998,7 +1998,7 @@ def loft(
     fairness_weight: float = 0.2,
     skeleton_mode: str = "auto",
     fairness_iterations: int = 12,
-) -> Mesh:
+) -> SurfaceBody:
     """Loft sections/profiles using the topology-aware planner/executor pipeline."""
 
     return loft_profiles(
@@ -2274,8 +2274,8 @@ def loft_sections(
     fairness_weight: float = 0.2,
     skeleton_mode: str = "auto",
     fairness_iterations: int = 12,
-) -> Mesh:
-    """Loft topology-native sections using a planner/executor pipeline."""
+) -> SurfaceBody:
+    """Loft topology-native sections into the canonical surfaced body."""
 
     plan = loft_plan_sections(
         stations,
@@ -2300,7 +2300,7 @@ def loft_sections(
         skeleton_mode=skeleton_mode,
         fairness_iterations=fairness_iterations,
     )
-    return loft_execute_plan_debug_mesh(plan, cap_ends=cap_ends)
+    return _loft_execute_plan_surface(plan, cap_ends=cap_ends)
 
 
 def loft_plan_sections(

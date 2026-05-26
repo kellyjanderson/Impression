@@ -26,6 +26,7 @@ from .surface import (
 
 BooleanBackend = Literal["manifold", "surface"]
 SurfaceBooleanOperation = Literal["union", "difference", "intersection"]
+SURFACE_BOOLEAN_OPERATIONS: tuple[SurfaceBooleanOperation, ...] = ("union", "difference", "intersection")
 SurfaceBooleanStatus = Literal["succeeded", "invalid", "unsupported"]
 SurfaceBooleanClassification = Literal["open", "closed", "empty"]
 SurfaceBooleanBodyRelation = Literal["disjoint", "touching", "overlap", "containment", "equal"]
@@ -274,15 +275,73 @@ class SurfaceBooleanFamilyEligibilityResult:
         }
 
 
-SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX: dict[tuple[SurfaceBooleanOperation, str, str], SurfaceBooleanFamilyPairSupport] = {
-    (operation, "planar", "planar"): SurfaceBooleanFamilyPairSupport(
-        operation=operation,
-        left_family="planar",
-        right_family="planar",
-        supported=True,
-        phase="intersection-kernel",
+_SURFACE_BOOLEAN_EXECUTABLE_FAMILY_PAIRS: frozenset[tuple[str, str]] = frozenset(
+    {
+        tuple(sorted((left_family, right_family)))
+        for left_family, left_capability in PATCH_FAMILY_CAPABILITY_MATRIX.items()
+        for right_family, right_capability in PATCH_FAMILY_CAPABILITY_MATRIX.items()
+        if left_capability.support_phase == "available" and right_capability.support_phase == "available"
+    }
+)
+
+
+def _surface_boolean_required_future_capability(
+    operation: SurfaceBooleanOperation,
+    left_family: str,
+    right_family: str,
+) -> str:
+    left_capability = PATCH_FAMILY_CAPABILITY_MATRIX.get(left_family)
+    right_capability = PATCH_FAMILY_CAPABILITY_MATRIX.get(right_family)
+    left_phase = "unknown" if left_capability is None else left_capability.support_phase
+    right_phase = "unknown" if right_capability is None else right_capability.support_phase
+    return (
+        f"surface boolean {operation} support for {left_family}/{right_family} "
+        f"families ({left_phase}/{right_phase})"
     )
-    for operation in ("union", "difference", "intersection")
+
+
+def _surface_boolean_support_record(
+    operation: SurfaceBooleanOperation,
+    left_family: str,
+    right_family: str,
+) -> SurfaceBooleanFamilyPairSupport:
+    canonical_pair = tuple(sorted((left_family, right_family)))
+    supported = canonical_pair in _SURFACE_BOOLEAN_EXECUTABLE_FAMILY_PAIRS
+    left_capability = PATCH_FAMILY_CAPABILITY_MATRIX.get(left_family)
+    right_capability = PATCH_FAMILY_CAPABILITY_MATRIX.get(right_family)
+    if supported:
+        phase: SurfaceBooleanUnsupportedPhase | str = "intersection-kernel"
+        required_future_capability = None
+    elif left_capability is None or right_capability is None:
+        phase = "operand-family-eligibility"
+        required_future_capability = _surface_boolean_required_future_capability(
+            operation, left_family, right_family
+        )
+    elif left_capability.support_phase == "planned" or right_capability.support_phase == "planned":
+        phase = "operand-family-eligibility"
+        required_future_capability = _surface_boolean_required_future_capability(
+            operation, left_family, right_family
+        )
+    else:
+        phase = "intersection-kernel"
+        required_future_capability = _surface_boolean_required_future_capability(
+            operation, left_family, right_family
+        )
+    return SurfaceBooleanFamilyPairSupport(
+        operation=operation,
+        left_family=left_family,
+        right_family=right_family,
+        supported=supported,
+        phase=phase,
+        required_future_capability=required_future_capability,
+    )
+
+
+SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX: dict[tuple[SurfaceBooleanOperation, str, str], SurfaceBooleanFamilyPairSupport] = {
+    (operation, left_family, right_family): _surface_boolean_support_record(operation, left_family, right_family)
+    for operation in SURFACE_BOOLEAN_OPERATIONS
+    for left_family in PATCH_FAMILY_CAPABILITY_MATRIX
+    for right_family in PATCH_FAMILY_CAPABILITY_MATRIX
 }
 
 
@@ -522,11 +581,13 @@ def _surface_body_patch_families(body: SurfaceBody) -> tuple[str, ...]:
     return tuple(sorted({patch.family for patch in body.iter_patches(world=True)}))
 
 
-def _surface_boolean_family_pair_support(
+def surface_boolean_family_pair_support(
     operation: SurfaceBooleanOperation,
     left_family: str,
     right_family: str,
 ) -> SurfaceBooleanFamilyPairSupport:
+    """Return the declared CSG support decision for one operation/family pair."""
+
     support = SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX.get(
         (operation, left_family, right_family)
     ) or SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX.get((operation, right_family, left_family))
@@ -541,21 +602,22 @@ def _surface_boolean_family_pair_support(
             phase=support.phase,
             required_future_capability=support.required_future_capability,
         )
-    left_capability = PATCH_FAMILY_CAPABILITY_MATRIX.get(left_family)
-    right_capability = PATCH_FAMILY_CAPABILITY_MATRIX.get(right_family)
-    left_phase = "unknown" if left_capability is None else left_capability.support_phase
-    right_phase = "unknown" if right_capability is None else right_capability.support_phase
     return SurfaceBooleanFamilyPairSupport(
         operation=operation,
         left_family=left_family,
         right_family=right_family,
         supported=False,
         phase="operand-family-eligibility",
-        required_future_capability=(
-            f"surface boolean {operation} support for {left_family}/{right_family} "
-            f"families ({left_phase}/{right_phase})"
-        ),
+        required_future_capability=_surface_boolean_required_future_capability(operation, left_family, right_family),
     )
+
+
+def _surface_boolean_family_pair_support(
+    operation: SurfaceBooleanOperation,
+    left_family: str,
+    right_family: str,
+) -> SurfaceBooleanFamilyPairSupport:
+    return surface_boolean_family_pair_support(operation, left_family, right_family)
 
 
 def build_surface_boolean_unsupported_family_diagnostic(
@@ -1858,6 +1920,24 @@ def _raise_surface_boolean_execution_unavailable(operands: SurfaceBooleanOperand
     raise SurfaceBooleanExecutionUnavailableError(result.operation, result.operands.body_ids)
 
 
+def _surface_boolean_result_after_family_gate(
+    operation: SurfaceBooleanOperation,
+    bodies: tuple[object, ...],
+) -> SurfaceBooleanResult | None:
+    if any(not isinstance(body, SurfaceBody) for body in bodies):
+        return None
+    raw_operands = SurfaceBooleanOperands(operation=operation, bodies=bodies)
+    eligibility = surface_boolean_family_eligibility(raw_operands)
+    if eligibility.supported:
+        return None
+    return SurfaceBooleanResult(
+        operation=operation,
+        operands=raw_operands,
+        status="unsupported",
+        failure_reason=eligibility.failure_reason,
+    )
+
+
 def boolean_union(
     meshes: Iterable[Mesh | MeshGroup | SurfaceBody],
     tolerance: float = 1e-4,
@@ -1867,7 +1947,11 @@ def boolean_union(
     if tolerance <= 0:
         raise ValueError("tolerance must be positive.")
     if backend == "surface":
-        operands = prepare_surface_boolean_operands("union", meshes)  # type: ignore[arg-type]
+        bodies = tuple(meshes)
+        gated = _surface_boolean_result_after_family_gate("union", bodies)  # type: ignore[arg-type]
+        if gated is not None:
+            return gated
+        operands = prepare_surface_boolean_operands("union", bodies)  # type: ignore[arg-type]
         return surface_boolean_result("union", operands)
     warn_mesh_primary_api(
         "boolean_union",
@@ -1886,7 +1970,11 @@ def boolean_difference(
     if tolerance <= 0:
         raise ValueError("tolerance must be positive.")
     if backend == "surface":
-        operands = prepare_surface_boolean_difference_operands(base, cutters)  # type: ignore[arg-type]
+        cutter_tuple = tuple(cutters)
+        gated = _surface_boolean_result_after_family_gate("difference", (base, *cutter_tuple))  # type: ignore[arg-type]
+        if gated is not None:
+            return gated
+        operands = prepare_surface_boolean_difference_operands(base, cutter_tuple)  # type: ignore[arg-type]
         return surface_boolean_result("difference", operands)
     warn_mesh_primary_api(
         "boolean_difference",
@@ -1909,7 +1997,11 @@ def boolean_intersection(
     if tolerance <= 0:
         raise ValueError("tolerance must be positive.")
     if backend == "surface":
-        operands = prepare_surface_boolean_operands("intersection", meshes)  # type: ignore[arg-type]
+        bodies = tuple(meshes)
+        gated = _surface_boolean_result_after_family_gate("intersection", bodies)  # type: ignore[arg-type]
+        if gated is not None:
+            return gated
+        operands = prepare_surface_boolean_operands("intersection", bodies)  # type: ignore[arg-type]
         return surface_boolean_result("intersection", operands)
     warn_mesh_primary_api(
         "boolean_intersection",
