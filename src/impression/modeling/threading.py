@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import ModuleType
 
@@ -54,20 +54,81 @@ class ThreadAssemblyLoweringError(ValueError):
         super().__init__(diagnostic.reason)
 
 
+@dataclass(frozen=True)
+class ThreadMeshCompatibilityResult:
+    mesh: object
+    estimate: object
+    builder: str
+    boundary: str = "explicit-mesh-compatibility"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary": self.boundary,
+            "builder": self.builder,
+            "mesh_vertices": self.mesh.n_vertices,
+            "mesh_faces": self.mesh.n_faces,
+            "predicted_vertices": self.estimate.predicted_vertices,
+            "predicted_faces": self.estimate.predicted_faces,
+        }
+
+
 def make_external_thread(spec, *args, backend="surface", **kwargs):
+    if backend == "mesh":
+        return _call_with_legacy_mesh_primitives(_extension.make_external_thread, spec, *args, backend=backend, **kwargs)
     return _extension.make_external_thread(spec, *args, backend=backend, **kwargs)
 
 
 def make_internal_thread(spec, *args, backend="surface", **kwargs):
+    if backend == "mesh":
+        return _call_with_legacy_mesh_primitives(_extension.make_internal_thread, spec, *args, backend=backend, **kwargs)
     return _extension.make_internal_thread(spec, *args, backend=backend, **kwargs)
 
 
 def make_threaded_rod(spec, *args, backend="surface", **kwargs):
+    if backend == "mesh":
+        return _call_with_legacy_mesh_primitives(_extension.make_threaded_rod, spec, *args, backend=backend, **kwargs)
     return _extension.make_threaded_rod(spec, *args, backend=backend, **kwargs)
 
 
 def make_tapped_hole_cutter(spec, *args, backend="surface", **kwargs):
+    if backend == "mesh":
+        return _call_with_legacy_mesh_primitives(_extension.make_tapped_hole_cutter, spec, *args, backend=backend, **kwargs)
     return _extension.make_tapped_hole_cutter(spec, *args, backend=backend, **kwargs)
+
+
+def make_hex_nut(spec, *args, backend="mesh", **kwargs):
+    if backend == "mesh":
+        return _call_with_legacy_mesh_primitives(_extension.make_hex_nut, spec, *args, backend=backend, **kwargs)
+    return _extension.make_hex_nut(spec, *args, backend=backend, **kwargs)
+
+
+def make_round_nut(spec, *args, backend="mesh", **kwargs):
+    if backend == "mesh":
+        return _call_with_legacy_mesh_primitives(_extension.make_round_nut, spec, *args, backend=backend, **kwargs)
+    return _extension.make_round_nut(spec, *args, backend=backend, **kwargs)
+
+
+def make_runout_relief(spec, *args, backend="mesh", **kwargs):
+    if backend == "mesh":
+        return _call_with_legacy_mesh_primitives(_extension.make_runout_relief, spec, *args, backend=backend, **kwargs)
+    return _extension.make_runout_relief(spec, *args, backend=backend, **kwargs)
+
+
+def _call_with_legacy_mesh_primitives(fn, *args, **kwargs):
+    from .primitives import make_cylinder_mesh, make_ngon_mesh
+
+    globals_dict = getattr(fn, "__globals__", {})
+    original_cylinder = globals_dict.get("make_cylinder")
+    original_ngon = globals_dict.get("make_ngon")
+    globals_dict["make_cylinder"] = make_cylinder_mesh
+    globals_dict["make_ngon"] = make_ngon_mesh
+    try:
+        return fn(*args, **kwargs)
+    finally:
+        if original_cylinder is not None:
+            globals_dict["make_cylinder"] = original_cylinder
+        if original_ngon is not None:
+            globals_dict["make_ngon"] = original_ngon
 
 
 def lower_thread_surface_assembly(assembly):
@@ -106,6 +167,48 @@ def lower_thread_surface_assembly(assembly):
             }
         },
     )
+
+
+def make_thread_mesh_compatibility_result(
+    spec,
+    *,
+    builder="external",
+    quality=None,
+    color=None,
+    overshoot=0.5,
+):
+    quality = _extension.MeshQuality() if quality is None else quality
+    if builder == "external":
+        estimate_spec = replace(spec, kind="external")
+        mesh = make_external_thread(spec, quality=quality, color=color, backend="mesh")
+    elif builder == "internal":
+        estimate_spec = replace(spec, kind="internal")
+        mesh = make_internal_thread(spec, quality=quality, color=color, backend="mesh")
+    elif builder == "threaded_rod":
+        estimate_spec = replace(spec, kind="external")
+        mesh = make_threaded_rod(spec, quality=quality, color=color, backend="mesh")
+    elif builder == "tapped_hole_cutter":
+        estimate_spec = replace(
+            spec,
+            kind="internal",
+            length=spec.length + 2.0 * float(overshoot),
+            axis_origin=(spec.axis_origin[0], spec.axis_origin[1], spec.axis_origin[2] - float(overshoot)),
+        )
+        mesh = make_tapped_hole_cutter(
+            spec,
+            quality=quality,
+            color=color,
+            overshoot=overshoot,
+            backend="mesh",
+        )
+    else:
+        raise _extension.InvalidThreadSpec(
+            "builder must be 'external', 'internal', 'threaded_rod', or 'tapped_hole_cutter'."
+        )
+    estimate = _extension.estimate_mesh_cost(estimate_spec, quality)
+    result = ThreadMeshCompatibilityResult(mesh=mesh, estimate=estimate, builder=builder)
+    mesh.metadata.update({"thread_mesh_compatibility": result.canonical_payload()})
+    return result
 
 
 def lower_thread_operand_to_surface_body(operand):
@@ -181,10 +284,15 @@ globals().update(
         "make_internal_thread": make_internal_thread,
         "make_threaded_rod": make_threaded_rod,
         "make_tapped_hole_cutter": make_tapped_hole_cutter,
+        "make_hex_nut": make_hex_nut,
+        "make_round_nut": make_round_nut,
+        "make_runout_relief": make_runout_relief,
         "ThreadAssemblyLoweringDiagnostic": ThreadAssemblyLoweringDiagnostic,
         "ThreadAssemblyLoweringError": ThreadAssemblyLoweringError,
+        "ThreadMeshCompatibilityResult": ThreadMeshCompatibilityResult,
         "lower_thread_operand_to_surface_body": lower_thread_operand_to_surface_body,
         "lower_thread_surface_assembly": lower_thread_surface_assembly,
+        "make_thread_mesh_compatibility_result": make_thread_mesh_compatibility_result,
     }
 )
 
@@ -192,7 +300,9 @@ __all__.extend(
     [
         "ThreadAssemblyLoweringDiagnostic",
         "ThreadAssemblyLoweringError",
+        "ThreadMeshCompatibilityResult",
         "lower_thread_operand_to_surface_body",
         "lower_thread_surface_assembly",
+        "make_thread_mesh_compatibility_result",
     ]
 )
