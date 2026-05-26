@@ -44,6 +44,7 @@ from impression.io import (
     write_impress_json,
 )
 import numpy as np
+from impression.modeling.path3d import Path3D
 from impression.modeling.surface import (
     BSplineSurfacePatch,
     NURBSSurfacePatch,
@@ -51,6 +52,7 @@ from impression.modeling.surface import (
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
+    SweepSurfacePatch,
     SurfaceAdjacencyRecord,
     SurfaceBoundaryRef,
     SurfaceSeam,
@@ -762,6 +764,35 @@ def test_encode_decode_spline_surface_patch_payloads_round_trip() -> None:
     assert decode_surface_patch_payload(nurbs_payload).stable_identity == nurbs.stable_identity
 
 
+def test_encode_decode_sweep_surface_patch_payload_round_trips_profile_path_and_frame() -> None:
+    path = Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.5, 1.0), (0.0, 0.0, 2.0)])
+    patch = SweepSurfacePatch(
+        family="sweep",
+        profile_points_uv=[(0.0, 0.0), (0.5, 0.2), (1.0, 0.0)],
+        path=path,
+        frame_policy="fixed",
+        profile_reference="profile:outer",
+        path_reference="path:centerline",
+    )
+
+    payload = encode_surface_patch_payload(patch)
+    decoded = decode_surface_patch_payload(payload)
+
+    assert payload["geometry"] == {
+        "payload_version": 1,
+        "profile_points_uv": patch.profile_points_uv.tolist(),
+        "path_points": path.sample().tolist(),
+        "frame_policy": "fixed",
+        "profile_reference": "profile:outer",
+        "path_reference": "path:centerline",
+    }
+    assert decoded.stable_identity == patch.stable_identity
+    assert isinstance(decoded, SweepSurfacePatch)
+    assert decoded.frame_policy == "fixed"
+    assert decoded.profile_reference == "profile:outer"
+    assert decoded.path_reference == "path:centerline"
+
+
 def test_decode_surface_patch_payload_rejects_invalid_family_dispatch() -> None:
     patch = PlanarSurfacePatch(family="planar")
     payload = encode_surface_patch_payload(patch)
@@ -830,6 +861,29 @@ def test_decode_nurbs_surface_patch_payload_rejects_invalid_weights() -> None:
     payload["geometry"] = geometry
 
     with pytest.raises(ImpressFormatError, match="weights"):
+        decode_surface_patch_payload(payload)
+
+
+@pytest.mark.parametrize(
+    "mutation, message",
+    [
+        (lambda geometry: geometry.pop("payload_version"), "payload_version"),
+        (lambda geometry: geometry.update({"payload_version": 2}), "payload_version"),
+        (lambda geometry: geometry.update({"mesh": {"vertices": []}}), "Unsupported SweepSurfacePatch geometry fields"),
+        (lambda geometry: geometry.update({"profile_points_uv": [[0.0, 0.0]]}), "profile_points_uv"),
+        (lambda geometry: geometry.update({"path_points": [[0.0, 0.0, 0.0]]}), "path_points"),
+        (lambda geometry: geometry.update({"frame_policy": "magic"}), "frame_policy"),
+        (lambda geometry: geometry.update({"profile_reference": ""}), "profile_reference"),
+    ],
+)
+def test_decode_sweep_surface_patch_payload_rejects_invalid_geometry(mutation, message: str) -> None:
+    patch = SweepSurfacePatch(family="sweep")
+    payload = encode_surface_patch_payload(patch)
+    geometry = dict(payload["geometry"])  # type: ignore[arg-type]
+    mutation(geometry)
+    payload["geometry"] = geometry
+
+    with pytest.raises(ImpressFormatError, match=message):
         decode_surface_patch_payload(payload)
 
 

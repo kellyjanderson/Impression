@@ -369,7 +369,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 153: Family-Aware Boolean Eligibility And Diagnostics (v1.0)](../specifications/surface-153-family-aware-boolean-eligibility-and-diagnostics-v1_0.md)
 - [x] [Surface Spec 154: .impress Analytic Patch Payloads (v1.0)](../specifications/surface-154-impress-analytic-patch-payloads-v1_0.md)
 - [x] [Surface Spec 155: .impress Spline Patch Payloads (v1.0)](../specifications/surface-155-impress-spline-patch-payloads-v1_0.md)
-- [ ] [Surface Spec 156: .impress Sweep Patch Payload (v1.0)](../specifications/surface-156-impress-sweep-patch-payload-v1_0.md)
+- [x] [Surface Spec 156: .impress Sweep Patch Payload (v1.0)](../specifications/surface-156-impress-sweep-patch-payload-v1_0.md)
 - [ ] [Surface Spec 157: .impress Subdivision Patch Payload (v1.0)](../specifications/surface-157-impress-subdivision-patch-payload-v1_0.md)
 - [ ] [Surface Spec 158: .impress Implicit Patch Payload Security (v1.0)](../specifications/surface-158-impress-implicit-patch-payload-security-v1_0.md)
 

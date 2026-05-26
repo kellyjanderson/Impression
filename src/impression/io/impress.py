@@ -9,6 +9,7 @@ from typing import Mapping, Sequence
 
 import numpy as np
 
+from impression.modeling.path3d import Path3D
 from impression.modeling.surface import (
     BSplineSurfacePatch,
     NURBSSurfacePatch,
@@ -16,6 +17,7 @@ from impression.modeling.surface import (
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
+    SweepSurfacePatch,
     SurfaceAdjacencyRecord,
     SurfaceBoundaryRef,
     SurfaceBody,
@@ -35,9 +37,11 @@ _PATCH_KIND_FAMILIES = {
     "RevolutionSurfacePatch": "revolution",
     "BSplineSurfacePatch": "bspline",
     "NURBSSurfacePatch": "nurbs",
+    "SweepSurfacePatch": "sweep",
 }
 _ANALYTIC_PATCH_PAYLOAD_VERSION = 1
 _SPLINE_PATCH_PAYLOAD_VERSION = 1
+_SWEEP_PATCH_PAYLOAD_VERSION = 1
 
 
 class ImpressFormatError(ValueError):
@@ -779,6 +783,28 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 control_net=_validate_control_net3_payload(geometry.get("control_net"), "control_net"),
                 weights=_validate_weight_net_payload(geometry.get("weights"), "weights"),
             )
+        if kind == "SweepSurfacePatch":
+            _validate_patch_geometry_fields(
+                geometry,
+                kind=kind,
+                allowed_fields={
+                    "payload_version",
+                    "profile_points_uv",
+                    "path_points",
+                    "frame_policy",
+                    "profile_reference",
+                    "path_reference",
+                },
+                expected_payload_version=_SWEEP_PATCH_PAYLOAD_VERSION,
+            )
+            return SweepSurfacePatch(
+                **common,
+                profile_points_uv=_validate_profile_points2_payload(geometry.get("profile_points_uv"), "profile_points_uv"),
+                path=Path3D.from_points(_validate_points3_payload(geometry.get("path_points"), "path_points")),
+                frame_policy=_validate_string_payload(geometry.get("frame_policy"), "frame_policy"),
+                profile_reference=_validate_optional_string_payload(geometry.get("profile_reference"), "profile_reference"),
+                path_reference=_validate_optional_string_payload(geometry.get("path_reference"), "path_reference"),
+            )
     except (TypeError, ValueError) as exc:
         raise ImpressFormatError(str(exc)) from exc
     raise ImpressFormatError(f"Unsupported SurfacePatch kind {kind!r}.")
@@ -1024,6 +1050,15 @@ def _encode_patch_geometry_payload(patch: SurfacePatch) -> dict[str, object]:
             "control_net": _array_payload(geometry["control_net"]),
             "weights": _array_payload(geometry["weights"]),
         }
+    if isinstance(patch, SweepSurfacePatch):
+        return {
+            "payload_version": _SWEEP_PATCH_PAYLOAD_VERSION,
+            "profile_points_uv": _array_payload(geometry["profile_points_uv"]),
+            "path_points": _array_payload(geometry["path_points"]),
+            "frame_policy": str(geometry["frame_policy"]),
+            "profile_reference": geometry["profile_reference"],
+            "path_reference": geometry["path_reference"],
+        }
     raise ImpressFormatError(f"Unsupported SurfacePatch kind {type(patch).__name__!r}.")
 
 
@@ -1140,6 +1175,18 @@ def _validate_points2_payload(payload: object, name: str) -> np.ndarray:
     return points
 
 
+def _validate_profile_points2_payload(payload: object, name: str) -> np.ndarray:
+    try:
+        points = np.asarray(payload, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be a numeric 2D point array.") from exc
+    if points.ndim != 2 or points.shape[1] != 2 or points.shape[0] < 2:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must contain at least two 2D points.")
+    if not np.all(np.isfinite(points)):
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must contain only finite values.")
+    return points
+
+
 def _validate_float_payload(payload: object, name: str) -> float:
     try:
         value = float(payload)
@@ -1157,6 +1204,18 @@ def _validate_float_tuple_payload(payload: object, name: str) -> tuple[float, ..
     if not values:
         raise ImpressFormatError(f"SurfacePatch geometry {name} must not be empty.")
     return values
+
+
+def _validate_string_payload(payload: object, name: str) -> str:
+    if not isinstance(payload, str) or not payload.strip():
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be a non-empty string.")
+    return payload
+
+
+def _validate_optional_string_payload(payload: object, name: str) -> str | None:
+    if payload is None:
+        return None
+    return _validate_string_payload(payload, name)
 
 
 def validate_impress_document_root(root: Mapping[str, object]) -> ImpressDocumentRoot:
