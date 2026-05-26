@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Mapping, Sequence
+
+from impression.modeling.surface import SurfaceBody
 
 IMPRESS_FORMAT = "impress"
 CURRENT_IMPRESS_SCHEMA_VERSION = "1.0"
@@ -28,6 +30,37 @@ class ImpressUnits:
 
     def to_json_object(self) -> dict[str, object]:
         return {"length": self.length}
+
+
+@dataclass(frozen=True)
+class ImpressBodyEntry:
+    """One body entry inside a `.impress` surface body store."""
+
+    body_id: str
+    stable_identity: str
+    body: SurfaceBody | None = None
+
+    def to_json_object(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "body_id": self.body_id,
+            "stable_identity": self.stable_identity,
+        }
+        if self.body is not None:
+            payload["body_ref"] = self.body_id
+        return payload
+
+
+@dataclass(frozen=True)
+class SurfaceBodyStore:
+    """Validated `.impress` persisted surface body store."""
+
+    bodies: tuple[ImpressBodyEntry, ...]
+
+    def __post_init__(self) -> None:
+        _validate_body_entries(self.bodies)
+
+    def to_json_object(self) -> dict[str, object]:
+        return {"bodies": [entry.to_json_object() for entry in self.bodies]}
 
 
 @dataclass(frozen=True)
@@ -91,6 +124,82 @@ def validate_impress_units(units: ImpressUnits | Mapping[str, object] | None) ->
             f"Unsupported `.impress` length unit {unit_record.length!r}; expected one of {supported}."
         )
     return unit_record
+
+
+def make_surface_body_store(bodies: Sequence[SurfaceBody]) -> SurfaceBodyStore:
+    """Create a deterministic store from authored surface bodies."""
+
+    entries = []
+    for index, body in enumerate(bodies):
+        if not isinstance(body, SurfaceBody):
+            raise ImpressFormatError("SurfaceBodyStore can only contain SurfaceBody instances.")
+        entries.append(
+            ImpressBodyEntry(
+                body_id=f"body-{index + 1:04d}",
+                stable_identity=body.stable_identity,
+                body=body,
+            )
+        )
+    return SurfaceBodyStore(tuple(entries))
+
+
+def validate_surface_body_store(store: SurfaceBodyStore | Mapping[str, object]) -> SurfaceBodyStore:
+    """Validate a `.impress` body store shape and stable identity policy."""
+
+    if isinstance(store, SurfaceBodyStore):
+        entries = store.bodies
+    elif isinstance(store, Mapping):
+        unknown_keys = set(store) - {"bodies"}
+        if unknown_keys:
+            keys = ", ".join(sorted(str(key) for key in unknown_keys))
+            raise ImpressFormatError(f"Unsupported SurfaceBodyStore fields: {keys}.")
+        raw_entries = store.get("bodies")
+        if not isinstance(raw_entries, Sequence) or isinstance(raw_entries, (str, bytes)):
+            raise ImpressFormatError("SurfaceBodyStore bodies must be an array.")
+        entries = tuple(_validate_body_entry_payload(entry) for entry in raw_entries)
+    else:
+        raise ImpressFormatError("SurfaceBodyStore must be an object.")
+
+    _validate_body_entries(entries)
+    return SurfaceBodyStore(tuple(entries)) if not isinstance(store, SurfaceBodyStore) else store
+
+
+def _validate_body_entries(entries: Sequence[ImpressBodyEntry]) -> None:
+    if not entries:
+        raise ImpressFormatError("SurfaceBodyStore requires at least one body entry.")
+
+    body_ids: set[str] = set()
+    identities: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, ImpressBodyEntry):
+            raise ImpressFormatError("SurfaceBodyStore entries must be ImpressBodyEntry records.")
+        if entry.body_id in body_ids:
+            raise ImpressFormatError(f"Duplicate SurfaceBodyStore body_id {entry.body_id!r}.")
+        if entry.stable_identity in identities:
+            raise ImpressFormatError(f"Duplicate SurfaceBodyStore stable_identity {entry.stable_identity!r}.")
+        if entry.body is not None and entry.body.stable_identity != entry.stable_identity:
+            raise ImpressFormatError(f"Body entry {entry.body_id!r} stable_identity does not match its SurfaceBody.")
+        body_ids.add(entry.body_id)
+        identities.add(entry.stable_identity)
+
+
+def _validate_body_entry_payload(entry: object) -> ImpressBodyEntry:
+    if not isinstance(entry, Mapping):
+        raise ImpressFormatError("SurfaceBodyStore body entries must be objects.")
+    unknown_keys = set(entry) - {"body_id", "stable_identity", "body_ref"}
+    if unknown_keys:
+        keys = ", ".join(sorted(str(key) for key in unknown_keys))
+        raise ImpressFormatError(f"Unsupported SurfaceBodyStore body entry fields: {keys}.")
+    body_id = entry.get("body_id")
+    stable_identity = entry.get("stable_identity")
+    if not isinstance(body_id, str) or not body_id:
+        raise ImpressFormatError("SurfaceBodyStore body entries require a non-empty body_id.")
+    if not isinstance(stable_identity, str) or not stable_identity:
+        raise ImpressFormatError("SurfaceBodyStore body entries require a non-empty stable_identity.")
+    body_ref = entry.get("body_ref", body_id)
+    if body_ref != body_id:
+        raise ImpressFormatError("SurfaceBodyStore body_ref must match body_id when present.")
+    return ImpressBodyEntry(body_id=body_id, stable_identity=stable_identity)
 
 
 def validate_impress_document_root(root: Mapping[str, object]) -> ImpressDocumentRoot:
