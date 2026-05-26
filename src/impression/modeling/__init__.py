@@ -167,6 +167,7 @@ from .heightmap import heightmap, displace_heightmap
 from .drafting import make_line, make_plane, make_arrow, make_dimension
 from .text import make_text, text, text_profiles, text_sections
 from .topology import (
+    GeneratedRailProvenance,
     Loop,
     Region,
     Section,
@@ -430,6 +431,7 @@ __all__ = [
     "text",
     "text_profiles",
     "text_sections",
+    "GeneratedRailProvenance",
     "Loop",
     "Region",
     "Section",
