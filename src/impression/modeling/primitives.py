@@ -53,7 +53,7 @@ def make_cylinder(
     direction: Sequence[float] = (0.0, 0.0, 1.0),
     resolution: int = 128,
     capping: bool = True,
-    backend: Backend = "mesh",
+    backend: Backend = "surface",
     color: Sequence[float] | str | None = None,
 ) -> Mesh | SurfaceBody:
     """Right circular cylinder aligned with `direction`."""
@@ -87,7 +87,7 @@ def make_ngon(
     height: float = 1.0,
     center: Sequence[float] = (0.0, 0.0, 0.0),
     direction: Sequence[float] = (0.0, 0.0, 1.0),
-    backend: Backend = "mesh",
+    backend: Backend = "surface",
     color: Sequence[float] | str | None = None,
     *,
     side_length: float | None = None,
@@ -252,7 +252,7 @@ def make_cone(
     center: Sequence[float] = (0.0, 0.0, 0.0),
     direction: Sequence[float] = (0.0, 0.0, 1.0),
     resolution: int = 64,
-    backend: Backend = "mesh",
+    backend: Backend = "surface",
     color: Sequence[float] | str | None = None,
     *,
     radius: float | None = None,

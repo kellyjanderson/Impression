@@ -41,6 +41,7 @@ def build():
 ## Cylinder
 
 - **Function:** `make_cylinder(radius=0.5, height=1.0, center=(0,0,0), direction=(0,0,1), resolution=128)`
+- **Default output:** `SurfaceBody`; use `backend="mesh"` for explicit mesh compatibility.
 - **Options**
   - `radius` / `height`
   - `direction`: normalized axis vector.
@@ -96,6 +97,7 @@ def build():
 ## Cone / Circular Frustum
 
 - **Function:** `make_cone(bottom_diameter=1.0, top_diameter=0.0, height=1.0, ...)`
+- **Default output:** `SurfaceBody`; use `backend="mesh"` for explicit mesh compatibility.
 - Supports classic cones (`top_diameter=0`) or truncated frustums.
 - **Example:** `docs/examples/primitives/cone_example.py`
 - **Preview:** `impression preview docs/examples/primitives/cone_example.py`
@@ -146,6 +148,7 @@ def build():
 ## N-gon Prism
 
 - **Function:** `make_ngon(sides=6, radius=0.5, height=1.0, center=(0,0,0), direction=(0,0,1))`
+- **Default output:** `SurfaceBody`; use `backend="mesh"` for explicit mesh compatibility.
 - **Options**
   - `sides`: number of polygon sides (>= 3).
   - `radius`: distance from center to vertices (circumscribed radius).
