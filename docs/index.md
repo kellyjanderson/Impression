@@ -61,9 +61,10 @@ scripts/run_stl_tests.py
 
 - [Project Workspace](../project/README.md) - planning, architecture, specifications, and project records.
 - [Project DNA](../project/project-dna.md) - core values and quality bar for every feature, example, and workflow.
-- [Project Plan](../project/planning/README.md) - roadmap, open questions, and future features.
-- [Feature Pipeline](../project/planning/feature-pipeline.md) - current implementation order.
-- [Implementation Specs](../project/specifications/README.md) - detailed implementation plans for major refactors/features.
+- [Active Release Workspace](../project/release-0.1.0a/README.md) - release-scoped planning, architecture, specifications, and records.
+- [Project Plan](../project/release-0.1.0a/planning/README.md) - roadmap, open questions, and future features.
+- [Feature Pipeline](../project/release-0.1.0a/planning/feature-pipeline.md) - current implementation order.
+- [Implementation Specs](../project/release-0.1.0a/specifications/README.md) - detailed implementation plans for major refactors/features.
 - [Changelog](../CHANGELOG.md) - release notes and supported/unsupported feature classes.
 
 ## Project Records
@@ -71,10 +72,8 @@ scripts/run_stl_tests.py
 - [Brand Guide](brand/brand-guide.md)
 - [Design System Notes](brand/design-system.md)
 - [Style Guide](brand/style-guide.md)
-- [Issue: Preview hot reload fails](../project/issues/impression-preview-hot-reload-fails.md)
-- [Issue: Camera resets on hot reload](../project/issues/camera-reset-on-hot-reload.md)
-- [PR: Hot reload resilience](../project/prs/bugfix-impression-preview-hot-reload.md)
-- [PR: Camera reset on reload](../project/prs/bugfix-camera-reset-on-hot-reload.md)
-- [PR: Configurable units](../project/prs/feature-config-unit-defaults.md)
+- [PR: Hot reload resilience](../project/release-0.1.0a/prs/bugfix-impression-preview-hot-reload.md)
+- [PR: Camera reset on reload](../project/release-0.1.0a/prs/bugfix-camera-reset-on-hot-reload.md)
+- [PR: Configurable units](../project/release-0.1.0a/prs/feature-config-unit-defaults.md)
 - [Meeting Notes (2025-11-11)](../project/meetings/2025-11-11.md)
 - [Findings (2025-11-11)](../project/research/2025-11-11.md)

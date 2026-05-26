@@ -1,0 +1,243 @@
+{
+  "generated": true,
+  "generated_at": 1778903598,
+  "generated_by": "system-skills-composer",
+  "generated_note": "Generated runtime output. Edit source skills in the custom hierarchy, not this .agents/skills tree.",
+  "orphaned_skills": [],
+  "runtime_root": "/Users/k/Documents/Projects/Impression/.agents/skills",
+  "schema_version": 1,
+  "selected_skills": [
+    {
+      "output_position": 0,
+      "runtime_identity": "accessibility-and-input",
+      "source_content_hash": "9f47ff253e8b20146e4760a03f30be58279e95b833e3f568f226b3e404280379",
+      "source_layer": "ancestor:/Users/k",
+      "source_path": "/Users/k/Agents/skills/accessibility-and-input"
+    },
+    {
+      "output_position": 1,
+      "runtime_identity": "bootstrap",
+      "source_content_hash": "e75be45b3332095da065de945b6504d21e1c5e72c702aaeb575674e196f45884",
+      "source_layer": "ancestor:/Users/k",
+      "source_path": "/Users/k/Agents/skills/bootstrap"
+    },
+    {
+      "output_position": 2,
+      "runtime_identity": "color-system-design",
+      "source_content_hash": "7ed5928d864bfdc5f6f1f857f66ba41ae041ee042ec2214b1e9025465cedae30",
+      "source_layer": "ancestor:/Users/k",
+      "source_path": "/Users/k/Agents/skills/color-system-design"
+    },
+    {
+      "output_position": 3,
+      "runtime_identity": "interaction-state-design",
+      "source_content_hash": "6918f61d8caa4a9bc436e9db26229558d0519263d248aa3a51dc46ca1a718c7f",
+      "source_layer": "ancestor:/Users/k",
+      "source_path": "/Users/k/Agents/skills/interaction-state-design"
+    },
+    {
+      "output_position": 4,
+      "runtime_identity": "qt-quick-layouts-and-overflow",
+      "source_content_hash": "587dc5105bfa1ecd977ef07e6d547f36e0dcbaa801b90b50944112a28a4da20d",
+      "source_layer": "ancestor:/Users/k",
+      "source_path": "/Users/k/Agents/skills/qt-quick-layouts-and-overflow"
+    },
+    {
+      "output_position": 5,
+      "runtime_identity": "research-guidance",
+      "source_content_hash": "bf1b02114b210035fa1816bb4759e3ba9e546909843ea8554411ef9cb8f79f95",
+      "source_layer": "ancestor:/Users/k",
+      "source_path": "/Users/k/Agents/skills/research-guidance"
+    },
+    {
+      "output_position": 6,
+      "runtime_identity": "system-policies",
+      "source_content_hash": "604bc02db7b9b92513f94367481ba0da896ec24cf57c4c44f478ebf61d1d6fbc",
+      "source_layer": "ancestor:/Users/k",
+      "source_path": "/Users/k/Agents/skills/system-policies"
+    },
+    {
+      "output_position": 7,
+      "runtime_identity": "system-skills",
+      "source_content_hash": "2add7c6c0cac5e4008fc057c651932d1be0117c2b29dea6d350b53ed2d1868e8",
+      "source_layer": "ancestor:/Users/k",
+      "source_path": "/Users/k/Agents/skills/system-skills"
+    },
+    {
+      "output_position": 8,
+      "runtime_identity": "ui-definitions",
+      "source_content_hash": "25dce344be60d52d4bfb8344992277c0adf1fc9da6866339c81e7639325364f4",
+      "source_layer": "ancestor:/Users/k/Documents/Projects",
+      "source_path": "/Users/k/Documents/Projects/.agents/skills/ui-definitions"
+    },
+    {
+      "output_position": 9,
+      "runtime_identity": "ui-review",
+      "source_content_hash": "4c1601e3fc30c076e068489d650f0aca288df25b83d137ab840881a2b15995ca",
+      "source_layer": "ancestor:/Users/k",
+      "source_path": "/Users/k/Agents/skills/ui-review"
+    },
+    {
+      "output_position": 10,
+      "runtime_identity": "ui-ux-invariants",
+      "source_content_hash": "db50bf272ac25a6d6c234f3343eb22a2b6f31c6b7975a30837c3e596cc888c8f",
+      "source_layer": "ancestor:/Users/k/Documents/Projects",
+      "source_path": "/Users/k/Documents/Projects/.agents/skills/ui-ux-invariants"
+    },
+    {
+      "output_position": 11,
+      "runtime_identity": "visual-design-foundations",
+      "source_content_hash": "b45a9e318b5c93a693360937f5652429a7260443c249dde4753b08266ac49aff",
+      "source_layer": "ancestor:/Users/k",
+      "source_path": "/Users/k/Agents/skills/visual-design-foundations"
+    },
+    {
+      "output_position": 12,
+      "runtime_identity": "architecture",
+      "source_content_hash": "25d741004653ed047a847e1e7f4610c797d8487488a2ae82217f678105512e77",
+      "source_layer": "ancestor:/Users/k/Documents/Projects",
+      "source_path": "/Users/k/Documents/Projects/.agents/skills/architecture"
+    },
+    {
+      "output_position": 13,
+      "runtime_identity": "do-research",
+      "source_content_hash": "e42a80a0fab97ad365027bbf624fb040c6423f3da2fefa39921bc6ee76e2d49f",
+      "source_layer": "ancestor:/Users/k/Documents/Projects",
+      "source_path": "/Users/k/Documents/Projects/.agents/skills/do-research"
+    },
+    {
+      "output_position": 14,
+      "runtime_identity": "documentation",
+      "source_content_hash": "598d6bced13d58044b31bb1b1eb1adade31de7b288d6265748dadfe0780f971c",
+      "source_layer": "ancestor:/Users/k/Documents/Projects",
+      "source_path": "/Users/k/Documents/Projects/.agents/skills/documentation"
+    },
+    {
+      "output_position": 15,
+      "runtime_identity": "git-and-github-core",
+      "source_content_hash": "04a612fcd4775c8206d0355a820535929c69517f47230f10131e1726d8630a04",
+      "source_layer": "ancestor:/Users/k/Documents/Projects",
+      "source_path": "/Users/k/Documents/Projects/.agents/skills/git-and-github-core"
+    },
+    {
+      "output_position": 16,
+      "runtime_identity": "impression",
+      "source_content_hash": "3996de4f04009aec2fbc5bb77947a4326c98cefcadb20c95a4caf8b1c0f668d7",
+      "source_layer": "ancestor:/Users/k/Documents/Projects",
+      "source_path": "/Users/k/Documents/Projects/.agents/skills/impression"
+    },
+    {
+      "output_position": 17,
+      "runtime_identity": "planning",
+      "source_content_hash": "a5f487a0a00e411ba0c1a7daf20566758d705d1b951778d31f30ea6a9656f701",
+      "source_layer": "ancestor:/Users/k/Documents/Projects",
+      "source_path": "/Users/k/Documents/Projects/.agents/skills/planning"
+    },
+    {
+      "output_position": 18,
+      "runtime_identity": "release-definitions",
+      "source_content_hash": "fb7a8db5b45dfa6bf31f858b953e8b2c6c51fc839cf75e5c472d0d1c265f791c",
+      "source_layer": "ancestor:/Users/k/Documents/Projects",
+      "source_path": "/Users/k/Documents/Projects/.agents/skills/release-definitions"
+    },
+    {
+      "output_position": 19,
+      "runtime_identity": "research",
+      "source_content_hash": "848417d5ddbab885a5f7846966283a142bae82d5f46df06aff395cdd1299a30e",
+      "source_layer": "ancestor:/Users/k/Documents/Projects",
+      "source_path": "/Users/k/Documents/Projects/.agents/skills/research"
+    },
+    {
+      "output_position": 20,
+      "runtime_identity": "specification-sizing",
+      "source_content_hash": "a69f0ac87116cf3c2e50ec31a14cd37c8254084c697162cda02398ee58da18a7",
+      "source_layer": "ancestor:/Users/k/Documents/Projects",
+      "source_path": "/Users/k/Documents/Projects/.agents/skills/specification-sizing"
+    },
+    {
+      "output_position": 21,
+      "runtime_identity": "specifications-core",
+      "source_content_hash": "7240c2d6f9b0f4f9c5d2e1daa9f57ede157ab1c1771105e7f13d8e0327d34d5b",
+      "source_layer": "ancestor:/Users/k/Documents/Projects",
+      "source_path": "/Users/k/Documents/Projects/.agents/skills/specifications-core"
+    },
+    {
+      "output_position": 22,
+      "runtime_identity": "test-specifications-core",
+      "source_content_hash": "1b21a87c260ec6aaf71d35242862fd11166d3eaf3ec6fd7e783bacc03831b824",
+      "source_layer": "ancestor:/Users/k/Documents/Projects",
+      "source_path": "/Users/k/Documents/Projects/.agents/skills/test-specifications-core"
+    },
+    {
+      "output_position": 23,
+      "runtime_identity": "workflow-core",
+      "source_content_hash": "3daa113697fe36d70ab353e75946b02ba11e0507269d2f260e1940c2cd27fe1b",
+      "source_layer": "ancestor:/Users/k/Documents/Projects",
+      "source_path": "/Users/k/Documents/Projects/.agents/skills/workflow-core"
+    },
+    {
+      "output_position": 24,
+      "runtime_identity": "coverage-discipline",
+      "source_content_hash": "721f2b16373adfa4de676c404b8ab21c36d795ac906a2d6cdc66e88d3db62978",
+      "source_layer": "ancestor:/Users/k/Documents/Projects/Impression",
+      "source_path": "/Users/k/Documents/Projects/Impression/.agents/coverage-discipline"
+    },
+    {
+      "output_position": 25,
+      "runtime_identity": "delegation",
+      "source_content_hash": "63060cf663292a54b962accdd79c88c7d4b67ee17c4415975db4181211e74b6c",
+      "source_layer": "ancestor:/Users/k/Documents/Projects/Impression",
+      "source_path": "/Users/k/Documents/Projects/Impression/.agents/delegation"
+    },
+    {
+      "output_position": 26,
+      "runtime_identity": "git-and-github-overlay",
+      "source_content_hash": "4e5f3ebc6cf5be157d1631742405aeb3fde9f2c3200304ec73a398f2a8fab53f",
+      "source_layer": "ancestor:/Users/k/Documents/Projects/Impression",
+      "source_path": "/Users/k/Documents/Projects/Impression/.agents/git-and-github-overlay"
+    },
+    {
+      "output_position": 27,
+      "runtime_identity": "modern-surface-first-guardrails",
+      "source_content_hash": "a562bc3563e8344b33d822e5655a2cb448152cb7ce03dc0314236027f13ac40e",
+      "source_layer": "ancestor:/Users/k/Documents/Projects/Impression",
+      "source_path": "/Users/k/Documents/Projects/Impression/.agents/modern-surface-first-guardrails"
+    },
+    {
+      "output_position": 28,
+      "runtime_identity": "reference-artifact-lifecycle",
+      "source_content_hash": "841bd5471d2c384bea348004c602d1ca6d2e0582be5d287377166ad60cce6e2d",
+      "source_layer": "ancestor:/Users/k/Documents/Projects/Impression",
+      "source_path": "/Users/k/Documents/Projects/Impression/.agents/reference-artifact-lifecycle"
+    },
+    {
+      "output_position": 29,
+      "runtime_identity": "session-handoff",
+      "source_content_hash": "d946a24e355bd6da78d10b0b52258a9d193e6f7c481457cea58ce55cf9a95386",
+      "source_layer": "ancestor:/Users/k/Documents/Projects/Impression",
+      "source_path": "/Users/k/Documents/Projects/Impression/.agents/session-handoff"
+    },
+    {
+      "output_position": 30,
+      "runtime_identity": "workflow-impression-overlay",
+      "source_content_hash": "9e26d835cfa835c7d7d20de63bfbfe481dbefeb9559581b22f13f49ccebb188c",
+      "source_layer": "ancestor:/Users/k/Documents/Projects/Impression",
+      "source_path": "/Users/k/Documents/Projects/Impression/.agents/workflow-impression-overlay"
+    },
+    {
+      "output_position": 31,
+      "runtime_identity": "workspace-index",
+      "source_content_hash": "4b044efcb2efb5567595154597daee57964e45edcd902f662e095cdd2a689c59",
+      "source_layer": "ancestor:/Users/k/Documents/Projects/Impression",
+      "source_path": "/Users/k/Documents/Projects/Impression/.agents/workspace-index"
+    },
+    {
+      "output_position": 32,
+      "runtime_identity": "concurrency-design",
+      "source_content_hash": "bfa990b9690bfff57acedc46b8668a2d3a61071f73fbc3bd2e57f1373490244a",
+      "source_layer": "ancestor:/Users/k",
+      "source_path": "/Users/k/Agents/skills/concurrency-design"
+    }
+  ],
+  "workspace_root": "/Users/k/Documents/Projects/Impression"
+}
