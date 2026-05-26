@@ -45,6 +45,8 @@ from impression.io import (
 )
 import numpy as np
 from impression.modeling.surface import (
+    BSplineSurfacePatch,
+    NURBSSurfacePatch,
     ParameterDomain,
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
@@ -712,6 +714,54 @@ def test_encode_decode_ruled_and_revolution_surface_patch_payloads_round_trip() 
     assert decode_surface_patch_payload(revolution_payload).stable_identity == revolution.stable_identity
 
 
+def test_encode_decode_spline_surface_patch_payloads_round_trip() -> None:
+    control_net = np.array(
+        [
+            [[0.0, 0.0, 0.0], [0.0, 1.0, 0.2], [0.0, 2.0, 0.0]],
+            [[1.0, 0.0, 0.1], [1.0, 1.0, 0.4], [1.0, 2.0, 0.1]],
+            [[2.0, 0.0, 0.0], [2.0, 1.0, 0.2], [2.0, 2.0, 0.0]],
+        ],
+        dtype=float,
+    )
+    knots = (0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+    domain = ParameterDomain(u_range=(0.0, 1.0), v_range=(0.0, 1.0))
+    bspline = BSplineSurfacePatch(
+        family="bspline",
+        domain=domain,
+        degree_u=2,
+        degree_v=2,
+        knots_u=knots,
+        knots_v=knots,
+        control_net=control_net,
+    )
+    nurbs = NURBSSurfacePatch(
+        family="nurbs",
+        domain=domain,
+        degree_u=2,
+        degree_v=2,
+        knots_u=knots,
+        knots_v=knots,
+        control_net=control_net,
+        weights=np.array([[1.0, 1.25, 1.0], [1.0, 2.0, 1.0], [1.0, 1.25, 1.0]], dtype=float),
+    )
+
+    bspline_payload = encode_surface_patch_payload(bspline)
+    nurbs_payload = encode_surface_patch_payload(nurbs)
+
+    assert bspline_payload["geometry"] == {
+        "payload_version": 1,
+        "degree_u": 2,
+        "degree_v": 2,
+        "knots_u": list(knots),
+        "knots_v": list(knots),
+        "control_net": control_net.tolist(),
+    }
+    assert nurbs_payload["geometry"]["payload_version"] == 1
+    assert nurbs_payload["geometry"]["weights"] == nurbs.weights.tolist()
+    assert decode_surface_patch_payload(bspline_payload).stable_identity == bspline.stable_identity
+    assert decode_surface_patch_payload(nurbs_payload).stable_identity == nurbs.stable_identity
+
+
 def test_decode_surface_patch_payload_rejects_invalid_family_dispatch() -> None:
     patch = PlanarSurfacePatch(family="planar")
     payload = encode_surface_patch_payload(patch)
@@ -748,6 +798,38 @@ def test_decode_analytic_surface_patch_payload_rejects_unversioned_or_unknown_ge
     payload["geometry"] = geometry
 
     with pytest.raises(ImpressFormatError, match=message):
+        decode_surface_patch_payload(payload)
+
+
+@pytest.mark.parametrize(
+    "mutation, message",
+    [
+        (lambda geometry: geometry.pop("payload_version"), "payload_version"),
+        (lambda geometry: geometry.update({"payload_version": 2}), "payload_version"),
+        (lambda geometry: geometry.update({"mesh": {"vertices": []}}), "Unsupported BSplineSurfacePatch geometry fields"),
+        (lambda geometry: geometry.update({"degree_u": 0}), "positive integer"),
+        (lambda geometry: geometry.update({"control_net": [[[0.0, 0.0, float("nan")]]]}), "control_net"),
+    ],
+)
+def test_decode_bspline_surface_patch_payload_rejects_invalid_geometry(mutation, message: str) -> None:
+    patch = BSplineSurfacePatch(family="bspline")
+    payload = encode_surface_patch_payload(patch)
+    geometry = dict(payload["geometry"])  # type: ignore[arg-type]
+    mutation(geometry)
+    payload["geometry"] = geometry
+
+    with pytest.raises(ImpressFormatError, match=message):
+        decode_surface_patch_payload(payload)
+
+
+def test_decode_nurbs_surface_patch_payload_rejects_invalid_weights() -> None:
+    patch = NURBSSurfacePatch(family="nurbs")
+    payload = encode_surface_patch_payload(patch)
+    geometry = dict(payload["geometry"])  # type: ignore[arg-type]
+    geometry["weights"] = [[1.0, 0.0], [1.0, 1.0]]
+    payload["geometry"] = geometry
+
+    with pytest.raises(ImpressFormatError, match="weights"):
         decode_surface_patch_payload(payload)
 
 
