@@ -125,6 +125,45 @@ def _as_control_net3(value: Sequence[Sequence[Sequence[float]]] | np.ndarray, *,
     return net
 
 
+def _as_control_points3(value: Sequence[Sequence[float]] | np.ndarray, *, name: str) -> np.ndarray:
+    pts = np.asarray(value, dtype=float).reshape(-1, 3)
+    if pts.shape[0] < 3:
+        raise ValueError(f"{name} must contain at least three 3D points.")
+    if not np.all(np.isfinite(pts)):
+        raise ValueError(f"{name} must contain only finite values.")
+    return pts
+
+
+def _normalize_subdivision_faces(
+    faces: Sequence[Sequence[int]],
+    *,
+    control_point_count: int,
+) -> tuple[tuple[int, ...], ...]:
+    normalized: list[tuple[int, ...]] = []
+    for face_index, face in enumerate(faces):
+        indices = tuple(int(index) for index in face)
+        if len(indices) < 3:
+            raise ValueError("SubdivisionSurfacePatch faces must contain at least three vertices.")
+        if len(set(indices)) != len(indices):
+            raise ValueError("SubdivisionSurfacePatch faces may not repeat a vertex.")
+        for index in indices:
+            if index < 0 or index >= control_point_count:
+                raise ValueError(f"SubdivisionSurfacePatch face {face_index} references a control point outside the cage.")
+        normalized.append(indices)
+    if not normalized:
+        raise ValueError("SubdivisionSurfacePatch requires at least one face.")
+    return tuple(normalized)
+
+
+def _subdivision_face_edges(faces: Sequence[Sequence[int]]) -> frozenset[tuple[int, int]]:
+    edges: set[tuple[int, int]] = set()
+    for face in faces:
+        for start, end in zip(face, (*face[1:], face[0])):
+            edge = tuple(sorted((int(start), int(end))))
+            edges.add((edge[0], edge[1]))
+    return frozenset(edges)
+
+
 def _normalize_degree(value: int, *, name: str) -> int:
     degree = int(value)
     if degree < 1:
@@ -1262,6 +1301,108 @@ class SweepSurfacePatch(SurfacePatch):
 
 
 @dataclass(frozen=True)
+class SubdivisionCrease:
+    """Sharpness assigned to one authored control-cage edge."""
+
+    edge: tuple[int, int]
+    sharpness: float = 1.0
+
+    def __post_init__(self) -> None:
+        edge = tuple(int(index) for index in self.edge)
+        if len(edge) != 2:
+            raise ValueError("SubdivisionCrease.edge must contain exactly two vertex indices.")
+        if edge[0] == edge[1]:
+            raise ValueError("SubdivisionCrease.edge must reference two distinct vertices.")
+        sharpness = float(self.sharpness)
+        if not np.isfinite(sharpness) or sharpness < 0.0:
+            raise ValueError("SubdivisionCrease.sharpness must be finite and non-negative.")
+        normalized_edge = tuple(sorted(edge))
+        object.__setattr__(self, "edge", (normalized_edge[0], normalized_edge[1]))
+        object.__setattr__(self, "sharpness", sharpness)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "edge": self.edge,
+            "sharpness": self.sharpness,
+        }
+
+
+SubdivisionScheme = Literal["catmull_clark"]
+
+
+@dataclass(frozen=True)
+class SubdivisionSurfacePatch(SurfacePatch):
+    """A subdivision surface payload with authored control cage and crease metadata."""
+
+    control_points: np.ndarray = field(
+        default_factory=lambda: np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ],
+            dtype=float,
+        )
+    )
+    faces: tuple[tuple[int, ...], ...] = ((0, 1, 2, 3),)
+    creases: tuple[SubdivisionCrease, ...] = field(default_factory=tuple)
+    subdivision_level: int = 1
+    scheme: SubdivisionScheme = "catmull_clark"
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.family != "subdivision":
+            raise ValueError("SubdivisionSurfacePatch.family must be 'subdivision'.")
+        control_points = _as_control_points3(self.control_points, name="control_points")
+        faces = _normalize_subdivision_faces(self.faces, control_point_count=control_points.shape[0])
+        cage_edges = _subdivision_face_edges(faces)
+        creases = tuple(crease if isinstance(crease, SubdivisionCrease) else SubdivisionCrease(**crease) for crease in self.creases)
+        seen_creases: set[tuple[int, int]] = set()
+        for crease in creases:
+            if crease.edge not in cage_edges:
+                raise ValueError("SubdivisionSurfacePatch creases must reference existing cage edges.")
+            if crease.edge in seen_creases:
+                raise ValueError("SubdivisionSurfacePatch creases must be unique per cage edge.")
+            seen_creases.add(crease.edge)
+        subdivision_level = int(self.subdivision_level)
+        if subdivision_level < 0:
+            raise ValueError("SubdivisionSurfacePatch.subdivision_level must be >= 0.")
+        scheme = str(self.scheme)
+        if scheme != "catmull_clark":
+            raise ValueError("SubdivisionSurfacePatch.scheme must be 'catmull_clark'.")
+        object.__setattr__(self, "control_points", control_points)
+        object.__setattr__(self, "faces", faces)
+        object.__setattr__(self, "creases", creases)
+        object.__setattr__(self, "subdivision_level", subdivision_level)
+        object.__setattr__(self, "scheme", scheme)
+
+    def geometry_payload(self) -> dict[str, object]:
+        return {
+            "scheme": self.scheme,
+            "subdivision_level": self.subdivision_level,
+            "control_points": self.control_points,
+            "faces": self.faces,
+            "creases": [crease.canonical_payload() for crease in self.creases],
+        }
+
+    def point_at(self, u: float, v: float) -> np.ndarray:
+        self.validate_parameters(u, v)
+        raise NotImplementedError("SubdivisionSurfacePatch evaluation is implemented by Surface Spec 146.")
+
+    def derivatives_at(self, u: float, v: float) -> tuple[np.ndarray, np.ndarray]:
+        self.validate_parameters(u, v)
+        raise NotImplementedError("SubdivisionSurfacePatch derivatives are implemented by Surface Spec 146.")
+
+    def bounds_estimate(self, *, u_count: int = 3, v_count: int = 3) -> tuple[float, float, float, float, float, float]:
+        del u_count, v_count
+        transformed = np.asarray([_transform_point(self.transform_matrix, point) for point in self.control_points], dtype=float)
+        mins = transformed.min(axis=0)
+        maxs = transformed.max(axis=0)
+        return (float(mins[0]), float(maxs[0]), float(mins[1]), float(maxs[1]), float(mins[2]), float(maxs[2]))
+
+
+@dataclass(frozen=True)
 class SurfaceShell:
     """An ordered collection of patches that form one shell."""
 
@@ -1492,6 +1633,8 @@ __all__ = [
     "BSplineSurfacePatch",
     "NURBSSurfacePatch",
     "SweepSurfacePatch",
+    "SubdivisionCrease",
+    "SubdivisionSurfacePatch",
     "SurfaceShell",
     "SurfaceBody",
     "make_surface_shell",
