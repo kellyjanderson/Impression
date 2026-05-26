@@ -347,7 +347,7 @@ Only final leaf specifications appear here.
 - [x] [Impress Spec 08: .impress Adjacency Payload Codec (v1.0)](../specifications/impress-08-impress-adjacency-payload-codec-v1_0.md)
 - [x] [Impress Spec 09: .impress Deterministic JSON Writer (v1.0)](../specifications/impress-09-impress-deterministic-json-writer-v1_0.md)
 - [x] [Impress Spec 10: .impress Reader And Load Result Contract (v1.0)](../specifications/impress-10-impress-reader-and-load-result-contract-v1_0.md)
-- [ ] [Impress Spec 11: .impress Atomic File Write And Error Handling (v1.0)](../specifications/impress-11-impress-atomic-file-write-and-error-handling-v1_0.md)
+- [x] [Impress Spec 11: .impress Atomic File Write And Error Handling (v1.0)](../specifications/impress-11-impress-atomic-file-write-and-error-handling-v1_0.md)
 - [ ] [Impress Spec 12: .impress Round Trip And Refusal Tests (v1.0)](../specifications/impress-12-impress-round-trip-and-refusal-tests-v1_0.md)
 - [ ] [Impress Spec 13: .impress Industry Interchange Boundary (v1.0)](../specifications/impress-13-impress-industry-interchange-boundary-v1_0.md)
 
