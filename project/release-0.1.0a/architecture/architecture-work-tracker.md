@@ -189,7 +189,7 @@ These areas had specs, but the architecture changed enough that at least one
 spec required revision, retirement, or replacement. The required reconciliation
 work now has final specification coverage.
 
-### Loft Mesh Executor Correspondence Consumption
+### Loft Legacy Mesh Debug Correspondence Consumption
 
 - Status: `Spec Revision Promoted`
 - [x] Replacement/reconciliation specification created.
@@ -197,7 +197,7 @@ work now has final specification coverage.
   - [Loft Topology Point Correspondence Architecture](loft-topology-point-correspondence-architecture.md)
   - [Mesh Execution To Tessellation Boundary Architecture](mesh-execution-tessellation-boundary-architecture.md)
 - Current downstream spec:
-  - [Loft Spec 60: Mesh Executor Correspondence Consumption](../specifications/loft-60-mesh-executor-correspondence-consumption-v1_0.md)
+  - [Loft Spec 60: Legacy Mesh Debug Correspondence Consumption](../specifications/loft-60-mesh-executor-correspondence-consumption-v1_0.md)
 
 Issue:
 

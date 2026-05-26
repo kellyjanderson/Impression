@@ -59,7 +59,7 @@
 - [Loft Spec 57: Point Lifecycle Event Records (v1.0)](loft-57-point-lifecycle-event-records-v1_0.md)
 - [Loft Spec 58: Birth/Death Synthetic Support Resolution (v1.0)](loft-58-birth-death-synthetic-support-resolution-v1_0.md)
 - [Loft Spec 59: Correspondence-Preserving Resampling Contract (v1.0)](loft-59-correspondence-preserving-resampling-contract-v1_0.md)
-- [Loft Spec 60: Mesh Executor Correspondence Consumption (v1.0)](loft-60-mesh-executor-correspondence-consumption-v1_0.md)
+- [Loft Spec 60: Legacy Mesh Debug Correspondence Consumption (retired canonical posture)](loft-60-mesh-executor-correspondence-consumption-v1_0.md)
 - [Loft Spec 61: Surface Executor Correspondence Consumption (v1.0)](loft-61-surface-executor-correspondence-consumption-v1_0.md)
 - [Loft Spec 62: Topology Builder Core API (v1.0)](loft-62-topology-builder-core-api-v1_0.md)
 - [Loft Spec 63: Topology Lifecycle Builder API (v1.0)](loft-63-topology-lifecycle-builder-api-v1_0.md)
