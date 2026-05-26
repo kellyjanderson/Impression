@@ -403,4 +403,4 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 185: MeshGroup Explicit Compatibility API (v1.0)](../specifications/surface-185-meshgroup-explicit-compatibility-api-v1_0.md)
 - [x] [Surface Spec 186: MeshGroup Import Boundary Enforcement (v1.0)](../specifications/surface-186-meshgroup-import-boundary-enforcement-v1_0.md)
 - [x] [Surface Spec 187: Mesh Utility Quarantine (v1.0)](../specifications/surface-187-mesh-utility-quarantine-v1_0.md)
-- [ ] [Surface Spec 188: No Hidden Mesh Fallback Enforcement (v1.0)](../specifications/surface-188-no-hidden-mesh-fallback-enforcement-v1_0.md)
+- [x] [Surface Spec 188: No Hidden Mesh Fallback Enforcement (v1.0)](../specifications/surface-188-no-hidden-mesh-fallback-enforcement-v1_0.md)
