@@ -60,7 +60,7 @@ def make_line(
     end: Sequence[float],
     thickness: float = 0.02,
     color: Sequence[float] | str | None = None,
-    backend: Backend = "mesh",
+    backend: Backend = "surface",
 ) -> Mesh | SurfaceBody:
     if backend not in {"mesh", "surface"}:
         raise ValueError("backend must be 'mesh' or 'surface'.")
@@ -119,7 +119,7 @@ def make_plane(
     center: Sequence[float] = (0.0, 0.0, 0.0),
     normal: Sequence[float] = (0.0, 0.0, 1.0),
     color: Sequence[float] | str | None = None,
-    backend: Backend = "mesh",
+    backend: Backend = "surface",
 ) -> Mesh | SurfaceBody:
     if backend not in {"mesh", "surface"}:
         raise ValueError("backend must be 'mesh' or 'surface'.")
@@ -173,7 +173,7 @@ def make_arrow(
     head_length: float = 0.15,
     head_diameter: float = 0.12,
     color: Sequence[float] | str | None = None,
-    backend: Backend = "mesh",
+    backend: Backend = "surface",
 ) -> Mesh | SurfaceBody:
     if backend not in {"mesh", "surface"}:
         raise ValueError("backend must be 'mesh' or 'surface'.")
@@ -222,7 +222,13 @@ def make_arrow(
     head_length = min(head_length, length * 0.5)
     shaft_length = length - head_length
 
-    shaft = make_line(start, start + direction * (shaft_length / length), thickness=shaft_diameter, color=color)
+    shaft = make_line(
+        start,
+        start + direction * (shaft_length / length),
+        thickness=shaft_diameter,
+        color=color,
+        backend="mesh",
+    )
     head_height = head_length
     base = np.array(
         [
@@ -258,7 +264,7 @@ def make_dimension(
     color: Sequence[float] | str | None = None,
     font: str = "Arial",
     font_path: str | None = None,
-    backend: Backend = "mesh",
+    backend: Backend = "surface",
 ) -> list[Mesh] | SurfaceConsumerCollection:
     if backend not in {"mesh", "surface"}:
         raise ValueError("backend must be 'mesh' or 'surface'.")
@@ -345,7 +351,7 @@ def make_dimension(
     arrow_start = start + offset_vec
     arrow_end = end + offset_vec
 
-    meshes = [make_arrow(arrow_start, arrow_end, color=color)]
+    meshes = [make_arrow(arrow_start, arrow_end, color=color, backend="mesh")]
     if text:
         label_up = np.cross(right, norm_dir)
         up_norm = np.linalg.norm(label_up)
