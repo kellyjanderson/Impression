@@ -129,6 +129,35 @@ class PointLifecycleResolution:
 
 
 @dataclass(frozen=True)
+class SampleCorrespondenceRecord:
+    index: int
+    source_point_ref: str | None = None
+    target_point_ref: str | None = None
+    track_id: str | None = None
+    lifecycle_event_id: str | None = None
+    source_parameter: float | None = None
+    target_parameter: float | None = None
+    protected: bool = False
+
+
+@dataclass(frozen=True)
+class ResampledLoopCorrespondence:
+    source_samples: np.ndarray
+    target_samples: np.ndarray
+    sample_records: tuple[SampleCorrespondenceRecord, ...]
+    protected_indices: tuple[int, ...] = ()
+    diagnostics: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "source_samples", np.asarray(self.source_samples, dtype=float).reshape(-1, 2))
+        object.__setattr__(self, "target_samples", np.asarray(self.target_samples, dtype=float).reshape(-1, 2))
+        object.__setattr__(self, "sample_records", tuple(self.sample_records))
+        object.__setattr__(self, "protected_indices", tuple(int(index) for index in self.protected_indices))
+        object.__setattr__(self, "diagnostics", dict(self.diagnostics))
+        validate_sample_correspondence(self)
+
+
+@dataclass(frozen=True)
 class _RailRecord:
     ref: str
     key: str
@@ -954,6 +983,123 @@ def _lifecycle_refusal(
         candidate_spans=candidate_spans,
         required_rail_hint=hints.get(reason),
     )
+
+
+def resample_loop_correspondence(
+    loop_pair: dict[str, object],
+    *,
+    sample_count: int | str = "auto",
+) -> ResampledLoopCorrespondence:
+    source_path = loop_pair.get("source")
+    target_path = loop_pair.get("target")
+    if not isinstance(source_path, TopologyPath) or not isinstance(target_path, TopologyPath):
+        raise TypeError("resample_loop_correspondence requires loop_pair source and target TopologyPath values.")
+    rail_result = loop_pair.get("rail_result")
+    if not isinstance(rail_result, RailResolutionResult):
+        rail_result = resolve_authored_rails(source_path, target_path)
+    lifecycle_resolution = loop_pair.get("lifecycle_resolution")
+    if lifecycle_resolution is not None and not isinstance(lifecycle_resolution, PointLifecycleResolution):
+        raise TypeError("lifecycle_resolution must be a PointLifecycleResolution.")
+
+    protected_source: list[np.ndarray] = []
+    protected_target: list[np.ndarray] = []
+    records: list[SampleCorrespondenceRecord] = []
+    source_by_id = {point.id: point for point in source_path.points}
+    target_by_id = {point.id: point for point in target_path.points}
+    for source_ref, target_ref in rail_result.matches:
+        if source_ref not in source_by_id or target_ref not in target_by_id:
+            continue
+        index = len(records)
+        protected_source.append(source_by_id[source_ref].coordinates)
+        protected_target.append(target_by_id[target_ref].coordinates)
+        records.append(
+            SampleCorrespondenceRecord(
+                index=index,
+                source_point_ref=source_ref,
+                target_point_ref=target_ref,
+                track_id=f"{source_ref}->{target_ref}",
+                source_parameter=float(source_by_id[source_ref].ordinal),
+                target_parameter=float(target_by_id[target_ref].ordinal),
+                protected=True,
+            )
+        )
+
+    if lifecycle_resolution is not None:
+        support_by_event = {support.source_event_id: support for support in lifecycle_resolution.synthetic_supports}
+        for event in lifecycle_resolution.events:
+            support = support_by_event.get(event.id)
+            if support is None:
+                raise ValueError(f"missing_lifecycle_support for event {event.id!r}.")
+            index = len(records)
+            if event.event_type == "point_birth":
+                target_point = target_by_id[event.point_ref]
+                source_sample = np.asarray(support.coordinates, dtype=float)
+                target_sample = target_point.coordinates
+                target_ref = event.point_ref
+                source_ref = None
+            else:
+                source_point = source_by_id[event.point_ref]
+                source_sample = source_point.coordinates
+                target_sample = np.asarray(support.coordinates, dtype=float)
+                source_ref = event.point_ref
+                target_ref = None
+            protected_source.append(source_sample)
+            protected_target.append(target_sample)
+            records.append(
+                SampleCorrespondenceRecord(
+                    index=index,
+                    source_point_ref=source_ref,
+                    target_point_ref=target_ref,
+                    track_id=event.correspondence_id,
+                    lifecycle_event_id=event.id,
+                    source_parameter=support.span_parameter,
+                    target_parameter=support.span_parameter,
+                    protected=True,
+                )
+            )
+
+    minimum_count = max(3, len(records))
+    if sample_count == "auto":
+        requested_count = minimum_count
+    else:
+        requested_count = int(sample_count)
+        if requested_count < minimum_count:
+            raise ValueError(f"sample_count_too_low requested={requested_count} minimum={minimum_count}")
+    remaining_count = requested_count - len(records)
+    source_samples = list(protected_source)
+    target_samples = list(protected_target)
+    if remaining_count:
+        source_fill = _resample_loop(source_path.to_section_loop().points, max(3, remaining_count))
+        target_fill = _resample_loop(target_path.to_section_loop().points, max(3, remaining_count))
+        for fill_index in range(remaining_count):
+            index = len(records)
+            source_samples.append(source_fill[fill_index % len(source_fill)])
+            target_samples.append(target_fill[fill_index % len(target_fill)])
+            records.append(SampleCorrespondenceRecord(index=index, track_id=f"sample-{index}", protected=False))
+    protected_indices = tuple(record.index for record in records if record.protected)
+    return ResampledLoopCorrespondence(
+        source_samples=np.asarray(source_samples, dtype=float),
+        target_samples=np.asarray(target_samples, dtype=float),
+        sample_records=tuple(records),
+        protected_indices=protected_indices,
+        diagnostics={"sample_count": requested_count, "minimum_count": minimum_count},
+    )
+
+
+def validate_sample_correspondence(resampled: ResampledLoopCorrespondence) -> None:
+    if len(resampled.source_samples) != len(resampled.target_samples):
+        raise ValueError("ResampledLoopCorrespondence source and target sample counts differ.")
+    if len(resampled.sample_records) != len(resampled.source_samples):
+        raise ValueError("Every emitted sample requires one SampleCorrespondenceRecord.")
+    expected_indices = tuple(range(len(resampled.sample_records)))
+    actual_indices = tuple(record.index for record in resampled.sample_records)
+    if actual_indices != expected_indices:
+        raise ValueError("SampleCorrespondenceRecord indices must align with sample arrays.")
+    for protected_index in resampled.protected_indices:
+        if protected_index < 0 or protected_index >= len(resampled.sample_records):
+            raise ValueError("protected_indices contains an out-of-range index.")
+        if not resampled.sample_records[protected_index].protected:
+            raise ValueError("protected_indices must reference protected sample records.")
 
 
 @dataclass(frozen=True)
@@ -5996,11 +6142,13 @@ __all__ = [
     "ParentSpanMatch",
     "PointLifecycleRefusalDiagnostic",
     "PointLifecycleResolution",
+    "ResampledLoopCorrespondence",
     "RailConflictDiagnostic",
     "RailResolutionResult",
     "RailSource",
     "PointLifecycleEvent",
     "PointLifecycleState",
+    "SampleCorrespondenceRecord",
     "SyntheticSupportReference",
     "LoftPlan",
     "accept_or_refuse_inferred_correspondence",
@@ -6009,10 +6157,12 @@ __all__ = [
     "project_point_to_span",
     "resolve_authored_rails",
     "resolve_point_birth_death_events",
+    "resample_loop_correspondence",
     "score_correspondence_candidates",
     "validate_point_lifecycle_event",
     "validate_point_lifecycle_events",
     "validate_rail_priority",
+    "validate_sample_correspondence",
     "loft_profiles",
     "loft",
     "loft_plan_sections",
