@@ -8,7 +8,16 @@ import numpy as np
 from impression.mesh import Mesh, MeshAnalysis, analyze_mesh, combine_meshes
 
 from ._legacy_mesh_deprecation import warn_mesh_primary_api
-from .surface import RevolutionSurfacePatch, RuledSurfacePatch, SurfaceBody, SurfacePatch, SurfaceShell, TrimLoop, _stable_hash
+from .surface import (
+    RevolutionSurfacePatch,
+    RuledSurfacePatch,
+    SubdivisionSurfacePatch,
+    SurfaceBody,
+    SurfacePatch,
+    SurfaceShell,
+    TrimLoop,
+    _stable_hash,
+)
 from .topology import triangulate_loops
 
 TessellationIntent = Literal["preview", "export", "analysis"]
@@ -394,6 +403,36 @@ def _patch_mesh(patch: SurfacePatch) -> Mesh:
     return Mesh(vertices=vertices, faces=faces, metadata=metadata)
 
 
+def _subdivision_refinement_level(patch: SubdivisionSurfacePatch, request: NormalizedTessellationRequest) -> int:
+    preset_minimum = {"preview": 1, "balanced": 1, "fine": 2, "analysis": 3}[request.quality_preset]
+    return max(int(patch.subdivision_level), preset_minimum)
+
+
+def _subdivision_patch_mesh(patch: SubdivisionSurfacePatch, request: NormalizedTessellationRequest) -> Mesh:
+    result = patch.refined_cage(levels=_subdivision_refinement_level(patch, request))
+    vertices = np.asarray([patch.transform_matrix[:3, :3] @ point + patch.transform_matrix[:3, 3] for point in result.control_points], dtype=float)
+    faces: list[list[int]] = []
+    for face in result.faces:
+        if len(face) < 3:
+            continue
+        root = int(face[0])
+        for index in range(1, len(face) - 1):
+            tri = [root, int(face[index]), int(face[index + 1])]
+            if len(set(tri)) == 3:
+                faces.append(tri)
+    return Mesh(
+        vertices=vertices,
+        faces=np.asarray(faces, dtype=int),
+        metadata={
+            "surface_family": patch.family,
+            "surface_patch_id": patch.stable_identity,
+            "subdivision_scheme": result.scheme,
+            "subdivision_level": result.level,
+            "subdivision_approximation": result.metadata["approximation"],
+        },
+    )
+
+
 @dataclass(frozen=True)
 class TessellationRequest:
     """Consumer-facing tessellation request with deterministic defaulting."""
@@ -590,7 +629,9 @@ def tessellate_surface_patch(
     request: TessellationRequest | NormalizedTessellationRequest | None = None,
 ) -> Mesh:
     normalized = request if isinstance(request, NormalizedTessellationRequest) else normalize_tessellation_request(request)
-    if _uses_rectangular_grid_tessellation(patch):
+    if isinstance(patch, SubdivisionSurfacePatch):
+        mesh = _subdivision_patch_mesh(patch, normalized)
+    elif _uses_rectangular_grid_tessellation(patch):
         u_count, v_count = _rectangular_grid_counts(normalized)
         uv_vertices, faces = _rectangular_grid_uv_mesh_data(patch, u_count=u_count, v_count=v_count)
         vertices: list[np.ndarray] = []
@@ -634,6 +675,17 @@ def tessellate_surface_shell(
     world_patches = shell.iter_patches(world=True)
     if not world_patches:
         return Mesh(np.zeros((0, 3), dtype=float), np.zeros((0, 3), dtype=int), metadata={"surface_shell_id": shell.stable_identity})
+    if any(isinstance(patch, SubdivisionSurfacePatch) for patch in world_patches):
+        mesh = combine_meshes([tessellate_surface_patch(patch, normalized) for patch in world_patches])
+        mesh.metadata.update(
+            {
+                "surface_shell_id": shell.stable_identity,
+                "tessellation_request": normalized.canonical_payload(),
+                "surface_shell_classification": _classify_shell(shell),
+                "subdivision_approximation_boundary": "tessellation",
+            }
+        )
+        return mesh
     patch_grid_counts = tuple(
         _shell_grid_counts_for_patch(shell, patch_index, patch, normalized)
         for patch_index, patch in enumerate(world_patches)

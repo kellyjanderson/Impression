@@ -59,6 +59,7 @@ from impression.modeling import (
     SurfaceBoundaryRef,
     SurfaceConsumerCollection,
     SubdivisionCrease,
+    SubdivisionRefinementResult,
     SubdivisionSurfacePatch,
     SurfaceMeshAdapter,
     SurfaceSceneGroup,
@@ -70,6 +71,7 @@ from impression.modeling import (
     TrimLoop,
     make_surface_body,
     make_surface_shell,
+    refine_subdivision_control_cage,
     tessellate_surface_body,
     tessellate_surface_patch,
 )
@@ -887,14 +889,61 @@ def test_subdivision_surface_patch_rejects_invalid_payload_inputs(kwargs: dict[s
         SubdivisionSurfacePatch(**kwargs)
 
 
-def test_subdivision_surface_patch_refuses_evaluation_until_subdivision_executor_exists() -> None:
+def test_subdivision_surface_patch_evaluates_finite_approximation() -> None:
     patch = SubdivisionSurfacePatch(family="subdivision")
 
-    with pytest.raises(NotImplementedError, match="Surface Spec 146"):
-        patch.point_at(0.5, 0.5)
+    point = patch.point_at(0.5, 0.5)
+    du, dv = patch.derivatives_at(0.5, 0.5)
 
-    with pytest.raises(NotImplementedError, match="Surface Spec 146"):
-        patch.derivatives_at(0.5, 0.5)
+    assert np.all(np.isfinite(point))
+    assert np.all(np.isfinite(du))
+    assert np.all(np.isfinite(dv))
+
+
+def test_subdivision_refinement_runs_catmull_clark_and_preserves_crease_sharpness() -> None:
+    shared_edge_patch = SubdivisionSurfacePatch(
+        family="subdivision",
+        control_points=[
+            (0.0, 0.0, 0.0),
+            (1.0, 0.0, 0.0),
+            (1.0, 1.0, 0.0),
+            (0.0, 1.0, 0.0),
+            (2.0, 0.0, 1.0),
+            (2.0, 1.0, 1.0),
+        ],
+        faces=((0, 1, 2, 3), (1, 4, 5, 2)),
+        subdivision_level=1,
+    )
+    creased_patch = SubdivisionSurfacePatch(
+        family="subdivision",
+        control_points=shared_edge_patch.control_points,
+        faces=shared_edge_patch.faces,
+        creases=(SubdivisionCrease((1, 2), sharpness=3.0),),
+        subdivision_level=1,
+    )
+
+    smooth = refine_subdivision_control_cage(shared_edge_patch)
+    creased = creased_patch.refined_cage()
+
+    assert isinstance(smooth, SubdivisionRefinementResult)
+    assert smooth.level == 1
+    assert smooth.faces and all(len(face) == 4 for face in smooth.faces)
+    assert smooth.metadata["approximation"] == "finite_catmull_clark"
+    assert np.min(np.linalg.norm(smooth.control_points - np.array([1.0, 0.5, 0.0]), axis=1)) > 0.01
+    assert np.min(np.linalg.norm(creased.control_points - np.array([1.0, 0.5, 0.0]), axis=1)) < 1e-12
+
+
+def test_subdivision_surface_patch_tessellates_with_approximation_metadata() -> None:
+    patch = SubdivisionSurfacePatch(family="subdivision", subdivision_level=1)
+
+    mesh = tessellate_surface_patch(patch, export_tessellation_request(require_watertight=False))
+
+    assert mesh.vertices.shape[0] > patch.control_points.shape[0]
+    assert mesh.faces.shape[0] > 0
+    assert mesh.metadata["surface_family"] == "subdivision"
+    assert mesh.metadata["subdivision_scheme"] == "catmull_clark"
+    assert mesh.metadata["subdivision_level"] >= 2
+    assert mesh.metadata["subdivision_approximation"] == "finite_catmull_clark"
 
 
 def test_planar_patch_rejects_collinear_axes_and_multiple_outer_trims() -> None:
