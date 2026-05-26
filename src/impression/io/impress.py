@@ -17,6 +17,8 @@ from impression.modeling.surface import (
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
+    SubdivisionCrease,
+    SubdivisionSurfacePatch,
     SweepSurfacePatch,
     SurfaceAdjacencyRecord,
     SurfaceBoundaryRef,
@@ -38,10 +40,12 @@ _PATCH_KIND_FAMILIES = {
     "BSplineSurfacePatch": "bspline",
     "NURBSSurfacePatch": "nurbs",
     "SweepSurfacePatch": "sweep",
+    "SubdivisionSurfacePatch": "subdivision",
 }
 _ANALYTIC_PATCH_PAYLOAD_VERSION = 1
 _SPLINE_PATCH_PAYLOAD_VERSION = 1
 _SWEEP_PATCH_PAYLOAD_VERSION = 1
+_SUBDIVISION_PATCH_PAYLOAD_VERSION = 1
 
 
 class ImpressFormatError(ValueError):
@@ -805,6 +809,31 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 profile_reference=_validate_optional_string_payload(geometry.get("profile_reference"), "profile_reference"),
                 path_reference=_validate_optional_string_payload(geometry.get("path_reference"), "path_reference"),
             )
+        if kind == "SubdivisionSurfacePatch":
+            _validate_patch_geometry_fields(
+                geometry,
+                kind=kind,
+                allowed_fields={
+                    "payload_version",
+                    "scheme",
+                    "subdivision_level",
+                    "control_points",
+                    "faces",
+                    "creases",
+                },
+                expected_payload_version=_SUBDIVISION_PATCH_PAYLOAD_VERSION,
+            )
+            return SubdivisionSurfacePatch(
+                **common,
+                scheme=_validate_string_payload(geometry.get("scheme"), "scheme"),
+                subdivision_level=_validate_nonnegative_int_payload(
+                    geometry.get("subdivision_level"),
+                    "subdivision_level",
+                ),
+                control_points=_validate_control_points3_payload(geometry.get("control_points"), "control_points"),
+                faces=_validate_subdivision_faces_payload(geometry.get("faces"), "faces"),
+                creases=tuple(_decode_subdivision_crease_payload(crease) for crease in _validate_array_payload(geometry.get("creases"), "creases")),
+            )
     except (TypeError, ValueError) as exc:
         raise ImpressFormatError(str(exc)) from exc
     raise ImpressFormatError(f"Unsupported SurfacePatch kind {kind!r}.")
@@ -1059,6 +1088,21 @@ def _encode_patch_geometry_payload(patch: SurfacePatch) -> dict[str, object]:
             "profile_reference": geometry["profile_reference"],
             "path_reference": geometry["path_reference"],
         }
+    if isinstance(patch, SubdivisionSurfacePatch):
+        return {
+            "payload_version": _SUBDIVISION_PATCH_PAYLOAD_VERSION,
+            "scheme": str(geometry["scheme"]),
+            "subdivision_level": int(geometry["subdivision_level"]),
+            "control_points": _array_payload(geometry["control_points"]),
+            "faces": [list(face) for face in geometry["faces"]],
+            "creases": [
+                {
+                    "edge": list(crease["edge"]),
+                    "sharpness": float(crease["sharpness"]),
+                }
+                for crease in geometry["creases"]
+            ],
+        }
     raise ImpressFormatError(f"Unsupported SurfacePatch kind {type(patch).__name__!r}.")
 
 
@@ -1115,6 +1159,12 @@ def _validate_positive_int_payload(payload: object, name: str) -> int:
     return payload
 
 
+def _validate_array_payload(payload: object, name: str) -> Sequence[object]:
+    if not isinstance(payload, Sequence) or isinstance(payload, (str, bytes)):
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be an array.")
+    return payload
+
+
 def _validate_vec3_payload(payload: object, name: str) -> np.ndarray:
     try:
         vector = np.asarray(payload, dtype=float).reshape(3)
@@ -1149,6 +1199,18 @@ def _validate_control_net3_payload(payload: object, name: str) -> np.ndarray:
     if not np.all(np.isfinite(control_net)):
         raise ImpressFormatError(f"SurfacePatch geometry {name} must contain only finite values.")
     return control_net
+
+
+def _validate_control_points3_payload(payload: object, name: str) -> np.ndarray:
+    try:
+        points = np.asarray(payload, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must be a numeric control-point array.") from exc
+    if points.ndim != 2 or points.shape[1] != 3 or points.shape[0] < 3:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must contain at least three 3D control points.")
+    if not np.all(np.isfinite(points)):
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must contain only finite values.")
+    return points
 
 
 def _validate_weight_net_payload(payload: object, name: str) -> np.ndarray:
@@ -1216,6 +1278,46 @@ def _validate_optional_string_payload(payload: object, name: str) -> str | None:
     if payload is None:
         return None
     return _validate_string_payload(payload, name)
+
+
+def _validate_subdivision_faces_payload(payload: object, name: str) -> tuple[tuple[int, ...], ...]:
+    faces_payload = _validate_array_payload(payload, name)
+    faces: list[tuple[int, ...]] = []
+    for face_index, face_payload in enumerate(faces_payload):
+        face_values = _validate_array_payload(face_payload, f"{name}[{face_index}]")
+        face: list[int] = []
+        for value in face_values:
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ImpressFormatError(f"SurfacePatch geometry {name} indices must be integers.")
+            face.append(value)
+        faces.append(tuple(face))
+    if not faces:
+        raise ImpressFormatError(f"SurfacePatch geometry {name} must not be empty.")
+    return tuple(faces)
+
+
+def _decode_subdivision_crease_payload(payload: object) -> SubdivisionCrease:
+    if not isinstance(payload, Mapping):
+        raise ImpressFormatError("Subdivision crease payload must be an object.")
+    unknown_keys = set(payload) - {"edge", "sharpness"}
+    if unknown_keys:
+        keys = ", ".join(sorted(str(key) for key in unknown_keys))
+        raise ImpressFormatError(f"Unsupported Subdivision crease fields: {keys}.")
+    edge_payload = _validate_array_payload(payload.get("edge"), "crease.edge")
+    if len(edge_payload) != 2:
+        raise ImpressFormatError("Subdivision crease edge must contain exactly two indices.")
+    edge: list[int] = []
+    for value in edge_payload:
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise ImpressFormatError("Subdivision crease edge indices must be integers.")
+        edge.append(value)
+    try:
+        return SubdivisionCrease(
+            edge=(edge[0], edge[1]),
+            sharpness=_validate_float_payload(payload.get("sharpness", 1.0), "crease.sharpness"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(str(exc)) from exc
 
 
 def validate_impress_document_root(root: Mapping[str, object]) -> ImpressDocumentRoot:

@@ -52,6 +52,8 @@ from impression.modeling.surface import (
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
+    SubdivisionCrease,
+    SubdivisionSurfacePatch,
     SweepSurfacePatch,
     SurfaceAdjacencyRecord,
     SurfaceBoundaryRef,
@@ -793,6 +795,37 @@ def test_encode_decode_sweep_surface_patch_payload_round_trips_profile_path_and_
     assert decoded.path_reference == "path:centerline"
 
 
+def test_encode_decode_subdivision_surface_patch_payload_round_trips_cage_creases_and_level() -> None:
+    patch = SubdivisionSurfacePatch(
+        family="subdivision",
+        control_points=[
+            (0.0, 0.0, 0.0),
+            (2.0, 0.0, 0.0),
+            (2.0, 1.0, 0.2),
+            (0.0, 1.0, 0.0),
+        ],
+        faces=((0, 1, 2, 3),),
+        creases=(SubdivisionCrease((1, 0), sharpness=2.5),),
+        subdivision_level=2,
+    )
+
+    payload = encode_surface_patch_payload(patch)
+    decoded = decode_surface_patch_payload(payload)
+
+    assert payload["geometry"] == {
+        "payload_version": 1,
+        "scheme": "catmull_clark",
+        "subdivision_level": 2,
+        "control_points": patch.control_points.tolist(),
+        "faces": [[0, 1, 2, 3]],
+        "creases": [{"edge": [0, 1], "sharpness": 2.5}],
+    }
+    assert decoded.stable_identity == patch.stable_identity
+    assert isinstance(decoded, SubdivisionSurfacePatch)
+    assert decoded.faces == ((0, 1, 2, 3),)
+    assert decoded.creases == (SubdivisionCrease((0, 1), sharpness=2.5),)
+
+
 def test_decode_surface_patch_payload_rejects_invalid_family_dispatch() -> None:
     patch = PlanarSurfacePatch(family="planar")
     payload = encode_surface_patch_payload(patch)
@@ -878,6 +911,32 @@ def test_decode_nurbs_surface_patch_payload_rejects_invalid_weights() -> None:
 )
 def test_decode_sweep_surface_patch_payload_rejects_invalid_geometry(mutation, message: str) -> None:
     patch = SweepSurfacePatch(family="sweep")
+    payload = encode_surface_patch_payload(patch)
+    geometry = dict(payload["geometry"])  # type: ignore[arg-type]
+    mutation(geometry)
+    payload["geometry"] = geometry
+
+    with pytest.raises(ImpressFormatError, match=message):
+        decode_surface_patch_payload(payload)
+
+
+@pytest.mark.parametrize(
+    "mutation, message",
+    [
+        (lambda geometry: geometry.pop("payload_version"), "payload_version"),
+        (lambda geometry: geometry.update({"payload_version": 2}), "payload_version"),
+        (lambda geometry: geometry.update({"mesh": {"vertices": []}}), "Unsupported SubdivisionSurfacePatch geometry fields"),
+        (lambda geometry: geometry.update({"control_points": [[0.0, 0.0, 0.0]]}), "control_points"),
+        (lambda geometry: geometry.update({"faces": [[0, 1]]}), "at least three vertices"),
+        (lambda geometry: geometry.update({"faces": [[0, 1, True]]}), "indices must be integers"),
+        (lambda geometry: geometry.update({"creases": [{"edge": [0, 2], "sharpness": 1.0}]}), "existing cage edges"),
+        (lambda geometry: geometry.update({"creases": [{"edge": [0, 1], "sharpness": -1.0}]}), "sharpness"),
+        (lambda geometry: geometry.update({"subdivision_level": -1}), "non-negative integer"),
+        (lambda geometry: geometry.update({"scheme": "loop"}), "scheme"),
+    ],
+)
+def test_decode_subdivision_surface_patch_payload_rejects_invalid_geometry(mutation, message: str) -> None:
+    patch = SubdivisionSurfacePatch(family="subdivision")
     payload = encode_surface_patch_payload(patch)
     geometry = dict(payload["geometry"])  # type: ignore[arg-type]
     mutation(geometry)
