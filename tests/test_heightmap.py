@@ -36,7 +36,7 @@ def test_heightmap_quality_preview(tmp_path: Path):
 
 
 def test_displace_heightmap_planar():
-    mesh = make_plane(size=(1.0, 1.0), center=(0.0, 0.0, 0.0))
+    mesh = make_plane(size=(1.0, 1.0), center=(0.0, 0.0, 0.0), backend="mesh")
     image = np.ones((2, 2), dtype=float)
 
     displaced = displace_heightmap(mesh, image, height=0.5, plane="xy", direction="z")

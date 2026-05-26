@@ -30,8 +30,8 @@ TEXT_MODULE = importlib.import_module("impression.modeling.text")
 
 
 def test_surface_plane_and_line_tessellate_non_empty() -> None:
-    plane = make_plane(size=(2.0, 1.0), center=(0.0, 0.0, 0.0), backend="surface")
-    line = make_line((0.0, 0.0, 0.0), (0.0, 0.0, 2.0), thickness=0.1, backend="surface")
+    plane = make_plane(size=(2.0, 1.0), center=(0.0, 0.0, 0.0))
+    line = make_line((0.0, 0.0, 0.0), (0.0, 0.0, 2.0), thickness=0.1)
     assert isinstance(plane, SurfaceBody)
     assert isinstance(line, SurfaceBody)
     assert tessellate_surface_body(plane, TessellationRequest(intent="preview")).mesh.n_faces > 0
@@ -39,7 +39,7 @@ def test_surface_plane_and_line_tessellate_non_empty() -> None:
 
 
 def test_surface_arrow_returns_surface_body() -> None:
-    arrow = make_arrow((0.0, 0.0, 0.0), (1.0, 0.5, 0.0), backend="surface")
+    arrow = make_arrow((0.0, 0.0, 0.0), (1.0, 0.5, 0.0))
     assert isinstance(arrow, SurfaceBody)
     mesh = tessellate_surface_body(arrow, TessellationRequest(intent="preview")).mesh
     assert mesh.n_faces > 0
@@ -52,7 +52,6 @@ def test_surface_dimension_returns_consumer_collection() -> None:
         offset=0.2,
         text="2.00",
         font_path=str(FONT_PATH),
-        backend="surface",
     )
     assert isinstance(result, SurfaceConsumerCollection)
     assert len(result.items) == 2
