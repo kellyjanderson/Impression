@@ -13,6 +13,7 @@ from impression.modeling.group import MeshGroup
 from ._color import get_mesh_color, set_mesh_color
 from ._legacy_mesh_deprecation import warn_mesh_primary_api
 from .surface import (
+    PATCH_FAMILY_CAPABILITY_MATRIX,
     SurfaceBoundaryRef,
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
@@ -30,6 +31,7 @@ SurfaceBooleanClassification = Literal["open", "closed", "empty"]
 SurfaceBooleanBodyRelation = Literal["disjoint", "touching", "overlap", "containment", "equal"]
 SurfaceBooleanPatchRelation = Literal["inside", "outside", "on"]
 SurfaceBooleanSplitRole = Literal["survive", "cut_cap", "discard"]
+SurfaceBooleanUnsupportedPhase = Literal["operand-family-eligibility", "intersection-kernel"]
 
 
 class BooleanOperationError(RuntimeError):
@@ -172,6 +174,116 @@ class SurfaceBooleanIntersectionStage:
             raise ValueError("Supported intersection stages may not carry support_reason.")
         if not self.supported and not self.support_reason:
             raise ValueError("Unsupported intersection stages require support_reason.")
+
+
+@dataclass(frozen=True)
+class SurfaceBooleanFamilyPairSupport:
+    """Boolean support declaration for one pair of patch families."""
+
+    operation: SurfaceBooleanOperation
+    left_family: str
+    right_family: str
+    supported: bool
+    phase: SurfaceBooleanUnsupportedPhase | str
+    required_future_capability: str | None = None
+
+    def __post_init__(self) -> None:
+        operation = str(self.operation)
+        if operation not in {"union", "difference", "intersection"}:
+            raise ValueError("SurfaceBooleanFamilyPairSupport.operation is not supported.")
+        left_family = str(self.left_family).strip()
+        right_family = str(self.right_family).strip()
+        phase = str(self.phase).strip()
+        if not left_family or not right_family or not phase:
+            raise ValueError("SurfaceBooleanFamilyPairSupport families and phase must be non-empty.")
+        future = None if self.required_future_capability is None else str(self.required_future_capability).strip()
+        if future == "":
+            raise ValueError("SurfaceBooleanFamilyPairSupport.required_future_capability must be non-empty when provided.")
+        object.__setattr__(self, "operation", operation)
+        object.__setattr__(self, "left_family", left_family)
+        object.__setattr__(self, "right_family", right_family)
+        object.__setattr__(self, "phase", phase)
+        object.__setattr__(self, "required_future_capability", future)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "left_family": self.left_family,
+            "right_family": self.right_family,
+            "supported": self.supported,
+            "phase": self.phase,
+            "required_future_capability": self.required_future_capability,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceBooleanUnsupportedFamilyDiagnostic:
+    """Explicit diagnostic for a boolean family pair that is outside current support."""
+
+    operation: SurfaceBooleanOperation
+    left_family: str
+    right_family: str
+    phase: str
+    required_future_capability: str
+
+    @property
+    def message(self) -> str:
+        return (
+            f"unsupported surface boolean family pair for {self.operation}: "
+            f"{self.left_family}/{self.right_family} at phase {self.phase}; "
+            f"requires {self.required_future_capability}"
+        )
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "left_family": self.left_family,
+            "right_family": self.right_family,
+            "phase": self.phase,
+            "required_future_capability": self.required_future_capability,
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceBooleanFamilyEligibilityResult:
+    """Structural family eligibility result for a surfaced boolean request."""
+
+    operation: SurfaceBooleanOperation
+    supported: bool
+    family_pairs: tuple[SurfaceBooleanFamilyPairSupport, ...]
+    diagnostics: tuple[SurfaceBooleanUnsupportedFamilyDiagnostic, ...] = ()
+
+    @property
+    def required_future_capabilities(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(diagnostic.required_future_capability for diagnostic in self.diagnostics))
+
+    @property
+    def failure_reason(self) -> str | None:
+        if self.supported:
+            return None
+        return "; ".join(diagnostic.message for diagnostic in self.diagnostics)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "supported": self.supported,
+            "family_pairs": [item.canonical_payload() for item in self.family_pairs],
+            "diagnostics": [item.canonical_payload() for item in self.diagnostics],
+            "required_future_capabilities": self.required_future_capabilities,
+        }
+
+
+SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX: dict[tuple[SurfaceBooleanOperation, str, str], SurfaceBooleanFamilyPairSupport] = {
+    (operation, "planar", "planar"): SurfaceBooleanFamilyPairSupport(
+        operation=operation,
+        left_family="planar",
+        right_family="planar",
+        supported=True,
+        phase="intersection-kernel",
+    )
+    for operation in ("union", "difference", "intersection")
+}
 
 
 def _ensure_backend(backend: BooleanBackend) -> None:
@@ -404,6 +516,86 @@ def _surface_boolean_body_relation(
     if _contains(left, right) or _contains(right, left):
         return "containment"
     return "overlap"
+
+
+def _surface_body_patch_families(body: SurfaceBody) -> tuple[str, ...]:
+    return tuple(sorted({patch.family for patch in body.iter_patches(world=True)}))
+
+
+def _surface_boolean_family_pair_support(
+    operation: SurfaceBooleanOperation,
+    left_family: str,
+    right_family: str,
+) -> SurfaceBooleanFamilyPairSupport:
+    support = SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX.get(
+        (operation, left_family, right_family)
+    ) or SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX.get((operation, right_family, left_family))
+    if support is not None:
+        if support.left_family == left_family and support.right_family == right_family:
+            return support
+        return SurfaceBooleanFamilyPairSupport(
+            operation=operation,
+            left_family=left_family,
+            right_family=right_family,
+            supported=support.supported,
+            phase=support.phase,
+            required_future_capability=support.required_future_capability,
+        )
+    left_capability = PATCH_FAMILY_CAPABILITY_MATRIX.get(left_family)
+    right_capability = PATCH_FAMILY_CAPABILITY_MATRIX.get(right_family)
+    left_phase = "unknown" if left_capability is None else left_capability.support_phase
+    right_phase = "unknown" if right_capability is None else right_capability.support_phase
+    return SurfaceBooleanFamilyPairSupport(
+        operation=operation,
+        left_family=left_family,
+        right_family=right_family,
+        supported=False,
+        phase="operand-family-eligibility",
+        required_future_capability=(
+            f"surface boolean {operation} support for {left_family}/{right_family} "
+            f"families ({left_phase}/{right_phase})"
+        ),
+    )
+
+
+def build_surface_boolean_unsupported_family_diagnostic(
+    support: SurfaceBooleanFamilyPairSupport,
+) -> SurfaceBooleanUnsupportedFamilyDiagnostic:
+    """Build the explicit unsupported-family diagnostic for a family support record."""
+
+    if support.supported:
+        raise ValueError("Supported surface boolean family pairs do not need unsupported diagnostics.")
+    if support.required_future_capability is None:
+        raise ValueError("Unsupported surface boolean family pairs require a future capability.")
+    return SurfaceBooleanUnsupportedFamilyDiagnostic(
+        operation=support.operation,
+        left_family=support.left_family,
+        right_family=support.right_family,
+        phase=support.phase,
+        required_future_capability=support.required_future_capability,
+    )
+
+
+def surface_boolean_family_eligibility(operands: SurfaceBooleanOperands) -> SurfaceBooleanFamilyEligibilityResult:
+    """Return structural patch-family support for a surfaced boolean request."""
+
+    family_pairs: list[SurfaceBooleanFamilyPairSupport] = []
+    for left_index, left_body in enumerate(operands.bodies):
+        for right_body in operands.bodies[left_index + 1 :]:
+            for left_family in _surface_body_patch_families(left_body):
+                for right_family in _surface_body_patch_families(right_body):
+                    family_pairs.append(_surface_boolean_family_pair_support(operands.operation, left_family, right_family))
+    diagnostics = tuple(
+        build_surface_boolean_unsupported_family_diagnostic(pair)
+        for pair in family_pairs
+        if not pair.supported
+    )
+    return SurfaceBooleanFamilyEligibilityResult(
+        operation=operands.operation,
+        supported=not diagnostics,
+        family_pairs=tuple(family_pairs),
+        diagnostics=diagnostics,
+    )
 
 
 def _contains_bounds(
@@ -1636,6 +1828,14 @@ def surface_boolean_result(operation: SurfaceBooleanOperation, operands: Surface
 
     if operands.operation != operation:
         raise ValueError("Surface boolean result operation must match prepared operands.")
+    eligibility = surface_boolean_family_eligibility(operands)
+    if not eligibility.supported:
+        return SurfaceBooleanResult(
+            operation=operation,
+            operands=operands,
+            status="unsupported",
+            failure_reason=eligibility.failure_reason,
+        )
     trivial_result = _surface_boolean_trivial_result(operands)
     if trivial_result is not None:
         return trivial_result
