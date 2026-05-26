@@ -42,6 +42,8 @@ from impression.modeling import (
     flatten_surface_scene,
     handoff_surface_scene,
     IMPLICIT_FIELD_NODE_KINDS,
+    ImplicitFieldEvaluationDomain,
+    ImplicitFieldEvaluationResult,
     ImplicitFieldNode,
     ImplicitFieldSafetyPolicy,
     ImplicitFieldValidationDiagnostic,
@@ -74,6 +76,8 @@ from impression.modeling import (
     SweepSurfacePatch,
     TessellationRequest,
     TrimLoop,
+    evaluate_implicit_field,
+    evaluate_implicit_field_domain,
     make_surface_body,
     make_surface_shell,
     make_implicit_field_node,
@@ -1007,13 +1011,13 @@ def test_implicit_surface_patch_rejects_unsupported_payloads(factory: object, me
         factory()
 
 
-def test_implicit_surface_patch_refuses_evaluation_until_field_evaluator_exists() -> None:
+def test_implicit_surface_patch_refuses_parametric_extraction_until_tessellation_spec() -> None:
     patch = ImplicitSurfacePatch(family="implicit")
 
-    with pytest.raises(NotImplementedError, match="Surface Spec 149"):
+    with pytest.raises(NotImplementedError, match="Surface Spec 150"):
         patch.point_at(0.5, 0.5)
 
-    with pytest.raises(NotImplementedError, match="Surface Spec 149"):
+    with pytest.raises(NotImplementedError, match="Surface Spec 150"):
         patch.derivatives_at(0.5, 0.5)
 
 
@@ -1081,6 +1085,63 @@ def test_implicit_field_security_refuses_unsafe_payloads(
 def test_implicit_surface_patch_constructor_runs_security_validator() -> None:
     with pytest.raises(ValueError, match="Unsafe implicit field payload"):
         ImplicitSurfacePatch(family="implicit", field=make_implicit_field_node("sphere", parameters={"eval": "boom"}))
+
+
+def test_implicit_field_evaluator_handles_primitives_and_combinators() -> None:
+    sphere = make_implicit_field_node("sphere", parameters={"radius": 1.0})
+    shifted_box = make_implicit_field_node(
+        "translate",
+        parameters={"offset": (2.0, 0.0, 0.0)},
+        children=(make_implicit_field_node("box", parameters={"half_extents": (0.5, 0.5, 0.5)}),),
+    )
+    union = make_implicit_field_node("union", children=(sphere, shifted_box))
+    difference = make_implicit_field_node("difference", children=(sphere, make_implicit_field_node("sphere", parameters={"radius": 0.25})))
+
+    sphere_result = evaluate_implicit_field(sphere, (0.0, 0.0, 0.0))
+    union_result = evaluate_implicit_field(union, (2.0, 0.0, 0.0))
+    difference_result = evaluate_implicit_field(difference, (0.0, 0.0, 0.0))
+
+    assert isinstance(sphere_result, ImplicitFieldEvaluationResult)
+    assert sphere_result.value == pytest.approx(-1.0)
+    assert sphere_result.inside is True
+    assert union_result.value == pytest.approx(-0.5)
+    assert difference_result.value == pytest.approx(0.25)
+
+
+def test_implicit_field_domain_evaluator_samples_bounded_grid() -> None:
+    node = make_implicit_field_node("plane", parameters={"normal": (0.0, 0.0, 1.0), "offset": 0.0})
+    domain = ImplicitFieldEvaluationDomain(bounds=(-1.0, 1.0, -1.0, 1.0, -2.0, 2.0), samples=(3, 2, 4))
+
+    values = evaluate_implicit_field_domain(node, domain)
+
+    assert values.shape == (4, 2, 3)
+    assert values[0, 0, 0] == pytest.approx(-2.0)
+    assert values[-1, -1, -1] == pytest.approx(2.0)
+
+
+def test_implicit_surface_patch_exposes_field_value_and_domain_helpers() -> None:
+    patch = ImplicitSurfacePatch(family="implicit", field=make_implicit_field_node("sphere", parameters={"radius": 2.0}))
+
+    result = patch.field_value_at((0.0, 0.0, 0.0))
+    values = patch.evaluate_domain(samples=(2, 2, 2))
+
+    assert result.value == pytest.approx(-2.0)
+    assert values.shape == (2, 2, 2)
+
+
+@pytest.mark.parametrize(
+    "node, point, message",
+    [
+        (make_implicit_field_node("sphere", parameters={"radius": 0.0}), (0.0, 0.0, 0.0), "radius"),
+        (make_implicit_field_node("box", parameters={"half_extents": (1.0, 0.0, 1.0)}), (0.0, 0.0, 0.0), "half_extents"),
+        (make_implicit_field_node("union"), (0.0, 0.0, 0.0), "at least 1 children"),
+        (make_implicit_field_node("translate", children=(make_implicit_field_node("sphere"), make_implicit_field_node("box"))), (0.0, 0.0, 0.0), "at most 1 children"),
+        (make_implicit_field_node("scale", parameters={"factor": 0.0}, children=(make_implicit_field_node("sphere"),)), (0.0, 0.0, 0.0), "factor"),
+    ],
+)
+def test_implicit_field_evaluator_refuses_invalid_runtime_payloads(node: ImplicitFieldNode, point: tuple[float, float, float], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        evaluate_implicit_field(node, point)
 
 
 def test_planar_patch_rejects_collinear_axes_and_multiple_outer_trims() -> None:

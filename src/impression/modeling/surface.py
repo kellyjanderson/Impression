@@ -1735,6 +1735,59 @@ class ImplicitFieldValidationDiagnostic:
         }
 
 
+@dataclass(frozen=True)
+class ImplicitFieldEvaluationResult:
+    """Single implicit field evaluation sample."""
+
+    point: np.ndarray
+    value: float
+    diagnostic: str = ""
+
+    def __post_init__(self) -> None:
+        point = _as_vec3(self.point, name="point")
+        value = float(self.value)
+        if not np.isfinite(value):
+            raise ValueError("ImplicitFieldEvaluationResult.value must be finite.")
+        object.__setattr__(self, "point", point)
+        object.__setattr__(self, "value", value)
+        object.__setattr__(self, "diagnostic", str(self.diagnostic))
+
+    @property
+    def inside(self) -> bool:
+        return self.value <= 0.0
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "point": self.point,
+            "value": self.value,
+            "inside": self.inside,
+            "diagnostic": self.diagnostic,
+        }
+
+
+@dataclass(frozen=True)
+class ImplicitFieldEvaluationDomain:
+    """Bounded sampling domain for implicit field evaluation."""
+
+    bounds: tuple[float, float, float, float, float, float] = (-1.0, 1.0, -1.0, 1.0, -1.0, 1.0)
+    samples: tuple[int, int, int] = (8, 8, 8)
+
+    def __post_init__(self) -> None:
+        bounds = _as_bounds3(self.bounds, name="ImplicitFieldEvaluationDomain.bounds")
+        samples = tuple(int(value) for value in self.samples)
+        if len(samples) != 3 or any(value < 2 for value in samples):
+            raise ValueError("ImplicitFieldEvaluationDomain.samples must contain three values >= 2.")
+        object.__setattr__(self, "bounds", bounds)
+        object.__setattr__(self, "samples", samples)
+
+    def sample_points(self) -> np.ndarray:
+        xmin, xmax, ymin, ymax, zmin, zmax = self.bounds
+        xs = np.linspace(xmin, xmax, self.samples[0])
+        ys = np.linspace(ymin, ymax, self.samples[1])
+        zs = np.linspace(zmin, zmax, self.samples[2])
+        return np.asarray([(float(x), float(y), float(z)) for z in zs for y in ys for x in xs], dtype=float)
+
+
 def _coerce_implicit_field_node(value: object) -> ImplicitFieldNode:
     if isinstance(value, ImplicitFieldNode):
         return value
@@ -1808,6 +1861,98 @@ def validate_implicit_field_security(
     return diagnostic
 
 
+def _field_param_vec3(node: ImplicitFieldNode, name: str, default: Sequence[float]) -> np.ndarray:
+    return _as_vec3(node.parameters.get(name, default), name=f"{node.kind}.{name}")
+
+
+def _field_param_float(node: ImplicitFieldNode, name: str, default: float) -> float:
+    value = float(node.parameters.get(name, default))
+    if not np.isfinite(value):
+        raise ValueError(f"{node.kind}.{name} must be finite.")
+    return value
+
+
+def _require_child_count(node: ImplicitFieldNode, *, minimum: int, maximum: int | None = None) -> None:
+    count = len(node.children)
+    if count < minimum:
+        raise ValueError(f"Implicit field node {node.kind!r} requires at least {minimum} children.")
+    if maximum is not None and count > maximum:
+        raise ValueError(f"Implicit field node {node.kind!r} allows at most {maximum} children.")
+
+
+def evaluate_implicit_field(
+    node: ImplicitFieldNode | dict[str, object],
+    point: Sequence[float] | np.ndarray,
+) -> ImplicitFieldEvaluationResult:
+    field_node = _coerce_implicit_field_node(node)
+    validate_implicit_field_security(field_node)
+    sample_point = _as_vec3(point, name="point")
+    value = _evaluate_implicit_field_value(field_node, sample_point)
+    return ImplicitFieldEvaluationResult(point=sample_point, value=value)
+
+
+def _evaluate_implicit_field_value(node: ImplicitFieldNode, point: np.ndarray) -> float:
+    if node.kind == "sphere":
+        center = _field_param_vec3(node, "center", (0.0, 0.0, 0.0))
+        radius = _field_param_float(node, "radius", 1.0)
+        if radius <= 0.0:
+            raise ValueError("sphere.radius must be > 0.")
+        return float(np.linalg.norm(point - center) - radius)
+    if node.kind == "box":
+        center = _field_param_vec3(node, "center", (0.0, 0.0, 0.0))
+        half_extents = _field_param_vec3(node, "half_extents", (1.0, 1.0, 1.0))
+        if np.any(half_extents <= 0.0):
+            raise ValueError("box.half_extents must be > 0 on every axis.")
+        q = np.abs(point - center) - half_extents
+        outside = np.maximum(q, 0.0)
+        inside = min(float(np.max(q)), 0.0)
+        return float(np.linalg.norm(outside) + inside)
+    if node.kind == "plane":
+        normal = _normalize_axis(_field_param_vec3(node, "normal", (0.0, 0.0, 1.0)), name="plane.normal")
+        offset = _field_param_float(node, "offset", 0.0)
+        return float(np.dot(normal, point) - offset)
+    if node.kind == "constant":
+        return _field_param_float(node, "value", 0.0)
+    if node.kind == "union":
+        _require_child_count(node, minimum=1)
+        return float(min(_evaluate_implicit_field_value(child, point) for child in node.children))
+    if node.kind == "intersection":
+        _require_child_count(node, minimum=1)
+        return float(max(_evaluate_implicit_field_value(child, point) for child in node.children))
+    if node.kind == "difference":
+        _require_child_count(node, minimum=2)
+        base = _evaluate_implicit_field_value(node.children[0], point)
+        cutters = (-_evaluate_implicit_field_value(child, point) for child in node.children[1:])
+        return float(max(base, *cutters))
+    if node.kind == "translate":
+        _require_child_count(node, minimum=1, maximum=1)
+        offset = _field_param_vec3(node, "offset", (0.0, 0.0, 0.0))
+        return _evaluate_implicit_field_value(node.children[0], point - offset)
+    if node.kind == "scale":
+        _require_child_count(node, minimum=1, maximum=1)
+        factor = _field_param_float(node, "factor", 1.0)
+        if factor <= 0.0:
+            raise ValueError("scale.factor must be > 0.")
+        return float(_evaluate_implicit_field_value(node.children[0], point / factor) * factor)
+    if node.kind == "negate":
+        _require_child_count(node, minimum=1, maximum=1)
+        return float(-_evaluate_implicit_field_value(node.children[0], point))
+    raise ValueError(f"Unsupported implicit field node kind {node.kind!r}.")
+
+
+def evaluate_implicit_field_domain(
+    node: ImplicitFieldNode | dict[str, object],
+    domain: ImplicitFieldEvaluationDomain,
+) -> np.ndarray:
+    field_node = _coerce_implicit_field_node(node)
+    validate_implicit_field_security(field_node)
+    return np.asarray([_evaluate_implicit_field_value(field_node, point) for point in domain.sample_points()], dtype=float).reshape(
+        domain.samples[2],
+        domain.samples[1],
+        domain.samples[0],
+    )
+
+
 def make_implicit_field_node(
     kind: ImplicitFieldNodeKind,
     *,
@@ -1842,13 +1987,19 @@ class ImplicitSurfacePatch(SurfacePatch):
             "bounds": self.bounds,
         }
 
+    def field_value_at(self, point: Sequence[float] | np.ndarray) -> ImplicitFieldEvaluationResult:
+        return evaluate_implicit_field(self.field, point)
+
+    def evaluate_domain(self, samples: tuple[int, int, int] = (8, 8, 8)) -> np.ndarray:
+        return evaluate_implicit_field_domain(self.field, ImplicitFieldEvaluationDomain(bounds=self.bounds, samples=samples))
+
     def point_at(self, u: float, v: float) -> np.ndarray:
         self.validate_parameters(u, v)
-        raise NotImplementedError("ImplicitSurfacePatch point evaluation is implemented by Surface Spec 149.")
+        raise NotImplementedError("ImplicitSurfacePatch parametric surface extraction is implemented by Surface Spec 150.")
 
     def derivatives_at(self, u: float, v: float) -> tuple[np.ndarray, np.ndarray]:
         self.validate_parameters(u, v)
-        raise NotImplementedError("ImplicitSurfacePatch derivatives are implemented by Surface Spec 149.")
+        raise NotImplementedError("ImplicitSurfacePatch parametric derivatives are implemented by Surface Spec 150.")
 
     def bounds_estimate(self, *, u_count: int = 3, v_count: int = 3) -> tuple[float, float, float, float, float, float]:
         del u_count, v_count
@@ -2091,10 +2242,14 @@ __all__ = [
     "SubdivisionRefinementResult",
     "SubdivisionSurfacePatch",
     "ImplicitFieldNode",
+    "ImplicitFieldEvaluationDomain",
+    "ImplicitFieldEvaluationResult",
     "ImplicitFieldSafetyPolicy",
     "ImplicitFieldValidationDiagnostic",
     "ImplicitSurfacePatch",
     "assess_implicit_field_security",
+    "evaluate_implicit_field",
+    "evaluate_implicit_field_domain",
     "make_implicit_field_node",
     "validate_implicit_field_security",
     "refine_subdivision_control_cage",
