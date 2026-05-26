@@ -195,6 +195,47 @@ def _heightmap_mesh_impl(
     return mesh
 
 
+def make_heightmap_surface_patch(
+    image: str | Path | Image.Image | ArrayLike,
+    *,
+    height: float = 1.0,
+    xy_scale: float | Sequence[float] = 1.0,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    alpha_mode: str = "mask",
+    quality: MeshQuality | None = None,
+):
+    from .surface import HeightmapSurfacePatch
+
+    heights, mask = _load_heightmap(image)
+    if quality is not None:
+        quality = apply_lod(quality)
+        if quality.lod == "preview":
+            heights = heights[::2, ::2]
+            mask = mask[::2, ::2]
+    if heights.shape[0] < 2 or heights.shape[1] < 2:
+        raise ValueError("Heightmap surface payload requires at least a 2x2 sample grid.")
+    if alpha_mode == "ignore":
+        heights = np.where(mask, heights, 0.0)
+    elif alpha_mode == "mask":
+        heights = np.where(mask, heights, 0.0)
+    else:
+        raise ValueError("alpha_mode must be 'mask' or 'ignore'.")
+    return HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=heights,
+        xy_scale=_as_scale(xy_scale),
+        center=np.asarray(center, dtype=float).reshape(3),
+        height_scale=float(height),
+        metadata={
+            "kernel": {
+                "producer": "heightmap",
+                "sample_shape": tuple(int(value) for value in heights.shape),
+                "alpha_mode": alpha_mode,
+            }
+        },
+    )
+
+
 def heightmap(
     image: str | Path | Image.Image | ArrayLike,
     height: float = 1.0,
@@ -213,7 +254,7 @@ def heightmap(
     if backend not in {"mesh", "surface"}:
         raise ValueError("backend must be 'mesh' or 'surface'.")
     if backend == "surface":
-        mesh = _heightmap_mesh_impl(
+        patch = make_heightmap_surface_patch(
             image,
             height=height,
             xy_scale=xy_scale,
@@ -221,8 +262,10 @@ def heightmap(
             alpha_mode=alpha_mode,
             quality=quality,
         )
-        return _triangle_surface_body_from_mesh(
-            mesh,
+        from .surface import make_surface_body, make_surface_shell
+
+        return make_surface_body(
+            (make_surface_shell((patch,), connected=False, metadata={"kernel": {"producer": "heightmap"}}),),
             metadata={"kernel": {"producer": "heightmap"}, "consumer": {"source": "heightmap"}},
         )
 
@@ -492,4 +535,4 @@ def _heightmap_cache_key(
     return None
 
 
-__all__ = ["heightmap", "displace_heightmap"]
+__all__ = ["heightmap", "displace_heightmap", "make_heightmap_surface_patch"]

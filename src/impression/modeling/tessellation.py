@@ -801,6 +801,7 @@ SURFACE_FAMILY_TESSELLATION_ADAPTERS: dict[str, SurfaceFamilyTessellationAdapter
         supports_seam_boundaries=False,
         approximation_boundary="tessellation",
     ),
+    "heightmap": SurfaceFamilyTessellationAdapter("heightmap", "rectangular-grid"),
 }
 
 _missing_surface_tessellation_adapters = set(SUPPORTED_SURFACE_PATCH_FAMILIES) - set(SURFACE_FAMILY_TESSELLATION_ADAPTERS)

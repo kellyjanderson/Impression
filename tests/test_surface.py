@@ -53,6 +53,7 @@ from impression.modeling import (
     export_tessellation_request,
     flatten_surface_scene,
     handoff_surface_scene,
+    HeightmapSurfacePatch,
     IMPLICIT_FIELD_NODE_KINDS,
     ImplicitApproximationMetadata,
     ImplicitFieldEvaluationDomain,
@@ -1303,6 +1304,10 @@ def test_every_surface_family_tessellates_through_family_adapter_metadata() -> N
         "implicit": ImplicitSurfacePatch(
             family="implicit",
             field=make_implicit_field_node("sphere", parameters={"radius": 0.75}),
+        ),
+        "heightmap": HeightmapSurfacePatch(
+            family="heightmap",
+            height_samples=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
         ),
     }
 

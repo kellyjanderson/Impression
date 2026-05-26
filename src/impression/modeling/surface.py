@@ -30,6 +30,7 @@ SUPPORTED_SURFACE_PATCH_FAMILIES: tuple[str, ...] = (
     "sweep",
     "subdivision",
     "implicit",
+    "heightmap",
 )
 REQUIRED_V1_PATCH_FAMILIES: tuple[str, ...] = ("planar", "ruled", "revolution")
 PATCH_FAMILY_CAPABILITY_MATRIX: dict[str, PatchFamilyCapabilityRecord] = {
@@ -72,6 +73,11 @@ PATCH_FAMILY_CAPABILITY_MATRIX: dict[str, PatchFamilyCapabilityRecord] = {
         family="implicit",
         support_phase="planned",
         operations=("field-node-payload", "validation-security", "evaluation", "tessellation", ".impress"),
+    ),
+    "heightmap": PatchFamilyCapabilityRecord(
+        family="heightmap",
+        support_phase="planned",
+        operations=("sample-grid-payload", "evaluation", "tessellation"),
     ),
 }
 SURFACE_SPEC_66_RETIREMENT_NOTE = (
@@ -809,6 +815,86 @@ class PlanarSurfacePatch(SurfacePatch):
             _transform_vector(self.transform_matrix, self.u_axis),
             _transform_vector(self.transform_matrix, self.v_axis),
         )
+
+
+@dataclass(frozen=True)
+class HeightmapSurfacePatch(SurfacePatch):
+    """Sampled heightfield patch with bilinear evaluation."""
+
+    height_samples: np.ndarray = field(default_factory=lambda: np.zeros((2, 2), dtype=float))
+    xy_scale: tuple[float, float] = (1.0, 1.0)
+    center: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float))
+    height_scale: float = 1.0
+
+    def __post_init__(self) -> None:
+        samples = np.asarray(self.height_samples, dtype=float)
+        if samples.ndim != 2:
+            raise ValueError("HeightmapSurfacePatch.height_samples must be a 2D array.")
+        if samples.shape[0] < 2 or samples.shape[1] < 2:
+            raise ValueError("HeightmapSurfacePatch.height_samples must be at least 2x2.")
+        if not np.all(np.isfinite(samples)):
+            raise ValueError("HeightmapSurfacePatch.height_samples must be finite.")
+        xy_scale = tuple(float(value) for value in self.xy_scale)
+        if len(xy_scale) != 2 or xy_scale[0] <= 0.0 or xy_scale[1] <= 0.0:
+            raise ValueError("HeightmapSurfacePatch.xy_scale must contain two positive values.")
+        center = _as_vec3(self.center, name="center")
+        height_scale = float(self.height_scale)
+        if not np.isfinite(height_scale):
+            raise ValueError("HeightmapSurfacePatch.height_scale must be finite.")
+        domain = ParameterDomain((0.0, float(samples.shape[1] - 1)), (0.0, float(samples.shape[0] - 1)))
+        object.__setattr__(self, "height_samples", samples)
+        object.__setattr__(self, "xy_scale", xy_scale)
+        object.__setattr__(self, "center", center)
+        object.__setattr__(self, "height_scale", height_scale)
+        object.__setattr__(self, "domain", domain)
+        object.__setattr__(self, "family", "heightmap")
+        super().__post_init__()
+
+    def _height_at(self, u: float, v: float) -> float:
+        rows, cols = self.height_samples.shape
+        u_clamped = float(np.clip(u, 0.0, cols - 1))
+        v_clamped = float(np.clip(v, 0.0, rows - 1))
+        c0 = int(np.floor(u_clamped))
+        r0 = int(np.floor(v_clamped))
+        c1 = min(c0 + 1, cols - 1)
+        r1 = min(r0 + 1, rows - 1)
+        du = u_clamped - c0
+        dv = v_clamped - r0
+        h00 = self.height_samples[r0, c0]
+        h10 = self.height_samples[r0, c1]
+        h01 = self.height_samples[r1, c0]
+        h11 = self.height_samples[r1, c1]
+        h0 = h00 * (1.0 - du) + h10 * du
+        h1 = h01 * (1.0 - du) + h11 * du
+        return float((h0 * (1.0 - dv) + h1 * dv) * self.height_scale)
+
+    def geometry_payload(self) -> dict[str, object]:
+        return {
+            "height_samples": self.height_samples,
+            "xy_scale": self.xy_scale,
+            "center": self.center,
+            "height_scale": self.height_scale,
+        }
+
+    def point_at(self, u: float, v: float) -> np.ndarray:
+        self.validate_parameters(u, v)
+        rows, cols = self.height_samples.shape
+        sx, sy = self.xy_scale
+        x = (float(u) - (cols - 1) / 2.0) * sx + self.center[0]
+        y = ((rows - 1 - float(v)) - (rows - 1) / 2.0) * sy + self.center[1]
+        z = self.center[2] + self._height_at(float(u), float(v))
+        return _transform_point(self.transform_matrix, np.array([x, y, z], dtype=float))
+
+    def derivatives_at(self, u: float, v: float) -> tuple[np.ndarray, np.ndarray]:
+        self.validate_parameters(u, v)
+        epsilon = 1e-4
+        u0 = max(self.domain.u_range[0], float(u) - epsilon)
+        u1 = min(self.domain.u_range[1], float(u) + epsilon)
+        v0 = max(self.domain.v_range[0], float(v) - epsilon)
+        v1 = min(self.domain.v_range[1], float(v) + epsilon)
+        du = (self.point_at(u1, v) - self.point_at(u0, v)) / max(u1 - u0, 1e-9)
+        dv = (self.point_at(u, v1) - self.point_at(u, v0)) / max(v1 - v0, 1e-9)
+        return du, dv
 
 
 @dataclass(frozen=True)
@@ -2540,6 +2626,7 @@ __all__ = [
     "SurfaceSeamValidationResult",
     "SurfacePatch",
     "PlanarSurfacePatch",
+    "HeightmapSurfacePatch",
     "RuledSurfacePatch",
     "RevolutionSurfacePatch",
     "BSplineSurfacePatch",

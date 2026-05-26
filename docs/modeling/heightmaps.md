@@ -8,9 +8,9 @@ color images, and treats `alpha == 0` as masked.
 from impression.modeling import heightmap, displace_heightmap
 ```
 
-Both APIs support `backend="surface"` for a surface-first path. In the current
-build that surfaced result is emitted as a piecewise-planar `SurfaceBody`,
-which keeps the output canonical before preview/export tessellation.
+`heightmap(..., backend="surface")` creates a native sampled heightmap surface
+payload, which keeps the output canonical before preview/export tessellation.
+Mesh output remains available through `backend="mesh"`.
 
 ## heightmap
 
@@ -34,7 +34,7 @@ Options:
 - `xy_scale`: scalar or `(sx, sy)` spacing between pixels.
 - `center`: world‑space center of the heightfield.
 - `alpha_mode`: `"mask"` (holes) or `"ignore"` (transparent pixels become zero height).
-- `backend`: `"mesh"` for legacy mesh-primary output, or `"surface"` for surfaced output.
+- `backend`: `"mesh"` for legacy mesh-primary output, or `"surface"` for sampled surfaced output.
 
 ## displace_heightmap
 

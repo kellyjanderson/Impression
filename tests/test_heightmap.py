@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from impression.modeling import MeshQuality, heightmap, displace_heightmap
+from impression.modeling import HeightmapSurfacePatch, MeshQuality, heightmap, displace_heightmap, make_heightmap_surface_patch
 from impression.modeling.drafting import make_plane
 
 
@@ -33,6 +33,19 @@ def test_heightmap_quality_preview(tmp_path: Path):
     path = _write_test_image(tmp_path / "mask.png", transparent_corner=False)
     mesh = heightmap(path, height=1.0, alpha_mode="ignore", quality=MeshQuality(lod="preview"))
     assert mesh.n_faces >= 0
+
+
+def test_heightmap_surface_backend_uses_sampled_surface_payload():
+    samples = np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float)
+
+    patch = make_heightmap_surface_patch(samples, height=2.0, xy_scale=(2.0, 3.0))
+    body = heightmap(samples, height=2.0, xy_scale=(2.0, 3.0), backend="surface")
+
+    assert isinstance(patch, HeightmapSurfacePatch)
+    assert patch.height_samples.shape == (2, 2)
+    assert patch.point_at(1.0, 0.0)[2] == 2.0
+    assert body.patch_count == 1
+    assert isinstance(body.iter_patches()[0], HeightmapSurfacePatch)
 
 
 def test_displace_heightmap_planar():

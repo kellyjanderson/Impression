@@ -387,7 +387,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 169: Text Surface Default Public API (v1.0)](../specifications/surface-169-text-surface-default-public-api-v1_0.md)
 - [x] [Surface Spec 170: Text Mesh Compatibility And Empty Text Behavior (v1.0)](../specifications/surface-170-text-mesh-compatibility-and-empty-text-behavior-v1_0.md)
 - [x] [Surface Spec 171: Drafting Surface Defaults (v1.0)](../specifications/surface-171-drafting-surface-defaults-v1_0.md)
-- [ ] [Surface Spec 172: Heightmap Sampled Surface Payload (v1.0)](../specifications/surface-172-heightmap-sampled-surface-payload-v1_0.md)
+- [x] [Surface Spec 172: Heightmap Sampled Surface Payload (v1.0)](../specifications/surface-172-heightmap-sampled-surface-payload-v1_0.md)
 - [ ] [Surface Spec 173: Heightmap Alpha Mask And Cache Policy (v1.0)](../specifications/surface-173-heightmap-alpha-mask-and-cache-policy-v1_0.md)
 - [ ] [Surface Spec 174: Heightmap Displacement Surface Contract (v1.0)](../specifications/surface-174-heightmap-displacement-surface-contract-v1_0.md)
 - [ ] [Surface Spec 175: Heightmap Projection Sampling Policy (v1.0)](../specifications/surface-175-heightmap-projection-sampling-policy-v1_0.md)
