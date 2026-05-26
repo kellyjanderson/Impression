@@ -230,6 +230,12 @@ from .group import (
     mesh_group_compatibility_diagnostic,
 )
 from .ops import offset, hull
+from .mesh_tools import (
+    MESH_TOOL_BOUNDARY,
+    MESH_TOOL_CLASSIFICATION,
+    MeshUtilityClassification,
+    classify_mesh_utility,
+)
 from .heightmap import (
     HeightmapAlphaMaskPolicy,
     HeightmapCacheKeyRecord,
@@ -629,6 +635,10 @@ __all__ = [
     "rotate_euler",
     "offset",
     "hull",
+    "MESH_TOOL_BOUNDARY",
+    "MESH_TOOL_CLASSIFICATION",
+    "MeshUtilityClassification",
+    "classify_mesh_utility",
     "heightmap",
     "displace_heightmap",
     "HeightmapAlphaMaskPolicy",
