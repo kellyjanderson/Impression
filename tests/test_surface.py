@@ -46,6 +46,7 @@ from impression.modeling import (
     make_surface_scene_group,
     make_surface_scene_node,
     mesh_from_surface_body,
+    NURBSSurfacePatch,
     normalize_tessellation_request,
     ParameterDomain,
     PlanarSurfacePatch,
@@ -710,6 +711,57 @@ def test_bspline_surface_patch_sampling_uses_surface_evaluator() -> None:
     assert samples.shape == (2, 2, 3)
     assert np.allclose(samples[0, 0], (0.0, 0.0, 0.0))
     assert np.allclose(samples[1, 1], (1.0, 1.0, 0.0))
+
+
+def test_nurbs_surface_patch_evaluates_rational_points_and_derivatives() -> None:
+    patch = NURBSSurfacePatch(
+        family="nurbs",
+        control_net=[
+            [(0.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            [(1.0, 0.0, 0.0), (1.0, 1.0, 0.0)],
+        ],
+        weights=[
+            [1.0, 1.0],
+            [1.0, 4.0],
+        ],
+    )
+
+    point = patch.point_at(0.5, 0.5)
+    assert np.allclose(point, (5.0 / 7.0, 5.0 / 7.0, 0.0))
+
+    du, dv = patch.derivatives_at(0.5, 0.5)
+    epsilon = 1e-6
+    finite_du = (patch.point_at(0.5 + epsilon, 0.5) - patch.point_at(0.5 - epsilon, 0.5)) / (2.0 * epsilon)
+    finite_dv = (patch.point_at(0.5, 0.5 + epsilon) - patch.point_at(0.5, 0.5 - epsilon)) / (2.0 * epsilon)
+    assert np.allclose(du, finite_du, atol=1e-6)
+    assert np.allclose(dv, finite_dv, atol=1e-6)
+
+
+def test_nurbs_surface_patch_with_unit_weights_matches_bspline_patch() -> None:
+    control_net = [
+        [(0.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+        [(1.0, 0.0, 0.0), (1.0, 1.0, 1.0)],
+    ]
+    bspline = BSplineSurfacePatch(family="bspline", control_net=control_net)
+    nurbs = NURBSSurfacePatch(family="nurbs", control_net=control_net, weights=np.ones((2, 2)))
+
+    assert np.allclose(nurbs.point_at(0.25, 0.75), bspline.point_at(0.25, 0.75))
+    assert np.allclose(nurbs.derivatives_at(0.25, 0.75)[0], bspline.derivatives_at(0.25, 0.75)[0])
+    assert np.allclose(nurbs.derivatives_at(0.25, 0.75)[1], bspline.derivatives_at(0.25, 0.75)[1])
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"family": "bspline"}, "family must be 'nurbs'"),
+        ({"family": "nurbs", "weights": [[1.0, 1.0]]}, "weights must match"),
+        ({"family": "nurbs", "weights": [[1.0, 0.0], [1.0, 1.0]]}, "finite and positive"),
+        ({"family": "nurbs", "weights": [[1.0, float("nan")], [1.0, 1.0]]}, "finite and positive"),
+    ],
+)
+def test_nurbs_surface_patch_rejects_invalid_weight_inputs(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        NURBSSurfacePatch(**kwargs)
 
 
 def test_planar_patch_rejects_collinear_axes_and_multiple_outer_trims() -> None:

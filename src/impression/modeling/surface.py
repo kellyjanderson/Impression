@@ -195,7 +195,7 @@ def _evaluate_bspline_surface_net(
     span_v = _find_bspline_span(degree=degree_v, knots=knots_v, control_point_count=control_net.shape[1], parameter=v)
     basis_u = _bspline_basis_functions(span_u, u, degree_u, knots_u)
     basis_v = _bspline_basis_functions(span_v, v, degree_v, knots_v)
-    point = np.zeros(3, dtype=float)
+    point = np.zeros(control_net.shape[2], dtype=float)
     for i in range(degree_u + 1):
         u_index = span_u - degree_u + i
         for j in range(degree_v + 1):
@@ -978,6 +978,156 @@ class BSplineSurfacePatch(SurfacePatch):
 
 
 @dataclass(frozen=True)
+class NURBSSurfacePatch(SurfacePatch):
+    """A rational tensor-product NURBS surface patch."""
+
+    degree_u: int = 1
+    degree_v: int = 1
+    knots_u: tuple[float, ...] = (0.0, 0.0, 1.0, 1.0)
+    knots_v: tuple[float, ...] = (0.0, 0.0, 1.0, 1.0)
+    control_net: np.ndarray = field(
+        default_factory=lambda: np.array(
+            [
+                [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                [[1.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+            ],
+            dtype=float,
+        )
+    )
+    weights: np.ndarray = field(default_factory=lambda: np.ones((2, 2), dtype=float))
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.family != "nurbs":
+            raise ValueError("NURBSSurfacePatch.family must be 'nurbs'.")
+        degree_u = _normalize_degree(self.degree_u, name="degree_u")
+        degree_v = _normalize_degree(self.degree_v, name="degree_v")
+        knots_u = _normalize_knot_vector(self.knots_u, name="knots_u")
+        knots_v = _normalize_knot_vector(self.knots_v, name="knots_v")
+        control_net = _as_control_net3(self.control_net, name="control_net")
+        weights = np.asarray(self.weights, dtype=float)
+        if weights.shape != control_net.shape[:2]:
+            raise ValueError("NURBSSurfacePatch weights must match the control net parameter shape.")
+        if not np.all(np.isfinite(weights)) or np.any(weights <= 0.0):
+            raise ValueError("NURBSSurfacePatch weights must be finite and positive.")
+        u_range = _validate_bspline_axis(
+            control_point_count=control_net.shape[0],
+            degree=degree_u,
+            knots=knots_u,
+            name="u",
+        )
+        v_range = _validate_bspline_axis(
+            control_point_count=control_net.shape[1],
+            degree=degree_v,
+            knots=knots_v,
+            name="v",
+        )
+        if not np.allclose(self.domain.u_range, u_range) or not np.allclose(self.domain.v_range, v_range):
+            raise ValueError("NURBSSurfacePatch domain must match knot parameter ranges.")
+        object.__setattr__(self, "degree_u", degree_u)
+        object.__setattr__(self, "degree_v", degree_v)
+        object.__setattr__(self, "knots_u", knots_u)
+        object.__setattr__(self, "knots_v", knots_v)
+        object.__setattr__(self, "control_net", control_net)
+        object.__setattr__(self, "weights", weights)
+
+    def geometry_payload(self) -> dict[str, object]:
+        return {
+            "degree_u": self.degree_u,
+            "degree_v": self.degree_v,
+            "knots_u": self.knots_u,
+            "knots_v": self.knots_v,
+            "control_net": self.control_net,
+            "weights": self.weights,
+        }
+
+    @property
+    def weighted_control_net(self) -> np.ndarray:
+        return self.control_net * self.weights[:, :, np.newaxis]
+
+    def _rational_components(self, u: float, v: float) -> tuple[np.ndarray, float]:
+        numerator = _evaluate_bspline_surface_net(
+            control_net=self.weighted_control_net,
+            degree_u=self.degree_u,
+            degree_v=self.degree_v,
+            knots_u=self.knots_u,
+            knots_v=self.knots_v,
+            u=float(u),
+            v=float(v),
+        )
+        denominator = float(
+            _evaluate_bspline_surface_net(
+                control_net=self.weights[:, :, np.newaxis],
+                degree_u=self.degree_u,
+                degree_v=self.degree_v,
+                knots_u=self.knots_u,
+                knots_v=self.knots_v,
+                u=float(u),
+                v=float(v),
+            )[0]
+        )
+        if denominator <= 0.0 or not np.isfinite(denominator):
+            raise ValueError("NURBSSurfacePatch evaluated weight must be positive and finite.")
+        return numerator, denominator
+
+    def point_at(self, u: float, v: float) -> np.ndarray:
+        self.validate_parameters(u, v)
+        numerator, denominator = self._rational_components(float(u), float(v))
+        return _transform_point(self.transform_matrix, numerator / denominator)
+
+    def derivatives_at(self, u: float, v: float) -> tuple[np.ndarray, np.ndarray]:
+        self.validate_parameters(u, v)
+        u_value = float(u)
+        v_value = float(v)
+        numerator, denominator = self._rational_components(u_value, v_value)
+        weighted_net = self.weighted_control_net
+        weight_net = self.weights[:, :, np.newaxis]
+        du_numerator = _evaluate_bspline_surface_net(
+            control_net=_bspline_surface_derivative_net(weighted_net, self.degree_u, self.knots_u, axis=0),
+            degree_u=self.degree_u - 1,
+            degree_v=self.degree_v,
+            knots_u=self.knots_u[1:-1],
+            knots_v=self.knots_v,
+            u=u_value,
+            v=v_value,
+        )
+        dv_numerator = _evaluate_bspline_surface_net(
+            control_net=_bspline_surface_derivative_net(weighted_net, self.degree_v, self.knots_v, axis=1),
+            degree_u=self.degree_u,
+            degree_v=self.degree_v - 1,
+            knots_u=self.knots_u,
+            knots_v=self.knots_v[1:-1],
+            u=u_value,
+            v=v_value,
+        )
+        du_weight = float(
+            _evaluate_bspline_surface_net(
+                control_net=_bspline_surface_derivative_net(weight_net, self.degree_u, self.knots_u, axis=0),
+                degree_u=self.degree_u - 1,
+                degree_v=self.degree_v,
+                knots_u=self.knots_u[1:-1],
+                knots_v=self.knots_v,
+                u=u_value,
+                v=v_value,
+            )[0]
+        )
+        dv_weight = float(
+            _evaluate_bspline_surface_net(
+                control_net=_bspline_surface_derivative_net(weight_net, self.degree_v, self.knots_v, axis=1),
+                degree_u=self.degree_u,
+                degree_v=self.degree_v - 1,
+                knots_u=self.knots_u,
+                knots_v=self.knots_v[1:-1],
+                u=u_value,
+                v=v_value,
+            )[0]
+        )
+        du = ((du_numerator * denominator) - (numerator * du_weight)) / (denominator * denominator)
+        dv = ((dv_numerator * denominator) - (numerator * dv_weight)) / (denominator * denominator)
+        return (_transform_vector(self.transform_matrix, du), _transform_vector(self.transform_matrix, dv))
+
+
+@dataclass(frozen=True)
 class SurfaceShell:
     """An ordered collection of patches that form one shell."""
 
@@ -1206,6 +1356,7 @@ __all__ = [
     "RuledSurfacePatch",
     "RevolutionSurfacePatch",
     "BSplineSurfacePatch",
+    "NURBSSurfacePatch",
     "SurfaceShell",
     "SurfaceBody",
     "make_surface_shell",
