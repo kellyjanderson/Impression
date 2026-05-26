@@ -10,6 +10,7 @@ from impression.modeling.surface import (
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
+    SurfaceAdjacencyRecord,
     SurfaceBoundaryRef,
     SurfaceBody,
     SurfacePatch,
@@ -342,6 +343,54 @@ def decode_surface_seam_payload(
         raise ImpressFormatError(str(exc)) from exc
 
 
+def encode_surface_adjacency_payload(record: SurfaceAdjacencyRecord) -> dict[str, object]:
+    """Encode a `.impress` adjacency payload."""
+
+    if not isinstance(record, SurfaceAdjacencyRecord):
+        raise ImpressFormatError("encode_surface_adjacency_payload requires a SurfaceAdjacencyRecord.")
+    return {
+        "source": encode_surface_boundary_ref_payload(record.source),
+        "target": None if record.target is None else encode_surface_boundary_ref_payload(record.target),
+        "seam_id": record.seam_id,
+        "continuity": record.continuity,
+    }
+
+
+def decode_surface_adjacency_payload(
+    payload: Mapping[str, object],
+    *,
+    patch_count: int | None = None,
+    seam_ids: Sequence[str] | None = None,
+) -> SurfaceAdjacencyRecord:
+    """Decode a `.impress` adjacency payload with optional loaded-shell reference validation."""
+
+    if not isinstance(payload, Mapping):
+        raise ImpressFormatError("SurfaceAdjacencyRecord payload must be an object.")
+    unknown_keys = set(payload) - {"source", "target", "seam_id", "continuity"}
+    if unknown_keys:
+        keys = ", ".join(sorted(str(key) for key in unknown_keys))
+        raise ImpressFormatError(f"Unsupported SurfaceAdjacencyRecord payload fields: {keys}.")
+    source = decode_surface_boundary_ref_payload(payload.get("source"), patch_count=patch_count)
+    target_payload = payload.get("target")
+    if target_payload is None:
+        target = None
+    else:
+        target = decode_surface_boundary_ref_payload(target_payload, patch_count=patch_count)
+    seam_id = payload.get("seam_id")
+    if seam_id is not None:
+        if not isinstance(seam_id, str) or not seam_id.strip():
+            raise ImpressFormatError("SurfaceAdjacencyRecord seam_id must be a non-empty string when present.")
+        if seam_ids is not None and seam_id not in set(seam_ids):
+            raise ImpressFormatError("SurfaceAdjacencyRecord references an unknown seam_id.")
+    continuity = payload.get("continuity", "C0")
+    if not isinstance(continuity, str) or not continuity.strip():
+        raise ImpressFormatError("SurfaceAdjacencyRecord continuity must be a non-empty string.")
+    try:
+        return SurfaceAdjacencyRecord(source=source, target=target, seam_id=seam_id, continuity=continuity)
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(str(exc)) from exc
+
+
 def encode_surface_patch_payload(patch: SurfacePatch) -> dict[str, object]:
     """Encode base patch fields and supported family geometry for `.impress` persistence."""
 
@@ -449,8 +498,6 @@ def encode_surface_shell_payload(shell: SurfaceShell) -> dict[str, object]:
 
     if not isinstance(shell, SurfaceShell):
         raise ImpressFormatError("encode_surface_shell_payload requires a SurfaceShell.")
-    if shell.adjacency:
-        raise ImpressFormatError("SurfaceShell adjacency payloads are encoded by the dedicated `.impress` adjacency codec.")
     return {
         "connected": shell.connected,
         "patch_count": shell.patch_count,
@@ -458,7 +505,7 @@ def encode_surface_shell_payload(shell: SurfaceShell) -> dict[str, object]:
         "transform_matrix": shell.transform_matrix.tolist(),
         "metadata": dict(shell.metadata),
         "seams": [encode_surface_seam_payload(seam) for seam in shell.seams],
-        "adjacency": [],
+        "adjacency": [encode_surface_adjacency_payload(record) for record in shell.adjacency],
     }
 
 
@@ -496,9 +543,13 @@ def decode_surface_shell_payload(payload: Mapping[str, object], *, patches: Sequ
     adjacency = payload.get("adjacency", [])
     if not isinstance(seams, Sequence) or isinstance(seams, (str, bytes)):
         raise ImpressFormatError("SurfaceShell seams must be an array.")
-    if adjacency != []:
-        raise ImpressFormatError("SurfaceShell adjacency payloads require their dedicated codec.")
+    if not isinstance(adjacency, Sequence) or isinstance(adjacency, (str, bytes)):
+        raise ImpressFormatError("SurfaceShell adjacency must be an array.")
     decoded_seams = tuple(decode_surface_seam_payload(seam, patch_count=len(patches)) for seam in seams)
+    seam_ids = tuple(seam.seam_id for seam in decoded_seams)
+    decoded_adjacency = tuple(
+        decode_surface_adjacency_payload(record, patch_count=len(patches), seam_ids=seam_ids) for record in adjacency
+    )
 
     transform_matrix = _validate_matrix4_payload(payload.get("transform_matrix"))
     try:
@@ -506,6 +557,7 @@ def decode_surface_shell_payload(payload: Mapping[str, object], *, patches: Sequ
             tuple(patches),
             connected=connected,
             seams=decoded_seams,
+            adjacency=decoded_adjacency,
             transform_matrix=transform_matrix,
             metadata=dict(metadata),
         )

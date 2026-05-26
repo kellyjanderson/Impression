@@ -11,12 +11,14 @@ from impression.io import (
     ImpressUnits,
     SurfaceBodyStore,
     UnsupportedImpressSchemaVersion,
+    decode_surface_adjacency_payload,
     decode_surface_boundary_ref_payload,
     decode_surface_body_payload,
     decode_surface_patch_payload,
     decode_surface_seam_payload,
     decode_surface_shell_payload,
     decode_trim_loop_payload,
+    encode_surface_adjacency_payload,
     encode_surface_boundary_ref_payload,
     encode_surface_body_payload,
     encode_surface_patch_payload,
@@ -35,6 +37,7 @@ from impression.modeling.surface import (
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
+    SurfaceAdjacencyRecord,
     SurfaceBoundaryRef,
     SurfaceSeam,
     TrimLoop,
@@ -249,6 +252,52 @@ def test_encode_decode_surface_shell_payload_round_trips_seams() -> None:
     assert decoded.seams == (seam,)
 
 
+def test_encode_decode_surface_adjacency_payload_round_trips_refs() -> None:
+    record = SurfaceAdjacencyRecord(
+        source=SurfaceBoundaryRef(0, "right"),
+        target=SurfaceBoundaryRef(1, "left"),
+        seam_id="join",
+        continuity="G1",
+    )
+
+    payload = encode_surface_adjacency_payload(record)
+    decoded = decode_surface_adjacency_payload(payload, patch_count=2, seam_ids=("join",))
+
+    assert payload == {
+        "source": {"patch_index": 0, "boundary_id": "right"},
+        "target": {"patch_index": 1, "boundary_id": "left"},
+        "seam_id": "join",
+        "continuity": "G1",
+    }
+    assert decoded == record
+
+
+def test_encode_decode_surface_shell_payload_round_trips_adjacency() -> None:
+    patches = [
+        PlanarSurfacePatch(family="planar", origin=(0.0, 0.0, 0.0)),
+        PlanarSurfacePatch(family="planar", origin=(1.0, 0.0, 0.0)),
+    ]
+    seam = SurfaceSeam("join", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")))
+    adjacency = SurfaceAdjacencyRecord(
+        source=SurfaceBoundaryRef(0, "right"),
+        target=SurfaceBoundaryRef(1, "left"),
+        seam_id="join",
+    )
+    shell = make_surface_shell(patches, seams=(seam,), adjacency=(adjacency,))
+
+    payload = encode_surface_shell_payload(shell)
+    decoded = decode_surface_shell_payload(payload, patches=patches)
+
+    assert payload["adjacency"] == [encode_surface_adjacency_payload(adjacency)]
+    assert decoded.adjacency == (adjacency,)
+
+
+def test_decode_surface_adjacency_payload_accepts_open_boundary_without_target() -> None:
+    record = SurfaceAdjacencyRecord(source=SurfaceBoundaryRef(0, "left"), target=None)
+
+    assert decode_surface_adjacency_payload(encode_surface_adjacency_payload(record), patch_count=1) == record
+
+
 def test_decode_surface_seam_payload_rejects_missing_boundary_reference() -> None:
     payload = encode_surface_seam_payload(
         SurfaceSeam("bad-ref", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(2, "left")))
@@ -298,6 +347,23 @@ def test_decode_surface_boundary_ref_payload_rejects_invalid_payloads(payload: d
 def test_decode_surface_seam_payload_rejects_invalid_payloads(payload: dict[str, object]) -> None:
     with pytest.raises(ImpressFormatError):
         decode_surface_seam_payload(payload)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"source": {"patch_index": 2, "boundary_id": "right"}, "target": None},
+        {"source": {"patch_index": 0, "boundary_id": "right"}, "target": {"patch_index": 2, "boundary_id": "left"}},
+        {"source": {"patch_index": 0, "boundary_id": "right"}, "target": None, "seam_id": "missing"},
+        {"source": {"patch_index": 0, "boundary_id": "right"}, "target": None, "seam_id": " "},
+        {"source": {"patch_index": 0, "boundary_id": "right"}, "target": None, "continuity": " "},
+        {"source": {"patch_index": 0, "boundary_id": "right"}, "target": None, "kind": "extra"},
+    ],
+)
+def test_decode_surface_adjacency_payload_rejects_invalid_references(payload: dict[str, object]) -> None:
+    with pytest.raises(ImpressFormatError):
+        decode_surface_adjacency_payload(payload, patch_count=2, seam_ids=("join",))
 
 
 def test_encode_decode_surface_body_payload_round_trips_container_fields() -> None:
