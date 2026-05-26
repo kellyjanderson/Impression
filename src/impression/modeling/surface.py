@@ -822,6 +822,8 @@ class HeightmapSurfacePatch(SurfacePatch):
     """Sampled heightfield patch with bilinear evaluation."""
 
     height_samples: np.ndarray = field(default_factory=lambda: np.zeros((2, 2), dtype=float))
+    alpha_mask: np.ndarray = field(default_factory=lambda: np.ones((2, 2), dtype=bool))
+    alpha_mode: Literal["mask", "ignore"] = "mask"
     xy_scale: tuple[float, float] = (1.0, 1.0)
     center: np.ndarray = field(default_factory=lambda: np.zeros(3, dtype=float))
     height_scale: float = 1.0
@@ -834,6 +836,12 @@ class HeightmapSurfacePatch(SurfacePatch):
             raise ValueError("HeightmapSurfacePatch.height_samples must be at least 2x2.")
         if not np.all(np.isfinite(samples)):
             raise ValueError("HeightmapSurfacePatch.height_samples must be finite.")
+        alpha_mask = np.asarray(self.alpha_mask, dtype=bool)
+        if alpha_mask.shape != samples.shape:
+            raise ValueError("HeightmapSurfacePatch.alpha_mask must match height_samples shape.")
+        alpha_mode = str(self.alpha_mode).lower()
+        if alpha_mode not in {"mask", "ignore"}:
+            raise ValueError("HeightmapSurfacePatch.alpha_mode must be 'mask' or 'ignore'.")
         xy_scale = tuple(float(value) for value in self.xy_scale)
         if len(xy_scale) != 2 or xy_scale[0] <= 0.0 or xy_scale[1] <= 0.0:
             raise ValueError("HeightmapSurfacePatch.xy_scale must contain two positive values.")
@@ -843,6 +851,8 @@ class HeightmapSurfacePatch(SurfacePatch):
             raise ValueError("HeightmapSurfacePatch.height_scale must be finite.")
         domain = ParameterDomain((0.0, float(samples.shape[1] - 1)), (0.0, float(samples.shape[0] - 1)))
         object.__setattr__(self, "height_samples", samples)
+        object.__setattr__(self, "alpha_mask", alpha_mask)
+        object.__setattr__(self, "alpha_mode", alpha_mode)
         object.__setattr__(self, "xy_scale", xy_scale)
         object.__setattr__(self, "center", center)
         object.__setattr__(self, "height_scale", height_scale)
@@ -871,6 +881,8 @@ class HeightmapSurfacePatch(SurfacePatch):
     def geometry_payload(self) -> dict[str, object]:
         return {
             "height_samples": self.height_samples,
+            "alpha_mask": self.alpha_mask,
+            "alpha_mode": self.alpha_mode,
             "xy_scale": self.xy_scale,
             "center": self.center,
             "height_scale": self.height_scale,

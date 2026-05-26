@@ -5,7 +5,19 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from impression.modeling import HeightmapSurfacePatch, MeshQuality, heightmap, displace_heightmap, make_heightmap_surface_patch
+from impression.modeling import (
+    HeightmapAlphaMaskPolicy,
+    HeightmapCacheKeyRecord,
+    HeightmapSurfacePatch,
+    MeshQuality,
+    heightmap,
+    displace_heightmap,
+    heightmap_cache_key_record,
+    make_heightmap_surface_patch,
+    resolve_heightmap_alpha_mask_policy,
+    tessellate_surface_body,
+    tessellate_surface_patch,
+)
 from impression.modeling.drafting import make_plane
 
 
@@ -46,6 +58,45 @@ def test_heightmap_surface_backend_uses_sampled_surface_payload():
     assert patch.point_at(1.0, 0.0)[2] == 2.0
     assert body.patch_count == 1
     assert isinstance(body.iter_patches()[0], HeightmapSurfacePatch)
+
+
+def test_heightmap_surface_alpha_policy_and_tessellation_preserve_mask(tmp_path: Path):
+    path = _write_test_image(tmp_path / "mask.png", transparent_corner=True)
+
+    masked_body = heightmap(path, height=1.0, alpha_mode="mask", backend="surface")
+    ignored_body = heightmap(path, height=1.0, alpha_mode="ignore", backend="surface")
+    masked_patch = masked_body.iter_patches()[0]
+    ignored_patch = ignored_body.iter_patches()[0]
+    masked_mesh = tessellate_surface_body(masked_body).mesh
+    ignored_mesh = tessellate_surface_body(ignored_body).mesh
+    ignored_patch_mesh = tessellate_surface_patch(ignored_patch)
+
+    assert isinstance(masked_patch, HeightmapSurfacePatch)
+    assert isinstance(ignored_patch, HeightmapSurfacePatch)
+    assert masked_patch.alpha_mode == "mask"
+    assert ignored_patch.alpha_mode == "ignore"
+    assert masked_patch.kernel_metadata()["alpha_policy"]["masked_sample_count"] == 1
+    assert masked_patch.kernel_metadata()["cache_key_policy"]["cacheable"] is True
+    assert masked_mesh.n_faces == 0
+    assert ignored_mesh.n_faces == 2
+    assert ignored_patch_mesh.metadata["heightmap_alpha_mode"] == "ignore"
+
+
+def test_heightmap_alpha_and_cache_policy_records_are_explicit(tmp_path: Path):
+    path = _write_test_image(tmp_path / "cache.png", transparent_corner=True)
+    mask = np.asarray([[False, True], [True, True]], dtype=bool)
+
+    policy = resolve_heightmap_alpha_mask_policy(mask, alpha_mode="mask")
+    cache_record = heightmap_cache_key_record(path, 1.0, 1.0, (0.0, 0.0, 0.0), "mask", None)
+    array_cache_record = heightmap_cache_key_record(mask.astype(float), 1.0, 1.0, (0.0, 0.0, 0.0), "mask", None)
+
+    assert isinstance(policy, HeightmapAlphaMaskPolicy)
+    assert policy.has_masked_samples is True
+    assert policy.canonical_payload()["masked_sample_count"] == 1
+    assert isinstance(cache_record, HeightmapCacheKeyRecord)
+    assert cache_record.cacheable is True
+    assert array_cache_record.cacheable is False
+    assert array_cache_record.reason == "uncacheable-source"
 
 
 def test_displace_heightmap_planar():

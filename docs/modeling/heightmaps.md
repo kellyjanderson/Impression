@@ -33,7 +33,7 @@ Options:
 - `height`: vertical scale applied to grayscale values.
 - `xy_scale`: scalar or `(sx, sy)` spacing between pixels.
 - `center`: world‑space center of the heightfield.
-- `alpha_mode`: `"mask"` (holes) or `"ignore"` (transparent pixels become zero height).
+- `alpha_mode`: `"mask"` keeps alpha as a surface payload mask and removes masked cells during tessellation; `"ignore"` keeps the sampled surface continuous and treats transparent samples as zero height.
 - `backend`: `"mesh"` for legacy mesh-primary output, or `"surface"` for sampled surfaced output.
 
 ## displace_heightmap
