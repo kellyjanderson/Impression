@@ -213,7 +213,7 @@ from .csg import (
 from .paths import Path
 from .group import MeshGroup, group
 from .ops import offset, hull
-from .heightmap import heightmap, displace_heightmap
+from .heightmap import heightmap, displace_heightmap, make_heightmap_surface_patch
 from .drafting import make_line, make_plane, make_arrow, make_dimension
 from .text import (
     TextMeshCompatibilityResult,
@@ -270,6 +270,7 @@ from .surface import (
     assess_implicit_field_security,
     evaluate_implicit_field,
     evaluate_implicit_field_domain,
+    HeightmapSurfacePatch,
     PlanarSurfacePatch,
     RuledSurfacePatch,
     RevolutionSurfacePatch,
@@ -572,6 +573,7 @@ __all__ = [
     "hull",
     "heightmap",
     "displace_heightmap",
+    "make_heightmap_surface_patch",
     "make_line",
     "make_plane",
     "make_arrow",
@@ -626,6 +628,7 @@ __all__ = [
     "assess_implicit_field_security",
     "evaluate_implicit_field",
     "evaluate_implicit_field_domain",
+    "HeightmapSurfacePatch",
     "PlanarSurfacePatch",
     "RuledSurfacePatch",
     "RevolutionSurfacePatch",
