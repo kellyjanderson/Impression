@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from .transform import rotate, translate, scale, resize, mirror, multmatrix, rotate_euler
+from .transform import (
+    TransformMeshCompatibilityResult,
+    rotate,
+    translate,
+    scale,
+    resize,
+    mirror,
+    multmatrix,
+    rotate_euler,
+)
 from .primitives import (
     make_box,
     make_box_mesh,
@@ -583,6 +592,7 @@ __all__ = [
     "Path",
     "MeshGroup",
     "group",
+    "TransformMeshCompatibilityResult",
     "rotate",
     "translate",
     "scale",

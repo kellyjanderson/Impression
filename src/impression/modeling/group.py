@@ -111,6 +111,7 @@ class MeshGroup:
 
     meshes: List[Mesh] = field(default_factory=list)
     _transform: np.ndarray = field(default_factory=lambda: np.eye(4))
+    metadata: dict[str, object] = field(default_factory=dict)
 
     def add(self, mesh: Mesh) -> "MeshGroup":
         self.meshes.append(mesh)
