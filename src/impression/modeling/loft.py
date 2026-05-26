@@ -158,6 +158,14 @@ class ResampledLoopCorrespondence:
 
 
 @dataclass(frozen=True)
+class MeshSampleEmissionDiagnostic:
+    loop_pair_id: str
+    sample_index: int | None
+    track_id: str | None
+    reason: str
+
+
+@dataclass(frozen=True)
 class _RailRecord:
     ref: str
     key: str
@@ -1100,6 +1108,54 @@ def validate_sample_correspondence(resampled: ResampledLoopCorrespondence) -> No
             raise ValueError("protected_indices contains an out-of-range index.")
         if not resampled.sample_records[protected_index].protected:
             raise ValueError("protected_indices must reference protected sample records.")
+
+
+def validate_mesh_executor_correspondence_input(resampled: ResampledLoopCorrespondence) -> None:
+    loop_pair_id = str(resampled.diagnostics.get("loop_pair_id", "loop-pair"))
+    if len(resampled.source_samples) != len(resampled.target_samples):
+        diagnostic = MeshSampleEmissionDiagnostic(loop_pair_id, None, None, "sample_count_mismatch")
+        raise ValueError(f"{diagnostic.reason}: source and target sample counts differ.")
+    if not resampled.sample_records:
+        diagnostic = MeshSampleEmissionDiagnostic(loop_pair_id, None, None, "missing_sample_correspondence")
+        raise ValueError(f"{diagnostic.reason}: sample records are required.")
+    if len(resampled.sample_records) != len(resampled.source_samples):
+        diagnostic = MeshSampleEmissionDiagnostic(loop_pair_id, None, None, "missing_sample_correspondence")
+        raise ValueError(f"{diagnostic.reason}: every sample needs a correspondence record.")
+    for index, record in enumerate(resampled.sample_records):
+        if record.index != index:
+            diagnostic = MeshSampleEmissionDiagnostic(loop_pair_id, index, record.track_id, "sample_record_index_mismatch")
+            raise ValueError(f"{diagnostic.reason}: record index {record.index} does not match {index}.")
+
+
+def emit_mesh_faces_from_sample_correspondence(
+    resampled: ResampledLoopCorrespondence,
+    mesh_builder: object | None = None,
+) -> Mesh:
+    validate_mesh_executor_correspondence_input(resampled)
+    source_vertices = np.column_stack([resampled.source_samples, np.zeros(len(resampled.source_samples))])
+    target_vertices = np.column_stack([resampled.target_samples, np.ones(len(resampled.target_samples))])
+    vertices = np.vstack([source_vertices, target_vertices])
+    count = len(resampled.sample_records)
+    faces: list[tuple[int, int, int]] = []
+    for index, record in enumerate(resampled.sample_records):
+        next_index = (index + 1) % count
+        next_record = resampled.sample_records[next_index]
+        if next_record.index != next_index:
+            raise ValueError("sample_record_index_mismatch: non-contiguous sample records.")
+        faces.append((record.index, next_record.index, count + next_record.index))
+        faces.append((record.index, count + next_record.index, count + record.index))
+    mesh = Mesh(
+        vertices=vertices,
+        faces=np.asarray(faces, dtype=int),
+        metadata={
+            "executor": "mesh_correspondence",
+            "sample_records": resampled.sample_records,
+            "protected_indices": resampled.protected_indices,
+        },
+    )
+    if mesh_builder is not None and hasattr(mesh_builder, "append"):
+        mesh_builder.append(mesh)
+    return mesh
 
 
 @dataclass(frozen=True)
@@ -6139,6 +6195,7 @@ __all__ = [
     "InferenceCandidateScore",
     "InferenceRefusalDiagnostic",
     "InferenceResult",
+    "MeshSampleEmissionDiagnostic",
     "ParentSpanMatch",
     "PointLifecycleRefusalDiagnostic",
     "PointLifecycleResolution",
@@ -6152,6 +6209,7 @@ __all__ = [
     "SyntheticSupportReference",
     "LoftPlan",
     "accept_or_refuse_inferred_correspondence",
+    "emit_mesh_faces_from_sample_correspondence",
     "insert_synthetic_support_reference",
     "locate_parent_span",
     "project_point_to_span",
@@ -6161,6 +6219,7 @@ __all__ = [
     "score_correspondence_candidates",
     "validate_point_lifecycle_event",
     "validate_point_lifecycle_events",
+    "validate_mesh_executor_correspondence_input",
     "validate_rail_priority",
     "validate_sample_correspondence",
     "loft_profiles",
