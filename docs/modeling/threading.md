@@ -34,10 +34,12 @@ Threading is in an active surface-first migration. The legacy mesh generators st
 from impression.modeling import lookup_standard_thread, make_external_thread
 
 spec = lookup_standard_thread("metric", "M6x1", length=12.0)
-thread = make_external_thread(spec, backend="surface")
+thread = make_external_thread(spec)
 ```
 
-That surfaced result is a `ThreadSurfaceRepresentation`, not a tessellated mesh. It captures:
+`make_external_thread(...)` and `make_internal_thread(...)` default to surfaced
+results. The surfaced result is a `ThreadSurfaceRepresentation`, not a
+tessellated mesh. It captures:
 
 - normalized axis origin, direction, and orthonormal basis
 - major diameter, minor diameter, pitch, and resolved thread depth
@@ -47,15 +49,24 @@ That surfaced result is a `ThreadSurfaceRepresentation`, not a tessellated mesh.
 
 This keeps thread truth explicit before any future surfaced thread executor turns it into patches or tessellation.
 
-Surface convenience builders are also starting to migrate. Today, `backend="surface"` on:
+Surface convenience builders are also starting to migrate. Today, the default
+route for:
 
 - `make_threaded_rod(...)`
 - `make_tapped_hole_cutter(...)`
+
+returns a `ThreadSurfaceAssembly`. The same surfaced assembly route remains
+available explicitly with `backend="surface"`.
+
+The broader convenience builders also expose `backend="surface"`:
+
 - `make_hex_nut(...)`
 - `make_round_nut(...)`
 - `make_runout_relief(...)`
 
-returns a `ThreadSurfaceAssembly`. That assembly records surfaced primitive and thread operands plus the intended composition (`standalone`, `union`, or `difference`) without collapsing back to mesh-first truth.
+That assembly records surfaced primitive and thread operands plus the intended
+composition (`standalone`, `union`, or `difference`) without collapsing back to
+mesh-first truth.
 
 Fit presets still change canonical geometry on the surfaced path, because they change the actual compensated thread dimensions. Mesh-quality controls do not: they are currently ignored by surfaced thread preparation and only matter on the legacy mesh generator path.
 

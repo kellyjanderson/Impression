@@ -132,6 +132,24 @@ def test_surface_thread_convenience_builders_return_structured_assemblies() -> N
     assert rod.stable_identity == make_threaded_rod(spec, backend="surface").stable_identity
 
 
+def test_thread_helpers_default_to_surface_representations_and_assemblies() -> None:
+    spec = lookup_standard_thread("metric", "M6x1", length=8.0)
+
+    external = make_external_thread(spec)
+    internal = make_internal_thread(spec)
+    rod = make_threaded_rod(spec)
+    cutter = make_tapped_hole_cutter(spec, overshoot=0.5)
+
+    assert isinstance(external, ThreadSurfaceRepresentation)
+    assert external.kind == "external"
+    assert isinstance(internal, ThreadSurfaceRepresentation)
+    assert internal.kind == "internal"
+    assert isinstance(rod, ThreadSurfaceAssembly)
+    assert rod.assembly_type == "threaded_rod"
+    assert isinstance(cutter, ThreadSurfaceAssembly)
+    assert cutter.assembly_type == "tapped_hole_cutter"
+
+
 def test_surface_thread_fit_changes_canonical_geometry_explicitly() -> None:
     base = lookup_standard_thread("metric", "M6x1", length=10.0)
     fitted = apply_fit(base, "fdm_default", kind="external")
