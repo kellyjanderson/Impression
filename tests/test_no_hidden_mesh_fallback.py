@@ -12,7 +12,9 @@ from impression.mesh import Mesh
 from impression.modeling import (
     HeightmapMeshCompatibilityResult,
     HingeSurfaceAssembly,
+    BSplineSurfacePatch,
     SurfaceBody,
+    SurfaceBooleanOperands,
     SurfaceBooleanResult,
     TextMeshCompatibilityResult,
     ThreadMeshCompatibilityResult,
@@ -28,10 +30,13 @@ from impression.modeling import (
     make_external_thread,
     make_line,
     make_sphere,
+    make_surface_body,
+    make_surface_shell,
     make_text,
     make_text_mesh_result,
     make_thread_mesh_compatibility_result,
     make_traditional_hinge_pair,
+    surface_boolean_result,
 )
 from impression.modeling.drawing2d import make_rect
 from impression.modeling.loft import Station
@@ -146,10 +151,13 @@ def test_explicit_mesh_compatibility_matrix_names_mesh_boundaries() -> None:
 
 
 def test_surface_csg_unsupported_result_is_diagnostic_not_mesh_fallback() -> None:
-    result = boolean_union(
-        [make_box(size=(1.0, 1.0, 1.0)), make_sphere(radius=0.5, center=(2.0, 0.0, 0.0))],
-        backend="surface",
+    planned_family_body = make_surface_body([make_surface_shell([BSplineSurfacePatch(family="bspline")])])
+    operands = SurfaceBooleanOperands(
+        operation="union",
+        bodies=(make_box(size=(1.0, 1.0, 1.0), backend="surface"), planned_family_body),
     )
+
+    result = surface_boolean_result("union", operands)
 
     diagnostic = UnsupportedOperationDiagnostic(
         subsystem="csg",

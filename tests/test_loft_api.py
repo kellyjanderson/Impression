@@ -2,16 +2,26 @@ from __future__ import annotations
 
 import numpy as np
 
-from impression.mesh import analyze_mesh
-from impression.modeling import Section, Station, as_section, loft, loft_plan_ambiguities, loft_profiles
+from impression.modeling import (
+    Section,
+    Station,
+    SurfaceBody,
+    as_section,
+    export_tessellation_request,
+    loft,
+    loft_plan_ambiguities,
+    loft_profiles,
+    tessellate_surface_body,
+)
 from impression.modeling.drawing2d import make_rect
 
 
-def _assert_mesh_quality(mesh) -> None:
-    analysis = analyze_mesh(mesh)
-    assert analysis.boundary_edges == 0, analysis.issues()
-    assert analysis.nonmanifold_edges == 0, analysis.issues()
-    assert analysis.degenerate_faces == 0, analysis.issues()
+def _assert_surface_body_tessellates(body: SurfaceBody) -> None:
+    assert isinstance(body, SurfaceBody)
+    assert body.patch_count > 0
+    result = tessellate_surface_body(body, export_tessellation_request(require_watertight=False))
+    assert result.mesh.n_vertices > 0
+    assert result.mesh.n_faces > 0
 
 
 def test_public_loft_api_threads_interactive_selection() -> None:
@@ -36,7 +46,7 @@ def test_public_loft_api_threads_interactive_selection() -> None:
     report = loft_plan_ambiguities(stations, samples=30, split_merge_mode="resolve")
     selection = {(0, 1): report.intervals[0].candidates[0].candidate_id}
 
-    mesh = loft(
+    body = loft(
         [s0, s1],
         path=path,
         samples=30,
@@ -45,9 +55,7 @@ def test_public_loft_api_threads_interactive_selection() -> None:
         ambiguity_selection=selection,
         cap_ends=True,
     )
-    assert mesh.n_vertices > 0
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    _assert_surface_body_tessellates(body)
 
 
 def test_public_loft_profiles_api_threads_probabilistic_controls_reproducibly() -> None:
@@ -66,7 +74,7 @@ def test_public_loft_profiles_api_threads_probabilistic_controls_reproducibly() 
     )
     path = np.asarray([[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=float)
 
-    mesh_a = loft_profiles(
+    body_a = loft_profiles(
         [s0, s1],
         path=path,
         samples=30,
@@ -78,7 +86,7 @@ def test_public_loft_profiles_api_threads_probabilistic_controls_reproducibly() 
         probabilistic_temperature=0.3,
         cap_ends=True,
     )
-    mesh_b = loft_profiles(
+    body_b = loft_profiles(
         [s0, s1],
         path=path,
         samples=30,
@@ -91,9 +99,8 @@ def test_public_loft_profiles_api_threads_probabilistic_controls_reproducibly() 
         cap_ends=True,
     )
 
-    assert np.array_equal(mesh_a.vertices, mesh_b.vertices)
-    assert np.array_equal(mesh_a.faces, mesh_b.faces)
-    _assert_mesh_quality(mesh_a)
+    assert body_a.stable_identity == body_b.stable_identity
+    _assert_surface_body_tessellates(body_a)
 
 
 def test_public_loft_api_interactive_best_effort_falls_back_without_selection() -> None:
@@ -112,7 +119,7 @@ def test_public_loft_api_interactive_best_effort_falls_back_without_selection() 
     )
     path = np.asarray([[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=float)
 
-    mesh = loft(
+    body = loft(
         [s0, s1],
         path=path,
         samples=30,
@@ -121,6 +128,4 @@ def test_public_loft_api_interactive_best_effort_falls_back_without_selection() 
         ambiguity_selection_policy="best_effort",
         cap_ends=True,
     )
-    assert mesh.n_vertices > 0
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    _assert_surface_body_tessellates(body)

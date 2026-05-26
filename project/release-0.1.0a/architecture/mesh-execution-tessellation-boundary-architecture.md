@@ -3303,8 +3303,312 @@ Split decision:
 - Cohesion reason: the fixture matrix spans subsystems, but the actual behavior
   is one policy: no hidden mesh fallback.
 
+### Split Review Record: Loft Public Surface API And Reference QA Boundary
+
+Discovery purpose:
+- Remove the remaining public loft convenience route that returns mesh output
+  as the default and correct loft reference QA so surfaced annotations are not
+  asserted as watertight model solids.
+
+Responsibilities:
+- Functions/methods:
+  - `loft_sections`
+  - `loft_execute_plan`
+  - `loft_execute_plan_debug_mesh`
+  - loft reference mesh-quality helpers
+- Data structures/models:
+  - `LoftPlan`
+  - `SurfaceBody` loft result
+  - reference scene item role record
+- Dependencies/services:
+  - `src/impression/modeling/loft.py`
+  - `tests/test_loft.py`
+  - loft real-world examples
+- Returns/outputs/signals:
+  - canonical `SurfaceBody`
+  - explicit debug/tessellated mesh only through named boundary APIs
+  - role-aware QA result
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: loft planning, surface executor, debug mesh
+    executor, tessellation helper
+  - Additions to existing reusable library/module: reference scene role checks
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - changes public loft behavior and test expectations
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - no additional tessellation unless test/export explicitly requests it
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - `src/impression/modeling/loft.py`, loft examples, and `tests/test_loft.py`
+- Chosen defaults / parameters:
+  - authored loft APIs return `SurfaceBody`; mesh appears only through
+    `*_debug_mesh`, tessellation, or explicitly named compatibility helpers
+- Test strategy:
+  - tests prove `loft_sections` no longer returns a mesh by default and the
+    splitter-manifold example distinguishes model bodies from annotation labels
+- Data ownership:
+  - loft owns surface plan execution; tessellation/debug owns mesh; examples
+    own scene item role metadata
+- Routes:
+  - public loft API to surface executor to optional tessellation/debug boundary
+- Reuse/extraction decision:
+  - keep debug mesh executor only as explicit boundary code
+- UI field/control inventory:
+  - not applicable
+
+Open questions / nuance discovered:
+- The observed splitter-manifold failure is not proof that the loft kernel must
+  be mesh-primary. The failing assertion applies mesh watertightness checks to
+  a surfaced annotation label and uses a public convenience route that still
+  returns a debug mesh.
+
+Pre-split score:
+- Functions/methods: 4 x 2 = 8
+- Data structures/models: 3 x 1 = 3
+- Dependencies/services: 3 x 1 = 3
+- Returns/outputs/signals: 3 x 1 = 3
+- Existing reusable code reused as-is: 4 x 0.5 = 2
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 1 x 3 = 3
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 0 x 2 = 0
+- Pre-split total: 25
+
+Readiness blockers:
+- [x] Missing implementation owner/module.
+- [x] Missing reuse/extraction decision.
+- [x] Missing library/module boundary where adding or creating reusable code.
+- [x] Missing UI field/control inventory where applicable.
+- [x] Missing chosen defaults / parameters.
+- [x] Missing test strategy.
+- [x] Unclear data ownership.
+- [x] Missing GUI/concurrency route where applicable.
+- [x] Missing performance bound/index plan where applicable.
+- [x] Missing privacy/logging rule where applicable.
+
+Split decision:
+- Split required by score. The implementation spec is split into:
+  - Loft Public Surface API Default
+  - Loft Reference QA Role Boundary
+
+### Candidate Spec: Loft Public Surface API Default
+
+Discovery purpose:
+- Make authored loft public APIs return `SurfaceBody` by default and reserve
+  mesh output for explicitly named tessellation, debug, or compatibility APIs.
+
+Responsibilities:
+- Functions/methods:
+  - `loft_sections`
+  - `loft_execute_plan`
+  - `loft_execute_plan_debug_mesh`
+- Data structures/models:
+  - `LoftPlan`
+  - `SurfaceBody` loft result
+- Dependencies/services:
+  - `src/impression/modeling/loft.py`
+  - tessellation boundary
+- Returns/outputs/signals:
+  - canonical `SurfaceBody`
+  - explicit debug mesh
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: loft planning and surface executor
+  - Additions to existing reusable library/module: public route migration tests
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - changes public loft return defaults
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - avoids implicit tessellation on default path
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - `src/impression/modeling/loft.py`
+- Chosen defaults / parameters:
+  - `loft_sections` returns `SurfaceBody` unless the caller chooses an
+    explicitly named mesh/debug route
+- Test strategy:
+  - public API tests for `SurfaceBody` default and explicit mesh route
+- Data ownership:
+  - loft owns modeled surface result; tessellation/debug owns mesh output
+- Routes:
+  - public loft API to surface executor
+- Reuse/extraction decision:
+  - reuse existing surface executor and debug mesh executor
+- UI field/control inventory:
+  - not applicable
+
+Open questions / nuance discovered:
+- Backward compatibility must be explicit; compatibility mesh helpers cannot
+  remain the default authored path.
+
+Score:
+- Functions/methods: 3 x 2 = 6
+- Data structures/models: 2 x 1 = 2
+- Dependencies/services: 2 x 1 = 2
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 1 x 3 = 3
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 0 x 2 = 0
+- Total: 18.5
+
+Readiness blockers:
+- [x] Missing implementation owner/module.
+- [x] Missing reuse/extraction decision.
+- [x] Missing library/module boundary where adding or creating reusable code.
+- [x] Missing UI field/control inventory where applicable.
+- [x] Missing chosen defaults / parameters.
+- [x] Missing test strategy.
+- [x] Unclear data ownership.
+- [x] Missing GUI/concurrency route where applicable.
+- [x] Missing performance bound/index plan where applicable.
+- [x] Missing privacy/logging rule where applicable.
+
+Split decision:
+- Review for split. Cohesion reason: this is one public return-contract change.
+
+### Candidate Spec: Loft Reference QA Role Boundary
+
+Discovery purpose:
+- Make loft reference/example tests distinguish modeled solid bodies from
+  annotations, labels, debug meshes, and tessellated views.
+
+Responsibilities:
+- Functions/methods:
+  - loft scene role helper
+  - reference mesh-quality assertion
+- Data structures/models:
+  - scene item role record
+  - expected QA mode record
+- Dependencies/services:
+  - `tests/test_loft.py`
+  - loft real-world examples
+- Returns/outputs/signals:
+  - watertight assertion for model bodies
+  - role-specific assertion for annotations
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: existing example outputs
+  - Additions to existing reusable library/module: role-aware test helper
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - changes tests/examples only
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - bounded tessellation only for model body QA
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - `tests/test_loft.py` and loft real-world example metadata
+- Chosen defaults / parameters:
+  - labels/annotations are not required to be watertight solids unless declared
+    as model bodies
+- Test strategy:
+  - splitter-manifold example passes with role-aware checks and no hidden loft
+    mesh fallback
+- Data ownership:
+  - examples own scene item roles; tests own QA interpretation
+- Routes:
+  - example scene output to role-aware verification
+- Reuse/extraction decision:
+  - reuse tessellation helpers only at verification boundary
+- UI field/control inventory:
+  - not applicable
+
+Open questions / nuance discovered:
+- The current failing splitter-manifold test tessellates a surfaced label and
+  demands watertightness, producing boundary-edge failures unrelated to the
+  loft manifold body.
+
+Score:
+- Functions/methods: 2 x 2 = 4
+- Data structures/models: 2 x 1 = 2
+- Dependencies/services: 2 x 1 = 2
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 1 x 3 = 3
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 0 x 2 = 0
+- Total: 16.5
+
+Readiness blockers:
+- [x] Missing implementation owner/module.
+- [x] Missing reuse/extraction decision.
+- [x] Missing library/module boundary where adding or creating reusable code.
+- [x] Missing UI field/control inventory where applicable.
+- [x] Missing chosen defaults / parameters.
+- [x] Missing test strategy.
+- [x] Unclear data ownership.
+- [x] Missing GUI/concurrency route where applicable.
+- [x] Missing performance bound/index plan where applicable.
+- [x] Missing privacy/logging rule where applicable.
+
+Split decision:
+- Review for split. Cohesion reason: this is one reference QA contract.
+
 ## Change History
 
+- 2026-05-26: Added loft public surface API and reference QA boundary manifest
+  entries after the splitter-manifold mesh-quality test exposed a default mesh
+  route plus annotation-as-solid verification issue.
 - 2026-05-26: Further split high-scoring manifest entries where review exposed hidden API, compatibility, operation, and policy boundaries.
 - 2026-05-26: Split all manifest candidates that scored 25+ into smaller assessed candidates for spec promotion.
 - 2026-05-26: Added template-assessed Specification Manifest for Discovery so
