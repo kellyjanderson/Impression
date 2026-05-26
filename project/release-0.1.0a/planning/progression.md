@@ -320,7 +320,7 @@ Only final leaf specifications appear here.
 - [x] [Loft Spec 57: Point Lifecycle Event Records (v1.0)](../specifications/loft-57-point-lifecycle-event-records-v1_0.md)
 - [x] [Loft Spec 58: Birth/Death Synthetic Support Resolution (v1.0)](../specifications/loft-58-birth-death-synthetic-support-resolution-v1_0.md)
 - [x] [Loft Spec 59: Correspondence-Preserving Resampling Contract (v1.0)](../specifications/loft-59-correspondence-preserving-resampling-contract-v1_0.md)
-- [x] [Loft Spec 60: Mesh Executor Correspondence Consumption (v1.0)](../specifications/loft-60-mesh-executor-correspondence-consumption-v1_0.md)
+- [x] [Loft Spec 60: Legacy Mesh Debug Correspondence Consumption (retired canonical posture)](../specifications/loft-60-mesh-executor-correspondence-consumption-v1_0.md)
 - [x] [Loft Spec 61: Surface Executor Correspondence Consumption (v1.0)](../specifications/loft-61-surface-executor-correspondence-consumption-v1_0.md)
 
 ## Polish Specifications
@@ -382,7 +382,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 164: Primitive Planar And Frustum Helper Quarantine (v1.0)](../specifications/surface-164-primitive-planar-and-frustum-helper-quarantine-v1_0.md)
 - [x] [Surface Spec 165: Primitive Curved Helper Quarantine (v1.0)](../specifications/surface-165-primitive-curved-helper-quarantine-v1_0.md)
 - [x] [Surface Spec 166: Primitive Tessellation Helper Relocation (v1.0)](../specifications/surface-166-primitive-tessellation-helper-relocation-v1_0.md)
-- [ ] [Surface Spec 167: Loft Spec 60 Revision Or Retirement (v1.0)](../specifications/surface-167-loft-spec-60-revision-or-retirement-v1_0.md)
+- [x] [Surface Spec 167: Loft Spec 60 Revision Or Retirement (v1.0)](../specifications/surface-167-loft-spec-60-revision-or-retirement-v1_0.md)
 - [ ] [Surface Spec 168: Loft Mesh Emission Relocation (v1.0)](../specifications/surface-168-loft-mesh-emission-relocation-v1_0.md)
 - [ ] [Surface Spec 169: Text Surface Default Public API (v1.0)](../specifications/surface-169-text-surface-default-public-api-v1_0.md)
 - [ ] [Surface Spec 170: Text Mesh Compatibility And Empty Text Behavior (v1.0)](../specifications/surface-170-text-mesh-compatibility-and-empty-text-behavior-v1_0.md)

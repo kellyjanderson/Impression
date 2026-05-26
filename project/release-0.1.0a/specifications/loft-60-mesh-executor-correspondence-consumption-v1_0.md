@@ -1,62 +1,78 @@
-# Loft Spec 60: Mesh Executor Correspondence Consumption (v1.0)
+# Loft Spec 60: Legacy Mesh Debug Correspondence Consumption (v1.1)
 
 Date: 2026-05-25
-Status: Proposed
-Parent: `project/release-0.1.0a/architecture/loft-topology-point-correspondence-architecture.md` / `Mesh Executor Correspondence Consumption`
+Status: Retired as canonical modeled execution; retained only as legacy/debug
+compatibility guidance.
+Parent: `project/release-0.1.0a/architecture/loft-topology-point-correspondence-architecture.md` / `Legacy Mesh Debug Correspondence Consumption`
+
+Revision note: Surface Spec 167 revised this document after the mesh execution
+tessellation-boundary audit. `LoftPlan -> SurfaceBody` is the canonical modeled
+executor contract. Mesh face emission from loft correspondence is not canonical
+authored geometry; it is allowed only as an explicit legacy compatibility,
+debug, or tessellation-boundary route.
 
 ## Purpose
 
-Update the mesh loft executor so it consumes validated sample correspondence
-records instead of assuming equal sample indices represent the same semantic
-point.
+Document the retired mesh loft executor posture so any remaining explicit
+mesh/debug path consumes validated sample correspondence records instead of
+assuming equal sample indices represent the same semantic point.
 
 ## Scope
 
 Owns:
 
-- Mesh executor validation for sample correspondence records.
-- Mesh face emission from correspondence-aligned samples.
-- Executor diagnostics when correspondence records are missing or inconsistent.
+- Legacy/debug mesh executor validation for sample correspondence records.
+- Explicit mesh/debug face emission from correspondence-aligned samples.
+- Diagnostics when correspondence records are missing or inconsistent.
+- The migration note that this document is not canonical modeled execution.
 
 Does not own:
 
 - Planner resampling and sample allocation.
 - Surface patch construction.
 - Mesh fallback behavior for surface execution.
+- Canonical loft execution; Surface Executor Correspondence Consumption owns
+  the modeled `LoftPlan -> SurfaceBody` contract.
+- Tessellation-boundary mesh generation; Surface Spec 168 owns relocation of
+  remaining mesh emission out of canonical loft execution.
 
 ## Implementation Routing
 
 - Primary modules/files:
-  - `src/impression/modeling/loft.py` - update `loft_execute_plan` and mesh
-    executor helpers.
+  - `src/impression/modeling/loft.py` - legacy/debug mesh helper references
+    only until Surface Spec 168 relocates or retires them.
 - Supporting modules/files:
   - `src/impression/modeling/mesh.py` or current mesh emission owner - read
     existing mesh construction primitives.
 - GUI/QML files, if applicable:
   - not applicable.
 - Reusable library/module files:
-  - `src/impression/modeling/loft.py` - executor consumption path.
+  - `src/impression/modeling/loft.py` - legacy/debug consumption path only.
 - Tests:
   - `tests/test_loft_mesh_executor_correspondence.py` - stable
     correspondence, birth/death supports, and missing-record refusal.
 
 ## Chosen Defaults / Parameters
 
-- Mesh executor requires a validated `ResampledLoopCorrespondence`.
+- Any retained explicit mesh/debug route requires a validated
+  `ResampledLoopCorrespondence`.
 - Equal-length sample arrays without sample records are invalid for new
   topology-correspondence plans.
-- Executor trusts planner validation but performs defensive length and id
+- Legacy/debug emission trusts planner validation but performs defensive length and id
   consistency checks.
 - Missing or mismatched correspondence records refuse execution; they do not
   fall back to index-only matching.
+- Public loft APIs must not silently fall back from surface execution to this
+  mesh/debug path.
 
 ## Data Ownership
 
-- Source of truth: planner owns correspondence truth; mesh executor owns emitted
-  mesh geometry.
-- Read ownership: mesh executor reads immutable resampled correspondence.
-- Write ownership: mesh executor writes mesh vertices/faces and executor
-  diagnostics only.
+- Source of truth: planner owns correspondence truth; surface executor owns
+  canonical modeled loft output.
+- Read ownership: retained mesh/debug emission reads immutable resampled
+  correspondence.
+- Write ownership: retained mesh/debug emission writes mesh vertices/faces and
+  diagnostics only; those meshes are not canonical authored model state.
 - Derived/cache data: mesh geometry derives from sample arrays and records.
 - Privacy/logging constraints: diagnostics may log sample indices, track ids,
   lifecycle event ids, and refusal reason.
@@ -78,17 +94,20 @@ Does not own:
 ## Reuse And Extraction Plan
 
 - Existing code to reuse:
-  - Existing mesh face emission path in `loft_execute_plan`.
+  - Existing mesh face emission path only as legacy/debug compatibility until
+    Surface Spec 168 relocates or retires it.
 - Current reuse readiness:
-  - update existing mesh executor path.
+  - retired from canonical execution; only explicit legacy/debug routes may
+    reuse it.
 - Extraction/wrapping needed:
-  - wrap old index-based emission behind a function that accepts sample
-    correspondence records.
+  - wrap or move old index-based emission behind explicit debug/tessellation
+    boundary functions that accept sample correspondence records.
 - Additions to existing library/modules:
   - `emit_mesh_faces_from_sample_correspondence(...)`
   - `validate_mesh_executor_correspondence_input(...)`
 - New reusable modules to expose:
-  - none.
+  - none from this retired spec; Surface Spec 168 owns any tessellation/debug
+    relocation.
 - One-off code justification, if any:
   - none.
 
@@ -109,7 +128,8 @@ Does not own:
 
 ## Performance Contract
 
-- Mesh emission remains O(s) per loop pair, where `s` is sample count.
+- Retained explicit mesh/debug emission remains O(s) per loop pair, where `s`
+  is sample count.
 - Defensive validation is O(s).
 - No correspondence inference or resampling occurs inside the mesh executor.
 
@@ -119,6 +139,8 @@ Does not own:
 - Sample array length mismatch refuses with `sample_count_mismatch`.
 - Record index mismatch refuses with `sample_record_index_mismatch`.
 - Refusal happens before partial mesh emission.
+- Any surface-executor failure must surface as a surface diagnostic, not a
+  successful mesh result.
 
 ## Test Strategy
 
@@ -137,9 +159,13 @@ Does not own:
 
 ## Acceptance Criteria
 
-- Mesh loft execution consumes explicit sample correspondence records.
+- This document is visibly retired as canonical modeled execution.
+- Retained explicit mesh/debug loft emission consumes explicit sample
+  correspondence records.
 - Index-only semantic matching is not used for topology-correspondence plans.
 - Invalid correspondence input refuses with diagnostics before mesh output.
+- Canonical loft execution is documented as `LoftPlan -> SurfaceBody`, with
+  mesh output restricted to legacy/debug/tessellation-boundary routes.
 
 ## Readiness Checklist
 
