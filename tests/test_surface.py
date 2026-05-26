@@ -37,6 +37,8 @@ from impression.modeling import (
     AdapterLossiness,
     analysis_tessellation_request,
     BSplineSurfacePatch,
+    boolean_union,
+    build_surface_boolean_unsupported_family_diagnostic,
     compare_tessellation_modes,
     export_tessellation_request,
     flatten_surface_scene,
@@ -71,6 +73,10 @@ from impression.modeling import (
     SurfaceConsumerCollection,
     SurfaceFamilyTessellationAdapter,
     SURFACE_FAMILY_TESSELLATION_ADAPTERS,
+    SurfaceBooleanFamilyEligibilityResult,
+    SurfaceBooleanFamilyPairSupport,
+    SurfaceBooleanUnsupportedFamilyDiagnostic,
+    SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX,
     SurfaceSeamParticipationRecord,
     SurfaceSeamValidationResult,
     SubdivisionCrease,
@@ -91,9 +97,12 @@ from impression.modeling import (
     make_surface_body,
     make_surface_shell,
     make_implicit_field_node,
+    prepare_surface_boolean_operands,
     assess_implicit_field_security,
     refine_subdivision_control_cage,
     surface_adjacency_from_seams,
+    surface_boolean_family_eligibility,
+    surface_boolean_result,
     validate_implicit_field_security,
     validate_surface_seam_participation,
     tessellate_surface_body,
@@ -1683,6 +1692,57 @@ def test_surface_consumer_collection_preserves_order_and_identity() -> None:
     assert collection.items[0].source_id == "scene-0"
     assert collection.items[1].source_id == "scene-1"
     assert collection.body_identities == (body_b.stable_identity, body_a.stable_identity)
+
+
+def test_surface_boolean_family_eligibility_supports_current_planar_pair_matrix() -> None:
+    left = make_surface_box(size=(1.0, 1.0, 1.0), center=(0.0, 0.0, 0.0))
+    right = make_surface_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0))
+    operands = prepare_surface_boolean_operands("union", (left, right))
+
+    eligibility = surface_boolean_family_eligibility(operands)
+
+    assert isinstance(eligibility, SurfaceBooleanFamilyEligibilityResult)
+    assert eligibility.supported is True
+    assert eligibility.diagnostics == ()
+    assert eligibility.failure_reason is None
+    assert ("union", "planar", "planar") in SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX
+    assert all(isinstance(pair, SurfaceBooleanFamilyPairSupport) for pair in eligibility.family_pairs)
+
+
+def test_surface_boolean_family_eligibility_reports_unsupported_mixed_family_without_mesh_fallback() -> None:
+    box = make_surface_box(size=(1.0, 1.0, 1.0), center=(0.0, 0.0, 0.0))
+    sphere = make_surface_sphere(radius=0.5, center=(2.0, 0.0, 0.0))
+    operands = prepare_surface_boolean_operands("union", (box, sphere))
+
+    eligibility = surface_boolean_family_eligibility(operands)
+    result = surface_boolean_result("union", operands)
+
+    assert eligibility.supported is False
+    assert eligibility.required_future_capabilities
+    assert all(isinstance(diagnostic, SurfaceBooleanUnsupportedFamilyDiagnostic) for diagnostic in eligibility.diagnostics)
+    assert result.status == "unsupported"
+    assert result.body is None
+    assert result.failure_reason is not None
+    assert "unsupported surface boolean family pair" in result.failure_reason
+    assert "revolution" in result.failure_reason
+
+
+def test_surface_boolean_unsupported_family_diagnostic_builder_refuses_supported_pair() -> None:
+    supported = SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX[("union", "planar", "planar")]
+
+    with pytest.raises(ValueError, match="Supported surface boolean family pairs"):
+        build_surface_boolean_unsupported_family_diagnostic(supported)
+
+
+def test_surface_backend_boolean_api_uses_family_diagnostic_result_for_unsupported_pairs() -> None:
+    box = make_surface_box(size=(1.0, 1.0, 1.0), center=(0.0, 0.0, 0.0))
+    sphere = make_surface_sphere(radius=0.5, center=(2.0, 0.0, 0.0))
+
+    result = boolean_union((box, sphere), backend="surface")
+
+    assert result.status == "unsupported"
+    assert result.failure_reason is not None
+    assert "operand-family-eligibility" in result.failure_reason
 
 
 def test_cross_mode_drift_report_stays_on_same_surface_truth() -> None:
