@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal, Sequence, Tuple
+from typing import TYPE_CHECKING, Literal, Sequence, Tuple, cast
 
 import numpy as np
 
@@ -325,6 +325,192 @@ def make_prism(
     if color is not None:
         set_mesh_color(mesh, color)
     return mesh
+
+
+def make_box_mesh(
+    size: Sequence[float] = (1.0, 1.0, 1.0),
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    color: Sequence[float] | str | None = None,
+) -> Mesh:
+    """Explicit mesh compatibility constructor for :func:`make_box`."""
+
+    return cast(Mesh, make_box(size=size, center=center, backend="mesh", color=color))
+
+
+def make_cylinder_mesh(
+    radius: float = 0.5,
+    height: float = 1.0,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    direction: Sequence[float] = (0.0, 0.0, 1.0),
+    resolution: int = 128,
+    capping: bool = True,
+    color: Sequence[float] | str | None = None,
+) -> Mesh:
+    """Explicit mesh compatibility constructor for :func:`make_cylinder`."""
+
+    return cast(
+        Mesh,
+        make_cylinder(
+            radius=radius,
+            height=height,
+            center=center,
+            direction=direction,
+            resolution=resolution,
+            capping=capping,
+            backend="mesh",
+            color=color,
+        ),
+    )
+
+
+def make_ngon_mesh(
+    sides: int = 6,
+    radius: float = 0.5,
+    height: float = 1.0,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    direction: Sequence[float] = (0.0, 0.0, 1.0),
+    color: Sequence[float] | str | None = None,
+    *,
+    side_length: float | None = None,
+) -> Mesh:
+    """Explicit mesh compatibility constructor for :func:`make_ngon`."""
+
+    return cast(
+        Mesh,
+        make_ngon(
+            sides=sides,
+            radius=radius,
+            height=height,
+            center=center,
+            direction=direction,
+            backend="mesh",
+            color=color,
+            side_length=side_length,
+        ),
+    )
+
+
+def make_polyhedron_mesh(
+    faces: int = 6,
+    radius: float = 0.5,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    color: Sequence[float] | str | None = None,
+) -> Mesh:
+    """Explicit mesh compatibility constructor for :func:`make_polyhedron`."""
+
+    return cast(Mesh, make_polyhedron(faces=faces, radius=radius, center=center, backend="mesh", color=color))
+
+
+def make_nhedron_mesh(
+    faces: int = 6,
+    radius: float = 0.5,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    color: Sequence[float] | str | None = None,
+) -> Mesh:
+    """Explicit mesh compatibility constructor for :func:`make_nhedron`."""
+
+    return cast(Mesh, make_nhedron(faces=faces, radius=radius, center=center, backend="mesh", color=color))
+
+
+def make_sphere_mesh(
+    radius: float = 0.5,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    theta_resolution: int = 64,
+    phi_resolution: int = 64,
+    color: Sequence[float] | str | None = None,
+) -> Mesh:
+    """Explicit mesh compatibility constructor for :func:`make_sphere`."""
+
+    return cast(
+        Mesh,
+        make_sphere(
+            radius=radius,
+            center=center,
+            theta_resolution=theta_resolution,
+            phi_resolution=phi_resolution,
+            backend="mesh",
+            color=color,
+        ),
+    )
+
+
+def make_torus_mesh(
+    major_radius: float = 1.0,
+    minor_radius: float = 0.25,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    direction: Sequence[float] = (0.0, 0.0, 1.0),
+    n_theta: int = 64,
+    n_phi: int = 32,
+    color: Sequence[float] | str | None = None,
+) -> Mesh:
+    """Explicit mesh compatibility constructor for :func:`make_torus`."""
+
+    return cast(
+        Mesh,
+        make_torus(
+            major_radius=major_radius,
+            minor_radius=minor_radius,
+            center=center,
+            direction=direction,
+            n_theta=n_theta,
+            n_phi=n_phi,
+            backend="mesh",
+            color=color,
+        ),
+    )
+
+
+def make_cone_mesh(
+    bottom_diameter: float = 1.0,
+    top_diameter: float = 0.0,
+    height: float = 1.0,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    direction: Sequence[float] = (0.0, 0.0, 1.0),
+    resolution: int = 64,
+    color: Sequence[float] | str | None = None,
+    *,
+    radius: float | None = None,
+) -> Mesh:
+    """Explicit mesh compatibility constructor for :func:`make_cone`."""
+
+    return cast(
+        Mesh,
+        make_cone(
+            bottom_diameter=bottom_diameter,
+            top_diameter=top_diameter,
+            height=height,
+            center=center,
+            direction=direction,
+            resolution=resolution,
+            backend="mesh",
+            color=color,
+            radius=radius,
+        ),
+    )
+
+
+def make_prism_mesh(
+    base_size: Sequence[float] = (1.0, 1.0),
+    top_size: Sequence[float] | None = None,
+    height: float = 1.0,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    direction: Sequence[float] = (0.0, 0.0, 1.0),
+    color: Sequence[float] | str | None = None,
+) -> Mesh:
+    """Explicit mesh compatibility constructor for :func:`make_prism`."""
+
+    return cast(
+        Mesh,
+        make_prism(
+            base_size=base_size,
+            top_size=top_size,
+            height=height,
+            center=center,
+            direction=direction,
+            backend="mesh",
+            color=color,
+        ),
+    )
 
 
 def _normalize(vector: Sequence[float]) -> Tuple[float, float, float]:

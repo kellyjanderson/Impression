@@ -4,17 +4,27 @@ import numpy as np
 import pytest
 
 import impression.modeling as modeling
+from impression.mesh import Mesh
 from impression.modeling import (
     make_box,
+    make_box_mesh,
     make_cone,
+    make_cone_mesh,
     make_cylinder,
+    make_cylinder_mesh,
     make_ngon,
+    make_ngon_mesh,
     make_nhedron,
+    make_nhedron_mesh,
     make_polyhedron,
+    make_polyhedron_mesh,
     make_prism,
+    make_prism_mesh,
     make_rect,
     make_sphere,
+    make_sphere_mesh,
     make_torus,
+    make_torus_mesh,
 )
 from impression.modeling._surface_primitives import (
     make_surface_box,
@@ -500,6 +510,29 @@ def test_internal_surface_nhedron_wraps_polyhedron_and_public_api_defaults_surfa
 def test_public_surface_backends_reject_unknown_backend_values() -> None:
     with pytest.raises(ValueError, match="Unsupported backend"):
         make_box(backend="wireframe")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("surface_factory", "mesh_factory", "kwargs"),
+    [
+        (make_box, make_box_mesh, {"size": (1.0, 2.0, 3.0), "color": "red"}),
+        (make_cylinder, make_cylinder_mesh, {"radius": 0.5, "height": 1.0, "resolution": 16}),
+        (make_cone, make_cone_mesh, {"bottom_diameter": 1.0, "top_diameter": 0.25, "height": 1.5, "resolution": 16}),
+        (make_ngon, make_ngon_mesh, {"sides": 5, "radius": 1.0, "height": 0.5}),
+        (make_nhedron, make_nhedron_mesh, {"faces": 6, "radius": 1.0}),
+        (make_polyhedron, make_polyhedron_mesh, {"faces": 8, "radius": 1.0}),
+        (make_prism, make_prism_mesh, {"base_size": (1.0, 0.5), "top_size": (0.75, 0.25), "height": 1.0}),
+        (make_sphere, make_sphere_mesh, {"radius": 0.75, "theta_resolution": 16, "phi_resolution": 8}),
+        (make_torus, make_torus_mesh, {"major_radius": 1.0, "minor_radius": 0.2, "n_theta": 16, "n_phi": 8}),
+    ],
+)
+def test_explicit_primitive_mesh_compatibility_apis_return_meshes(surface_factory, mesh_factory, kwargs) -> None:
+    surface_result = surface_factory(**kwargs)
+    mesh_result = mesh_factory(**kwargs)
+
+    assert isinstance(surface_result, SurfaceBody)
+    assert isinstance(mesh_result, Mesh)
+    assert mesh_result.n_faces > 0
 
 
 def test_private_surface_builders_do_not_leak_through_public_modeling_namespace() -> None:

@@ -2,11 +2,11 @@
 
 All primitives are exposed from `impression.modeling`. Surface-first primitives
 return `SurfaceBody` by default as they are migrated; mesh output remains
-available through explicit `backend="mesh"` compatibility routes. Import helpers
-like:
+available through explicit `make_*_mesh(...)` compatibility helpers, with
+`backend="mesh"` retained for direct compatibility. Import helpers like:
 
 ```python
-from impression.modeling import make_box, make_cylinder, make_ngon, make_polyhedron, make_sphere, make_torus
+from impression.modeling import make_box, make_box_mesh, make_cylinder, make_ngon, make_polyhedron, make_sphere, make_torus
 ```
 
 > Rendering note: the CLI preview (`impression preview`) or `docs/examples/...` scripts can be used to visualize outputs on a desktop environment.
@@ -22,7 +22,7 @@ with the mesh.
 ## Box
 
 - **Function:** `make_box(size=(dx, dy, dz), center=(0, 0, 0))`
-- **Default output:** `SurfaceBody`; use `backend="mesh"` for explicit mesh compatibility.
+- **Default output:** `SurfaceBody`; use `make_box_mesh(...)` or `backend="mesh"` for explicit mesh compatibility.
 - **Options**
   - `size`: tuple specifying side lengths along X/Y/Z.
   - `center`: world-space center of the box.
@@ -41,7 +41,7 @@ def build():
 ## Cylinder
 
 - **Function:** `make_cylinder(radius=0.5, height=1.0, center=(0,0,0), direction=(0,0,1), resolution=128)`
-- **Default output:** `SurfaceBody`; use `backend="mesh"` for explicit mesh compatibility.
+- **Default output:** `SurfaceBody`; use `make_cylinder_mesh(...)` or `backend="mesh"` for explicit mesh compatibility.
 - **Options**
   - `radius` / `height`
   - `direction`: normalized axis vector.
@@ -61,7 +61,7 @@ def build():
 ## Sphere
 
 - **Function:** `make_sphere(radius=0.5, center=(0,0,0), theta_resolution=64, phi_resolution=64)`
-- **Default output:** `SurfaceBody`; use `backend="mesh"` for explicit mesh compatibility.
+- **Default output:** `SurfaceBody`; use `make_sphere_mesh(...)` or `backend="mesh"` for explicit mesh compatibility.
 - **Options:** radius, center, longitudinal (`theta_resolution`) and latitudinal (`phi_resolution`) segment counts.
 - **Example:** `docs/examples/primitives/sphere_example.py`
 - **Preview:** `impression preview docs/examples/primitives/sphere_example.py`
@@ -78,7 +78,7 @@ def build():
 ## Torus
 
 - **Function:** `make_torus(major_radius=1.0, minor_radius=0.25, center=(0,0,0), direction=(0,0,1), n_theta=64, n_phi=32)`
-- **Default output:** `SurfaceBody`; use `backend="mesh"` for explicit mesh compatibility.
+- **Default output:** `SurfaceBody`; use `make_torus_mesh(...)` or `backend="mesh"` for explicit mesh compatibility.
 - **Options**
   - `major_radius`: distance from center to tube centerline.
   - `minor_radius`: tube radius.
@@ -99,7 +99,7 @@ def build():
 ## Cone / Circular Frustum
 
 - **Function:** `make_cone(bottom_diameter=1.0, top_diameter=0.0, height=1.0, ...)`
-- **Default output:** `SurfaceBody`; use `backend="mesh"` for explicit mesh compatibility.
+- **Default output:** `SurfaceBody`; use `make_cone_mesh(...)` or `backend="mesh"` for explicit mesh compatibility.
 - Supports classic cones (`top_diameter=0`) or truncated frustums.
 - **Example:** `docs/examples/primitives/cone_example.py`
 - **Preview:** `impression preview docs/examples/primitives/cone_example.py`
@@ -116,7 +116,7 @@ def build():
 ## Prism / Pyramid
 
 - **Function:** `make_prism(base_size=(dx, dy), top_size=None, height=1.0, ...)`
-- **Default output:** `SurfaceBody`; use `backend="mesh"` for explicit mesh compatibility.
+- **Default output:** `SurfaceBody`; use `make_prism_mesh(...)` or `backend="mesh"` for explicit mesh compatibility.
 - `top_size=None` → straight prism, `top_size=(0,0)` → pyramid.
 - **Example:** `docs/examples/primitives/prism_example.py`
 - **Preview:** `impression preview docs/examples/primitives/prism_example.py`
@@ -133,7 +133,7 @@ def build():
 ## Polyhedron (Regular Solids)
 
 - **Function:** `make_polyhedron(faces=6, radius=0.5, center=(0,0,0))`
-- **Default output:** `SurfaceBody`; use `backend="mesh"` for explicit mesh compatibility.
+- **Default output:** `SurfaceBody`; use `make_polyhedron_mesh(...)` or `backend="mesh"` for explicit mesh compatibility.
 - **Supported face counts:** 4 (tetrahedron), 6 (hexahedron/cube), 8 (octahedron), 12 (dodecahedron), 20 (icosahedron).
 - **Example:** `docs/examples/primitives/polyhedron_example.py`
 - **Preview:** `impression preview docs/examples/primitives/polyhedron_example.py`
@@ -150,7 +150,7 @@ def build():
 ## N-gon Prism
 
 - **Function:** `make_ngon(sides=6, radius=0.5, height=1.0, center=(0,0,0), direction=(0,0,1))`
-- **Default output:** `SurfaceBody`; use `backend="mesh"` for explicit mesh compatibility.
+- **Default output:** `SurfaceBody`; use `make_ngon_mesh(...)` or `backend="mesh"` for explicit mesh compatibility.
 - **Options**
   - `sides`: number of polygon sides (>= 3).
   - `radius`: distance from center to vertices (circumscribed radius).
