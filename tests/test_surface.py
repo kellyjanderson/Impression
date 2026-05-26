@@ -65,10 +65,14 @@ from impression.modeling import (
     RuledSurfacePatch,
     SurfaceAdjacencyRecord,
     SurfaceBody,
+    SurfaceBoundaryDescriptor,
     SurfaceBoundaryRef,
+    SurfaceContinuityMetadata,
     SurfaceConsumerCollection,
     SurfaceFamilyTessellationAdapter,
     SURFACE_FAMILY_TESSELLATION_ADAPTERS,
+    SurfaceSeamParticipationRecord,
+    SurfaceSeamValidationResult,
     SubdivisionCrease,
     SubdivisionRefinementResult,
     SubdivisionSurfacePatch,
@@ -80,14 +84,18 @@ from impression.modeling import (
     SweepSurfacePatch,
     TessellationRequest,
     TrimLoop,
+    classify_surface_seam_continuity,
     evaluate_implicit_field,
     evaluate_implicit_field_domain,
+    extract_surface_boundary_descriptor,
     make_surface_body,
     make_surface_shell,
     make_implicit_field_node,
     assess_implicit_field_security,
     refine_subdivision_control_cage,
+    surface_adjacency_from_seams,
     validate_implicit_field_security,
+    validate_surface_seam_participation,
     tessellate_surface_body,
     tessellate_surface_patch,
     tessellate_surface_shell,
@@ -1265,6 +1273,102 @@ def test_shell_tessellation_records_family_adapters_and_welds_supported_seam_bou
     assert mesh.vertices.shape[0] == 6
     assert {adapter["family"] for adapter in mesh.metadata["tessellation_family_adapters"]} == {"planar", "ruled"}
     assert all(adapter["supports_seam_boundaries"] is True for adapter in mesh.metadata["tessellation_family_adapters"])
+
+
+def test_cross_family_boundary_descriptor_uses_patch_evaluator_without_mesh() -> None:
+    patch = RevolutionSurfacePatch(
+        family="revolution",
+        profile_curve=((1.0, 0.0, 0.0), (1.0, 0.0, 1.0)),
+    )
+
+    descriptor = extract_surface_boundary_descriptor(patch, "left", sample_count=5)
+
+    assert isinstance(descriptor, SurfaceBoundaryDescriptor)
+    assert descriptor.family == "revolution"
+    assert descriptor.comparison_kind == "parametric-edge"
+    assert descriptor.exact is True
+    assert descriptor.parameter_points.shape == (5, 2)
+
+
+def test_cross_family_seam_validation_records_participation_continuity_and_adjacency() -> None:
+    planar = PlanarSurfacePatch(family="planar")
+    bspline = BSplineSurfacePatch(
+        family="bspline",
+        control_net=[
+            [(1.0, 0.0, 0.0), (1.0, 1.0, 0.0)],
+            [(2.0, 0.0, 0.0), (2.0, 1.0, 0.0)],
+        ],
+    )
+    seam = SurfaceSeam(
+        seam_id="planar-bspline",
+        boundaries=(SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")),
+        continuity="C0",
+    )
+    shell = SurfaceShell(patches=(planar, bspline), seams=(seam,))
+
+    result = validate_surface_seam_participation(shell, seam)
+    continuity = classify_surface_seam_continuity(shell, seam)
+    adjacency = surface_adjacency_from_seams(shell)
+
+    assert isinstance(result, SurfaceSeamValidationResult)
+    assert isinstance(result.continuity, SurfaceContinuityMetadata)
+    assert all(isinstance(record, SurfaceSeamParticipationRecord) for record in result.participation)
+    assert result.compatible is True
+    assert result.continuity.classified == "C0"
+    assert result.continuity.exact_comparison is True
+    assert continuity.classified == "C0"
+    assert len(result.adjacency_updates) == 2
+    assert adjacency == result.adjacency_updates
+    assert {record.descriptor.family for record in result.participation} == {"planar", "bspline"}
+
+
+def test_cross_family_seam_validation_reports_incompatible_boundaries() -> None:
+    planar = PlanarSurfacePatch(family="planar")
+    bspline = BSplineSurfacePatch(
+        family="bspline",
+        control_net=[
+            [(3.0, 0.0, 0.0), (3.0, 1.0, 0.0)],
+            [(4.0, 0.0, 0.0), (4.0, 1.0, 0.0)],
+        ],
+    )
+    seam = SurfaceSeam("gap", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")))
+    shell = SurfaceShell(patches=(planar, bspline), seams=(seam,))
+
+    result = validate_surface_seam_participation(shell, seam)
+
+    assert result.compatible is False
+    assert result.continuity.classified == "incompatible"
+    assert "boundary positions differ" in result.diagnostics[0]
+
+
+def test_cross_family_seam_validation_reports_unsupported_continuity_request() -> None:
+    planar = PlanarSurfacePatch(family="planar")
+    ruled = RuledSurfacePatch(
+        family="ruled",
+        start_curve=((1.0, 0.0, 0.0), (1.0, 1.0, 0.0)),
+        end_curve=((2.0, 0.0, 0.0), (2.0, 1.0, 0.0)),
+    )
+    seam = SurfaceSeam("unsupported-continuity", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")), continuity="G1")
+    shell = SurfaceShell(patches=(planar, ruled), seams=(seam,))
+
+    result = validate_surface_seam_participation(shell, seam)
+
+    assert result.compatible is False
+    assert result.continuity.classified == "incompatible"
+    assert any("unsupported continuity request" in diagnostic for diagnostic in result.diagnostics)
+
+
+def test_subdivision_boundary_descriptor_records_approximation_and_implicit_seams_refuse() -> None:
+    descriptor = extract_surface_boundary_descriptor(SubdivisionSurfacePatch(family="subdivision"), "left")
+
+    assert descriptor.exact is False
+    assert descriptor.approximation_metadata["method"] == "finite_subdivision_boundary"
+
+    with pytest.raises(ValueError, match="cannot participate in parametric seams"):
+        SurfaceShell(
+            patches=(ImplicitSurfacePatch(family="implicit"), PlanarSurfacePatch(family="planar")),
+            seams=(SurfaceSeam("implicit-planar", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left"))),),
+        )
 
 
 def test_planar_patch_rejects_collinear_axes_and_multiple_outer_trims() -> None:
