@@ -65,6 +65,7 @@ from impression.modeling import (
     ImplicitSurfacePatch,
     ImplicitTessellationBoundsDiagnostic,
     make_surface_consumer_collection,
+    make_surface_composition,
     make_surface_mesh_adapter,
     make_surface_scene_group,
     make_surface_scene_node,
@@ -82,6 +83,8 @@ from impression.modeling import (
     SurfaceBody,
     SurfaceBoundaryDescriptor,
     SurfaceBoundaryRef,
+    SurfaceComposition,
+    SurfaceCompositionError,
     SurfaceContinuityMetadata,
     SurfaceConsumerCollection,
     SurfaceFamilyTessellationAdapter,
@@ -119,6 +122,7 @@ from impression.modeling import (
     surface_adjacency_from_seams,
     surface_boolean_family_eligibility,
     surface_boolean_result,
+    surface_group,
     validate_implicit_field_security,
     validate_surface_seam_participation,
     validate_tessellation_helper_boundary_input,
@@ -1871,3 +1875,58 @@ def test_surface_scene_handoff_preserves_order_without_tessellating() -> None:
     assert flattened.items[0].metadata["label"] == "A"
     assert flattened.items[1].metadata["label"] == "B"
     assert np.allclose(flattened.items[1].body.bounds_estimate(), (6.0, 7.0, 0.0, 1.0, 0.0, 0.0))
+
+
+def test_surface_composition_public_type_groups_surface_bodies_without_tessellating() -> None:
+    body_a = make_surface_body([make_surface_shell([PlanarSurfacePatch(family="planar")])])
+    body_b = make_surface_body([make_surface_shell([PlanarSurfacePatch(family="planar", origin=(2.0, 0.0, 0.0))])])
+    translate = np.eye(4)
+    translate[:3, 3] = [4.0, 0.0, 0.0]
+
+    nested = make_surface_composition([body_b], composition_id="nested")
+    composition = surface_group(
+        [body_a, nested],
+        group_id="authored",
+        transform_matrix=translate,
+        metadata={"purpose": "public-grouping"},
+    )
+
+    assert isinstance(composition, SurfaceComposition)
+    assert composition.composition_id == "authored"
+    assert composition.iter_children() == (body_a, nested)
+    assert composition.metadata == {"purpose": "public-grouping"}
+    assert np.allclose(composition.transform_matrix, translate)
+    assert composition.stable_identity == surface_group(
+        [body_a, nested],
+        group_id="authored",
+        transform_matrix=translate,
+        metadata={"purpose": "public-grouping"},
+    ).stable_identity
+
+
+def test_surface_composition_transform_attachment_returns_new_composition() -> None:
+    body = make_surface_body([make_surface_shell([PlanarSurfacePatch(family="planar")])])
+    composition = make_surface_composition([body], composition_id="move-me")
+    translate = np.eye(4)
+    translate[:3, 3] = [1.0, 2.0, 3.0]
+
+    moved = composition.with_transform(translate)
+
+    assert moved is not composition
+    assert isinstance(moved, SurfaceComposition)
+    assert np.allclose(composition.transform_matrix, np.eye(4))
+    assert np.allclose(moved.transform_matrix, translate)
+    assert moved.stable_identity != composition.stable_identity
+
+
+def test_surface_composition_rejects_mesh_inputs_with_diagnostic() -> None:
+    mesh = make_box_mesh(size=(1.0, 1.0, 1.0))
+
+    with pytest.raises(SurfaceCompositionError) as exc:
+        make_surface_composition([mesh], composition_id="bad")
+
+    diagnostic = exc.value.diagnostic
+    assert diagnostic.boundary == "surface-composition"
+    assert diagnostic.target_type == "Mesh"
+    assert diagnostic.child_index == 0
+    assert "compatibility boundary" in diagnostic.reason
