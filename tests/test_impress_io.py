@@ -11,12 +11,16 @@ from impression.io import (
     ImpressUnits,
     SurfaceBodyStore,
     UnsupportedImpressSchemaVersion,
+    decode_surface_boundary_ref_payload,
     decode_surface_body_payload,
     decode_surface_patch_payload,
+    decode_surface_seam_payload,
     decode_surface_shell_payload,
     decode_trim_loop_payload,
+    encode_surface_boundary_ref_payload,
     encode_surface_body_payload,
     encode_surface_patch_payload,
+    encode_surface_seam_payload,
     encode_surface_shell_payload,
     encode_trim_loop_payload,
     make_impress_document_root,
@@ -31,6 +35,8 @@ from impression.modeling.surface import (
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
+    SurfaceBoundaryRef,
+    SurfaceSeam,
     TrimLoop,
     make_surface_body,
     make_surface_shell,
@@ -202,6 +208,96 @@ def test_encode_decode_surface_shell_payload_round_trips_container_fields() -> N
     assert decoded.connected is False
     assert decoded.metadata == {"consumer": {"label": "shell"}}
     assert decoded.patches == (patch,)
+
+
+def test_encode_decode_surface_seam_payload_round_trips_boundary_refs() -> None:
+    seam = SurfaceSeam(
+        "front-right",
+        (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")),
+        continuity="G1",
+        metadata={"kernel": {"source": "fixture"}},
+    )
+
+    payload = encode_surface_seam_payload(seam)
+    decoded = decode_surface_seam_payload(payload, patch_count=2)
+
+    assert encode_surface_boundary_ref_payload(seam.boundaries[0]) == {"patch_index": 0, "boundary_id": "right"}
+    assert payload == {
+        "seam_id": "front-right",
+        "boundaries": [
+            {"patch_index": 0, "boundary_id": "right"},
+            {"patch_index": 1, "boundary_id": "left"},
+        ],
+        "continuity": "G1",
+        "metadata": {"kernel": {"source": "fixture"}},
+    }
+    assert decoded == seam
+
+
+def test_encode_decode_surface_shell_payload_round_trips_seams() -> None:
+    patches = [
+        PlanarSurfacePatch(family="planar", origin=(0.0, 0.0, 0.0)),
+        PlanarSurfacePatch(family="planar", origin=(1.0, 0.0, 0.0)),
+    ]
+    seam = SurfaceSeam("join", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")))
+    shell = make_surface_shell(patches, seams=(seam,))
+
+    payload = encode_surface_shell_payload(shell)
+    decoded = decode_surface_shell_payload(payload, patches=patches)
+
+    assert payload["seams"] == [encode_surface_seam_payload(seam)]
+    assert decoded.seams == (seam,)
+
+
+def test_decode_surface_seam_payload_rejects_missing_boundary_reference() -> None:
+    payload = encode_surface_seam_payload(
+        SurfaceSeam("bad-ref", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(2, "left")))
+    )
+
+    with pytest.raises(ImpressFormatError, match="outside the loaded shell"):
+        decode_surface_seam_payload(payload, patch_count=2)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"patch_index": -1, "boundary_id": "left"},
+        {"patch_index": True, "boundary_id": "left"},
+        {"patch_index": 0, "boundary_id": "   "},
+        {"patch_index": 0, "boundary_id": "left", "side": "outer"},
+    ],
+)
+def test_decode_surface_boundary_ref_payload_rejects_invalid_payloads(payload: dict[str, object]) -> None:
+    with pytest.raises(ImpressFormatError):
+        decode_surface_boundary_ref_payload(payload)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"seam_id": "   ", "boundaries": [{"patch_index": 0, "boundary_id": "left"}]},
+        {"seam_id": "open", "boundaries": []},
+        {
+            "seam_id": "too-many",
+            "boundaries": [
+                {"patch_index": 0, "boundary_id": "left"},
+                {"patch_index": 1, "boundary_id": "right"},
+                {"patch_index": 2, "boundary_id": "top"},
+            ],
+        },
+        {
+            "seam_id": "dup",
+            "boundaries": [{"patch_index": 0, "boundary_id": "left"}, {"patch_index": 0, "boundary_id": "left"}],
+        },
+        {"seam_id": "bad-continuity", "boundaries": [{"patch_index": 0, "boundary_id": "left"}], "continuity": " "},
+        {"seam_id": "bad-metadata", "boundaries": [{"patch_index": 0, "boundary_id": "left"}], "metadata": []},
+    ],
+)
+def test_decode_surface_seam_payload_rejects_invalid_payloads(payload: dict[str, object]) -> None:
+    with pytest.raises(ImpressFormatError):
+        decode_surface_seam_payload(payload)
 
 
 def test_encode_decode_surface_body_payload_round_trips_container_fields() -> None:
