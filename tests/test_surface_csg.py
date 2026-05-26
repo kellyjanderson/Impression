@@ -16,6 +16,7 @@ from impression.modeling import (
     BooleanOperationError,
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
+    RuledSurfacePatch,
     SurfaceBody,
     SurfaceBooleanIntersectionStage,
     SurfaceBooleanOperands,
@@ -23,16 +24,19 @@ from impression.modeling import (
     SurfaceBooleanResult,
     SurfaceBooleanSplitRecord,
     SurfaceBooleanTrimmedPatchFragment,
+    SurfaceCSGAnalyticIntersectionRecord,
     SurfaceCSGCurvePrimitive,
     SurfaceCSGCurveMappingDiagnostic,
     SurfaceCSGPatchLocalCurve,
     SurfaceCSGPatchLocalCurveMappingResult,
+    SurfaceCSGPlanarRelationDiagnostic,
     SurfaceCSGToleranceDiagnostic,
     SurfaceCSGTolerancePolicy,
     SurfaceShell,
     boolean_difference,
     boolean_intersection,
     boolean_union,
+    intersect_planar_linear_patch_pair,
     map_surface_csg_curve_to_patch_local,
     make_surface_csg_curve,
     make_surface_csg_line_curve,
@@ -149,6 +153,83 @@ def test_surface_csg_curve_maps_to_revolution_patch_local_domain() -> None:
     assert result.curve.points_uv[0] == pytest.approx((0.0, 0.25))
     assert result.curve.points_uv[1] == pytest.approx((0.25, 0.75))
     assert validate_surface_csg_patch_local_curve_domain(result.curve) == ()
+
+
+def test_planar_linear_analytic_intersection_emits_exact_line_record() -> None:
+    first_ref = SurfaceBooleanPatchRef(0, 0)
+    second_ref = SurfaceBooleanPatchRef(1, 0)
+    first_patch = PlanarSurfacePatch(
+        family="planar",
+        origin=(0.0, 0.0, 0.0),
+        u_axis=(1.0, 0.0, 0.0),
+        v_axis=(0.0, 1.0, 0.0),
+    )
+    second_patch = PlanarSurfacePatch(
+        family="planar",
+        origin=(0.5, 0.0, -0.5),
+        u_axis=(0.0, 1.0, 0.0),
+        v_axis=(0.0, 0.0, 1.0),
+    )
+
+    record = intersect_planar_linear_patch_pair(first_ref, first_patch, second_ref, second_patch)
+
+    assert isinstance(record, SurfaceCSGAnalyticIntersectionRecord)
+    assert record.supported is True
+    assert record.relation == "crossing"
+    assert record.curve is not None
+    assert record.curve.kind == "line"
+    assert np.allclose(record.curve.points_3d, ((0.5, 0.0, 0.0), (0.5, 1.0, 0.0)))
+    assert len(record.patch_local_curves) == 2
+    assert np.allclose(record.patch_local_curves[0].points_uv, ((0.5, 0.0), (0.5, 1.0)))
+    assert np.allclose(record.patch_local_curves[1].points_uv, ((0.0, 0.5), (1.0, 0.5)))
+    assert record.diagnostics == ()
+
+
+def test_planar_linear_analytic_intersection_classifies_parallel_coincident_disjoint_and_touching() -> None:
+    ref_a = SurfaceBooleanPatchRef(0, 0)
+    ref_b = SurfaceBooleanPatchRef(1, 0)
+    base = PlanarSurfacePatch(family="planar")
+    parallel = PlanarSurfacePatch(family="planar", origin=(0.0, 0.0, 1.0))
+    coincident = PlanarSurfacePatch(family="planar")
+    disjoint = PlanarSurfacePatch(
+        family="planar",
+        origin=(2.0, 0.0, -0.5),
+        u_axis=(0.0, 1.0, 0.0),
+        v_axis=(0.0, 0.0, 1.0),
+    )
+    touching = PlanarSurfacePatch(
+        family="planar",
+        origin=(1.0, 1.0, -0.5),
+        u_axis=(0.0, 1.0, 0.0),
+        v_axis=(0.0, 0.0, 1.0),
+    )
+
+    records = (
+        intersect_planar_linear_patch_pair(ref_a, base, ref_b, parallel),
+        intersect_planar_linear_patch_pair(ref_a, base, ref_b, coincident),
+        intersect_planar_linear_patch_pair(ref_a, base, ref_b, disjoint),
+        intersect_planar_linear_patch_pair(ref_a, base, ref_b, touching),
+    )
+
+    assert tuple(record.relation for record in records) == ("parallel", "coincident", "disjoint", "touching")
+    assert all(record.supported is False for record in records)
+    assert all(isinstance(record.diagnostics[0], SurfaceCSGPlanarRelationDiagnostic) for record in records)
+
+
+def test_planar_linear_analytic_intersection_gates_ruled_pairs() -> None:
+    ref_a = SurfaceBooleanPatchRef(0, 0)
+    ref_b = SurfaceBooleanPatchRef(1, 0)
+    ruled = RuledSurfacePatch(
+        family="ruled",
+        start_curve=((0.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+        end_curve=((1.0, 0.0, 0.0), (1.0, 1.0, 0.0)),
+    )
+
+    record = intersect_planar_linear_patch_pair(ref_a, PlanarSurfacePatch(family="planar"), ref_b, ruled)
+
+    assert record.relation == "unsupported-linear"
+    assert record.supported is False
+    assert "Ruled patch analytic intersection is gated" in record.diagnostics[0].message
 
 
 def _translated(body: SurfaceBody, offset: tuple[float, float, float]) -> SurfaceBody:

@@ -442,7 +442,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 218: Surface CSG Family Capability Matrix And Refusal Gate (v1.0)](../specifications/surface-218-surface-csg-family-capability-matrix-and-refusal-gate-v1_0.md)
 - [x] [Surface Spec 226: CSG Curve Primitive And Tolerance Policy (v1.0)](../specifications/surface-226-csg-curve-primitive-and-tolerance-policy-v1_0.md)
 - [x] [Surface Spec 227: CSG Patch-Local Curve Mapping (v1.0)](../specifications/surface-227-csg-patch-local-curve-mapping-v1_0.md)
-- [ ] [Surface Spec 228: CSG Planar/Linear Analytic Intersections (v1.0)](../specifications/surface-228-csg-planar-linear-analytic-intersections-v1_0.md)
+- [x] [Surface Spec 228: CSG Planar/Linear Analytic Intersections (v1.0)](../specifications/surface-228-csg-planar-linear-analytic-intersections-v1_0.md)
 - [ ] [Surface Spec 229: CSG Revolution/Conic Analytic Intersections (v1.0)](../specifications/surface-229-csg-revolution-conic-analytic-intersections-v1_0.md)
 - [ ] [Surface Spec 230: CSG Higher-Order Analytic Intersection Refusal Or Solver Boundary (v1.0)](../specifications/surface-230-csg-higher-order-analytic-intersection-refusal-or-solver-boundary-v1_0.md)
 - [ ] [Surface Spec 231: CSG Curve Arrangement And Trim Loop Splitting (v1.0)](../specifications/surface-231-csg-curve-arrangement-and-trim-loop-splitting-v1_0.md)
