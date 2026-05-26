@@ -2007,6 +2007,308 @@ class ImplicitSurfacePatch(SurfacePatch):
 
 
 @dataclass(frozen=True)
+class SurfaceBoundaryDescriptor:
+    """Parametric boundary participation record for seam validation."""
+
+    family: str
+    boundary_id: str
+    parameter_points: np.ndarray
+    comparison_kind: str
+    exact: bool = True
+    approximation_metadata: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        family = str(self.family).strip()
+        boundary_id = str(self.boundary_id).strip()
+        comparison_kind = str(self.comparison_kind).strip()
+        if not family or not boundary_id or not comparison_kind:
+            raise ValueError("SurfaceBoundaryDescriptor family, boundary_id, and comparison_kind must be non-empty.")
+        parameter_points = _as_points2(self.parameter_points, name="parameter_points")
+        object.__setattr__(self, "family", family)
+        object.__setattr__(self, "boundary_id", boundary_id)
+        object.__setattr__(self, "parameter_points", parameter_points)
+        object.__setattr__(self, "comparison_kind", comparison_kind)
+        object.__setattr__(self, "approximation_metadata", _normalize_metadata(self.approximation_metadata))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "family": self.family,
+            "boundary_id": self.boundary_id,
+            "parameter_points": self.parameter_points,
+            "comparison_kind": self.comparison_kind,
+            "exact": self.exact,
+            "approximation_metadata": self.approximation_metadata,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceContinuityMetadata:
+    """Continuity classification and diagnostics for a seam validation pass."""
+
+    requested: str
+    classified: str
+    position_tolerance: float
+    exact_comparison: bool
+    diagnostics: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        requested = str(self.requested).strip()
+        classified = str(self.classified).strip()
+        if not requested or not classified:
+            raise ValueError("SurfaceContinuityMetadata requested and classified values must be non-empty.")
+        tolerance = float(self.position_tolerance)
+        if not np.isfinite(tolerance) or tolerance <= 0.0:
+            raise ValueError("SurfaceContinuityMetadata.position_tolerance must be finite and positive.")
+        object.__setattr__(self, "requested", requested)
+        object.__setattr__(self, "classified", classified)
+        object.__setattr__(self, "position_tolerance", tolerance)
+        object.__setattr__(self, "diagnostics", tuple(str(item) for item in self.diagnostics))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "requested": self.requested,
+            "classified": self.classified,
+            "position_tolerance": self.position_tolerance,
+            "exact_comparison": self.exact_comparison,
+            "diagnostics": self.diagnostics,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSeamParticipationRecord:
+    """One patch boundary's participation in a seam."""
+
+    seam_id: str
+    boundary: SurfaceBoundaryRef
+    descriptor: SurfaceBoundaryDescriptor
+    orientation: Literal["forward", "reversed", "open"] = "forward"
+
+    def __post_init__(self) -> None:
+        seam_id = str(self.seam_id).strip()
+        orientation = str(self.orientation).strip()
+        if not seam_id:
+            raise ValueError("SurfaceSeamParticipationRecord.seam_id must be non-empty.")
+        if orientation not in {"forward", "reversed", "open"}:
+            raise ValueError("SurfaceSeamParticipationRecord.orientation must be forward, reversed, or open.")
+        object.__setattr__(self, "seam_id", seam_id)
+        object.__setattr__(self, "orientation", orientation)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "seam_id": self.seam_id,
+            "boundary": self.boundary.canonical_payload(),
+            "descriptor": self.descriptor.canonical_payload(),
+            "orientation": self.orientation,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSeamValidationResult:
+    """Result of validating one seam against participating patch boundaries."""
+
+    seam_id: str
+    compatible: bool
+    continuity: SurfaceContinuityMetadata
+    participation: tuple[SurfaceSeamParticipationRecord, ...]
+    adjacency_updates: tuple[SurfaceAdjacencyRecord, ...]
+    diagnostics: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        seam_id = str(self.seam_id).strip()
+        if not seam_id:
+            raise ValueError("SurfaceSeamValidationResult.seam_id must be non-empty.")
+        object.__setattr__(self, "seam_id", seam_id)
+        object.__setattr__(self, "participation", tuple(self.participation))
+        object.__setattr__(self, "adjacency_updates", tuple(self.adjacency_updates))
+        object.__setattr__(self, "diagnostics", tuple(str(item) for item in self.diagnostics))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "seam_id": self.seam_id,
+            "compatible": self.compatible,
+            "continuity": self.continuity.canonical_payload(),
+            "participation": [record.canonical_payload() for record in self.participation],
+            "adjacency_updates": [record.canonical_payload() for record in self.adjacency_updates],
+            "diagnostics": self.diagnostics,
+        }
+
+
+def _surface_boundary_parameter_points(
+    patch: SurfacePatch,
+    boundary_id: str,
+    *,
+    sample_count: int,
+) -> tuple[np.ndarray, str, bool, dict[str, object]]:
+    if isinstance(patch, ImplicitSurfacePatch):
+        raise ValueError("ImplicitSurfacePatch boundaries are field-domain bounds and cannot participate in parametric seams.")
+    if sample_count < 2:
+        raise ValueError("Boundary extraction requires at least two samples.")
+    boundary_id = str(boundary_id).strip().lower()
+    if boundary_id == "trim:outer":
+        outer = patch.outer_trim
+        if outer is None:
+            raise ValueError("Patch has no outer trim boundary.")
+        return outer.normalized().points_uv, "trim-loop", True, {}
+    if boundary_id.startswith("trim:inner:"):
+        try:
+            inner_index = int(boundary_id.split(":", 2)[2])
+        except ValueError as exc:
+            raise ValueError(f"Invalid trim boundary_id {boundary_id!r}.") from exc
+        inner_trims = patch.inner_trims
+        if inner_index < 0 or inner_index >= len(inner_trims):
+            raise ValueError(f"Trim boundary_id {boundary_id!r} is out of range for the patch.")
+        return inner_trims[inner_index].normalized().points_uv, "trim-loop", True, {}
+    u0, u1 = patch.domain.u_range
+    v0, v1 = patch.domain.v_range
+    if boundary_id == "left":
+        points = [(u0, v) for v in np.linspace(v0, v1, sample_count)]
+    elif boundary_id == "right":
+        points = [(u1, v) for v in np.linspace(v0, v1, sample_count)]
+    elif boundary_id == "bottom":
+        points = [(u, v0) for u in np.linspace(u0, u1, sample_count)]
+    elif boundary_id == "top":
+        points = [(u, v1) for u in np.linspace(u0, u1, sample_count)]
+    else:
+        raise ValueError(f"Unsupported surface boundary_id: {boundary_id!r}")
+    exact = not isinstance(patch, SubdivisionSurfacePatch)
+    approximation_metadata = (
+        {"method": "finite_subdivision_boundary", "boundary": "parametric-samples"}
+        if isinstance(patch, SubdivisionSurfacePatch)
+        else {}
+    )
+    return np.asarray(points, dtype=float), "parametric-edge", exact, approximation_metadata
+
+
+def extract_surface_boundary_descriptor(
+    patch: SurfacePatch,
+    boundary_id: str,
+    *,
+    sample_count: int = 9,
+) -> SurfaceBoundaryDescriptor:
+    """Extract a surface-native boundary descriptor without tessellating to a mesh."""
+
+    parameter_points, comparison_kind, exact, approximation_metadata = _surface_boundary_parameter_points(
+        patch,
+        boundary_id,
+        sample_count=sample_count,
+    )
+    return SurfaceBoundaryDescriptor(
+        family=patch.family,
+        boundary_id=boundary_id,
+        parameter_points=parameter_points,
+        comparison_kind=comparison_kind,
+        exact=exact,
+        approximation_metadata=approximation_metadata,
+    )
+
+
+def _boundary_world_samples(patch: SurfacePatch, descriptor: SurfaceBoundaryDescriptor) -> np.ndarray:
+    return np.asarray([patch.point_at(float(u), float(v)) for u, v in descriptor.parameter_points], dtype=float)
+
+
+def _seam_adjacency_updates(seam: SurfaceSeam) -> tuple[SurfaceAdjacencyRecord, ...]:
+    if seam.is_open:
+        boundary = seam.boundaries[0]
+        return (SurfaceAdjacencyRecord(source=boundary, target=None, seam_id=seam.seam_id, continuity=seam.continuity),)
+    first, second = seam.boundaries
+    return (
+        SurfaceAdjacencyRecord(source=first, target=second, seam_id=seam.seam_id, continuity=seam.continuity),
+        SurfaceAdjacencyRecord(source=second, target=first, seam_id=seam.seam_id, continuity=seam.continuity),
+    )
+
+
+def classify_surface_seam_continuity(
+    shell: "SurfaceShell",
+    seam: SurfaceSeam,
+    *,
+    tolerance: float = 1e-6,
+) -> SurfaceContinuityMetadata:
+    """Classify supported seam continuity from patch boundary evaluators."""
+
+    result = validate_surface_seam_participation(shell, seam, tolerance=tolerance)
+    return result.continuity
+
+
+def validate_surface_seam_participation(
+    shell: "SurfaceShell",
+    seam: SurfaceSeam,
+    *,
+    tolerance: float = 1e-6,
+) -> SurfaceSeamValidationResult:
+    """Validate boundary compatibility for one seam without mesh fallback."""
+
+    tolerance = float(tolerance)
+    if not np.isfinite(tolerance) or tolerance <= 0.0:
+        raise ValueError("Seam validation tolerance must be finite and positive.")
+    if seam.is_open:
+        boundary = seam.boundaries[0]
+        descriptor = extract_surface_boundary_descriptor(shell.patches[boundary.patch_index], boundary.boundary_id)
+        continuity = SurfaceContinuityMetadata(seam.continuity, "open", tolerance, descriptor.exact)
+        participation = (
+            SurfaceSeamParticipationRecord(
+                seam_id=seam.seam_id,
+                boundary=boundary,
+                descriptor=descriptor,
+                orientation="open",
+            ),
+        )
+        return SurfaceSeamValidationResult(seam.seam_id, True, continuity, participation, _seam_adjacency_updates(seam))
+
+    first_ref, second_ref = seam.boundaries
+    first_patch = shell.patches[first_ref.patch_index]
+    second_patch = shell.patches[second_ref.patch_index]
+    first_descriptor = extract_surface_boundary_descriptor(first_patch, first_ref.boundary_id)
+    second_descriptor = extract_surface_boundary_descriptor(second_patch, second_ref.boundary_id)
+    diagnostics: list[str] = []
+    if len(first_descriptor.parameter_points) != len(second_descriptor.parameter_points):
+        diagnostics.append("boundary sample counts differ")
+        compatible = False
+        orientation: Literal["forward", "reversed", "open"] = "forward"
+    else:
+        first_points = _boundary_world_samples(first_patch, first_descriptor)
+        second_points = _boundary_world_samples(second_patch, second_descriptor)
+        forward_delta = float(np.max(np.linalg.norm(first_points - second_points, axis=1)))
+        reversed_delta = float(np.max(np.linalg.norm(first_points - second_points[::-1], axis=1)))
+        if reversed_delta < forward_delta:
+            orientation = "reversed"
+            position_delta = reversed_delta
+        else:
+            orientation = "forward"
+            position_delta = forward_delta
+        compatible = position_delta <= tolerance
+        if not compatible:
+            diagnostics.append(f"boundary positions differ by {position_delta:.6g}, tolerance {tolerance:.6g}")
+    exact_comparison = first_descriptor.exact and second_descriptor.exact
+    requested = seam.continuity
+    if requested not in {"C0", "G0"}:
+        diagnostics.append(f"unsupported continuity request {requested!r}; only C0/G0 are classified")
+        compatible = False
+    classified = "C0" if compatible else "incompatible"
+    continuity = SurfaceContinuityMetadata(requested, classified, tolerance, exact_comparison, tuple(diagnostics))
+    participation = (
+        SurfaceSeamParticipationRecord(seam.seam_id, first_ref, first_descriptor, "forward"),
+        SurfaceSeamParticipationRecord(seam.seam_id, second_ref, second_descriptor, orientation),
+    )
+    return SurfaceSeamValidationResult(
+        seam_id=seam.seam_id,
+        compatible=compatible,
+        continuity=continuity,
+        participation=participation,
+        adjacency_updates=_seam_adjacency_updates(seam),
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def surface_adjacency_from_seams(shell: "SurfaceShell") -> tuple[SurfaceAdjacencyRecord, ...]:
+    """Create directional adjacency records from the shell's authored seam truth."""
+
+    updates: list[SurfaceAdjacencyRecord] = []
+    for seam in shell.seams:
+        updates.extend(_seam_adjacency_updates(seam))
+    return tuple(updates)
+
+
+@dataclass(frozen=True)
 class SurfaceShell:
     """An ordered collection of patches that form one shell."""
 
@@ -2035,6 +2337,7 @@ class SurfaceShell:
             for boundary in seam.boundaries:
                 if boundary.patch_index >= len(patches):
                     raise ValueError("SurfaceSeam references a patch index outside the shell.")
+                _surface_boundary_parameter_points(patches[boundary.patch_index], boundary.boundary_id, sample_count=2)
         for record in adjacency:
             if record.source.patch_index >= len(patches):
                 raise ValueError("SurfaceAdjacencyRecord source references a patch index outside the shell.")
@@ -2231,6 +2534,10 @@ __all__ = [
     "SurfaceBoundaryRef",
     "SurfaceAdjacencyRecord",
     "SurfaceSeam",
+    "SurfaceBoundaryDescriptor",
+    "SurfaceContinuityMetadata",
+    "SurfaceSeamParticipationRecord",
+    "SurfaceSeamValidationResult",
     "SurfacePatch",
     "PlanarSurfacePatch",
     "RuledSurfacePatch",
@@ -2253,6 +2560,10 @@ __all__ = [
     "make_implicit_field_node",
     "validate_implicit_field_security",
     "refine_subdivision_control_cage",
+    "classify_surface_seam_continuity",
+    "extract_surface_boundary_descriptor",
+    "surface_adjacency_from_seams",
+    "validate_surface_seam_participation",
     "SurfaceShell",
     "SurfaceBody",
     "make_surface_shell",
