@@ -581,6 +581,119 @@ class PlannedRegionRef:
     index: int
 
 
+class PointLifecycleState(str, Enum):
+    PRESENT = "present"
+    BIRTH = "birth"
+    DEATH = "death"
+    SYNTHETIC_BIRTH_SUPPORT = "synthetic_birth_support"
+    SYNTHETIC_DEATH_SUPPORT = "synthetic_death_support"
+    INFERRED = "inferred"
+
+
+@dataclass(frozen=True)
+class PointLifecycleEvent:
+    id: str
+    event_type: str
+    station_interval: tuple[int, int]
+    loop_ref: str
+    point_ref: str
+    correspondence_id: str
+    parent_span_ref: tuple[str, str]
+    source: str
+    interpolation_policy: str
+    diagnostics: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        validate_point_lifecycle_event(self)
+        object.__setattr__(self, "id", str(self.id))
+        object.__setattr__(self, "event_type", str(self.event_type))
+        object.__setattr__(self, "station_interval", tuple(int(index) for index in self.station_interval))
+        object.__setattr__(self, "loop_ref", str(self.loop_ref))
+        object.__setattr__(self, "point_ref", str(self.point_ref))
+        object.__setattr__(self, "correspondence_id", str(self.correspondence_id))
+        object.__setattr__(self, "parent_span_ref", tuple(str(ref) for ref in self.parent_span_ref))
+        object.__setattr__(self, "source", str(self.source))
+        object.__setattr__(self, "interpolation_policy", str(self.interpolation_policy))
+        object.__setattr__(self, "diagnostics", dict(self.diagnostics))
+
+    def lifecycle_state_for_station(self, station_index: int) -> PointLifecycleState:
+        station_index = int(station_index)
+        start, end = self.station_interval
+        if self.event_type == "point_birth":
+            if station_index < start:
+                return PointLifecycleState.INFERRED
+            if station_index == start:
+                return PointLifecycleState.SYNTHETIC_BIRTH_SUPPORT
+            if station_index == end:
+                return PointLifecycleState.BIRTH
+            return PointLifecycleState.PRESENT
+        if station_index < start:
+            return PointLifecycleState.PRESENT
+        if station_index == start:
+            return PointLifecycleState.DEATH
+        if station_index == end:
+            return PointLifecycleState.SYNTHETIC_DEATH_SUPPORT
+        return PointLifecycleState.INFERRED
+
+
+@dataclass(frozen=True)
+class SyntheticSupportReference:
+    id: str
+    source_event_id: str
+    station_index: int
+    span_ref: tuple[str, str]
+    span_parameter: float
+    coordinates: Sequence[float] | np.ndarray
+
+    def __post_init__(self) -> None:
+        if not str(self.id):
+            raise ValueError("SyntheticSupportReference id must not be empty.")
+        if not str(self.source_event_id):
+            raise ValueError("SyntheticSupportReference source_event_id must not be empty.")
+        span_ref = tuple(str(ref) for ref in self.span_ref)
+        if len(span_ref) != 2 or not all(span_ref):
+            raise ValueError("SyntheticSupportReference span_ref must contain two point refs.")
+        span_parameter = float(self.span_parameter)
+        if not np.isfinite(span_parameter) or not 0.0 <= span_parameter <= 1.0:
+            raise ValueError("SyntheticSupportReference span_parameter must be between 0 and 1.")
+        coordinates = np.asarray(self.coordinates, dtype=float).reshape(2)
+        if not np.all(np.isfinite(coordinates)):
+            raise ValueError("SyntheticSupportReference coordinates must be finite.")
+        object.__setattr__(self, "id", str(self.id))
+        object.__setattr__(self, "source_event_id", str(self.source_event_id))
+        object.__setattr__(self, "station_index", int(self.station_index))
+        object.__setattr__(self, "span_ref", span_ref)
+        object.__setattr__(self, "span_parameter", span_parameter)
+        object.__setattr__(self, "coordinates", (float(coordinates[0]), float(coordinates[1])))
+
+
+def validate_point_lifecycle_event(event: PointLifecycleEvent) -> None:
+    if not str(event.id):
+        raise ValueError("PointLifecycleEvent id must not be empty.")
+    if event.event_type not in {"point_birth", "point_death"}:
+        raise ValueError("PointLifecycleEvent event_type must be point_birth or point_death.")
+    interval = tuple(event.station_interval)
+    if len(interval) != 2 or int(interval[0]) >= int(interval[1]):
+        raise ValueError("PointLifecycleEvent station_interval must be an increasing pair.")
+    for field_name in ("loop_ref", "point_ref", "correspondence_id", "source", "interpolation_policy"):
+        if not str(getattr(event, field_name)):
+            raise ValueError(f"PointLifecycleEvent {field_name} must not be empty.")
+    parent_span_ref = tuple(str(ref) for ref in event.parent_span_ref)
+    if len(parent_span_ref) != 2 or not all(parent_span_ref):
+        raise ValueError("PointLifecycleEvent parent_span_ref must contain two point refs.")
+    if event.source not in {"authored", "generated", "inferred"}:
+        raise ValueError("PointLifecycleEvent source must be authored, generated, or inferred.")
+
+
+def validate_point_lifecycle_events(events: Iterable[PointLifecycleEvent]) -> None:
+    seen_ids: set[str] = set()
+    for event in events:
+        validate_point_lifecycle_event(event)
+        if event.id in seen_ids:
+            raise ValueError(f"Duplicate PointLifecycleEvent id {event.id!r}.")
+        seen_ids.add(event.id)
+
+
 @dataclass(frozen=True)
 class PlannedLoopPair:
     """Planner output for one loop correspondence."""
@@ -5621,10 +5734,15 @@ __all__ = [
     "RailConflictDiagnostic",
     "RailResolutionResult",
     "RailSource",
+    "PointLifecycleEvent",
+    "PointLifecycleState",
+    "SyntheticSupportReference",
     "LoftPlan",
     "accept_or_refuse_inferred_correspondence",
     "resolve_authored_rails",
     "score_correspondence_candidates",
+    "validate_point_lifecycle_event",
+    "validate_point_lifecycle_events",
     "validate_rail_priority",
     "loft_profiles",
     "loft",
