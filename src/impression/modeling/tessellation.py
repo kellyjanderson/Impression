@@ -850,6 +850,96 @@ class SurfaceMeshAdapter:
 
 
 @dataclass(frozen=True)
+class TessellationBoundaryViolationDiagnostic:
+    helper_name: str
+    received_type: str
+    expected_inputs: tuple[str, ...]
+    message: str
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "helper_name": self.helper_name,
+            "received_type": self.received_type,
+            "expected_inputs": self.expected_inputs,
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True)
+class TessellationHelperContract:
+    helper_name: str
+    owner_module: str = "impression.modeling.tessellation"
+    accepted_inputs: tuple[str, ...] = ("SurfaceBody", "SurfacePatch", "SurfaceShell")
+    boundary: str = "tessellation"
+    consumes_authored_primitive_arguments: bool = False
+
+    def validate_source(self, source: object) -> TessellationBoundaryViolationDiagnostic | None:
+        received_type = type(source).__name__
+        if isinstance(source, (SurfaceBody, SurfacePatch, SurfaceShell)):
+            return None
+        return TessellationBoundaryViolationDiagnostic(
+            helper_name=self.helper_name,
+            received_type=received_type,
+            expected_inputs=self.accepted_inputs,
+            message=(
+                f"{self.helper_name} belongs to the tessellation boundary and accepts "
+                "SurfaceBody, SurfacePatch, or SurfaceShell inputs only."
+            ),
+        )
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "helper_name": self.helper_name,
+            "owner_module": self.owner_module,
+            "accepted_inputs": self.accepted_inputs,
+            "boundary": self.boundary,
+            "consumes_authored_primitive_arguments": self.consumes_authored_primitive_arguments,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceToMeshAdapterRecord:
+    source_type: str
+    source_identity: str
+    request_cache_key: str
+    helper_contract: TessellationHelperContract
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "source_type": self.source_type,
+            "source_identity": self.source_identity,
+            "request_cache_key": self.request_cache_key,
+            "helper_contract": self.helper_contract.canonical_payload(),
+        }
+
+
+SURFACE_TO_MESH_HELPER_CONTRACT = TessellationHelperContract("surface-to-mesh-adapter")
+
+
+def validate_tessellation_helper_boundary_input(
+    source: object,
+    helper_contract: TessellationHelperContract = SURFACE_TO_MESH_HELPER_CONTRACT,
+) -> TessellationBoundaryViolationDiagnostic | None:
+    return helper_contract.validate_source(source)
+
+
+def make_surface_to_mesh_adapter_record(
+    source: SurfaceBody | SurfacePatch | SurfaceShell,
+    request: TessellationRequest | NormalizedTessellationRequest | None = None,
+) -> SurfaceToMeshAdapterRecord:
+    diagnostic = validate_tessellation_helper_boundary_input(source)
+    if diagnostic is not None:
+        raise ValueError(diagnostic.message)
+    normalized = request if isinstance(request, NormalizedTessellationRequest) else normalize_tessellation_request(request)
+    return SurfaceToMeshAdapterRecord(
+        source_type=type(source).__name__,
+        source_identity=source.stable_identity,
+        request_cache_key=normalized.cache_key,
+        helper_contract=SURFACE_TO_MESH_HELPER_CONTRACT,
+    )
+
+
+@dataclass(frozen=True)
 class SurfaceConsumerRecord:
     body: SurfaceBody
     source_id: str
@@ -1113,6 +1203,10 @@ __all__ = [
     "SurfaceFamilyTessellationAdapter",
     "SurfaceMeshAdapter",
     "SurfaceOutputClassification",
+    "SurfaceToMeshAdapterRecord",
+    "SURFACE_TO_MESH_HELPER_CONTRACT",
+    "TessellationBoundaryViolationDiagnostic",
+    "TessellationHelperContract",
     "SurfaceTessellationResult",
     "SURFACE_FAMILY_TESSELLATION_ADAPTERS",
     "TessellationIntent",
@@ -1122,6 +1216,7 @@ __all__ = [
     "analysis_tessellation_request",
     "compare_tessellation_modes",
     "export_tessellation_request",
+    "make_surface_to_mesh_adapter_record",
     "make_surface_consumer_collection",
     "make_surface_mesh_adapter",
     "mesh_from_surface_body",
@@ -1130,4 +1225,5 @@ __all__ = [
     "tessellate_surface_body",
     "tessellate_surface_patch",
     "tessellate_surface_shell",
+    "validate_tessellation_helper_boundary_input",
 ]

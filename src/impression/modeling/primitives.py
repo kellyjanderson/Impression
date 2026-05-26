@@ -75,10 +75,10 @@ def make_cylinder(
         )
 
     direction = _normalize(direction)
-    from ._legacy_mesh_primitives import circular_frustum_mesh
+    from ._legacy_mesh_primitives import circular_frustum_mesh, orient_mesh
 
     mesh = circular_frustum_mesh(radius, radius, height, resolution, capping=capping)
-    mesh = _orient_mesh(mesh, direction)
+    mesh = orient_mesh(mesh, direction)
     mesh.translate(center, inplace=True)
     if color is not None:
         set_mesh_color(mesh, color)
@@ -122,10 +122,10 @@ def make_ngon(
         )
 
     direction = _normalize(direction)
-    from ._legacy_mesh_primitives import circular_frustum_mesh
+    from ._legacy_mesh_primitives import circular_frustum_mesh, orient_mesh
 
     mesh = circular_frustum_mesh(radius, radius, height, sides, capping=True)
-    mesh = _orient_mesh(mesh, direction)
+    mesh = orient_mesh(mesh, direction)
     mesh.translate(center, inplace=True)
     if color is not None:
         set_mesh_color(mesh, color)
@@ -245,10 +245,10 @@ def make_torus(
         )
 
     direction = _normalize(direction)
-    from ._legacy_mesh_primitives import torus_mesh
+    from ._legacy_mesh_primitives import orient_mesh, torus_mesh
 
     base = torus_mesh(major_radius, minor_radius, n_theta, n_phi)
-    aligned = _orient_mesh(base, direction)
+    aligned = orient_mesh(base, direction)
     aligned.translate(center, inplace=True)
     if color is not None:
         set_mesh_color(aligned, color)
@@ -293,10 +293,10 @@ def make_cone(
             metadata=_surface_metadata(color=color),
         )
 
-    from ._legacy_mesh_primitives import circular_frustum_mesh
+    from ._legacy_mesh_primitives import circular_frustum_mesh, orient_mesh
 
     mesh = circular_frustum_mesh(bottom_radius, top_radius, height, resolution)
-    mesh = _orient_mesh(mesh, direction)
+    mesh = orient_mesh(mesh, direction)
     mesh.translate(center, inplace=True)
     if color is not None:
         set_mesh_color(mesh, color)
@@ -331,10 +331,10 @@ def make_prism(
 
     if top_size is None:
         top_size = tuple(base_size)
-    from ._legacy_mesh_primitives import rectangular_frustum_mesh
+    from ._legacy_mesh_primitives import orient_mesh, rectangular_frustum_mesh
 
     mesh = rectangular_frustum_mesh(tuple(base_size), tuple(top_size), height)
-    mesh = _orient_mesh(mesh, direction)
+    mesh = orient_mesh(mesh, direction)
     mesh.translate(center, inplace=True)
     if color is not None:
         set_mesh_color(mesh, color)
@@ -534,30 +534,6 @@ def _normalize(vector: Sequence[float]) -> Tuple[float, float, float]:
         raise ValueError("Direction vector must be non-zero.")
     arr = arr / norm
     return float(arr[0]), float(arr[1]), float(arr[2])
-
-
-def _orient_mesh(mesh: Mesh, direction: Sequence[float]) -> Mesh:
-    target = np.asarray(direction, dtype=float)
-    target_norm = np.linalg.norm(target)
-    if target_norm == 0:
-        raise ValueError("Direction vector must be non-zero.")
-    target = target / target_norm
-    default = np.array([0.0, 0.0, 1.0])
-    if np.allclose(target, default):
-        return mesh.copy()
-    axis = np.cross(default, target)
-    axis_norm = np.linalg.norm(axis)
-    if axis_norm == 0:
-        # opposite direction; rotate 180 around X
-        axis = np.array([1.0, 0.0, 0.0])
-        angle_deg = 180.0
-    else:
-        axis = axis / axis_norm
-        angle_rad = np.arccos(np.clip(np.dot(default, target), -1.0, 1.0))
-        angle_deg = np.degrees(angle_rad)
-    rotated = mesh.copy()
-    rotated.rotate_vector(axis, angle_deg, point=(0.0, 0.0, 0.0), inplace=True)
-    return rotated
 
 
 def _orient_faces_outward(vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:

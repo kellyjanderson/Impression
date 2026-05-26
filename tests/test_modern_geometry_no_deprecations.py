@@ -66,6 +66,7 @@ def test_planar_and_frustum_mesh_helpers_are_quarantined_outside_primitives(proj
     assert "def _rectangular_frustum_mesh" not in primitives_text
     assert "def _sphere_mesh" not in primitives_text
     assert "def _torus_mesh" not in primitives_text
+    assert "def _orient_mesh" not in primitives_text
     assert {record.legacy_name for record in LEGACY_MESH_PRIMITIVE_HELPERS} == {
         "_box_mesh",
         "_circular_frustum_mesh",

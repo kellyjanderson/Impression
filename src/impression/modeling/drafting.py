@@ -9,7 +9,8 @@ from impression.mesh import Mesh, combine_meshes, triangulate_faces
 
 from ._color import set_mesh_color
 from ._legacy_mesh_deprecation import warn_mesh_primary_api
-from .primitives import _orient_mesh, _normalize
+from ._legacy_mesh_primitives import orient_mesh
+from .primitives import _normalize
 from .text import make_text
 
 Axis = Literal["x", "y", "z"]
@@ -106,7 +107,7 @@ def make_line(
         [3, 0, 4, 7],
     ])
     mesh = Mesh(points, faces)
-    mesh = _orient_mesh(mesh, _normalize(direction))
+    mesh = orient_mesh(mesh, _normalize(direction))
     mesh.translate(start, inplace=True)
     if color is not None:
         set_mesh_color(mesh, color)
@@ -158,7 +159,7 @@ def make_plane(
     )
     faces = triangulate_faces([[0, 1, 2, 3]])
     mesh = Mesh(points, faces)
-    mesh = _orient_mesh(mesh, normal)
+    mesh = orient_mesh(mesh, normal)
     mesh.translate(center, inplace=True)
     if color is not None:
         set_mesh_color(mesh, color)
@@ -242,7 +243,7 @@ def make_arrow(
         ]
     )
     head = Mesh(base, faces)
-    head = _orient_mesh(head, direction / length)
+    head = orient_mesh(head, direction / length)
     head.translate(start + direction * (shaft_length / length), inplace=True)
     if color is not None:
         set_mesh_color(head, color)
