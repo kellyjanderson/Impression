@@ -29,7 +29,7 @@ def _surface_metadata(*, color: Sequence[float] | str | None) -> dict[str, objec
 def make_box(
     size: Sequence[float] = (1.0, 1.0, 1.0),
     center: Sequence[float] = (0.0, 0.0, 0.0),
-    backend: Backend = "mesh",
+    backend: Backend = "surface",
     color: Sequence[float] | str | None = None,
 ) -> Mesh | SurfaceBody:
     """Axis-aligned box specified by size (dx, dy, dz) and center."""
@@ -130,7 +130,7 @@ def make_polyhedron(
     faces: int = 6,
     radius: float = 0.5,
     center: Sequence[float] = (0.0, 0.0, 0.0),
-    backend: Backend = "mesh",
+    backend: Backend = "surface",
     color: Sequence[float] | str | None = None,
 ) -> Mesh | SurfaceBody:
     """Regular polyhedron specified by number of faces (4, 6, 8, 12, 20)."""
@@ -170,7 +170,7 @@ def make_nhedron(
     faces: int = 6,
     radius: float = 0.5,
     center: Sequence[float] = (0.0, 0.0, 0.0),
-    backend: Backend = "mesh",
+    backend: Backend = "surface",
     color: Sequence[float] | str | None = None,
 ) -> Mesh | SurfaceBody:
     """Compatibility wrapper for make_polyhedron."""
@@ -297,7 +297,7 @@ def make_prism(
     height: float = 1.0,
     center: Sequence[float] = (0.0, 0.0, 0.0),
     direction: Sequence[float] = (0.0, 0.0, 1.0),
-    backend: Backend = "mesh",
+    backend: Backend = "surface",
     color: Sequence[float] | str | None = None,
 ) -> Mesh | SurfaceBody:
     """

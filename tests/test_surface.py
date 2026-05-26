@@ -162,15 +162,16 @@ def _make_closed_cube_body() -> SurfaceBody:
     return make_surface_body([shell])
 
 
-def test_internal_surface_box_builder_is_closed_and_public_box_stays_mesh() -> None:
+def test_internal_surface_box_builder_is_closed_and_public_box_defaults_surface() -> None:
     surface_box = make_surface_box(size=(2.0, 4.0, 6.0), center=(1.0, 2.0, 3.0))
-    mesh_box = make_box(size=(2.0, 4.0, 6.0), center=(1.0, 2.0, 3.0))
+    public_box = make_box(size=(2.0, 4.0, 6.0), center=(1.0, 2.0, 3.0))
 
     assert isinstance(surface_box, SurfaceBody)
+    assert isinstance(public_box, SurfaceBody)
+    assert public_box.stable_identity == surface_box.stable_identity
     assert surface_box.shell_count == 1
     assert surface_box.patch_count == 6
     assert surface_box.bounds_estimate() == (0.0, 2.0, 0.0, 4.0, 0.0, 6.0)
-    assert mesh_box.n_faces > 0
 
     result = tessellate_surface_body(surface_box, export_tessellation_request())
     assert result.classification == "closed"
@@ -350,11 +351,14 @@ def test_internal_surface_ngon_returns_surface_body_and_public_api_stays_mesh() 
     assert result.mesh.n_faces > 0
 
 
-def test_internal_surface_prism_returns_surface_body_and_public_api_stays_mesh() -> None:
+def test_internal_surface_prism_returns_surface_body_and_public_api_defaults_surface() -> None:
     surface_prism = make_surface_prism(base_size=(2.0, 1.0), top_size=(1.0, 0.5), height=2.0)
-    mesh_prism = make_prism(base_size=(2.0, 1.0), top_size=(1.0, 0.5), height=2.0)
+    public_prism = make_prism(base_size=(2.0, 1.0), top_size=(1.0, 0.5), height=2.0)
+    mesh_prism = make_prism(base_size=(2.0, 1.0), top_size=(1.0, 0.5), height=2.0, backend="mesh")
 
     assert isinstance(surface_prism, SurfaceBody)
+    assert isinstance(public_prism, SurfaceBody)
+    assert public_prism.stable_identity == surface_prism.stable_identity
     assert surface_prism.shell_count == 1
     assert surface_prism.patch_count == 6
     assert [patch.family for patch in surface_prism.iter_patches(world=False)].count("ruled") == 4
@@ -442,11 +446,14 @@ def test_internal_surface_sphere_respects_center() -> None:
     assert bounds == (4.0, 6.0, 5.0, 7.0, 6.0, 8.0)
 
 
-def test_internal_surface_polyhedron_returns_surface_body_and_public_api_stays_mesh() -> None:
+def test_internal_surface_polyhedron_returns_surface_body_and_public_api_defaults_surface() -> None:
     surface_polyhedron = make_surface_polyhedron(faces=6, radius=1.0)
-    mesh_polyhedron = make_polyhedron(faces=6, radius=1.0)
+    public_polyhedron = make_polyhedron(faces=6, radius=1.0)
+    mesh_polyhedron = make_polyhedron(faces=6, radius=1.0, backend="mesh")
 
     assert isinstance(surface_polyhedron, SurfaceBody)
+    assert isinstance(public_polyhedron, SurfaceBody)
+    assert public_polyhedron.stable_identity == surface_polyhedron.stable_identity
     assert surface_polyhedron.shell_count == 1
     assert surface_polyhedron.patch_count == 6
     assert [patch.family for patch in surface_polyhedron.iter_patches(world=False)].count("planar") == 6
@@ -457,11 +464,14 @@ def test_internal_surface_polyhedron_returns_surface_body_and_public_api_stays_m
     assert result.mesh.n_faces > 0
 
 
-def test_internal_surface_nhedron_wraps_polyhedron_and_public_api_stays_mesh() -> None:
+def test_internal_surface_nhedron_wraps_polyhedron_and_public_api_defaults_surface() -> None:
     surface_nhedron = make_surface_nhedron(faces=8, radius=1.0)
-    mesh_nhedron = make_nhedron(faces=8, radius=1.0)
+    public_nhedron = make_nhedron(faces=8, radius=1.0)
+    mesh_nhedron = make_nhedron(faces=8, radius=1.0, backend="mesh")
 
     assert isinstance(surface_nhedron, SurfaceBody)
+    assert isinstance(public_nhedron, SurfaceBody)
+    assert public_nhedron.stable_identity == surface_nhedron.stable_identity
     assert surface_nhedron.shell_count == 1
     assert surface_nhedron.patch_count == 8
     assert [patch.family for patch in surface_nhedron.iter_patches(world=False)].count("planar") == 8
