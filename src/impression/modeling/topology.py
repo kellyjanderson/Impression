@@ -237,6 +237,63 @@ class TopologyLifecycleBuilderRequest:
 
 
 @dataclass(frozen=True)
+class GeneratedRailProvenance:
+    shape_kind: str
+    name_prefix: str | None
+    generated_role: str
+    source_parameter: str | None = None
+    overridden: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "shape_kind", str(self.shape_kind))
+        object.__setattr__(self, "name_prefix", None if self.name_prefix is None else str(self.name_prefix))
+        object.__setattr__(self, "generated_role", str(self.generated_role))
+        object.__setattr__(
+            self,
+            "source_parameter",
+            None if self.source_parameter is None else str(self.source_parameter),
+        )
+        object.__setattr__(self, "overridden", bool(self.overridden))
+
+
+def _generated_rail_name(base_name: str, name_prefix: str | None) -> str:
+    if name_prefix is None:
+        return base_name
+    return f"{derive_stable_id(name_prefix)}-{base_name}"
+
+
+def _generated_rail_provenance(
+    shape_kind: str,
+    name_prefix: str | None,
+    generated_role: str,
+    source_parameter: str | None = None,
+    *,
+    overridden: bool = False,
+) -> dict[str, object]:
+    return {
+        "source": "generated_shape_default_rails",
+        "generated_rail": GeneratedRailProvenance(
+            shape_kind=shape_kind,
+            name_prefix=name_prefix,
+            generated_role=generated_role,
+            source_parameter=source_parameter,
+            overridden=overridden,
+        ),
+    }
+
+
+def _resolve_generated_anchor(anchor: str | None, valid_base_names: Sequence[str], name_prefix: str | None) -> str:
+    base_anchor = anchor or valid_base_names[0]
+    generated_names = {_generated_rail_name(name, name_prefix): name for name in valid_base_names}
+    if base_anchor in valid_base_names:
+        return _generated_rail_name(base_anchor, name_prefix)
+    if base_anchor in generated_names:
+        return base_anchor
+    valid = ", ".join(valid_base_names)
+    raise ValueError(f"Invalid generated topology anchor {anchor!r}; valid anchors: {valid}.")
+
+
+@dataclass(frozen=True)
 class TopologyPath:
     id: str = "topology-path"
     closed: bool = True
@@ -404,6 +461,213 @@ class TopologyPath:
         id: str = "topology-path",
     ) -> "TopologyPathBuilder":
         return TopologyPathBuilder(id=id, closed=True, anchor=anchor, direction=direction, sampling_policy=sampling_policy)
+
+    @classmethod
+    def named_rect(
+        cls,
+        width: float,
+        height: float,
+        *,
+        anchor: str = "bottom-left",
+        name_prefix: str | None = None,
+    ) -> "TopologyPath":
+        width = float(width)
+        height = float(height)
+        if not np.isfinite(width) or width <= 0 or not np.isfinite(height) or height <= 0:
+            raise ValueError("named_rect width and height must be positive.")
+        half_w = width / 2.0
+        half_h = height / 2.0
+        rails = (
+            ("bottom-left", (-half_w, -half_h), "corner"),
+            ("bottom-mid", (0.0, -half_h), "side_midpoint"),
+            ("bottom-right", (half_w, -half_h), "corner"),
+            ("right-mid", (half_w, 0.0), "side_midpoint"),
+            ("top-right", (half_w, half_h), "corner"),
+            ("top-mid", (0.0, half_h), "side_midpoint"),
+            ("top-left", (-half_w, half_h), "corner"),
+            ("left-mid", (-half_w, 0.0), "side_midpoint"),
+        )
+        return cls._from_generated_point_rails(
+            "rect",
+            rails,
+            anchor=anchor,
+            name_prefix=name_prefix,
+            metadata={"width": width, "height": height},
+        )
+
+    @classmethod
+    def named_circle(
+        cls,
+        radius: float,
+        *,
+        anchor: str | None = None,
+        name_prefix: str | None = None,
+    ) -> "TopologyPath":
+        radius = float(radius)
+        if not np.isfinite(radius) or radius <= 0:
+            raise ValueError("named_circle radius must be positive.")
+        rails = (
+            ("start", (radius, 0.0), "start"),
+            ("north", (0.0, radius), "quadrant"),
+            ("west", (-radius, 0.0), "quadrant"),
+            ("south", (0.0, -radius), "quadrant"),
+        )
+        return cls._from_generated_point_rails(
+            "circle",
+            rails,
+            anchor=anchor or "start",
+            name_prefix=name_prefix,
+            metadata={"radius": radius},
+        )
+
+    @classmethod
+    def named_rounded_rect(
+        cls,
+        width: float,
+        height: float,
+        radius: float,
+        *,
+        anchor: str = "bottom-left",
+        name_prefix: str | None = None,
+    ) -> "TopologyPath":
+        width = float(width)
+        height = float(height)
+        radius = float(radius)
+        if not np.isfinite(width) or width <= 0 or not np.isfinite(height) or height <= 0:
+            raise ValueError("named_rounded_rect width and height must be positive.")
+        if not np.isfinite(radius) or radius <= 0:
+            raise ValueError("named_rounded_rect radius must be positive.")
+        if radius > min(width, height) / 2.0:
+            raise ValueError("named_rounded_rect radius must fit within width and height.")
+
+        half_w = width / 2.0
+        half_h = height / 2.0
+        rails = (
+            ("bottom-left", (-half_w + radius, -half_h), "tangent_transition"),
+            ("bottom-right", (half_w - radius, -half_h), "tangent_transition"),
+            ("right-bottom", (half_w, -half_h + radius), "tangent_transition"),
+            ("right-top", (half_w, half_h - radius), "tangent_transition"),
+            ("top-right", (half_w - radius, half_h), "tangent_transition"),
+            ("top-left", (-half_w + radius, half_h), "tangent_transition"),
+            ("left-top", (-half_w, half_h - radius), "tangent_transition"),
+            ("left-bottom", (-half_w, -half_h + radius), "tangent_transition"),
+        )
+        points = cls._generated_points("rounded_rect", rails, name_prefix)
+        segment_specs = (
+            ("bottom", "bottom-left", "bottom-right", "straight"),
+            ("bottom-right-arc", "bottom-right", "right-bottom", "corner_arc"),
+            ("right", "right-bottom", "right-top", "straight"),
+            ("top-right-arc", "right-top", "top-right", "corner_arc"),
+            ("top", "top-right", "top-left", "straight"),
+            ("top-left-arc", "top-left", "left-top", "corner_arc"),
+            ("left", "left-top", "left-bottom", "straight"),
+            ("bottom-left-arc", "left-bottom", "bottom-left", "corner_arc"),
+        )
+        point_by_base = {base_name: point for point, (base_name, _, _) in zip(points, rails, strict=True)}
+        segments: list[TopologySegment] = []
+        landmarks: list[TopologyLandmark] = []
+        for segment_name, start_name, end_name, role in segment_specs:
+            generated_name = _generated_rail_name(segment_name, name_prefix)
+            segment_id = derive_stable_id(generated_name)
+            segment_landmarks = (
+                TopologyLandmark(
+                    name=f"{generated_name}-start",
+                    segment_id=segment_id,
+                    parameter=0.0,
+                    role="tangent_transition",
+                    correspondence_id=point_by_base[start_name].correspondence_id,
+                    provenance=_generated_rail_provenance("rounded_rect", name_prefix, "tangent_transition", start_name),
+                ),
+                TopologyLandmark(
+                    name=f"{generated_name}-end",
+                    segment_id=segment_id,
+                    parameter=1.0,
+                    role="tangent_transition",
+                    correspondence_id=point_by_base[end_name].correspondence_id,
+                    provenance=_generated_rail_provenance("rounded_rect", name_prefix, "tangent_transition", end_name),
+                ),
+            )
+            landmarks.extend(segment_landmarks)
+            segments.append(
+                TopologySegment(
+                    id=segment_id,
+                    name=generated_name,
+                    source_kind=role,
+                    start_ref=point_by_base[start_name].id,
+                    end_ref=point_by_base[end_name].id,
+                    correspondence_id=segment_id,
+                    landmarks=segment_landmarks,
+                    provenance=_generated_rail_provenance("rounded_rect", name_prefix, role, segment_name),
+                )
+            )
+        return cls(
+            id=_generated_rail_name("rounded-rect", name_prefix),
+            closed=True,
+            anchor_id=_resolve_generated_anchor(anchor, [name for name, _, _ in rails], name_prefix),
+            anchor_policy="generated",
+            points=tuple(points),
+            segments=tuple(segments),
+            landmarks=tuple(landmarks),
+            metadata={
+                "source": "generated_shape_default_rails",
+                "shape_kind": "rounded_rect",
+                "width": width,
+                "height": height,
+                "radius": radius,
+                "name_prefix": name_prefix,
+            },
+        )
+
+    @classmethod
+    def _from_generated_point_rails(
+        cls,
+        shape_kind: str,
+        rails: Sequence[tuple[str, tuple[float, float], str]],
+        *,
+        anchor: str,
+        name_prefix: str | None,
+        metadata: dict[str, object],
+    ) -> "TopologyPath":
+        return cls(
+            id=_generated_rail_name(shape_kind, name_prefix),
+            closed=True,
+            anchor_id=_resolve_generated_anchor(anchor, [name for name, _, _ in rails], name_prefix),
+            anchor_policy="generated",
+            points=tuple(cls._generated_points(shape_kind, rails, name_prefix)),
+            metadata={
+                "source": "generated_shape_default_rails",
+                "shape_kind": shape_kind,
+                "name_prefix": name_prefix,
+                **metadata,
+            },
+        )
+
+    @staticmethod
+    def _generated_points(
+        shape_kind: str,
+        rails: Sequence[tuple[str, tuple[float, float], str]],
+        name_prefix: str | None,
+    ) -> tuple[TopologyPoint, ...]:
+        points: list[TopologyPoint] = []
+        seen_ids: set[str] = set()
+        for ordinal, (base_name, coordinates, role) in enumerate(rails):
+            generated_name = _generated_rail_name(base_name, name_prefix)
+            point_id = derive_stable_id(generated_name)
+            if point_id in seen_ids:
+                raise ValueError(f"Generated topology rail collision for {point_id!r}.")
+            seen_ids.add(point_id)
+            points.append(
+                TopologyPoint(
+                    id=point_id,
+                    name=generated_name,
+                    coordinates=coordinates,
+                    ordinal=ordinal,
+                    role=role,
+                    correspondence_id=point_id,
+                    provenance=_generated_rail_provenance(shape_kind, name_prefix, role, base_name),
+                )
+            )
+        return tuple(points)
 
     def validate(self) -> None:
         if not self.id:
@@ -1381,6 +1645,7 @@ def split_merge_ambiguous(a_loop: np.ndarray, b_loop: np.ndarray) -> bool:
 
 __all__ = [
     "Loop",
+    "GeneratedRailProvenance",
     "Region",
     "Section",
     "TopologyLandmark",
