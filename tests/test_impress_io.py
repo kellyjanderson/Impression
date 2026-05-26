@@ -14,9 +14,11 @@ from impression.io import (
     decode_surface_body_payload,
     decode_surface_patch_payload,
     decode_surface_shell_payload,
+    decode_trim_loop_payload,
     encode_surface_body_payload,
     encode_surface_patch_payload,
     encode_surface_shell_payload,
+    encode_trim_loop_payload,
     make_impress_document_root,
     make_surface_body_store,
     validate_impress_units,
@@ -288,19 +290,52 @@ def test_decode_surface_patch_payload_uses_constructor_validation() -> None:
         decode_surface_patch_payload(payload)
 
 
-def test_surface_patch_payload_codec_refuses_trim_payload_until_trim_codec() -> None:
+def test_encode_decode_trim_loop_payload_round_trips_normalized_orientation() -> None:
+    outer = TrimLoop(points_uv=[(0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0)], category="outer")
+    inner = TrimLoop(points_uv=[(0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.2, 0.8)], category="inner")
+
+    outer_payload = encode_trim_loop_payload(outer)
+    inner_payload = encode_trim_loop_payload(inner)
+
+    assert outer_payload["category"] == "outer"
+    assert outer_payload["clockwise"] is False
+    assert inner_payload["category"] == "inner"
+    assert inner_payload["clockwise"] is True
+    assert decode_trim_loop_payload(outer_payload).canonical_payload()["category"] == "outer"
+    assert decode_trim_loop_payload(inner_payload).canonical_payload()["category"] == "inner"
+
+
+def test_surface_patch_payload_codec_round_trips_trim_loops() -> None:
     patch = PlanarSurfacePatch(
         family="planar",
-        trim_loops=(TrimLoop(points_uv=[(0.1, 0.1), (0.8, 0.1), (0.1, 0.8)], category="outer"),),
+        trim_loops=(
+            TrimLoop(points_uv=[(0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0)], category="outer"),
+            TrimLoop(points_uv=[(0.2, 0.2), (0.8, 0.2), (0.8, 0.8), (0.2, 0.8)], category="inner"),
+        ),
     )
 
-    with pytest.raises(ImpressFormatError, match="trim payloads require"):
-        encode_surface_patch_payload(patch)
+    payload = encode_surface_patch_payload(patch)
+    decoded = decode_surface_patch_payload(payload)
 
-    payload = encode_surface_patch_payload(PlanarSurfacePatch(family="planar"))
-    payload["trim_loops"] = [{"category": "outer", "points_uv": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]}]
-    with pytest.raises(ImpressFormatError, match="trim payloads require"):
-        decode_surface_patch_payload(payload)
+    assert len(payload["trim_loops"]) == 2
+    assert decoded.stable_identity == patch.stable_identity
+    assert [trim.category for trim in decoded.trim_loops] == ["outer", "inner"]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"category": "mystery", "points_uv": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]},
+        {"category": "outer", "points_uv": [[0.0, 0.0], [1.0, 0.0]]},
+        {"category": "outer", "points_uv": [[float("inf"), 0.0], [1.0, 0.0], [0.0, 1.0]]},
+        {"category": "outer", "points_uv": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], "clockwise": "no"},
+        {"category": "outer", "points_uv": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], "clockwise": True},
+    ],
+)
+def test_decode_trim_loop_payload_rejects_invalid_payloads(payload: dict[str, object]) -> None:
+    with pytest.raises(ImpressFormatError):
+        decode_trim_loop_payload(payload)
 
 
 @pytest.mark.parametrize(

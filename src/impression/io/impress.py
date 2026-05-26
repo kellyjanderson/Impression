@@ -13,6 +13,7 @@ from impression.modeling.surface import (
     SurfaceBody,
     SurfacePatch,
     SurfaceShell,
+    TrimLoop,
 )
 
 IMPRESS_FORMAT = "impress"
@@ -217,13 +218,49 @@ def _validate_body_entry_payload(entry: object) -> ImpressBodyEntry:
     return ImpressBodyEntry(body_id=body_id, stable_identity=stable_identity)
 
 
+def encode_trim_loop_payload(trim_loop: TrimLoop) -> dict[str, object]:
+    """Encode a patch-local trim loop for `.impress` persistence."""
+
+    if not isinstance(trim_loop, TrimLoop):
+        raise ImpressFormatError("encode_trim_loop_payload requires a TrimLoop.")
+    normalized = trim_loop.normalized()
+    return {
+        "category": normalized.category,
+        "points_uv": _array_payload(normalized.points_uv),
+        "clockwise": normalized.is_clockwise,
+    }
+
+
+def decode_trim_loop_payload(payload: Mapping[str, object]) -> TrimLoop:
+    """Decode a `.impress` trim payload through the public TrimLoop constructor."""
+
+    if not isinstance(payload, Mapping):
+        raise ImpressFormatError("TrimLoop payload must be an object.")
+    unknown_keys = set(payload) - {"category", "points_uv", "clockwise"}
+    if unknown_keys:
+        keys = ", ".join(sorted(str(key) for key in unknown_keys))
+        raise ImpressFormatError(f"Unsupported TrimLoop payload fields: {keys}.")
+    category = payload.get("category")
+    if not isinstance(category, str) or not category:
+        raise ImpressFormatError("TrimLoop payload requires a non-empty category.")
+    clockwise = payload.get("clockwise")
+    if clockwise is not None and not isinstance(clockwise, bool):
+        raise ImpressFormatError("TrimLoop clockwise must be a boolean when present.")
+    try:
+        trim_loop = TrimLoop(_validate_points2_payload(payload.get("points_uv"), "points_uv"), category=category)
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(str(exc)) from exc
+    normalized = trim_loop.normalized()
+    if clockwise is not None and normalized.is_clockwise != clockwise:
+        raise ImpressFormatError("TrimLoop clockwise does not match the normalized category orientation.")
+    return normalized
+
+
 def encode_surface_patch_payload(patch: SurfacePatch) -> dict[str, object]:
     """Encode base patch fields and supported family geometry for `.impress` persistence."""
 
     if not isinstance(patch, SurfacePatch):
         raise ImpressFormatError("encode_surface_patch_payload requires a SurfacePatch.")
-    if patch.trim_loops:
-        raise ImpressFormatError("SurfacePatch trim payloads require the dedicated `.impress` trim codec.")
     _validate_patch_kind_family(type(patch).__name__, patch.family)
     return {
         "kind": type(patch).__name__,
@@ -232,7 +269,7 @@ def encode_surface_patch_payload(patch: SurfacePatch) -> dict[str, object]:
         "capability_flags": sorted(patch.capability_flags),
         "transform_matrix": patch.transform_matrix.tolist(),
         "metadata": dict(patch.metadata),
-        "trim_loops": [],
+        "trim_loops": [encode_trim_loop_payload(trim_loop) for trim_loop in patch.trim_loops],
         "geometry": _encode_patch_geometry_payload(patch),
     }
 
@@ -274,9 +311,10 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
     if not isinstance(metadata, Mapping):
         raise ImpressFormatError("SurfacePatch metadata must be an object.")
 
-    trim_loops = payload.get("trim_loops", [])
-    if trim_loops != []:
-        raise ImpressFormatError("SurfacePatch trim payloads require the dedicated `.impress` trim codec.")
+    trim_payloads = payload.get("trim_loops", [])
+    if not isinstance(trim_payloads, Sequence) or isinstance(trim_payloads, (str, bytes)):
+        raise ImpressFormatError("SurfacePatch trim_loops must be an array.")
+    trim_loops = tuple(decode_trim_loop_payload(trim_payload) for trim_payload in trim_payloads)
 
     geometry = payload.get("geometry")
     if not isinstance(geometry, Mapping):
@@ -288,7 +326,7 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
         "family": family,
         "domain": domain,
         "capability_flags": frozenset(flags),
-        "trim_loops": (),
+        "trim_loops": trim_loops,
         "transform_matrix": transform_matrix,
         "metadata": dict(metadata),
     }
@@ -535,6 +573,18 @@ def _validate_points3_payload(payload: object, name: str) -> np.ndarray:
         raise ImpressFormatError(f"SurfacePatch geometry {name} must contain at least two 3D points.")
     if not np.all(np.isfinite(points)):
         raise ImpressFormatError(f"SurfacePatch geometry {name} must contain only finite values.")
+    return points
+
+
+def _validate_points2_payload(payload: object, name: str) -> np.ndarray:
+    try:
+        points = np.asarray(payload, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(f"TrimLoop {name} must be a numeric point array.") from exc
+    if points.ndim != 2 or points.shape[1] != 2 or points.shape[0] < 3:
+        raise ImpressFormatError(f"TrimLoop {name} must contain at least three 2D points.")
+    if not np.all(np.isfinite(points)):
+        raise ImpressFormatError(f"TrimLoop {name} must contain only finite values.")
     return points
 
 
