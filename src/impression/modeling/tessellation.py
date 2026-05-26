@@ -766,6 +766,21 @@ class SurfaceTessellationResult:
 
 
 @dataclass(frozen=True)
+class SurfaceCollectionTessellationResult:
+    """Mesh output produced only from an explicit surface consumer collection boundary."""
+
+    mesh: Mesh
+    request: NormalizedTessellationRequest
+    body_identities: tuple[str, ...]
+    analysis: MeshAnalysis
+    metadata: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "body_identities", tuple(str(identity) for identity in self.body_identities))
+        object.__setattr__(self, "metadata", _normalize_patch_metadata(self.metadata))
+
+
+@dataclass(frozen=True)
 class SurfaceFamilyTessellationAdapter:
     """Family-specific tessellation policy behind the common request contract."""
 
@@ -1261,6 +1276,35 @@ def make_surface_consumer_collection(
     return SurfaceConsumerCollection(items=items, metadata=_normalize_patch_metadata(metadata))
 
 
+def tessellate_surface_consumer_collection(
+    collection: SurfaceConsumerCollection,
+    request: TessellationRequest | NormalizedTessellationRequest | None = None,
+) -> SurfaceCollectionTessellationResult:
+    """Tessellate an explicit surface consumer collection at the mesh output boundary."""
+
+    normalized = request if isinstance(request, NormalizedTessellationRequest) else normalize_tessellation_request(request)
+    meshes = [tessellate_surface_body(item.body, normalized).mesh for item in collection.items]
+    if meshes:
+        mesh = combine_meshes(meshes)
+    else:
+        mesh = Mesh(np.zeros((0, 3), dtype=float), np.zeros((0, 3), dtype=int))
+    mesh.metadata.update(
+        {
+            "surface_collection_body_identities": collection.body_identities,
+            "surface_collection_metadata": dict(collection.metadata),
+            "tessellation_request": normalized.canonical_payload(),
+            "adapter_lossiness": "lossy",
+        }
+    )
+    return SurfaceCollectionTessellationResult(
+        mesh=mesh,
+        request=normalized,
+        body_identities=collection.body_identities,
+        analysis=analyze_mesh(mesh),
+        metadata=dict(collection.metadata),
+    )
+
+
 __all__ = [
     "AdapterLossiness",
     "CrossModeDriftReport",
@@ -1269,6 +1313,7 @@ __all__ = [
     "NormalizedTessellationRequest",
     "SurfaceConsumerCollection",
     "SurfaceConsumerRecord",
+    "SurfaceCollectionTessellationResult",
     "SurfaceFamilySamplingKind",
     "SurfaceFamilyTessellationAdapter",
     "SurfaceMeshAdapter",
@@ -1293,6 +1338,7 @@ __all__ = [
     "normalize_tessellation_request",
     "preview_tessellation_request",
     "tessellate_surface_body",
+    "tessellate_surface_consumer_collection",
     "tessellate_surface_patch",
     "tessellate_surface_shell",
     "validate_tessellation_helper_boundary_input",

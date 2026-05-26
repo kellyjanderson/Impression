@@ -85,8 +85,10 @@ from impression.modeling import (
     SurfaceBoundaryRef,
     SurfaceComposition,
     SurfaceCompositionError,
+    SurfaceCompositionTraversalRecord,
     SurfaceContinuityMetadata,
     SurfaceConsumerCollection,
+    SurfaceCollectionTessellationResult,
     SurfaceFamilyTessellationAdapter,
     SURFACE_FAMILY_TESSELLATION_ADAPTERS,
     SurfaceBooleanFamilyEligibilityResult,
@@ -122,13 +124,17 @@ from impression.modeling import (
     surface_adjacency_from_seams,
     surface_boolean_family_eligibility,
     surface_boolean_result,
+    surface_composition_to_consumer_collection,
     surface_group,
     validate_implicit_field_security,
     validate_surface_seam_participation,
     validate_tessellation_helper_boundary_input,
     tessellate_surface_body,
+    tessellate_surface_composition,
+    tessellate_surface_consumer_collection,
     tessellate_surface_patch,
     tessellate_surface_shell,
+    traverse_surface_composition,
 )
 
 
@@ -1930,3 +1936,46 @@ def test_surface_composition_rejects_mesh_inputs_with_diagnostic() -> None:
     assert diagnostic.target_type == "Mesh"
     assert diagnostic.child_index == 0
     assert "compatibility boundary" in diagnostic.reason
+
+
+def test_surface_composition_traversal_is_preorder_and_transform_aware() -> None:
+    body_a = make_surface_body([make_surface_shell([PlanarSurfacePatch(family="planar")])])
+    body_b = make_surface_body([make_surface_shell([PlanarSurfacePatch(family="planar", origin=(2.0, 0.0, 0.0))])])
+    root_translate = np.eye(4)
+    root_translate[:3, 3] = [10.0, 0.0, 0.0]
+    nested_translate = np.eye(4)
+    nested_translate[:3, 3] = [0.0, 5.0, 0.0]
+
+    nested = make_surface_composition([body_b], composition_id="nested", transform_matrix=nested_translate)
+    root = surface_group([body_a, nested], group_id="root", transform_matrix=root_translate)
+
+    records = traverse_surface_composition(root)
+    collection = surface_composition_to_consumer_collection(root)
+
+    assert all(isinstance(record, SurfaceCompositionTraversalRecord) for record in records)
+    assert [record.source_id for record in records] == ["root/0", "root/1/nested/0"]
+    assert [item.source_id for item in collection.items] == ["root/0", "root/1/nested/0"]
+    assert collection.items[1].metadata["traversal"]["order"] == 1
+    assert np.allclose(collection.items[0].body.bounds_estimate(), (10.0, 11.0, 0.0, 1.0, 0.0, 0.0))
+    assert np.allclose(collection.items[1].body.bounds_estimate(), (12.0, 13.0, 5.0, 6.0, 0.0, 0.0))
+    assert collection.metadata["surface_composition_traversal"]["traversal_order"] == (
+        "root/0",
+        "root/1/nested/0",
+    )
+
+
+def test_surface_composition_tessellation_handoff_is_explicit_boundary() -> None:
+    body_a = make_surface_body([make_surface_shell([PlanarSurfacePatch(family="planar")])])
+    body_b = make_surface_body([make_surface_shell([PlanarSurfacePatch(family="planar", origin=(2.0, 0.0, 0.0))])])
+    composition = surface_group([body_a, body_b], group_id="render-me")
+
+    collection = surface_composition_to_consumer_collection(composition)
+    direct = tessellate_surface_consumer_collection(collection, preview_tessellation_request())
+    from_composition = tessellate_surface_composition(composition, preview_tessellation_request())
+
+    assert isinstance(direct, SurfaceCollectionTessellationResult)
+    assert isinstance(from_composition, SurfaceCollectionTessellationResult)
+    assert direct.body_identities == collection.body_identities
+    assert from_composition.body_identities == collection.body_identities
+    assert direct.mesh.vertices.shape[0] == from_composition.mesh.vertices.shape[0]
+    assert direct.mesh.metadata["surface_collection_body_identities"] == collection.body_identities
