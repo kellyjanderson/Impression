@@ -20,6 +20,8 @@ from impression.modeling import (
     export_tessellation_request,
     loft,
     loft_execute_plan,
+    loft_execute_plan_debug_mesh,
+    loft_execute_plan_debug_mesh_result,
     loft_endcaps,
     loft_plan_ambiguities,
     loft_plan_sections,
@@ -423,10 +425,43 @@ def test_loft_sections_matches_planner_executor_pipeline():
     ]
     direct = loft_sections(stations, samples=36, cap_ends=True)
     plan = loft_plan_sections(stations, samples=36)
-    from_plan = loft_execute_plan(plan, cap_ends=True)
+    from_plan = loft_execute_plan_debug_mesh(plan, cap_ends=True)
     assert np.array_equal(direct.vertices, from_plan.vertices)
     assert np.array_equal(direct.faces, from_plan.faces)
     _assert_mesh_quality(from_plan)
+
+
+def test_loft_execute_plan_returns_canonical_surface_body_and_debug_mesh_is_explicit() -> None:
+    start = make_rect(size=(1.0, 1.0))
+    end = make_rect(size=(0.6, 1.4))
+    stations = [
+        Station(
+            t=0.0,
+            section=as_section(start),
+            origin=[0.0, 0.0, 0.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+        Station(
+            t=1.0,
+            section=as_section(end),
+            origin=[0.0, 0.0, 1.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+    ]
+    plan = loft_plan_sections(stations, samples=24)
+
+    body = loft_execute_plan(plan, cap_ends=True)
+    debug_result = loft_execute_plan_debug_mesh_result(plan, cap_ends=True)
+
+    assert isinstance(body, SurfaceBody)
+    assert body.patch_count > 0
+    assert debug_result.boundary == "debug-compatibility"
+    assert debug_result.mesh.metadata["canonical_executor"] == "surface"
+    assert debug_result.mesh.n_faces > 0
 
 
 def test_private_surface_loft_executor_maps_simple_plan_to_surface_body() -> None:
@@ -817,7 +852,7 @@ def test_loft_sections_resolve_mode_matches_planner_executor_pipeline():
         split_merge_steps=10,
         split_merge_bias=0.5,
     )
-    from_plan = loft_execute_plan(plan, cap_ends=True)
+    from_plan = loft_execute_plan_debug_mesh(plan, cap_ends=True)
     assert np.array_equal(direct.vertices, from_plan.vertices)
     assert np.array_equal(direct.faces, from_plan.faces)
     _assert_mesh_quality(from_plan)
@@ -1662,8 +1697,8 @@ def test_loft_plan_sections_region_2_to_2_symmetric_ambiguity_resolves_determini
     assert plan_b.transitions[0].topology_case == "one_to_one"
     assert _plan_transition_signature(plan_a) == _plan_transition_signature(plan_b)
 
-    mesh_a = loft_execute_plan(plan_a, cap_ends=True)
-    mesh_b = loft_execute_plan(plan_b, cap_ends=True)
+    mesh_a = loft_execute_plan_debug_mesh(plan_a, cap_ends=True)
+    mesh_b = loft_execute_plan_debug_mesh(plan_b, cap_ends=True)
     assert np.array_equal(mesh_a.vertices, mesh_b.vertices)
     assert np.array_equal(mesh_a.faces, mesh_b.faces)
     _assert_mesh_quality(mesh_a)
@@ -1724,8 +1759,8 @@ def test_loft_plan_sections_hole_2_to_2_symmetric_ambiguity_resolves_determinist
     )
     assert _plan_transition_signature(plan_a) == _plan_transition_signature(plan_b)
 
-    mesh_a = loft_execute_plan(plan_a, cap_ends=True)
-    mesh_b = loft_execute_plan(plan_b, cap_ends=True)
+    mesh_a = loft_execute_plan_debug_mesh(plan_a, cap_ends=True)
+    mesh_b = loft_execute_plan_debug_mesh(plan_b, cap_ends=True)
     assert np.array_equal(mesh_a.vertices, mesh_b.vertices)
     assert np.array_equal(mesh_a.faces, mesh_b.faces)
     _assert_mesh_quality(mesh_a)
@@ -2197,8 +2232,8 @@ def test_loft_plan_sections_many_to_many_region_2_to_3_branch_order_is_determini
     )
 
     assert _plan_transition_signature(plan_a) == _plan_transition_signature(plan_b)
-    mesh_a = loft_execute_plan(plan_a, cap_ends=True)
-    mesh_b = loft_execute_plan(plan_b, cap_ends=True)
+    mesh_a = loft_execute_plan_debug_mesh(plan_a, cap_ends=True)
+    mesh_b = loft_execute_plan_debug_mesh(plan_b, cap_ends=True)
     assert np.array_equal(mesh_a.vertices, mesh_b.vertices)
     assert np.array_equal(mesh_a.faces, mesh_b.faces)
     _assert_mesh_quality(mesh_a)
@@ -2920,8 +2955,8 @@ def test_loft_plan_sections_region_split_branch_order_is_deterministic_under_reo
     )
 
     assert _plan_transition_signature(plan_a) == _plan_transition_signature(plan_b)
-    mesh_a = loft_execute_plan(plan_a, cap_ends=True)
-    mesh_b = loft_execute_plan(plan_b, cap_ends=True)
+    mesh_a = loft_execute_plan_debug_mesh(plan_a, cap_ends=True)
+    mesh_b = loft_execute_plan_debug_mesh(plan_b, cap_ends=True)
     assert np.array_equal(mesh_a.vertices, mesh_b.vertices)
     assert np.array_equal(mesh_a.faces, mesh_b.faces)
 
@@ -2959,8 +2994,8 @@ def test_loft_plan_sections_region_merge_branch_order_is_deterministic_under_reo
     )
 
     assert _plan_transition_signature(plan_a) == _plan_transition_signature(plan_b)
-    mesh_a = loft_execute_plan(plan_a, cap_ends=True)
-    mesh_b = loft_execute_plan(plan_b, cap_ends=True)
+    mesh_a = loft_execute_plan_debug_mesh(plan_a, cap_ends=True)
+    mesh_b = loft_execute_plan_debug_mesh(plan_b, cap_ends=True)
     assert np.array_equal(mesh_a.vertices, mesh_b.vertices)
     assert np.array_equal(mesh_a.faces, mesh_b.faces)
 
