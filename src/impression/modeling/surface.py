@@ -9,18 +9,74 @@ from typing import Any, Iterable, Literal, Sequence
 import numpy as np
 
 
-REQUIRED_V1_PATCH_FAMILIES: tuple[str, ...] = ("planar", "ruled", "revolution")
-DEFERRED_V1_PATCH_FAMILIES: tuple[str, ...] = (
-    "nurbs",
+@dataclass(frozen=True)
+class PatchFamilyCapabilityRecord:
+    """Declared support phase and operation coverage for one surface patch family."""
+
+    family: str
+    support_phase: Literal["available", "planned"]
+    operations: tuple[str, ...]
+    notes: str = ""
+
+
+SUPPORTED_SURFACE_PATCH_FAMILIES: tuple[str, ...] = (
+    "planar",
+    "ruled",
+    "revolution",
     "bspline",
+    "nurbs",
+    "sweep",
     "subdivision",
     "implicit",
-    "sweep",
+)
+REQUIRED_V1_PATCH_FAMILIES: tuple[str, ...] = ("planar", "ruled", "revolution")
+PATCH_FAMILY_CAPABILITY_MATRIX: dict[str, PatchFamilyCapabilityRecord] = {
+    "planar": PatchFamilyCapabilityRecord(
+        family="planar",
+        support_phase="available",
+        operations=("caps", "planar-primitives", "trimmed-faces", "tessellation", ".impress"),
+    ),
+    "ruled": PatchFamilyCapabilityRecord(
+        family="ruled",
+        support_phase="available",
+        operations=("extrude", "loft", "linear-bridge-surfaces", "tessellation", ".impress"),
+    ),
+    "revolution": PatchFamilyCapabilityRecord(
+        family="revolution",
+        support_phase="available",
+        operations=("rotate-extrude", "revolved-primitives", "tessellation", ".impress"),
+    ),
+    "bspline": PatchFamilyCapabilityRecord(
+        family="bspline",
+        support_phase="planned",
+        operations=("surface-record", "evaluation", "tessellation", ".impress"),
+    ),
+    "nurbs": PatchFamilyCapabilityRecord(
+        family="nurbs",
+        support_phase="planned",
+        operations=("rational-surface-record", "evaluation", "tessellation", ".impress"),
+    ),
+    "sweep": PatchFamilyCapabilityRecord(
+        family="sweep",
+        support_phase="planned",
+        operations=("sweep-record", "frame-policy", "evaluation", "tessellation", ".impress"),
+    ),
+    "subdivision": PatchFamilyCapabilityRecord(
+        family="subdivision",
+        support_phase="planned",
+        operations=("control-cage", "crease-payload", "evaluation", "tessellation", ".impress"),
+    ),
+    "implicit": PatchFamilyCapabilityRecord(
+        family="implicit",
+        support_phase="planned",
+        operations=("field-node-payload", "validation-security", "evaluation", "tessellation", ".impress"),
+    ),
+}
+SURFACE_SPEC_66_RETIREMENT_NOTE = (
+    "Surface Spec 66 is superseded by PATCH_FAMILY_CAPABILITY_MATRIX; no patch family is architecturally deferred."
 )
 PATCH_FAMILY_FEATURE_COVERAGE: dict[str, tuple[str, ...]] = {
-    "planar": ("caps", "planar-primitives", "trimmed-faces"),
-    "ruled": ("extrude", "loft", "linear-bridge-surfaces"),
-    "revolution": ("rotate-extrude", "revolved-primitives"),
+    family: record.operations for family, record in PATCH_FAMILY_CAPABILITY_MATRIX.items()
 }
 
 
@@ -923,9 +979,12 @@ def make_surface_body(
 
 
 __all__ = [
-    "REQUIRED_V1_PATCH_FAMILIES",
-    "DEFERRED_V1_PATCH_FAMILIES",
+    "PatchFamilyCapabilityRecord",
+    "PATCH_FAMILY_CAPABILITY_MATRIX",
     "PATCH_FAMILY_FEATURE_COVERAGE",
+    "REQUIRED_V1_PATCH_FAMILIES",
+    "SUPPORTED_SURFACE_PATCH_FAMILIES",
+    "SURFACE_SPEC_66_RETIREMENT_NOTE",
     "ParameterDomain",
     "TrimLoop",
     "SurfaceBoundaryRef",

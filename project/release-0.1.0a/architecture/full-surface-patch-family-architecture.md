@@ -51,6 +51,10 @@ It also supersedes the deferral posture described by:
 Spec 66 may remain historically useful as a statement of the original bounded
 V1 scope, but it is no longer acceptable as the target architecture.
 
+Surface Spec 139 replaces Spec 66 with `PATCH_FAMILY_CAPABILITY_MATRIX`. No
+family is architecturally deferred; a family may be `available` or `planned` by
+operation, and unsupported operations must report capability-aware diagnostics.
+
 ## Architectural Principle
 
 Patch-family support is a kernel capability, not a feature-specific escape
@@ -491,6 +495,23 @@ payloads.
 
 The architecture target is no deferred families.
 
+The maintained implementation truth is the patch-family capability matrix:
+
+| Family | Phase | Capability Obligations |
+| --- | --- | --- |
+| planar | available | caps, planar primitives, trimmed faces, tessellation, `.impress` |
+| ruled | available | extrude, loft, linear bridge surfaces, tessellation, `.impress` |
+| revolution | available | rotate-extrude, revolved primitives, tessellation, `.impress` |
+| B-spline | planned | surface record, evaluation, tessellation, `.impress` |
+| NURBS | planned | rational surface record, evaluation, tessellation, `.impress` |
+| sweep | planned | sweep record, frame policy, evaluation, tessellation, `.impress` |
+| subdivision | planned | control cage, crease payload, evaluation, tessellation, `.impress` |
+| implicit | planned | field-node payload, validation security, evaluation, tessellation, `.impress` |
+
+The phase column is not an exclusion list. It is a staged implementation status
+that downstream operations use to produce explicit diagnostics when a family is
+not yet supported by that operation.
+
 Implementation can still be staged:
 
 1. Update architecture/spec manifest to remove deferral posture.
@@ -500,7 +521,8 @@ Implementation can still be staged:
 5. Add tessellation adapters by family.
 6. Add seam/boundary support by family.
 7. Add operation-specific consumption, including loft/booleans/sweeps.
-8. Retire Spec 66 or replace it with an explicit implementation matrix.
+8. Keep Spec 66 retired and keep the capability matrix current as families and
+   operations land.
 
 ## Specification Manifest for Discovery
 
