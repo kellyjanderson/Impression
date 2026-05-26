@@ -189,7 +189,7 @@ def make_sphere(
     center: Sequence[float] = (0.0, 0.0, 0.0),
     theta_resolution: int = 64,
     phi_resolution: int = 64,
-    backend: Backend = "mesh",
+    backend: Backend = "surface",
     color: Sequence[float] | str | None = None,
 ) -> Mesh | SurfaceBody:
     _ensure_backend(backend)
@@ -217,7 +217,7 @@ def make_torus(
     direction: Sequence[float] = (0.0, 0.0, 1.0),
     n_theta: int = 64,
     n_phi: int = 32,
-    backend: Backend = "mesh",
+    backend: Backend = "surface",
     color: Sequence[float] | str | None = None,
 ) -> Mesh | SurfaceBody:
     """Generate a torus (donut) with given major/minor radii."""

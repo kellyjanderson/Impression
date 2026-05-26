@@ -61,6 +61,7 @@ def build():
 ## Sphere
 
 - **Function:** `make_sphere(radius=0.5, center=(0,0,0), theta_resolution=64, phi_resolution=64)`
+- **Default output:** `SurfaceBody`; use `backend="mesh"` for explicit mesh compatibility.
 - **Options:** radius, center, longitudinal (`theta_resolution`) and latitudinal (`phi_resolution`) segment counts.
 - **Example:** `docs/examples/primitives/sphere_example.py`
 - **Preview:** `impression preview docs/examples/primitives/sphere_example.py`
@@ -77,6 +78,7 @@ def build():
 ## Torus
 
 - **Function:** `make_torus(major_radius=1.0, minor_radius=0.25, center=(0,0,0), direction=(0,0,1), n_theta=64, n_phi=32)`
+- **Default output:** `SurfaceBody`; use `backend="mesh"` for explicit mesh compatibility.
 - **Options**
   - `major_radius`: distance from center to tube centerline.
   - `minor_radius`: tube radius.
