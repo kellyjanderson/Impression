@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from impression.modeling import (
+    MESH_GROUP_COMPATIBILITY_BOUNDARY,
+    MESH_GROUP_COMPATIBILITY_CLASSIFICATION,
+    MeshGroupCompatibilityError,
     SurfaceBody,
     TransformMeshCompatibilityResult,
+    group,
     make_box,
     translate,
     rotate,
@@ -112,3 +117,26 @@ def test_mesh_transform_records_explicit_compatibility_boundary():
     assert mesh.metadata["transform_mesh_compatibility"] == [
         TransformMeshCompatibilityResult("Mesh", "translate").canonical_payload()
     ]
+
+
+def test_mesh_group_is_explicit_compatibility_api():
+    mesh = make_box(size=(1.0, 1.0, 1.0), backend="mesh")
+
+    grp = group([mesh])
+
+    assert grp.classification == MESH_GROUP_COMPATIBILITY_CLASSIFICATION
+    assert grp.metadata["mesh_group_compatibility"]["boundary"] == MESH_GROUP_COMPATIBILITY_BOUNDARY
+    assert grp.metadata["mesh_group_compatibility"]["classification"] == MESH_GROUP_COMPATIBILITY_CLASSIFICATION
+    assert grp.to_mesh().vertices.shape[0] == mesh.vertices.shape[0]
+
+
+def test_mesh_group_rejects_surface_body_inputs_with_diagnostic():
+    body = make_box(size=(1.0, 1.0, 1.0))
+
+    with pytest.raises(MeshGroupCompatibilityError) as exc:
+        group([body])
+
+    diagnostic = exc.value.diagnostic
+    assert diagnostic.boundary == MESH_GROUP_COMPATIBILITY_BOUNDARY
+    assert diagnostic.target_type == "SurfaceBody"
+    assert "SurfaceComposition" in diagnostic.reason
