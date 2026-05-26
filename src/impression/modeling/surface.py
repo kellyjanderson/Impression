@@ -335,6 +335,38 @@ def _polyline_point_at(points: np.ndarray, t: float) -> np.ndarray:
     return pts[-1].copy()
 
 
+def _polyline_point_at_2d(points: np.ndarray, t: float) -> np.ndarray:
+    pts = np.asarray(points, dtype=float).reshape(-1, 2)
+    if pts.shape[0] == 2:
+        return pts[0] + ((pts[1] - pts[0]) * float(t))
+    deltas = np.diff(pts, axis=0)
+    lengths = np.linalg.norm(deltas, axis=1)
+    total = float(lengths.sum())
+    if total == 0.0:
+        return pts[0].copy()
+    target = float(np.clip(t, 0.0, 1.0)) * total
+    consumed = 0.0
+    for index, seg_length in enumerate(lengths):
+        if seg_length == 0.0:
+            continue
+        next_consumed = consumed + float(seg_length)
+        if target <= next_consumed or index == len(lengths) - 1:
+            local = (target - consumed) / float(seg_length)
+            return pts[index] + ((pts[index + 1] - pts[index]) * local)
+        consumed = next_consumed
+    return pts[-1].copy()
+
+
+def _frame_for_tangent(tangent: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    w_axis = _normalize_axis(tangent, name="path_tangent")
+    reference = np.array([0.0, 0.0, 1.0], dtype=float)
+    if abs(float(np.dot(w_axis, reference))) > 0.9:
+        reference = np.array([0.0, 1.0, 0.0], dtype=float)
+    u_axis = _normalize_axis(np.cross(reference, w_axis), name="sweep_u_axis")
+    v_axis = _normalize_axis(np.cross(w_axis, u_axis), name="sweep_v_axis")
+    return u_axis, v_axis, w_axis
+
+
 def _transform_bounds(bounds: tuple[float, float, float, float, float, float], matrix: np.ndarray) -> tuple[float, float, float, float, float, float]:
     xmin, xmax, ymin, ymax, zmin, zmax = bounds
     corners = np.array(
@@ -1184,11 +1216,49 @@ class SweepSurfacePatch(SurfacePatch):
             "path_reference": self.path_reference,
         }
 
+    def _normalized_parameters(self, u: float, v: float) -> tuple[float, float]:
+        self.validate_parameters(u, v)
+        u0, u1 = self.domain.u_range
+        v0, v1 = self.domain.v_range
+        u_norm = (float(u) - u0) / (u1 - u0)
+        v_norm = (float(v) - v0) / (v1 - v0)
+        return float(np.clip(u_norm, 0.0, 1.0)), float(np.clip(v_norm, 0.0, 1.0))
+
+    def _path_point_and_frame(self, u_norm: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        path_points = self.path.sample()
+        point = _polyline_point_at(path_points, u_norm)
+        previous_point = _polyline_point_at(path_points, max(0.0, u_norm - 1e-5))
+        next_point = _polyline_point_at(path_points, min(1.0, u_norm + 1e-5))
+        tangent = next_point - previous_point
+        if float(np.linalg.norm(tangent)) == 0.0:
+            tangent = path_points[-1] - path_points[0]
+        u_axis, v_axis, w_axis = _frame_for_tangent(tangent)
+        return point, u_axis, v_axis, w_axis
+
     def point_at(self, u: float, v: float) -> np.ndarray:
-        raise NotImplementedError("SweepSurfacePatch evaluation is implemented by Surface Spec 144.")
+        u_norm, v_norm = self._normalized_parameters(u, v)
+        path_point, u_axis, v_axis, _w_axis = self._path_point_and_frame(u_norm)
+        profile_point = _polyline_point_at_2d(self.profile_points_uv, v_norm)
+        local = path_point + (u_axis * profile_point[0]) + (v_axis * profile_point[1])
+        return _transform_point(self.transform_matrix, local)
 
     def derivatives_at(self, u: float, v: float) -> tuple[np.ndarray, np.ndarray]:
-        raise NotImplementedError("SweepSurfacePatch derivatives are implemented by Surface Spec 144.")
+        self.validate_parameters(u, v)
+        u_step = min(1e-5 * self.domain.u_span, self.domain.u_span * 0.25)
+        v_step = min(1e-5 * self.domain.v_span, self.domain.v_span * 0.25)
+        u_prev = max(self.domain.u_range[0], float(u) - u_step)
+        u_next = min(self.domain.u_range[1], float(u) + u_step)
+        v_prev = max(self.domain.v_range[0], float(v) - v_step)
+        v_next = min(self.domain.v_range[1], float(v) + v_step)
+        if np.isclose(u_prev, u_next):
+            du = np.zeros(3, dtype=float)
+        else:
+            du = (self.point_at(u_next, v) - self.point_at(u_prev, v)) / (u_next - u_prev)
+        if np.isclose(v_prev, v_next):
+            dv = np.zeros(3, dtype=float)
+        else:
+            dv = (self.point_at(u, v_next) - self.point_at(u, v_prev)) / (v_next - v_prev)
+        return du, dv
 
 
 @dataclass(frozen=True)

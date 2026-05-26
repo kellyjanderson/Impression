@@ -802,11 +802,33 @@ def test_sweep_surface_patch_rejects_invalid_payload_inputs(kwargs: dict[str, ob
         SweepSurfacePatch(**kwargs)
 
 
-def test_sweep_surface_patch_refuses_evaluation_until_evaluator_spec() -> None:
-    patch = SweepSurfacePatch(family="sweep")
+def test_sweep_surface_patch_evaluates_profile_along_path() -> None:
+    patch = SweepSurfacePatch(
+        family="sweep",
+        path=Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.0, 2.0)]),
+        profile_points_uv=[(0.0, 0.0), (1.0, 0.0)],
+    )
 
-    with pytest.raises(NotImplementedError, match="Surface Spec 144"):
-        patch.point_at(0.0, 0.0)
+    assert np.allclose(patch.point_at(0.0, 0.0), (0.0, 0.0, 0.0))
+    assert np.allclose(patch.point_at(1.0, 1.0), (1.0, 0.0, 2.0))
+
+    du, dv = patch.derivatives_at(0.5, 0.5)
+    assert np.allclose(du, (0.0, 0.0, 2.0), atol=1e-5)
+    assert np.allclose(dv, (1.0, 0.0, 0.0), atol=1e-5)
+
+
+def test_sweep_surface_patch_tessellates_through_surface_boundary() -> None:
+    patch = SweepSurfacePatch(
+        family="sweep",
+        path=Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.0, 1.0)]),
+        profile_points_uv=[(0.0, 0.0), (1.0, 0.0)],
+    )
+
+    mesh = tessellate_surface_patch(patch)
+
+    assert mesh.vertices.shape[0] > 0
+    assert mesh.faces.shape[0] > 0
+    assert mesh.metadata["surface_family"] == "sweep"
 
 
 def test_planar_patch_rejects_collinear_axes_and_multiple_outer_trims() -> None:
