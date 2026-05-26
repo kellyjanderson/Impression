@@ -8,11 +8,16 @@ import pytest
 
 from impression.modeling import (
     MeshQuality,
+    SurfaceBody,
+    ThreadAssemblyLoweringDiagnostic,
+    ThreadAssemblyLoweringError,
     ThreadSpec,
     ThreadSurfaceAssembly,
     ThreadSurfaceRepresentation,
     apply_fit,
     lookup_standard_thread,
+    lower_thread_operand_to_surface_body,
+    lower_thread_surface_assembly,
     make_external_thread,
     make_hex_nut,
     make_internal_thread,
@@ -148,6 +153,37 @@ def test_thread_helpers_default_to_surface_representations_and_assemblies() -> N
     assert rod.assembly_type == "threaded_rod"
     assert isinstance(cutter, ThreadSurfaceAssembly)
     assert cutter.assembly_type == "tapped_hole_cutter"
+
+
+def test_thread_surface_assembly_lowers_standalone_and_union_to_surface_body() -> None:
+    spec = lookup_standard_thread("metric", "M6x1", length=8.0)
+    rod = make_threaded_rod(spec)
+    relief = make_runout_relief(replace(spec, runout_length=1.0, runout_depth=0.25), backend="surface")
+
+    lowered_rod = lower_thread_surface_assembly(rod)
+    lowered_relief = lower_thread_surface_assembly(relief)
+    lowered_operand = lower_thread_operand_to_surface_body(rod.operands[0])
+
+    assert isinstance(lowered_rod, SurfaceBody)
+    assert lowered_rod.kernel_metadata()["producer"] == "threading"
+    assert lowered_rod.kernel_metadata()["assembly_type"] == "threaded_rod"
+    assert lowered_rod.patch_count > 0
+    assert isinstance(lowered_relief, SurfaceBody)
+    assert lowered_relief.shell_count == 2
+    assert isinstance(lowered_operand, SurfaceBody)
+
+
+def test_thread_surface_assembly_lowering_refuses_boolean_dependencies() -> None:
+    spec = lookup_standard_thread("metric", "M6x1", length=8.0)
+    nut = make_hex_nut(spec, thickness=5.0, across_flats=10.0, backend="surface")
+
+    with pytest.raises(ThreadAssemblyLoweringError) as caught:
+        lower_thread_surface_assembly(nut)
+
+    diagnostic = caught.value.diagnostic
+    assert isinstance(diagnostic, ThreadAssemblyLoweringDiagnostic)
+    assert diagnostic.missing_dependency == "surface-boolean-difference"
+    assert diagnostic.canonical_payload()["assembly_type"] == "hex_nut"
 
 
 def test_surface_thread_fit_changes_canonical_geometry_explicitly() -> None:
