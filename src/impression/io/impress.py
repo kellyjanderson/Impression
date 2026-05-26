@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Mapping, Sequence
 
-from impression.modeling.surface import SurfaceBody
+import numpy as np
+
+from impression.modeling.surface import SurfaceBody, SurfacePatch, SurfaceShell
 
 IMPRESS_FORMAT = "impress"
 CURRENT_IMPRESS_SCHEMA_VERSION = "1.0"
@@ -200,6 +202,125 @@ def _validate_body_entry_payload(entry: object) -> ImpressBodyEntry:
     if body_ref != body_id:
         raise ImpressFormatError("SurfaceBodyStore body_ref must match body_id when present.")
     return ImpressBodyEntry(body_id=body_id, stable_identity=stable_identity)
+
+
+def encode_surface_shell_payload(shell: SurfaceShell) -> dict[str, object]:
+    """Encode container-level shell fields for `.impress` persistence."""
+
+    if not isinstance(shell, SurfaceShell):
+        raise ImpressFormatError("encode_surface_shell_payload requires a SurfaceShell.")
+    if shell.seams or shell.adjacency:
+        raise ImpressFormatError("SurfaceShell seam and adjacency payloads are encoded by later `.impress` codecs.")
+    return {
+        "connected": shell.connected,
+        "patch_count": shell.patch_count,
+        "patches": [patch.stable_identity for patch in shell.patches],
+        "transform_matrix": shell.transform_matrix.tolist(),
+        "metadata": dict(shell.metadata),
+        "seams": [],
+        "adjacency": [],
+    }
+
+
+def decode_surface_shell_payload(payload: Mapping[str, object], *, patches: Sequence[SurfacePatch]) -> SurfaceShell:
+    """Decode container-level shell fields through the public SurfaceShell constructor."""
+
+    if not isinstance(payload, Mapping):
+        raise ImpressFormatError("SurfaceShell payload must be an object.")
+    unknown_keys = set(payload) - {"connected", "patch_count", "patches", "transform_matrix", "metadata", "seams", "adjacency"}
+    if unknown_keys:
+        keys = ", ".join(sorted(str(key) for key in unknown_keys))
+        raise ImpressFormatError(f"Unsupported SurfaceShell payload fields: {keys}.")
+
+    connected = payload.get("connected", True)
+    if not isinstance(connected, bool):
+        raise ImpressFormatError("SurfaceShell connected must be a boolean.")
+
+    patch_ids = payload.get("patches")
+    if not isinstance(patch_ids, Sequence) or isinstance(patch_ids, (str, bytes)):
+        raise ImpressFormatError("SurfaceShell patches must be an array of patch identities.")
+    if not all(isinstance(patch_id, str) and patch_id for patch_id in patch_ids):
+        raise ImpressFormatError("SurfaceShell patch identities must be non-empty strings.")
+
+    patch_count = payload.get("patch_count", len(patch_ids))
+    if not isinstance(patch_count, int) or patch_count < 1:
+        raise ImpressFormatError("SurfaceShell patch_count must be a positive integer.")
+    if patch_count != len(patch_ids) or patch_count != len(patches):
+        raise ImpressFormatError("SurfaceShell patch_count must match encoded and decoded patch counts.")
+
+    metadata = payload.get("metadata", {})
+    if not isinstance(metadata, Mapping):
+        raise ImpressFormatError("SurfaceShell metadata must be an object.")
+
+    seams = payload.get("seams", [])
+    adjacency = payload.get("adjacency", [])
+    if seams != [] or adjacency != []:
+        raise ImpressFormatError("SurfaceShell seam and adjacency payloads require their dedicated codecs.")
+
+    transform_matrix = _validate_matrix4_payload(payload.get("transform_matrix"))
+    try:
+        return SurfaceShell(
+            tuple(patches),
+            connected=connected,
+            transform_matrix=transform_matrix,
+            metadata=dict(metadata),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(str(exc)) from exc
+
+
+def encode_surface_body_payload(body: SurfaceBody) -> dict[str, object]:
+    """Encode container-level body fields for `.impress` persistence."""
+
+    if not isinstance(body, SurfaceBody):
+        raise ImpressFormatError("encode_surface_body_payload requires a SurfaceBody.")
+    return {
+        "shell_count": body.shell_count,
+        "shells": [encode_surface_shell_payload(shell) for shell in body.shells],
+        "transform_matrix": body.transform_matrix.tolist(),
+        "metadata": dict(body.metadata),
+    }
+
+
+def decode_surface_body_payload(payload: Mapping[str, object], *, shells: Sequence[SurfaceShell]) -> SurfaceBody:
+    """Decode container-level body fields through the public SurfaceBody constructor."""
+
+    if not isinstance(payload, Mapping):
+        raise ImpressFormatError("SurfaceBody payload must be an object.")
+    unknown_keys = set(payload) - {"shell_count", "shells", "transform_matrix", "metadata"}
+    if unknown_keys:
+        keys = ", ".join(sorted(str(key) for key in unknown_keys))
+        raise ImpressFormatError(f"Unsupported SurfaceBody payload fields: {keys}.")
+
+    shell_payloads = payload.get("shells")
+    if not isinstance(shell_payloads, Sequence) or isinstance(shell_payloads, (str, bytes)):
+        raise ImpressFormatError("SurfaceBody shells must be an array.")
+    shell_count = payload.get("shell_count", len(shell_payloads))
+    if not isinstance(shell_count, int) or shell_count < 1:
+        raise ImpressFormatError("SurfaceBody shell_count must be a positive integer.")
+    if shell_count != len(shell_payloads) or shell_count != len(shells):
+        raise ImpressFormatError("SurfaceBody shell_count must match encoded and decoded shell counts.")
+
+    metadata = payload.get("metadata", {})
+    if not isinstance(metadata, Mapping):
+        raise ImpressFormatError("SurfaceBody metadata must be an object.")
+    transform_matrix = _validate_matrix4_payload(payload.get("transform_matrix"))
+    try:
+        return SurfaceBody(tuple(shells), transform_matrix=transform_matrix, metadata=dict(metadata))
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError(str(exc)) from exc
+
+
+def _validate_matrix4_payload(payload: object) -> np.ndarray:
+    if payload is None:
+        return np.eye(4, dtype=float)
+    try:
+        matrix = np.asarray(payload, dtype=float).reshape(4, 4)
+    except (TypeError, ValueError) as exc:
+        raise ImpressFormatError("transform_matrix must be a 4x4 numeric matrix.") from exc
+    if not np.all(np.isfinite(matrix)):
+        raise ImpressFormatError("transform_matrix must contain only finite values.")
+    return matrix
 
 
 def validate_impress_document_root(root: Mapping[str, object]) -> ImpressDocumentRoot:
