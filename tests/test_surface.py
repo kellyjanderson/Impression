@@ -110,6 +110,9 @@ from impression.modeling import (
     SurfaceContinuitySupportRecord,
     SurfaceContinuityTolerancePolicy,
     SurfaceContinuityConstraintDiagnostic,
+    SurfaceBoundaryDerivativeDiagnostic,
+    SurfaceBoundaryDerivativeSample,
+    SurfaceBoundaryDerivativeSummary,
     SurfaceConsumerCollection,
     SurfaceCollectionTessellationResult,
     SurfaceFamilyTessellationAdapter,
@@ -157,6 +160,7 @@ from impression.modeling import (
     classify_surface_seam_continuity,
     evaluate_surface_body_completion_gate,
     evaluate_surface_body_completion_reference_evidence_matrix,
+    evaluate_surface_boundary_derivatives,
     evaluate_implicit_field,
     evaluate_implicit_field_domain,
     extract_surface_boundary_descriptor,
@@ -1965,6 +1969,61 @@ def test_surface_seam_continuity_constraint_validator_reports_invalid_requests()
     assert diagnostics[0].canonical_payload()["seam_id"] == "bad"
     with pytest.raises(ValueError, match="positive finite"):
         SurfaceContinuityTolerancePolicy(tangent_tolerance=0.0)
+
+
+def test_surface_boundary_derivative_evaluator_samples_planar_boundary() -> None:
+    patch = PlanarSurfacePatch(
+        family="planar",
+        origin=(0.0, 0.0, 0.0),
+        u_axis=(2.0, 0.0, 0.0),
+        v_axis=(0.0, 3.0, 0.0),
+    )
+
+    summary = evaluate_surface_boundary_derivatives(patch, "right", patch_index=2, sample_count=3)
+
+    assert isinstance(summary, SurfaceBoundaryDerivativeSummary)
+    assert summary.supported is True
+    assert summary.diagnostics == ()
+    assert len(summary.samples) == 3
+    assert all(isinstance(sample, SurfaceBoundaryDerivativeSample) for sample in summary.samples)
+    assert all(sample.boundary == SurfaceBoundaryRef(2, "right") for sample in summary.samples)
+    assert all(sample.du == pytest.approx((2.0, 0.0, 0.0)) for sample in summary.samples)
+    assert all(sample.dv == pytest.approx((0.0, 3.0, 0.0)) for sample in summary.samples)
+    assert all(sample.normal == pytest.approx((0.0, 0.0, 1.0)) for sample in summary.samples)
+    assert all(sample.tangent == pytest.approx((0.0, 1.0, 0.0)) for sample in summary.samples)
+    assert summary.canonical_payload()["supported"] is True
+
+
+def test_surface_boundary_derivative_evaluator_samples_ruled_and_revolution_boundaries() -> None:
+    ruled = RuledSurfacePatch(
+        family="ruled",
+        start_curve=((0.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+        end_curve=((1.0, 0.0, 0.0), (1.0, 1.0, 1.0)),
+    )
+    revolution = RevolutionSurfacePatch(
+        family="revolution",
+        profile_curve=((1.0, 0.0, -1.0), (1.0, 0.0, 1.0)),
+    )
+
+    ruled_summary = evaluate_surface_boundary_derivatives(ruled, "top", sample_count=4)
+    revolution_summary = evaluate_surface_boundary_derivatives(revolution, "left", sample_count=4)
+
+    assert ruled_summary.supported is True
+    assert revolution_summary.supported is True
+    assert len(ruled_summary.samples) == 4
+    assert len(revolution_summary.samples) == 4
+    assert all(np.linalg.norm(sample.normal) == pytest.approx(1.0) for sample in ruled_summary.samples)
+    assert all(np.linalg.norm(sample.normal) == pytest.approx(1.0) for sample in revolution_summary.samples)
+    assert ruled_summary.residual_metadata["second_derivative_method"] == "finite-difference"
+
+
+def test_surface_boundary_derivative_evaluator_reports_unsupported_implicit_family() -> None:
+    summary = evaluate_surface_boundary_derivatives(ImplicitSurfacePatch(family="implicit"), "left")
+
+    assert summary.supported is False
+    assert summary.samples == ()
+    assert all(isinstance(diagnostic, SurfaceBoundaryDerivativeDiagnostic) for diagnostic in summary.diagnostics)
+    assert summary.diagnostics[0].code == "unsupported-family"
 
 
 def test_subdivision_boundary_descriptor_records_approximation_and_implicit_seams_refuse() -> None:
