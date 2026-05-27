@@ -449,8 +449,8 @@ Only final leaf specifications appear here.
 ### Additional Manifest Splits
 - [x] [Impress Spec 14: .impress Base Patch Payload Codec (v1.0)](../specifications/impress-14-impress-base-patch-payload-codec-v1_0.md)
 - [x] [Impress Spec 15: .impress Patch Family Dispatch And Validation (v1.0)](../specifications/impress-15-impress-patch-family-dispatch-and-validation-v1_0.md)
-- [ ] [Loft Spec 65: Topology Point Builder API (v1.0)](../specifications/loft-65-topology-point-builder-api-v1_0.md)
-- [ ] [Loft Spec 66: Topology Segment Builder API (v1.0)](../specifications/loft-66-topology-segment-builder-api-v1_0.md)
+- [x] [Loft Spec 65: Topology Point Builder API (v1.0)](../specifications/loft-65-topology-point-builder-api-v1_0.md)
+- [x] [Loft Spec 66: Topology Segment Builder API (v1.0)](../specifications/loft-66-topology-segment-builder-api-v1_0.md)
 - [ ] [Surface Spec 240: .impress Implicit Patch Payload Codec (v1.0)](../specifications/surface-240-impress-implicit-patch-payload-codec-v1_0.md)
 - [ ] [Surface Spec 241: .impress Implicit Payload Security Refusal Fixtures (v1.0)](../specifications/surface-241-impress-implicit-payload-security-refusal-fixtures-v1_0.md)
 
