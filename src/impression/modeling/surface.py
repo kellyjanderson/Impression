@@ -65,6 +65,363 @@ class PatchFamilyPromotionEvidenceRecord:
         return self.current_phase != self.promoted_phase and self.promoted_phase == "available"
 
 
+@dataclass(frozen=True)
+class SurfaceBodyCompletionEvidenceRecord:
+    """Release-level evidence item used by the surface body completion gate."""
+
+    track: str
+    state: Literal["specified", "implemented", "verified", "unsupported", "retired"]
+    spec: str
+    implementation_owner: str
+    evidence_type: str
+    source: str = "implementation"
+
+    def __post_init__(self) -> None:
+        for name in ("track", "spec", "implementation_owner", "evidence_type", "source"):
+            value = str(getattr(self, name)).strip()
+            if not value:
+                raise ValueError(f"SurfaceBodyCompletionEvidenceRecord.{name} must be non-empty.")
+            object.__setattr__(self, name, value)
+        if self.state not in {"specified", "implemented", "verified", "unsupported", "retired"}:
+            raise ValueError("SurfaceBodyCompletionEvidenceRecord.state is invalid.")
+
+
+@dataclass(frozen=True)
+class SurfaceBodyCompletionDiagnostic:
+    """Actionable missing evidence diagnostic for the completion gate."""
+
+    track: str
+    code: str
+    message: str
+    implementation_owner: str
+    evidence_type: str
+    spec: str = ""
+
+
+@dataclass(frozen=True)
+class SurfaceBodyCompletionReport:
+    """Pass/fail release completion report."""
+
+    passed: bool
+    evidence: tuple[SurfaceBodyCompletionEvidenceRecord, ...]
+    diagnostics: tuple[SurfaceBodyCompletionDiagnostic, ...]
+
+
+@dataclass(frozen=True)
+class SurfaceReferenceFixtureRequirementRecord:
+    """Reference-evidence requirement for one promoted model-outputting track."""
+
+    track: str
+    required_evidence_types: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        track = str(self.track).strip()
+        evidence_types = tuple(str(value).strip() for value in self.required_evidence_types)
+        if not track:
+            raise ValueError("SurfaceReferenceFixtureRequirementRecord.track must be non-empty.")
+        if not evidence_types or not all(evidence_types):
+            raise ValueError("SurfaceReferenceFixtureRequirementRecord.required_evidence_types must be non-empty.")
+        object.__setattr__(self, "track", track)
+        object.__setattr__(self, "required_evidence_types", evidence_types)
+
+
+@dataclass(frozen=True)
+class SurfaceReferenceArtifactClassRecord:
+    """Durable artifact class required by model-output reference evidence."""
+
+    artifact_class: str
+    required_keys: tuple[str, ...]
+    promoted_root: str
+    dirty_root: str
+
+    def __post_init__(self) -> None:
+        artifact_class = str(self.artifact_class).strip()
+        required_keys = tuple(str(value).strip() for value in self.required_keys)
+        promoted_root = str(self.promoted_root).strip()
+        dirty_root = str(self.dirty_root).strip()
+        if not artifact_class:
+            raise ValueError("SurfaceReferenceArtifactClassRecord.artifact_class must be non-empty.")
+        if not required_keys or not all(required_keys):
+            raise ValueError("SurfaceReferenceArtifactClassRecord.required_keys must be non-empty.")
+        if not promoted_root or not dirty_root:
+            raise ValueError("SurfaceReferenceArtifactClassRecord roots must be non-empty.")
+        object.__setattr__(self, "artifact_class", artifact_class)
+        object.__setattr__(self, "required_keys", required_keys)
+        object.__setattr__(self, "promoted_root", promoted_root)
+        object.__setattr__(self, "dirty_root", dirty_root)
+
+
+@dataclass(frozen=True)
+class SurfaceReferenceFixtureContractRecord:
+    """Fixture contract connecting a capability track to artifact classes."""
+
+    fixture_id: str
+    track: str
+    artifact_classes: tuple[str, ...]
+    contract_version: str = "v1"
+
+    def __post_init__(self) -> None:
+        fixture_id = str(self.fixture_id).strip()
+        track = str(self.track).strip()
+        artifact_classes = tuple(str(value).strip() for value in self.artifact_classes)
+        contract_version = str(self.contract_version).strip()
+        if not fixture_id or not track or not contract_version:
+            raise ValueError("SurfaceReferenceFixtureContractRecord fixture_id, track, and contract_version must be non-empty.")
+        if not artifact_classes or not all(artifact_classes):
+            raise ValueError("SurfaceReferenceFixtureContractRecord.artifact_classes must be non-empty.")
+        object.__setattr__(self, "fixture_id", fixture_id)
+        object.__setattr__(self, "track", track)
+        object.__setattr__(self, "artifact_classes", artifact_classes)
+        object.__setattr__(self, "contract_version", contract_version)
+
+
+@dataclass(frozen=True)
+class SurfaceReferenceEvidenceMatrixReport:
+    """Pass/fail report for reference artifact and negative diagnostic evidence."""
+
+    passed: bool
+    requirements: tuple[SurfaceReferenceFixtureRequirementRecord, ...]
+    evidence: tuple[SurfaceBodyCompletionEvidenceRecord, ...]
+    diagnostics: tuple[SurfaceBodyCompletionDiagnostic, ...]
+
+
+@dataclass(frozen=True)
+class SurfaceContinuityRequest:
+    """Authored continuity request kept separate from observed continuity."""
+
+    requested: str = "C0"
+    source: str = "authored"
+
+    def __post_init__(self) -> None:
+        requested = str(self.requested).strip()
+        source = str(self.source).strip()
+        if not requested:
+            raise ValueError("SurfaceContinuityRequest.requested must be non-empty.")
+        if not source:
+            raise ValueError("SurfaceContinuityRequest.source must be non-empty.")
+        object.__setattr__(self, "requested", requested)
+        object.__setattr__(self, "source", source)
+
+
+@dataclass(frozen=True)
+class SurfaceContinuitySupportRecord:
+    """Support verdict for an authored seam continuity request."""
+
+    requested: str
+    supported: bool
+    support_state: Literal["supported", "unsupported", "not-yet-implemented"]
+    diagnostic: str = ""
+
+
+@dataclass(frozen=True)
+class SurfaceUnsupportedContinuityDiagnostic:
+    """Structured diagnostic for unsupported seam continuity classes."""
+
+    requested: str
+    supported_classes: tuple[str, ...]
+    message: str
+
+
+@dataclass(frozen=True)
+class SurfaceContinuityTolerancePolicy:
+    """Tolerance policy carried by authored higher-order seam continuity constraints."""
+
+    position_tolerance: float = 1e-9
+    tangent_tolerance: float = 1e-6
+    curvature_tolerance: float = 1e-5
+
+    def __post_init__(self) -> None:
+        for name in ("position_tolerance", "tangent_tolerance", "curvature_tolerance"):
+            value = float(getattr(self, name))
+            if not np.isfinite(value) or value <= 0.0:
+                raise ValueError(f"SurfaceContinuityTolerancePolicy.{name} must be a positive finite value.")
+            object.__setattr__(self, name, value)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "curvature_tolerance": self.curvature_tolerance,
+            "position_tolerance": self.position_tolerance,
+            "tangent_tolerance": self.tangent_tolerance,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSeamBoundaryUseRef:
+    """One participating boundary use in an authored seam continuity constraint."""
+
+    seam_id: str
+    boundary: "SurfaceBoundaryRef"
+    role: Literal["first", "second", "open"] = "first"
+
+    def __post_init__(self) -> None:
+        seam_id = str(self.seam_id).strip()
+        role = str(self.role).strip()
+        if not seam_id:
+            raise ValueError("SurfaceSeamBoundaryUseRef.seam_id must be non-empty.")
+        if role not in {"first", "second", "open"}:
+            raise ValueError("SurfaceSeamBoundaryUseRef.role must be first, second, or open.")
+        object.__setattr__(self, "seam_id", seam_id)
+        object.__setattr__(self, "role", role)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary": self.boundary.canonical_payload(),
+            "role": self.role,
+            "seam_id": self.seam_id,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceContinuityConstraintDiagnostic:
+    """Validation diagnostic for authored seam continuity constraints."""
+
+    code: Literal["invalid-continuity", "invalid-boundary-count", "duplicate-boundary", "invalid-role"]
+    message: str
+    seam_id: str | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "seam_id": self.seam_id,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSeamContinuityConstraint:
+    """Authored C/G continuity intent for one seam and its boundary uses."""
+
+    seam_id: str
+    requested: str
+    boundary_uses: tuple[SurfaceSeamBoundaryUseRef, ...]
+    tolerance_policy: SurfaceContinuityTolerancePolicy = field(default_factory=SurfaceContinuityTolerancePolicy)
+    source: str = "authored"
+
+    def __post_init__(self) -> None:
+        seam_id = str(self.seam_id).strip()
+        requested = str(self.requested).strip().upper()
+        source = str(self.source).strip()
+        boundary_uses = tuple(self.boundary_uses)
+        if not seam_id:
+            raise ValueError("SurfaceSeamContinuityConstraint.seam_id must be non-empty.")
+        if not requested:
+            raise ValueError("SurfaceSeamContinuityConstraint.requested must be non-empty.")
+        if not source:
+            raise ValueError("SurfaceSeamContinuityConstraint.source must be non-empty.")
+        if not all(isinstance(boundary_use, SurfaceSeamBoundaryUseRef) for boundary_use in boundary_uses):
+            raise TypeError("SurfaceSeamContinuityConstraint boundary_uses must be SurfaceSeamBoundaryUseRef instances.")
+        object.__setattr__(self, "seam_id", seam_id)
+        object.__setattr__(self, "requested", requested)
+        object.__setattr__(self, "boundary_uses", boundary_uses)
+        object.__setattr__(self, "source", source)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary_uses": [boundary_use.canonical_payload() for boundary_use in self.boundary_uses],
+            "requested": self.requested,
+            "seam_id": self.seam_id,
+            "source": self.source,
+            "tolerance_policy": self.tolerance_policy.canonical_payload(),
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceContinuityEnforcementRequest:
+    """Request for an operation-owned producer to satisfy a continuity constraint."""
+
+    operation_id: str
+    producer: str
+    constraint: SurfaceSeamContinuityConstraint
+    owns_generated_geometry: bool = False
+    mutates_source_geometry: bool = False
+
+    def __post_init__(self) -> None:
+        operation_id = str(self.operation_id).strip()
+        producer = str(self.producer).strip()
+        if not operation_id:
+            raise ValueError("SurfaceContinuityEnforcementRequest.operation_id must be non-empty.")
+        if not producer:
+            raise ValueError("SurfaceContinuityEnforcementRequest.producer must be non-empty.")
+        object.__setattr__(self, "operation_id", operation_id)
+        object.__setattr__(self, "producer", producer)
+        object.__setattr__(self, "owns_generated_geometry", bool(self.owns_generated_geometry))
+        object.__setattr__(self, "mutates_source_geometry", bool(self.mutates_source_geometry))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "constraint": self.constraint.canonical_payload(),
+            "mutates_source_geometry": self.mutates_source_geometry,
+            "operation_id": self.operation_id,
+            "owns_generated_geometry": self.owns_generated_geometry,
+            "producer": self.producer,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceContinuityEnforcementRefusalDiagnostic:
+    """Explicit reason a continuity enforcement request cannot alter geometry."""
+
+    code: Literal[
+        "validation-only",
+        "source-mutation-forbidden",
+        "invalid-constraint",
+        "validation-failed",
+    ]
+    message: str
+    operation_id: str
+    seam_id: str
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "operation_id": self.operation_id,
+            "seam_id": self.seam_id,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceContinuityEnforcementResult:
+    """Boundary result for operation-owned continuity enforcement."""
+
+    request: SurfaceContinuityEnforcementRequest
+    accepted: bool
+    validation_report: "SurfaceHigherOrderContinuityValidationReport | None" = None
+    diagnostics: tuple[SurfaceContinuityEnforcementRefusalDiagnostic, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "accepted": self.accepted,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "request": self.request.canonical_payload(),
+            "validation_report": None
+            if self.validation_report is None
+            else self.validation_report.canonical_payload(),
+        }
+
+
+@dataclass(frozen=True)
+class PatchFamilyPromotionGapRecord:
+    """One missing or unsupported promotion criterion for a patch family."""
+
+    family: str
+    criterion: str
+    implementation_owner: str
+    evidence_type: str
+    message: str
+
+
+@dataclass(frozen=True)
+class PatchFamilyPromotionReadinessRecord:
+    """Per-family promotion verdict with criterion-level support details."""
+
+    family: str
+    current_phase: Literal["available", "planned"]
+    promotable: bool
+    supported_criteria: tuple[str, ...]
+    gaps: tuple[PatchFamilyPromotionGapRecord, ...]
+
+
 SUPPORTED_SURFACE_PATCH_FAMILIES: tuple[str, ...] = (
     "planar",
     "ruled",
@@ -85,6 +442,97 @@ PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS: tuple[str, ...] = (
     "diagnostics",
     "no-hidden-fallback",
 )
+SURFACE_BODY_COMPLETION_TRACKS: tuple[str, ...] = (
+    "patch-family",
+    "csg",
+    "loft",
+    ".impress",
+    "primitive",
+    "feature",
+    "verification",
+)
+SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS: tuple[SurfaceReferenceFixtureRequirementRecord, ...] = (
+    SurfaceReferenceFixtureRequirementRecord("patch-family", ("unit-test", ".impress-roundtrip", "reference-artifact")),
+    SurfaceReferenceFixtureRequirementRecord("csg", ("unit-test", "refusal-diagnostic")),
+    SurfaceReferenceFixtureRequirementRecord("loft", ("unit-test", "refusal-diagnostic", "reference-artifact")),
+    SurfaceReferenceFixtureRequirementRecord(".impress", ("unit-test", ".impress-roundtrip", "refusal-diagnostic")),
+    SurfaceReferenceFixtureRequirementRecord("primitive", ("unit-test", "tessellation-artifact")),
+    SurfaceReferenceFixtureRequirementRecord("feature", ("unit-test", "handoff-diagnostic")),
+    SurfaceReferenceFixtureRequirementRecord("verification", ("unit-test", "reference-artifact")),
+)
+SURFACE_REFERENCE_ARTIFACT_CLASSES: tuple[SurfaceReferenceArtifactClassRecord, ...] = (
+    SurfaceReferenceArtifactClassRecord(
+        artifact_class="reference-artifact",
+        required_keys=("expected", "actual", "diff"),
+        promoted_root="project/reference-artifacts",
+        dirty_root="project/reference-artifacts/dirty",
+    ),
+    SurfaceReferenceArtifactClassRecord(
+        artifact_class="tessellation-artifact",
+        required_keys=("mesh", "metadata"),
+        promoted_root="project/reference-artifacts/stl",
+        dirty_root="project/reference-artifacts/dirty/stl",
+    ),
+    SurfaceReferenceArtifactClassRecord(
+        artifact_class="refusal-diagnostic",
+        required_keys=("diagnostic",),
+        promoted_root="project/reference-artifacts/diagnostics",
+        dirty_root="project/reference-artifacts/dirty/diagnostics",
+    ),
+    SurfaceReferenceArtifactClassRecord(
+        artifact_class=".impress-roundtrip",
+        required_keys=("source", "decoded", "canonical"),
+        promoted_root="project/reference-artifacts/impress",
+        dirty_root="project/reference-artifacts/dirty/impress",
+    ),
+)
+SURFACE_REFERENCE_FIXTURE_CONTRACTS: tuple[SurfaceReferenceFixtureContractRecord, ...] = tuple(
+    SurfaceReferenceFixtureContractRecord(
+        fixture_id=f"surface-{requirement.track}",
+        track=requirement.track,
+        artifact_classes=requirement.required_evidence_types,
+    )
+    for requirement in SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS
+)
+PATCH_FAMILY_PROMOTION_CRITERIA: tuple[str, ...] = (
+    "record",
+    "evaluator",
+    "derivative",
+    "seam",
+    "tessellation",
+    ".impress",
+    "csg",
+    "loft",
+    "diagnostics",
+)
+SUPPORTED_SEAM_CONTINUITY_CLASSES: tuple[str, ...] = ("C0", "G0")
+_PATCH_FAMILY_PROMOTION_OPERATION_ALIASES: dict[str, tuple[str, ...]] = {
+    "record": (
+        "surface-store",
+        "surface-record",
+        "rational-surface-record",
+        "sweep-record",
+        "control-cage",
+        "field-node-payload",
+        "sample-grid-payload",
+        "source-surface-reference",
+    ),
+    "evaluator": (
+        "evaluation",
+        "planar-primitives",
+        "extrude",
+        "rotate-extrude",
+        "revolved-primitives",
+        "linear-bridge-surfaces",
+    ),
+    "derivative": ("evaluation", "tessellation"),
+    "seam": ("trimmed-faces", "linear-bridge-surfaces", "diagnostics"),
+    "tessellation": ("tessellation",),
+    ".impress": (".impress",),
+    "csg": ("caps", "planar-primitives", "revolved-primitives"),
+    "loft": ("loft", "linear-bridge-surfaces", "extrude", "rotate-extrude", "planar-primitives"),
+    "diagnostics": ("diagnostics", "validation-security", "no-hidden-fallback"),
+}
 PATCH_FAMILY_CAPABILITY_MATRIX: dict[str, PatchFamilyCapabilityRecord] = {
     "planar": PatchFamilyCapabilityRecord(
         family="planar",
@@ -377,6 +825,300 @@ def run_patch_family_availability_promotion_pass() -> tuple[PatchFamilyPromotion
         family for family in sorted(PATCH_FAMILY_CAPABILITY_MATRIX) if family not in SUPPORTED_SURFACE_PATCH_FAMILIES
     )
     return tuple(assess_patch_family_availability_promotion(family) for family in families)
+
+
+def make_surface_body_completion_evidence_from_capabilities() -> tuple[SurfaceBodyCompletionEvidenceRecord, ...]:
+    """Return implementation-backed release evidence derived from current capability records."""
+
+    records: list[SurfaceBodyCompletionEvidenceRecord] = []
+    for family, capability in sorted(PATCH_FAMILY_CAPABILITY_MATRIX.items()):
+        state: Literal["specified", "implemented", "verified", "unsupported", "retired"]
+        state = "verified" if validate_patch_family_availability_gate(family).available else "implemented"
+        records.append(
+            SurfaceBodyCompletionEvidenceRecord(
+                track="patch-family",
+                state=state,
+                spec=f"patch-family:{family}",
+                implementation_owner="src/impression/modeling/surface.py",
+                evidence_type="capability-matrix",
+                source="implementation",
+            )
+        )
+        if ".impress" in capability.operations:
+            records.append(
+                SurfaceBodyCompletionEvidenceRecord(
+                    track=".impress",
+                    state="verified" if state == "verified" else "implemented",
+                    spec=f".impress:{family}",
+                    implementation_owner="src/impression/io/impress.py",
+                    evidence_type="codec-coverage",
+                    source="implementation",
+                )
+            )
+        if "tessellation" in capability.operations:
+            records.append(
+                SurfaceBodyCompletionEvidenceRecord(
+                    track="verification",
+                    state="implemented",
+                    spec=f"tessellation:{family}",
+                    implementation_owner="src/impression/modeling/tessellation.py",
+                    evidence_type="test-fixture",
+                    source="implementation",
+                )
+            )
+    return tuple(records)
+
+
+def evaluate_surface_body_completion_gate(
+    evidence: Iterable[SurfaceBodyCompletionEvidenceRecord] | None = None,
+    *,
+    required_tracks: Iterable[str] = SURFACE_BODY_COMPLETION_TRACKS,
+) -> SurfaceBodyCompletionReport:
+    """Evaluate whether explicit non-documentation evidence supports completion claims."""
+
+    evidence_records = tuple(
+        make_surface_body_completion_evidence_from_capabilities() if evidence is None else tuple(evidence)
+    )
+    diagnostics: list[SurfaceBodyCompletionDiagnostic] = []
+    by_track: dict[str, list[SurfaceBodyCompletionEvidenceRecord]] = {}
+    for record in evidence_records:
+        by_track.setdefault(record.track, []).append(record)
+        if record.source in {"documentation", "progression", "architecture"}:
+            diagnostics.append(
+                SurfaceBodyCompletionDiagnostic(
+                    track=record.track,
+                    code="documentation-only-evidence",
+                    spec=record.spec,
+                    implementation_owner=record.implementation_owner,
+                    evidence_type=record.evidence_type,
+                    message=(
+                        f"Track '{record.track}' uses {record.source} evidence only; "
+                        "completion requires implementation or verification evidence."
+                    ),
+                )
+            )
+        if record.state in {"specified", "unsupported"}:
+            diagnostics.append(
+                SurfaceBodyCompletionDiagnostic(
+                    track=record.track,
+                    code="incomplete-evidence-state",
+                    spec=record.spec,
+                    implementation_owner=record.implementation_owner,
+                    evidence_type=record.evidence_type,
+                    message=(
+                        f"Track '{record.track}' evidence '{record.spec}' is {record.state}; "
+                        "required evidence must be implemented, verified, or retired."
+                    ),
+                )
+            )
+
+    for track in required_tracks:
+        track_key = str(track)
+        track_records = by_track.get(track_key, [])
+        if not track_records:
+            diagnostics.append(
+                SurfaceBodyCompletionDiagnostic(
+                    track=track_key,
+                    code="missing-track-evidence",
+                    spec="",
+                    implementation_owner="release verification",
+                    evidence_type="implementation-or-verification",
+                    message=f"Track '{track_key}' has no explicit completion evidence.",
+                )
+            )
+            continue
+        if not any(record.state in {"implemented", "verified", "retired"} for record in track_records):
+            diagnostics.append(
+                SurfaceBodyCompletionDiagnostic(
+                    track=track_key,
+                    code="missing-implemented-evidence",
+                    spec=", ".join(record.spec for record in track_records),
+                    implementation_owner=", ".join(sorted({record.implementation_owner for record in track_records})),
+                    evidence_type=", ".join(sorted({record.evidence_type for record in track_records})),
+                    message=f"Track '{track_key}' has no implemented, verified, or retired evidence.",
+                )
+            )
+
+    return SurfaceBodyCompletionReport(
+        passed=not diagnostics,
+        evidence=evidence_records,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def surface_body_completion_reference_evidence_matrix() -> tuple[SurfaceReferenceFixtureRequirementRecord, ...]:
+    """Return the required positive and negative evidence matrix for promoted surface output."""
+
+    return SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS
+
+
+def load_surface_reference_requirement_matrix() -> tuple[SurfaceReferenceFixtureRequirementRecord, ...]:
+    """Load the durable surface reference requirement matrix."""
+
+    return surface_body_completion_reference_evidence_matrix()
+
+
+def surface_reference_artifact_classes() -> tuple[SurfaceReferenceArtifactClassRecord, ...]:
+    """Return artifact class contracts used by promoted surface reference evidence."""
+
+    return SURFACE_REFERENCE_ARTIFACT_CLASSES
+
+
+def surface_reference_fixture_contracts() -> tuple[SurfaceReferenceFixtureContractRecord, ...]:
+    """Return fixture contracts derived from the surface reference requirement matrix."""
+
+    return SURFACE_REFERENCE_FIXTURE_CONTRACTS
+
+
+def assert_surface_reference_requirement_matrix_covers_capabilities(
+    requirements: Iterable[SurfaceReferenceFixtureRequirementRecord] = SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS,
+    *,
+    tracks: Iterable[str] = SURFACE_BODY_COMPLETION_TRACKS,
+) -> tuple[SurfaceReferenceFixtureRequirementRecord, ...]:
+    """Assert the reference requirement matrix covers each model-outputting track once."""
+
+    requirement_records = tuple(requirements)
+    expected_tracks = tuple(str(track).strip() for track in tracks)
+    actual_tracks = tuple(record.track for record in requirement_records)
+    missing = sorted(set(expected_tracks) - set(actual_tracks))
+    unknown = sorted(set(actual_tracks) - set(expected_tracks))
+    duplicates = sorted(track for track in set(actual_tracks) if actual_tracks.count(track) > 1)
+    if missing or unknown or duplicates:
+        messages = []
+        if missing:
+            messages.append(f"missing reference requirement tracks: {missing!r}")
+        if unknown:
+            messages.append(f"unknown reference requirement tracks: {unknown!r}")
+        if duplicates:
+            messages.append(f"duplicate reference requirement tracks: {duplicates!r}")
+        raise AssertionError("; ".join(messages))
+    return requirement_records
+
+
+def evaluate_surface_body_completion_reference_evidence_matrix(
+    evidence: Iterable[SurfaceBodyCompletionEvidenceRecord],
+    *,
+    requirements: Iterable[SurfaceReferenceFixtureRequirementRecord] = SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS,
+) -> SurfaceReferenceEvidenceMatrixReport:
+    """Fail completion when required reference artifacts or diagnostics are missing."""
+
+    evidence_records = tuple(evidence)
+    requirement_records = tuple(requirements)
+    diagnostics: list[SurfaceBodyCompletionDiagnostic] = []
+    by_track_type: set[tuple[str, str]] = {
+        (record.track, record.evidence_type)
+        for record in evidence_records
+        if record.state in {"implemented", "verified", "retired"} and record.source != "dirty-artifact"
+    }
+    for requirement in requirement_records:
+        for evidence_type in requirement.required_evidence_types:
+            if (requirement.track, evidence_type) not in by_track_type:
+                diagnostics.append(
+                    SurfaceBodyCompletionDiagnostic(
+                        track=requirement.track,
+                        code="missing-reference-evidence",
+                        spec="Surface Spec 254",
+                        implementation_owner="release verification",
+                        evidence_type=evidence_type,
+                        message=(
+                            f"Track '{requirement.track}' is missing promoted reference evidence "
+                            f"of type '{evidence_type}'."
+                        ),
+                    )
+                )
+    for record in evidence_records:
+        if record.source == "dirty-artifact":
+            diagnostics.append(
+                SurfaceBodyCompletionDiagnostic(
+                    track=record.track,
+                    code="dirty-artifact-not-promoted",
+                    spec=record.spec,
+                    implementation_owner=record.implementation_owner,
+                    evidence_type=record.evidence_type,
+                    message="Dirty generated artifacts do not satisfy promoted baseline evidence.",
+                )
+            )
+    return SurfaceReferenceEvidenceMatrixReport(
+        passed=not diagnostics,
+        requirements=requirement_records,
+        evidence=evidence_records,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def audit_patch_family_promotion_readiness(
+    family: str,
+    record: PatchFamilyCapabilityRecord | None = None,
+) -> PatchFamilyPromotionReadinessRecord:
+    """Audit a patch family against promotion criteria without mutating support phase."""
+
+    family_key = str(family).strip()
+    capability = record if record is not None else PATCH_FAMILY_CAPABILITY_MATRIX.get(family_key)
+    if capability is None:
+        gap = PatchFamilyPromotionGapRecord(
+            family=family_key,
+            criterion="record",
+            implementation_owner="src/impression/modeling/surface.py",
+            evidence_type="capability-matrix",
+            message=f"Patch family '{family_key}' is missing from PATCH_FAMILY_CAPABILITY_MATRIX.",
+        )
+        return PatchFamilyPromotionReadinessRecord(
+            family=family_key,
+            current_phase="planned",
+            promotable=False,
+            supported_criteria=(),
+            gaps=(gap,),
+        )
+
+    operations = set(capability.operations)
+    supported: list[str] = []
+    gaps: list[PatchFamilyPromotionGapRecord] = []
+    for criterion in PATCH_FAMILY_PROMOTION_CRITERIA:
+        aliases = _PATCH_FAMILY_PROMOTION_OPERATION_ALIASES[criterion]
+        if operations.intersection(aliases):
+            supported.append(criterion)
+            continue
+        gaps.append(
+            PatchFamilyPromotionGapRecord(
+                family=family_key,
+                criterion=criterion,
+                implementation_owner=_promotion_owner_for_criterion(criterion),
+                evidence_type=f"{criterion}-coverage",
+                message=(
+                    f"Patch family '{family_key}' lacks promotion evidence for '{criterion}'. "
+                    f"Expected one of: {', '.join(aliases)}."
+                ),
+            )
+        )
+
+    return PatchFamilyPromotionReadinessRecord(
+        family=family_key,
+        current_phase=capability.support_phase,
+        promotable=not gaps,
+        supported_criteria=tuple(supported),
+        gaps=tuple(gaps),
+    )
+
+
+def audit_all_patch_family_promotion_readiness() -> tuple[PatchFamilyPromotionReadinessRecord, ...]:
+    """Audit every supported authored patch family for promotion readiness."""
+
+    return tuple(audit_patch_family_promotion_readiness(family) for family in SUPPORTED_SURFACE_PATCH_FAMILIES)
+
+
+def _promotion_owner_for_criterion(criterion: str) -> str:
+    owners = {
+        "record": "src/impression/modeling/surface.py",
+        "evaluator": "src/impression/modeling/surface.py",
+        "derivative": "src/impression/modeling/surface.py",
+        "seam": "src/impression/modeling/surface.py",
+        "tessellation": "src/impression/modeling/tessellation.py",
+        ".impress": "src/impression/io/impress.py",
+        "csg": "src/impression/modeling/csg.py",
+        "loft": "src/impression/modeling/loft.py",
+        "diagnostics": "src/impression/modeling/surface.py",
+    }
+    return owners.get(criterion, "release verification")
 
 
 def _as_vec2(value: Sequence[float], *, name: str) -> np.ndarray:
@@ -2586,6 +3328,207 @@ class SurfaceBoundaryDescriptor:
 
 
 @dataclass(frozen=True)
+class SurfaceBoundaryDerivativeDiagnostic:
+    """Diagnostic emitted while sampling boundary derivatives for continuity checks."""
+
+    code: Literal["unsupported-family", "evaluation-failed"]
+    message: str
+    family: str
+    boundary_id: str
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary_id": self.boundary_id,
+            "code": self.code,
+            "family": self.family,
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceBoundaryDerivativeSample:
+    """One point/derivative/normal sample on a patch boundary."""
+
+    boundary: SurfaceBoundaryRef
+    parameter: tuple[float, float]
+    point: tuple[float, float, float]
+    tangent: tuple[float, float, float]
+    du: tuple[float, float, float]
+    dv: tuple[float, float, float]
+    normal: tuple[float, float, float]
+    second_u: tuple[float, float, float] | None = None
+    second_v: tuple[float, float, float] | None = None
+    exact_first_derivative: bool = True
+    residual_metadata: dict[str, object] = field(default_factory=dict)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary": self.boundary.canonical_payload(),
+            "du": self.du,
+            "dv": self.dv,
+            "exact_first_derivative": self.exact_first_derivative,
+            "normal": self.normal,
+            "parameter": self.parameter,
+            "point": self.point,
+            "residual_metadata": self.residual_metadata,
+            "second_u": self.second_u,
+            "second_v": self.second_v,
+            "tangent": self.tangent,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceBoundaryDerivativeSummary:
+    """Boundary derivative sampling result used by higher-order continuity validation."""
+
+    family: str
+    boundary_id: str
+    samples: tuple[SurfaceBoundaryDerivativeSample, ...] = ()
+    diagnostics: tuple[SurfaceBoundaryDerivativeDiagnostic, ...] = ()
+    residual_metadata: dict[str, object] = field(default_factory=dict)
+
+    @property
+    def supported(self) -> bool:
+        return not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary_id": self.boundary_id,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "family": self.family,
+            "residual_metadata": self.residual_metadata,
+            "samples": [sample.canonical_payload() for sample in self.samples],
+            "supported": self.supported,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceContinuityResidualMetrics:
+    """Residual metrics computed between two sampled seam boundaries."""
+
+    max_position_delta: float
+    max_tangent_delta: float
+    max_normal_delta: float
+    max_second_derivative_delta: float
+    sample_count: int
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "max_normal_delta": self.max_normal_delta,
+            "max_position_delta": self.max_position_delta,
+            "max_second_derivative_delta": self.max_second_derivative_delta,
+            "max_tangent_delta": self.max_tangent_delta,
+            "sample_count": self.sample_count,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceObservedContinuityClassRecord:
+    """Observed continuity classes derived from residual metrics."""
+
+    requested: str
+    observed_classes: tuple[str, ...]
+    passed_requested: bool
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "observed_classes": self.observed_classes,
+            "passed_requested": self.passed_requested,
+            "requested": self.requested,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceHigherOrderContinuityValidationReport:
+    """Pass/fail report for authored higher-order continuity constraints."""
+
+    constraint: SurfaceSeamContinuityConstraint
+    residuals: SurfaceContinuityResidualMetrics | None
+    observed: SurfaceObservedContinuityClassRecord | None
+    diagnostics: tuple[SurfaceContinuityConstraintDiagnostic, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return self.observed is not None and self.observed.passed_requested and not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "constraint": self.constraint.canonical_payload(),
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "observed": None if self.observed is None else self.observed.canonical_payload(),
+            "passed": self.passed,
+            "residuals": None if self.residuals is None else self.residuals.canonical_payload(),
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceContinuitySeamParameterLocator:
+    """Parameter-space location for a higher-order continuity violation."""
+
+    seam_id: str
+    first_boundary: SurfaceBoundaryRef
+    second_boundary: SurfaceBoundaryRef
+    first_parameter: tuple[float, float]
+    second_parameter: tuple[float, float]
+    sample_index: int
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "first_boundary": self.first_boundary.canonical_payload(),
+            "first_parameter": self.first_parameter,
+            "sample_index": self.sample_index,
+            "seam_id": self.seam_id,
+            "second_boundary": self.second_boundary.canonical_payload(),
+            "second_parameter": self.second_parameter,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceContinuityViolationRecord:
+    """Localized failed residual diagnostic for an authored continuity request."""
+
+    seam_id: str
+    requested: str
+    residual_kind: Literal["position", "tangent", "normal", "curvature", "invalid-report"]
+    residual_value: float
+    tolerance: float
+    locator: SurfaceContinuitySeamParameterLocator | None = None
+    message: str = ""
+    fix_hint: str = ""
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "fix_hint": self.fix_hint,
+            "locator": None if self.locator is None else self.locator.canonical_payload(),
+            "message": self.message,
+            "requested": self.requested,
+            "residual_kind": self.residual_kind,
+            "residual_value": self.residual_value,
+            "seam_id": self.seam_id,
+            "tolerance": self.tolerance,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceContinuityViolationDiagnostics:
+    """Localized diagnostics generated from a failed continuity validation report."""
+
+    seam_id: str
+    violations: tuple[SurfaceContinuityViolationRecord, ...] = ()
+
+    @property
+    def has_violations(self) -> bool:
+        return bool(self.violations)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "has_violations": self.has_violations,
+            "seam_id": self.seam_id,
+            "violations": [violation.canonical_payload() for violation in self.violations],
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceContinuityMetadata:
     """Continuity classification and diagnostics for a seam validation pass."""
 
@@ -2750,6 +3693,400 @@ def _boundary_world_samples(patch: SurfacePatch, descriptor: SurfaceBoundaryDesc
     return np.asarray([patch.point_at(float(u), float(v)) for u, v in descriptor.parameter_points], dtype=float)
 
 
+def _surface_boundary_tangent_from_derivatives(boundary_id: str, du: np.ndarray, dv: np.ndarray) -> np.ndarray:
+    boundary = boundary_id.strip().lower()
+    if boundary in {"left", "right"}:
+        tangent = dv
+    elif boundary in {"bottom", "top"}:
+        tangent = du
+    else:
+        tangent = du if np.linalg.norm(du) >= np.linalg.norm(dv) else dv
+    return _normalize_axis(tangent, name="boundary_tangent")
+
+
+def _surface_second_derivative_numeric(
+    patch: SurfacePatch,
+    u: float,
+    v: float,
+    *,
+    axis: Literal["u", "v"],
+    step: float,
+) -> np.ndarray:
+    u0, u1 = patch.domain.u_range
+    v0, v1 = patch.domain.v_range
+    if axis == "u":
+        low = max(u0, u - step)
+        high = min(u1, u + step)
+        if high == low:
+            return np.zeros(3, dtype=float)
+        du_low, _dv_low = patch.derivatives_at(low, v)
+        du_high, _dv_high = patch.derivatives_at(high, v)
+        return (np.asarray(du_high, dtype=float) - np.asarray(du_low, dtype=float)) / float(high - low)
+    low = max(v0, v - step)
+    high = min(v1, v + step)
+    if high == low:
+        return np.zeros(3, dtype=float)
+    _du_low, dv_low = patch.derivatives_at(u, low)
+    _du_high, dv_high = patch.derivatives_at(u, high)
+    return (np.asarray(dv_high, dtype=float) - np.asarray(dv_low, dtype=float)) / float(high - low)
+
+
+def evaluate_surface_boundary_derivatives(
+    patch: SurfacePatch,
+    boundary_id: str,
+    *,
+    patch_index: int = 0,
+    sample_count: int = 5,
+    second_derivative_step: float = 1e-4,
+) -> SurfaceBoundaryDerivativeSummary:
+    """Evaluate first derivatives, normals, and numeric second derivatives along a boundary."""
+
+    boundary_id = str(boundary_id).strip()
+    diagnostics: list[SurfaceBoundaryDerivativeDiagnostic] = []
+    if isinstance(patch, ImplicitSurfacePatch):
+        return SurfaceBoundaryDerivativeSummary(
+            family=patch.family,
+            boundary_id=boundary_id,
+            diagnostics=(
+                SurfaceBoundaryDerivativeDiagnostic(
+                    code="unsupported-family",
+                    family=patch.family,
+                    boundary_id=boundary_id,
+                    message="ImplicitSurfacePatch has no canonical parametric boundary derivatives.",
+                ),
+            ),
+        )
+    try:
+        descriptor = extract_surface_boundary_descriptor(patch, boundary_id, sample_count=sample_count)
+    except ValueError as exc:
+        return SurfaceBoundaryDerivativeSummary(
+            family=patch.family,
+            boundary_id=boundary_id,
+            diagnostics=(
+                SurfaceBoundaryDerivativeDiagnostic(
+                    code="evaluation-failed",
+                    family=patch.family,
+                    boundary_id=boundary_id,
+                    message=str(exc),
+                ),
+            ),
+        )
+
+    samples: list[SurfaceBoundaryDerivativeSample] = []
+    residual_metadata = {
+        "second_derivative_method": "finite-difference",
+        "second_derivative_step": float(second_derivative_step),
+        "boundary_descriptor_exact": descriptor.exact,
+    }
+    boundary_ref = SurfaceBoundaryRef(patch_index, boundary_id)
+    for u, v in descriptor.parameter_points:
+        try:
+            du, dv = patch.derivatives_at(float(u), float(v))
+            normal = patch.normal_at(float(u), float(v))
+            tangent = _surface_boundary_tangent_from_derivatives(boundary_id, du, dv)
+            second_u = _surface_second_derivative_numeric(
+                patch,
+                float(u),
+                float(v),
+                axis="u",
+                step=second_derivative_step,
+            )
+            second_v = _surface_second_derivative_numeric(
+                patch,
+                float(u),
+                float(v),
+                axis="v",
+                step=second_derivative_step,
+            )
+            point = patch.point_at(float(u), float(v))
+        except (NotImplementedError, ValueError) as exc:
+            diagnostics.append(
+                SurfaceBoundaryDerivativeDiagnostic(
+                    code="evaluation-failed",
+                    family=patch.family,
+                    boundary_id=boundary_id,
+                    message=str(exc),
+                )
+            )
+            continue
+        samples.append(
+            SurfaceBoundaryDerivativeSample(
+                boundary=boundary_ref,
+                parameter=(float(u), float(v)),
+                point=tuple(float(component) for component in point),
+                tangent=tuple(float(component) for component in tangent),
+                du=tuple(float(component) for component in du),
+                dv=tuple(float(component) for component in dv),
+                normal=tuple(float(component) for component in normal),
+                second_u=tuple(float(component) for component in second_u),
+                second_v=tuple(float(component) for component in second_v),
+                exact_first_derivative=descriptor.exact,
+                residual_metadata=residual_metadata,
+            )
+        )
+
+    return SurfaceBoundaryDerivativeSummary(
+        family=patch.family,
+        boundary_id=boundary_id,
+        samples=tuple(samples),
+        diagnostics=tuple(diagnostics),
+        residual_metadata=residual_metadata,
+    )
+
+
+def _unit_vector_delta(first: Sequence[float], second: Sequence[float]) -> float:
+    first_array = _normalize_axis(first, name="first")
+    second_array = _normalize_axis(second, name="second")
+    return float(np.linalg.norm(first_array - second_array))
+
+
+def compute_surface_continuity_residual_metrics(
+    first: SurfaceBoundaryDerivativeSummary,
+    second: SurfaceBoundaryDerivativeSummary,
+) -> SurfaceContinuityResidualMetrics:
+    """Compute max residuals between two boundary derivative summaries."""
+
+    sample_count = min(len(first.samples), len(second.samples))
+    if sample_count == 0:
+        raise ValueError("Surface continuity residual metrics require at least one paired sample.")
+    position_deltas: list[float] = []
+    tangent_deltas: list[float] = []
+    normal_deltas: list[float] = []
+    second_deltas: list[float] = []
+    for first_sample, second_sample in zip(first.samples[:sample_count], second.samples[:sample_count], strict=True):
+        position_deltas.append(float(np.linalg.norm(np.asarray(first_sample.point) - np.asarray(second_sample.point))))
+        tangent_deltas.append(_unit_vector_delta(first_sample.tangent, second_sample.tangent))
+        normal_deltas.append(_unit_vector_delta(first_sample.normal, second_sample.normal))
+        first_second = np.asarray(first_sample.second_u or (0.0, 0.0, 0.0)) + np.asarray(
+            first_sample.second_v or (0.0, 0.0, 0.0)
+        )
+        second_second = np.asarray(second_sample.second_u or (0.0, 0.0, 0.0)) + np.asarray(
+            second_sample.second_v or (0.0, 0.0, 0.0)
+        )
+        second_deltas.append(float(np.linalg.norm(first_second - second_second)))
+    return SurfaceContinuityResidualMetrics(
+        max_position_delta=max(position_deltas),
+        max_tangent_delta=max(tangent_deltas),
+        max_normal_delta=max(normal_deltas),
+        max_second_derivative_delta=max(second_deltas),
+        sample_count=sample_count,
+    )
+
+
+def classify_surface_continuity_residuals(
+    requested: str,
+    residuals: SurfaceContinuityResidualMetrics,
+    tolerance_policy: SurfaceContinuityTolerancePolicy,
+) -> SurfaceObservedContinuityClassRecord:
+    """Classify residual metrics without downgrading the requested class."""
+
+    requested = str(requested).strip().upper()
+    observed: list[str] = []
+    position_ok = residuals.max_position_delta <= tolerance_policy.position_tolerance
+    tangent_ok = residuals.max_tangent_delta <= tolerance_policy.tangent_tolerance
+    normal_ok = residuals.max_normal_delta <= tolerance_policy.tangent_tolerance
+    curvature_ok = residuals.max_second_derivative_delta <= tolerance_policy.curvature_tolerance
+    if position_ok:
+        observed.extend(("C0", "G0"))
+    if position_ok and normal_ok:
+        observed.append("G1")
+    if position_ok and tangent_ok:
+        observed.append("C1")
+    if position_ok and normal_ok and curvature_ok:
+        observed.append("G2")
+    if position_ok and tangent_ok and curvature_ok:
+        observed.append("C2")
+    return SurfaceObservedContinuityClassRecord(
+        requested=requested,
+        observed_classes=tuple(observed),
+        passed_requested=requested in observed,
+    )
+
+
+def validate_higher_order_surface_continuity(
+    constraint: SurfaceSeamContinuityConstraint,
+    first: SurfaceBoundaryDerivativeSummary,
+    second: SurfaceBoundaryDerivativeSummary,
+) -> SurfaceHigherOrderContinuityValidationReport:
+    """Validate authored C/G continuity from boundary derivative residuals."""
+
+    diagnostics = list(validate_surface_seam_continuity_constraint(constraint))
+    for summary in (first, second):
+        diagnostics.extend(
+            SurfaceContinuityConstraintDiagnostic(
+                code="invalid-continuity",
+                seam_id=constraint.seam_id,
+                message=diagnostic.message,
+            )
+            for diagnostic in summary.diagnostics
+        )
+    if diagnostics:
+        return SurfaceHigherOrderContinuityValidationReport(
+            constraint=constraint,
+            residuals=None,
+            observed=None,
+            diagnostics=tuple(diagnostics),
+        )
+    try:
+        residuals = compute_surface_continuity_residual_metrics(first, second)
+    except ValueError as exc:
+        return SurfaceHigherOrderContinuityValidationReport(
+            constraint=constraint,
+            residuals=None,
+            observed=None,
+            diagnostics=(
+                SurfaceContinuityConstraintDiagnostic(
+                    code="invalid-boundary-count",
+                    seam_id=constraint.seam_id,
+                    message=str(exc),
+                ),
+            ),
+        )
+    observed = classify_surface_continuity_residuals(
+        constraint.requested,
+        residuals,
+        constraint.tolerance_policy,
+    )
+    return SurfaceHigherOrderContinuityValidationReport(
+        constraint=constraint,
+        residuals=residuals,
+        observed=observed,
+    )
+
+
+def _surface_continuity_residual_hotspot(
+    first: SurfaceBoundaryDerivativeSummary,
+    second: SurfaceBoundaryDerivativeSummary,
+    *,
+    residual_kind: Literal["position", "tangent", "normal", "curvature"],
+) -> tuple[int, float]:
+    sample_count = min(len(first.samples), len(second.samples))
+    if sample_count == 0:
+        return (0, 0.0)
+    values: list[tuple[int, float]] = []
+    for index, (first_sample, second_sample) in enumerate(
+        zip(first.samples[:sample_count], second.samples[:sample_count], strict=True)
+    ):
+        if residual_kind == "position":
+            value = float(np.linalg.norm(np.asarray(first_sample.point) - np.asarray(second_sample.point)))
+        elif residual_kind == "tangent":
+            value = _unit_vector_delta(first_sample.tangent, second_sample.tangent)
+        elif residual_kind == "normal":
+            value = _unit_vector_delta(first_sample.normal, second_sample.normal)
+        else:
+            first_second = np.asarray(first_sample.second_u or (0.0, 0.0, 0.0)) + np.asarray(
+                first_sample.second_v or (0.0, 0.0, 0.0)
+            )
+            second_second = np.asarray(second_sample.second_u or (0.0, 0.0, 0.0)) + np.asarray(
+                second_sample.second_v or (0.0, 0.0, 0.0)
+            )
+            value = float(np.linalg.norm(first_second - second_second))
+        values.append((index, value))
+    return max(values, key=lambda item: (item[1], -item[0]))
+
+
+def _surface_continuity_locator(
+    constraint: SurfaceSeamContinuityConstraint,
+    first: SurfaceBoundaryDerivativeSummary,
+    second: SurfaceBoundaryDerivativeSummary,
+    sample_index: int,
+) -> SurfaceContinuitySeamParameterLocator | None:
+    if len(constraint.boundary_uses) != 2 or not first.samples or not second.samples:
+        return None
+    index = min(sample_index, len(first.samples) - 1, len(second.samples) - 1)
+    return SurfaceContinuitySeamParameterLocator(
+        seam_id=constraint.seam_id,
+        first_boundary=constraint.boundary_uses[0].boundary,
+        second_boundary=constraint.boundary_uses[1].boundary,
+        first_parameter=first.samples[index].parameter,
+        second_parameter=second.samples[index].parameter,
+        sample_index=index,
+    )
+
+
+def format_surface_continuity_violation_diagnostic(violation: SurfaceContinuityViolationRecord) -> str:
+    """Format a deterministic user-facing continuity violation diagnostic."""
+
+    location = "" if violation.locator is None else f" at sample {violation.locator.sample_index}"
+    return (
+        f"Seam {violation.seam_id!r} failed requested {violation.requested} {violation.residual_kind} "
+        f"residual{location}: {violation.residual_value:.6g} > {violation.tolerance:.6g}. "
+        f"{violation.fix_hint}"
+    ).strip()
+
+
+def build_surface_continuity_violation_locators(
+    report: SurfaceHigherOrderContinuityValidationReport,
+    first: SurfaceBoundaryDerivativeSummary,
+    second: SurfaceBoundaryDerivativeSummary,
+) -> SurfaceContinuityViolationDiagnostics:
+    """Convert a failed higher-order continuity report into localized diagnostics."""
+
+    if report.passed:
+        return SurfaceContinuityViolationDiagnostics(seam_id=report.constraint.seam_id)
+    violations: list[SurfaceContinuityViolationRecord] = []
+    policy = report.constraint.tolerance_policy
+    if report.residuals is None:
+        violations.append(
+            SurfaceContinuityViolationRecord(
+                seam_id=report.constraint.seam_id,
+                requested=report.constraint.requested,
+                residual_kind="invalid-report",
+                residual_value=0.0,
+                tolerance=0.0,
+                message="Continuity validation did not produce residual metrics.",
+                fix_hint="Resolve upstream boundary derivative diagnostics before enforcing continuity.",
+            )
+        )
+        return SurfaceContinuityViolationDiagnostics(seam_id=report.constraint.seam_id, violations=tuple(violations))
+
+    residual_checks: tuple[tuple[Literal["position", "tangent", "normal", "curvature"], float, float, str], ...] = (
+        (
+            "position",
+            report.residuals.max_position_delta,
+            policy.position_tolerance,
+            "Align authored seam boundary positions or relax position tolerance.",
+        ),
+        (
+            "tangent",
+            report.residuals.max_tangent_delta,
+            policy.tangent_tolerance,
+            "Align boundary tangent directions for C-continuity requests.",
+        ),
+        (
+            "normal",
+            report.residuals.max_normal_delta,
+            policy.tangent_tolerance,
+            "Align tangent-plane normals for G-continuity requests.",
+        ),
+        (
+            "curvature",
+            report.residuals.max_second_derivative_delta,
+            policy.curvature_tolerance,
+            "Adjust curvature controls or relax curvature tolerance.",
+        ),
+    )
+    for kind, value, tolerance, hint in residual_checks:
+        if value <= tolerance:
+            continue
+        sample_index, hotspot_value = _surface_continuity_residual_hotspot(first, second, residual_kind=kind)
+        locator = _surface_continuity_locator(report.constraint, first, second, sample_index)
+        violation = SurfaceContinuityViolationRecord(
+            seam_id=report.constraint.seam_id,
+            requested=report.constraint.requested,
+            residual_kind=kind,
+            residual_value=hotspot_value,
+            tolerance=tolerance,
+            locator=locator,
+            fix_hint=hint,
+        )
+        violations.append(replace(violation, message=format_surface_continuity_violation_diagnostic(violation)))
+    return SurfaceContinuityViolationDiagnostics(
+        seam_id=report.constraint.seam_id,
+        violations=tuple(violations),
+    )
+
+
 def _seam_adjacency_updates(seam: SurfaceSeam) -> tuple[SurfaceAdjacencyRecord, ...]:
     if seam.is_open:
         boundary = seam.boundaries[0]
@@ -2824,8 +4161,9 @@ def validate_surface_seam_participation(
             diagnostics.append(f"boundary positions differ by {position_delta:.6g}, tolerance {tolerance:.6g}")
     exact_comparison = first_descriptor.exact and second_descriptor.exact
     requested = seam.continuity
-    if requested not in {"C0", "G0"}:
-        diagnostics.append(f"unsupported continuity request {requested!r}; only C0/G0 are classified")
+    support = surface_continuity_support(requested)
+    if not support.supported:
+        diagnostics.append(support.diagnostic)
         compatible = False
     classified = "C0" if compatible else "incompatible"
     continuity = SurfaceContinuityMetadata(requested, classified, tolerance, exact_comparison, tuple(diagnostics))
@@ -2850,6 +4188,207 @@ def surface_adjacency_from_seams(shell: "SurfaceShell") -> tuple[SurfaceAdjacenc
     for seam in shell.seams:
         updates.extend(_seam_adjacency_updates(seam))
     return tuple(updates)
+
+
+def surface_continuity_support(request: SurfaceContinuityRequest | str) -> SurfaceContinuitySupportRecord:
+    """Return the support verdict for an authored continuity request."""
+
+    normalized = request if isinstance(request, SurfaceContinuityRequest) else SurfaceContinuityRequest(str(request))
+    if normalized.requested in SUPPORTED_SEAM_CONTINUITY_CLASSES:
+        return SurfaceContinuitySupportRecord(
+            requested=normalized.requested,
+            supported=True,
+            support_state="supported",
+        )
+    state: Literal["unsupported", "not-yet-implemented"] = (
+        "not-yet-implemented" if normalized.requested in {"C1", "G1", "C2", "G2"} else "unsupported"
+    )
+    return SurfaceContinuitySupportRecord(
+        requested=normalized.requested,
+        supported=False,
+        support_state=state,
+        diagnostic=(
+            f"unsupported continuity request {normalized.requested!r}; "
+            f"supported classes are {', '.join(SUPPORTED_SEAM_CONTINUITY_CLASSES)}"
+        ),
+    )
+
+
+def normalize_surface_seam_continuity_constraint(
+    seam: SurfaceSeam,
+    *,
+    request: SurfaceContinuityRequest | str | None = None,
+    tolerance_policy: SurfaceContinuityTolerancePolicy | None = None,
+) -> SurfaceSeamContinuityConstraint:
+    """Normalize an authored seam continuity request into a durable constraint record."""
+
+    requested = seam.continuity if request is None else (
+        request.requested if isinstance(request, SurfaceContinuityRequest) else str(request)
+    )
+    boundaries = tuple(seam.boundaries)
+    if len(boundaries) == 1:
+        roles: tuple[Literal["open"], ...] = ("open",)
+    else:
+        roles = ("first", "second")  # type: ignore[assignment]
+    boundary_uses = tuple(
+        SurfaceSeamBoundaryUseRef(seam.seam_id, boundary, role=role)
+        for boundary, role in zip(boundaries, roles, strict=True)
+    )
+    return SurfaceSeamContinuityConstraint(
+        seam_id=seam.seam_id,
+        requested=requested,
+        boundary_uses=boundary_uses,
+        tolerance_policy=SurfaceContinuityTolerancePolicy()
+        if tolerance_policy is None
+        else tolerance_policy,
+        source="authored" if request is None or isinstance(request, str) else request.source,
+    )
+
+
+def validate_surface_seam_continuity_constraint(
+    constraint: SurfaceSeamContinuityConstraint,
+) -> tuple[SurfaceContinuityConstraintDiagnostic, ...]:
+    """Validate authored seam continuity intent without enforcing it."""
+
+    diagnostics: list[SurfaceContinuityConstraintDiagnostic] = []
+    supported_requests = {"C0", "G0", "C1", "G1", "C2", "G2"}
+    if constraint.requested not in supported_requests:
+        diagnostics.append(
+            SurfaceContinuityConstraintDiagnostic(
+                code="invalid-continuity",
+                seam_id=constraint.seam_id,
+                message=(
+                    f"Surface seam continuity constraint {constraint.seam_id!r} requested "
+                    f"unsupported continuity {constraint.requested!r}."
+                ),
+            )
+        )
+    if len(constraint.boundary_uses) not in {1, 2}:
+        diagnostics.append(
+            SurfaceContinuityConstraintDiagnostic(
+                code="invalid-boundary-count",
+                seam_id=constraint.seam_id,
+                message="Surface seam continuity constraints require one open boundary use or two shared boundary uses.",
+            )
+        )
+    boundary_keys = tuple(
+        (boundary_use.boundary.patch_index, boundary_use.boundary.boundary_id)
+        for boundary_use in constraint.boundary_uses
+    )
+    if len(set(boundary_keys)) != len(boundary_keys):
+        diagnostics.append(
+            SurfaceContinuityConstraintDiagnostic(
+                code="duplicate-boundary",
+                seam_id=constraint.seam_id,
+                message="Surface seam continuity constraint boundary uses must be unique.",
+            )
+        )
+    expected_roles = {"open"} if len(constraint.boundary_uses) == 1 else {"first", "second"}
+    actual_roles = {boundary_use.role for boundary_use in constraint.boundary_uses}
+    if len(constraint.boundary_uses) in {1, 2} and actual_roles != expected_roles:
+        diagnostics.append(
+            SurfaceContinuityConstraintDiagnostic(
+                code="invalid-role",
+                seam_id=constraint.seam_id,
+                message=(
+                    "Surface seam continuity constraint roles must be "
+                    f"{tuple(sorted(expected_roles))} for this boundary count."
+                ),
+            )
+        )
+    if any(boundary_use.seam_id != constraint.seam_id for boundary_use in constraint.boundary_uses):
+        diagnostics.append(
+            SurfaceContinuityConstraintDiagnostic(
+                code="invalid-role",
+                seam_id=constraint.seam_id,
+                message="Surface seam continuity constraint boundary-use seam IDs must match the constraint seam ID.",
+            )
+        )
+    return tuple(diagnostics)
+
+
+def check_surface_continuity_enforcement_eligibility(
+    request: SurfaceContinuityEnforcementRequest,
+) -> tuple[SurfaceContinuityEnforcementRefusalDiagnostic, ...]:
+    """Check whether an operation may construct or adjust geometry for continuity."""
+
+    diagnostics: list[SurfaceContinuityEnforcementRefusalDiagnostic] = []
+    if request.mutates_source_geometry:
+        diagnostics.append(
+            SurfaceContinuityEnforcementRefusalDiagnostic(
+                code="source-mutation-forbidden",
+                operation_id=request.operation_id,
+                seam_id=request.constraint.seam_id,
+                message=(
+                    "Continuity enforcement may not mutate authored source geometry; "
+                    "only operation-owned generated output may be adjusted."
+                ),
+            )
+        )
+    if not request.owns_generated_geometry:
+        diagnostics.append(
+            SurfaceContinuityEnforcementRefusalDiagnostic(
+                code="validation-only",
+                operation_id=request.operation_id,
+                seam_id=request.constraint.seam_id,
+                message=(
+                    "Continuity enforcement is validation-only because the producer did "
+                    "not declare ownership of generated geometry."
+                ),
+            )
+        )
+    diagnostics.extend(
+        SurfaceContinuityEnforcementRefusalDiagnostic(
+            code="invalid-constraint",
+            operation_id=request.operation_id,
+            seam_id=request.constraint.seam_id,
+            message=diagnostic.message,
+        )
+        for diagnostic in validate_surface_seam_continuity_constraint(request.constraint)
+    )
+    return tuple(diagnostics)
+
+
+def validate_surface_continuity_enforcement_result(
+    request: SurfaceContinuityEnforcementRequest,
+    validation_report: "SurfaceHigherOrderContinuityValidationReport",
+) -> SurfaceContinuityEnforcementResult:
+    """Validate an operation-owned continuity enforcement result."""
+
+    diagnostics = list(check_surface_continuity_enforcement_eligibility(request))
+    if not validation_report.passed:
+        diagnostics.append(
+            SurfaceContinuityEnforcementRefusalDiagnostic(
+                code="validation-failed",
+                operation_id=request.operation_id,
+                seam_id=request.constraint.seam_id,
+                message=(
+                    f"Continuity enforcement result failed requested "
+                    f"{request.constraint.requested} validation."
+                ),
+            )
+        )
+    return SurfaceContinuityEnforcementResult(
+        request=request,
+        accepted=not diagnostics,
+        validation_report=validation_report,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def build_surface_unsupported_continuity_diagnostic(
+    request: SurfaceContinuityRequest | str,
+) -> SurfaceUnsupportedContinuityDiagnostic:
+    """Build a structured diagnostic for unsupported seam continuity requests."""
+
+    support = surface_continuity_support(request)
+    if support.supported:
+        raise ValueError("Supported seam continuity requests do not need unsupported diagnostics.")
+    return SurfaceUnsupportedContinuityDiagnostic(
+        requested=support.requested,
+        supported_classes=SUPPORTED_SEAM_CONTINUITY_CLASSES,
+        message=support.diagnostic,
+    )
 
 
 @dataclass(frozen=True)
@@ -3134,16 +4673,66 @@ __all__ = [
     "PatchFamilyAvailabilityGateRecord",
     "PatchFamilyOperationSupportRecord",
     "PatchFamilyPromotionEvidenceRecord",
+    "PatchFamilyPromotionGapRecord",
+    "PatchFamilyPromotionReadinessRecord",
+    "SurfaceBodyCompletionDiagnostic",
+    "SurfaceBodyCompletionEvidenceRecord",
+    "SurfaceBodyCompletionReport",
+    "SurfaceReferenceArtifactClassRecord",
+    "SurfaceReferenceEvidenceMatrixReport",
+    "SurfaceReferenceFixtureContractRecord",
+    "SurfaceReferenceFixtureRequirementRecord",
+    "SurfaceContinuityRequest",
+    "SurfaceContinuitySupportRecord",
+    "SurfaceUnsupportedContinuityDiagnostic",
+    "SurfaceContinuityTolerancePolicy",
+    "SurfaceSeamBoundaryUseRef",
+    "SurfaceContinuityConstraintDiagnostic",
+    "SurfaceSeamContinuityConstraint",
+    "SurfaceContinuityEnforcementRequest",
+    "SurfaceContinuityEnforcementRefusalDiagnostic",
+    "SurfaceContinuityEnforcementResult",
+    "SurfaceBoundaryDerivativeDiagnostic",
+    "SurfaceBoundaryDerivativeSample",
+    "SurfaceBoundaryDerivativeSummary",
+    "SurfaceContinuityResidualMetrics",
+    "SurfaceObservedContinuityClassRecord",
+    "SurfaceHigherOrderContinuityValidationReport",
+    "SurfaceContinuitySeamParameterLocator",
+    "SurfaceContinuityViolationRecord",
+    "SurfaceContinuityViolationDiagnostics",
     "PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS",
     "PATCH_FAMILY_CAPABILITY_MATRIX",
     "PATCH_FAMILY_FEATURE_COVERAGE",
+    "PATCH_FAMILY_PROMOTION_CRITERIA",
     "REQUIRED_V1_PATCH_FAMILIES",
+    "SURFACE_BODY_COMPLETION_TRACKS",
+    "SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS",
+    "SURFACE_REFERENCE_ARTIFACT_CLASSES",
+    "SURFACE_REFERENCE_FIXTURE_CONTRACTS",
+    "SUPPORTED_SEAM_CONTINUITY_CLASSES",
     "SUPPORTED_SURFACE_PATCH_FAMILIES",
     "SURFACE_SPEC_66_RETIREMENT_NOTE",
     "assert_patch_family_capability_matrix",
     "assert_patch_family_operation_coverage",
+    "audit_all_patch_family_promotion_readiness",
+    "audit_patch_family_promotion_readiness",
     "assess_patch_family_availability_promotion",
+    "build_surface_unsupported_continuity_diagnostic",
+    "normalize_surface_seam_continuity_constraint",
+    "check_surface_continuity_enforcement_eligibility",
+    "validate_surface_continuity_enforcement_result",
+    "evaluate_surface_body_completion_gate",
+    "evaluate_surface_body_completion_reference_evidence_matrix",
+    "assert_surface_reference_requirement_matrix_covers_capabilities",
+    "load_surface_reference_requirement_matrix",
+    "make_surface_body_completion_evidence_from_capabilities",
     "run_patch_family_availability_promotion_pass",
+    "surface_continuity_support",
+    "validate_surface_seam_continuity_constraint",
+    "surface_body_completion_reference_evidence_matrix",
+    "surface_reference_artifact_classes",
+    "surface_reference_fixture_contracts",
     "validate_patch_family_availability_gate",
     "IMPLICIT_FIELD_NODE_KINDS",
     "ParameterDomain",
@@ -3181,6 +4770,12 @@ __all__ = [
     "refine_subdivision_control_cage",
     "classify_surface_seam_continuity",
     "extract_surface_boundary_descriptor",
+    "evaluate_surface_boundary_derivatives",
+    "compute_surface_continuity_residual_metrics",
+    "classify_surface_continuity_residuals",
+    "validate_higher_order_surface_continuity",
+    "build_surface_continuity_violation_locators",
+    "format_surface_continuity_violation_diagnostic",
     "surface_adjacency_from_seams",
     "validate_surface_seam_participation",
     "SurfaceShell",

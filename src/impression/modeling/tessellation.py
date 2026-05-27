@@ -1152,6 +1152,76 @@ class SurfaceConsumerCollection:
         return tuple(item.body.stable_identity for item in self.items)
 
 
+@dataclass(frozen=True)
+class FeatureSurfaceHandoffDiagnostic:
+    """Diagnostic for feature builders that fail the surface-truth handoff contract."""
+
+    caller_id: str
+    received_type: str
+    expected_types: tuple[str, ...]
+    explicit_mesh_api_required: bool
+
+    @property
+    def message(self) -> str:
+        expected = ", ".join(self.expected_types)
+        suffix = " Use an explicitly mesh-named API for mesh compatibility." if self.explicit_mesh_api_required else ""
+        return f"{self.caller_id} must hand off {expected}; received {self.received_type}.{suffix}"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "caller_id": self.caller_id,
+            "explicit_mesh_api_required": self.explicit_mesh_api_required,
+            "expected_types": self.expected_types,
+            "received_type": self.received_type,
+        }
+
+
+@dataclass(frozen=True)
+class FeatureSurfaceHandoffRecord:
+    """Accepted feature-builder surface handoff."""
+
+    caller_id: str
+    output_type: Literal["SurfaceBody", "SurfaceConsumerCollection"]
+    body_identities: tuple[str, ...]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "body_identities": self.body_identities,
+            "caller_id": self.caller_id,
+            "output_type": self.output_type,
+        }
+
+
+def validate_feature_surface_handoff(caller_id: str, result: object) -> FeatureSurfaceHandoffRecord:
+    """Validate that an authored feature builder hands off surface-native truth."""
+
+    if isinstance(result, SurfaceBody):
+        return FeatureSurfaceHandoffRecord(
+            caller_id=caller_id,
+            output_type="SurfaceBody",
+            body_identities=(result.stable_identity,),
+        )
+    if isinstance(result, SurfaceConsumerCollection):
+        return FeatureSurfaceHandoffRecord(
+            caller_id=caller_id,
+            output_type="SurfaceConsumerCollection",
+            body_identities=result.body_identities,
+        )
+    diagnostic = feature_surface_handoff_diagnostic(caller_id, result)
+    raise TypeError(diagnostic.message)
+
+
+def feature_surface_handoff_diagnostic(caller_id: str, result: object) -> FeatureSurfaceHandoffDiagnostic:
+    """Build the explicit unsupported-feature diagnostic for hidden mesh outputs."""
+
+    return FeatureSurfaceHandoffDiagnostic(
+        caller_id=caller_id,
+        received_type=type(result).__name__,
+        expected_types=("SurfaceBody", "SurfaceConsumerCollection"),
+        explicit_mesh_api_required=True,
+    )
+
+
 def normalize_tessellation_request(request: TessellationRequest | None = None) -> NormalizedTessellationRequest:
     if request is None:
         request = TessellationRequest()
@@ -1411,6 +1481,8 @@ __all__ = [
     "ImplicitApproximationMetadata",
     "ImplicitTessellationBoundsDiagnostic",
     "NormalizedTessellationRequest",
+    "FeatureSurfaceHandoffDiagnostic",
+    "FeatureSurfaceHandoffRecord",
     "SurfaceConsumerCollection",
     "SurfaceConsumerRecord",
     "SurfaceCollectionTessellationResult",
@@ -1435,6 +1507,7 @@ __all__ = [
     "assert_surface_family_tessellation_adapter_coverage",
     "compare_tessellation_modes",
     "export_tessellation_request",
+    "feature_surface_handoff_diagnostic",
     "make_surface_to_mesh_adapter_record",
     "make_surface_consumer_collection",
     "make_surface_mesh_adapter",
@@ -1446,5 +1519,6 @@ __all__ = [
     "tessellate_surface_consumer_collection",
     "tessellate_surface_patch",
     "tessellate_surface_shell",
+    "validate_feature_surface_handoff",
     "validate_tessellation_helper_boundary_input",
 ]

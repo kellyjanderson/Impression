@@ -76,6 +76,72 @@ These items capture the new surface-body completion standard. They supersede
 the assumption that a checked progression means the surface-body kernel is
 complete.
 
+### Surface Body Depth Completion Architecture
+
+- Status: `Specifications Written`
+- Architecture:
+  - [Higher-Order Surface CSG Solver Architecture](higher-order-surface-csg-solver-architecture.md)
+  - [Exact Surface Intersection Kernel Architecture](exact-surface-intersection-kernel-architecture.md)
+  - [Higher-Order Seam Continuity Architecture](higher-order-seam-continuity-architecture.md)
+  - [Reference Artifact Promotion Architecture](reference-artifact-promotion-architecture.md)
+  - [Legacy Primitive Mesh Assumption Migration Architecture](legacy-primitive-mesh-assumption-migration-architecture.md)
+- [x] Architecture documents created for the missing depth areas.
+- [x] Specification manifests added using the manifest template shape and
+  scoring policy.
+- [x] Architecture index updated.
+- [x] Final implementation specifications created for all 33 reviewed manifest candidates.
+
+Architecture-defined work:
+
+- [ ] promote CSG coverage from bounded analytic cases to a family-pair solver
+  matrix covering every promoted patch-family pair
+- [ ] add CSG operation plans that accumulate unsupported/invalid diagnostics
+  and refuse non-executable plans before solver execution
+- [ ] build the surface-native fragment graph and result reconstruction path
+  for higher-order CSG outputs
+- [ ] create a shared exact/declared-tolerance surface intersection kernel used
+  by CSG, seams, trims, and loft/sweep diagnostics
+- [ ] add shared intersection request, solver registry, result, degeneracy, and
+  patch-local mapping records
+- [ ] implement analytic/spline and spline/spline intersection solvers with
+  deterministic residual and convergence diagnostics
+- [ ] define bounded subdivision and implicit intersection adapters with safety
+  budgets and refusal paths
+- [ ] promote seam continuity from C0/G0 storage/refusal to true C1/C2/G1/G2
+  validation
+- [ ] add boundary derivative evaluation for promoted patch families
+- [ ] add higher-order continuity violation locators and residual diagnostics
+- [ ] define bounded operation-owned continuity enforcement without mutating
+  authored source geometry
+- [ ] broaden reference artifact promotion so dirty artifacts do not count as
+  completion evidence
+- [ ] add negative diagnostic reference fixtures for unsupported and unsafe
+  surface states
+- [ ] inventory and rewrite tests/tools/docs that still assume public primitives
+  return meshes by default
+- [ ] update preview/reference tests to cross the tessellation boundary
+  explicitly when they need mesh
+
+Manifest notes:
+
+- [x] Critical review, rescore, split, review, rescore pass completed across
+  the five depth-completion manifests.
+- [x] Two additional review/rescore/split cycles completed after the first
+  manifest pass.
+- [x] Reviewed manifests now contain 33 candidate specs; no candidate in this
+  reviewed set is scored `25+`.
+- [x] Hidden work was split out of CSG graph/reconstruction, analytic/spline
+  versus spline/spline intersections, subdivision versus implicit
+  intersections, continuity residual versus locator diagnostics, and negative
+  diagnostic fixtures.
+- [x] Additional hidden work was split out of cap payloads versus cut-boundary
+  trims, shell assembly versus validity/provenance, implicit safety versus
+  contour extraction/result classification, and loft versus seam negative
+  fixtures.
+- [x] Every `16-24` candidate includes a split-review cohesion reason.
+- [x] Readiness blockers are carried where downstream intersection,
+  derivative, reference-promotion, or artifact-policy work is prerequisite.
+
 ### Surface Body Completion Program
 
 - Status: `Manifest Promoted`

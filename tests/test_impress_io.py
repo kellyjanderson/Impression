@@ -13,14 +13,19 @@ from impression.io import (
     ImpressFormatError,
     ImpressSaveOptions,
     ImpressUnits,
+    ImpressWholeStoreFixtureCoverageReport,
     InvalidSurfaceWrapperDiagnostic,
+    IMPRESS_DIAGNOSTIC_METADATA_FIELDS,
     SurfaceBodyStore,
+    SurfacePatchBasePayload,
     UnsupportedImpressSchemaVersion,
     atomic_write_text,
     assert_impress_patch_codec_coverage_for_available_families,
+    assert_impress_whole_store_fixture_coverage,
     decode_surface_adjacency_payload,
     decode_surface_boundary_ref_payload,
     decode_surface_body_payload,
+    decode_surface_patch_base_payload,
     decode_surface_patch_payload,
     decode_surface_seam_payload,
     decode_surface_shell_payload,
@@ -30,6 +35,7 @@ from impression.io import (
     encode_surface_adjacency_payload,
     encode_surface_boundary_ref_payload,
     encode_surface_body_payload,
+    encode_surface_patch_base_payload,
     encode_surface_patch_payload,
     encode_surface_seam_payload,
     encode_surface_shell_payload,
@@ -37,7 +43,9 @@ from impression.io import (
     make_impress_document_payload,
     make_impress_document_root,
     make_surface_body_store,
+    inspect_impress_patch_family_dispatch,
     inspect_impress_patch_codec_coverage,
+    inspect_impress_whole_store_fixture_coverage,
     load_impress,
     loads_impress_json,
     validate_impress_units,
@@ -70,6 +78,41 @@ from impression.modeling.surface import (
     make_surface_shell,
     make_implicit_field_node,
 )
+from tests.reference_images import (
+    ExpectedDiagnosticKeyRecord,
+    NegativeDiagnosticFixtureRecord,
+    evaluate_negative_diagnostic_fixture_matrix,
+    normalize_diagnostic_snapshot,
+)
+
+
+def _impress_negative_fixture(
+    fixture_id: str,
+    operation,
+    *,
+    expected_code: str = "ImpressFormatError",
+) -> NegativeDiagnosticFixtureRecord:
+    try:
+        operation()
+    except Exception as exc:  # noqa: BLE001 - negative fixture runner records refusal shape.
+        snapshot = normalize_diagnostic_snapshot(
+            {
+                "code": type(exc).__name__,
+                "message": str(exc),
+            },
+            fixture_id=fixture_id,
+        )
+    else:
+        raise AssertionError(f".impress negative fixture {fixture_id!r} did not refuse.")
+    return NegativeDiagnosticFixtureRecord(
+        fixture_id=fixture_id,
+        domain=".impress",
+        expected_keys=(
+            ExpectedDiagnosticKeyRecord(("code",), expected_code),
+            ExpectedDiagnosticKeyRecord(("message",)),
+        ),
+        expected_snapshot=snapshot,
+    )
 
 
 def test_make_impress_document_root_declares_format_and_schema() -> None:
@@ -99,6 +142,35 @@ def test_impress_patch_codec_coverage_inventory_covers_available_families() -> N
 def test_impress_patch_codec_coverage_inventory_reports_supported_family_list() -> None:
     records = inspect_impress_patch_codec_coverage()
 
+    assert {record.family for record in records} == {
+        "planar",
+        "ruled",
+        "revolution",
+        "bspline",
+        "nurbs",
+        "sweep",
+        "subdivision",
+        "implicit",
+        "heightmap",
+        "displacement",
+    }
+
+
+def test_impress_patch_family_dispatch_inventory_is_allow_listed() -> None:
+    records = inspect_impress_patch_family_dispatch()
+
+    assert {record.kind for record in records} == {
+        "PlanarSurfacePatch",
+        "RuledSurfacePatch",
+        "RevolutionSurfacePatch",
+        "BSplineSurfacePatch",
+        "NURBSSurfacePatch",
+        "SweepSurfacePatch",
+        "SubdivisionSurfacePatch",
+        "ImplicitSurfacePatch",
+        "HeightmapSurfacePatch",
+        "DisplacementSurfacePatch",
+    }
     assert {record.family for record in records} == {
         "planar",
         "ruled",
@@ -228,7 +300,11 @@ def _codec_covered_patch_fixtures() -> tuple[object, ...]:
     knots = (0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
     field = make_implicit_field_node("sphere", parameters={"center": (0.0, 0.0, 0.0), "radius": 0.75})
     return (
-        PlanarSurfacePatch(family="planar", metadata={"kernel": {"fixture": "planar"}}),
+        PlanarSurfacePatch(
+            family="planar",
+            metadata={"kernel": {"fixture": "planar"}},
+            trim_loops=(TrimLoop(points_uv=[(0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0)], category="outer"),),
+        ),
         RuledSurfacePatch(
             family="ruled",
             start_curve=[(0.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
@@ -299,9 +375,96 @@ def _codec_covered_patch_fixtures() -> tuple[object, ...]:
     )
 
 
+def test_encode_surface_patch_base_payload_preserves_identity_and_metadata_without_geometry() -> None:
+    patch = PlanarSurfacePatch(
+        family="planar",
+        metadata={"kernel": {"face": "base"}, "consumer": {"name": "panel"}},
+        capability_flags=frozenset({"analytic"}),
+        trim_loops=(TrimLoop(points_uv=[(0.0, 0.0), (0.0, 1.0), (1.0, 1.0)], category="outer"),),
+    )
+
+    payload = encode_surface_patch_base_payload(patch)
+
+    assert payload["stable_identity"] == patch.stable_identity
+    assert payload["kind"] == "PlanarSurfacePatch"
+    assert payload["family"] == "planar"
+    assert payload["metadata"] == patch.metadata
+    assert payload["capability_flags"] == ["analytic"]
+    assert "geometry" not in payload
+
+
+def test_decode_surface_patch_base_payload_returns_typed_bundle_before_family_dispatch() -> None:
+    patch = PlanarSurfacePatch(family="planar", metadata={"kernel": {"face": "base"}})
+    payload = encode_surface_patch_payload(patch)
+
+    base = decode_surface_patch_base_payload(payload)
+
+    assert isinstance(base, SurfacePatchBasePayload)
+    assert base.kind == "PlanarSurfacePatch"
+    assert base.family == "planar"
+    assert base.stable_identity == patch.stable_identity
+    assert base.metadata == patch.metadata
+    assert base.geometry == payload["geometry"]
+    assert base.constructor_kwargs()["metadata"] == patch.metadata
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda payload: payload.pop("kind"), "requires a non-empty kind"),
+        (lambda payload: payload.update({"stable_identity": ""}), "stable_identity must be a non-empty string"),
+        (lambda payload: payload.update({"metadata": []}), "metadata must be an object"),
+        (lambda payload: payload.update({"capability_flags": ["ok", ""]}), "capability_flags must contain"),
+        (lambda payload: payload.update({"transform_matrix": [[1.0]]}), "transform_matrix must be a 4x4"),
+    ],
+)
+def test_decode_surface_patch_base_payload_refuses_malformed_base_fields(mutate, message) -> None:  # noqa: ANN001
+    payload = encode_surface_patch_payload(PlanarSurfacePatch(family="planar"))
+    mutate(payload)
+
+    with pytest.raises(ImpressFormatError, match=message):
+        decode_surface_patch_base_payload(payload)
+
+
+def test_decode_surface_patch_payload_refuses_stable_identity_mismatch() -> None:
+    payload = encode_surface_patch_payload(PlanarSurfacePatch(family="planar"))
+    payload["metadata"] = {"kernel": {"changed": True}}
+
+    with pytest.raises(ImpressFormatError, match="stable_identity does not match"):
+        decode_surface_patch_payload(payload)
+
+
+def test_decode_surface_patch_payload_refuses_unknown_family_before_geometry_interpretation() -> None:
+    payload = encode_surface_patch_payload(PlanarSurfacePatch(family="planar"))
+    payload["kind"] = "MysterySurfacePatch"
+    payload["geometry"] = {"unexpected": "family-specific"}
+
+    with pytest.raises(ImpressFormatError, match="Unsupported SurfacePatch kind"):
+        decode_surface_patch_payload(payload)
+
+
 def _all_codec_covered_family_body() -> object:
     return make_surface_body(
-        [make_surface_shell(_codec_covered_patch_fixtures(), metadata={"fixture": "all-codec-covered"})],
+        [
+            make_surface_shell(
+                _codec_covered_patch_fixtures(),
+                seams=(
+                    SurfaceSeam(
+                        "fixture-planar-ruled",
+                        (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")),
+                        metadata={"kernel": {"continuity_source": "authored"}},
+                    ),
+                ),
+                adjacency=(
+                    SurfaceAdjacencyRecord(
+                        source=SurfaceBoundaryRef(0, "right"),
+                        target=SurfaceBoundaryRef(1, "left"),
+                        seam_id="fixture-planar-ruled",
+                    ),
+                ),
+                metadata={"fixture": "all-codec-covered"},
+            )
+        ],
         metadata={"body": "all-codec-covered"},
     )
 
@@ -330,6 +493,46 @@ def test_impress_all_codec_covered_families_round_trip_preserves_identity_and_fa
     assert {patch.family for patch in loaded_patches} == {
         record.family for record in inspect_impress_patch_codec_coverage() if record.covered
     }
+
+
+def test_impress_whole_store_fixture_coverage_gate_accepts_complete_surface_truth() -> None:
+    body = _all_codec_covered_family_body()
+    payload = make_impress_document_payload(
+        [body],
+        metadata={
+            "topology_rails": [{"id": "rail.outer", "anchors": ["station0.p0", "station1.p0"]}],
+            "lifecycle_records": [{"entity": "point.notch", "event": "birth"}],
+            "operation_provenance": [{"operation": "fixture-loft", "producer": "surface"}],
+        },
+    )
+
+    report = assert_impress_whole_store_fixture_coverage(payload)
+    loaded = loads_impress_json(dumps_impress_json(payload))
+
+    assert isinstance(report, ImpressWholeStoreFixtureCoverageReport)
+    assert report.covered is True
+    assert set(report.covered_families) == set(report.required_families)
+    assert report.covered_store_areas == ("bodies", "body_store", "patches")
+    assert loaded.root.metadata["operation_provenance"][0]["producer"] == "surface"
+    assert loaded.bodies[0].shells[0].seams[0].metadata == {"kernel": {"continuity_source": "authored"}}
+    assert loaded.bodies[0].shells[0].adjacency[0].seam_id == "fixture-planar-ruled"
+
+
+def test_impress_whole_store_fixture_coverage_gate_reports_missing_payloads() -> None:
+    payload = make_impress_document_payload([_round_trip_fixture_body()])
+    patches = dict(payload["patches"])  # type: ignore[arg-type]
+    patches.pop(next(iter(patches)))
+    payload["patches"] = patches
+    payload["mesh"] = {"vertices": [], "faces": []}
+
+    report = inspect_impress_whole_store_fixture_coverage(payload)
+
+    assert report.covered is False
+    assert "metadata.topology_rails" in report.missing_payloads
+    assert "patches.family[implicit]" in report.missing_payloads
+    assert report.mesh_truth_present is True
+    with pytest.raises(ImpressFormatError, match="mesh truth payload"):
+        assert_impress_whole_store_fixture_coverage(payload)
 
 
 def _invalid_impress_file(path, payload: dict[str, object]) -> None:
@@ -569,6 +772,46 @@ def test_impress_acceptance_invalid_files_refuse_explicitly(tmp_path, mutate, me
 
     with pytest.raises(ImpressFormatError, match=message):
         load_impress(path)
+
+
+def test_impress_invalid_payload_diagnostics_are_deterministic_and_surface_native(tmp_path) -> None:
+    payload = make_impress_document_payload([_round_trip_fixture_body()])
+    payload["metadata"] = {"diagnostics": [{"code": "invalid", "message": "broken", "unknown": "field"}]}
+    path = tmp_path / "invalid-diagnostic.impress"
+    _invalid_impress_file(path, payload)
+
+    messages = []
+    for _ in range(2):
+        with pytest.raises(ImpressFormatError) as exc_info:
+            load_impress(path)
+        messages.append(str(exc_info.value))
+
+    assert IMPRESS_DIAGNOSTIC_METADATA_FIELDS == frozenset({"code", "message", "path", "severity"})
+    assert messages == [
+        "Unsupported `.impress` diagnostic metadata fields at diagnostics[0]: unknown.",
+        "Unsupported `.impress` diagnostic metadata fields at diagnostics[0]: unknown.",
+    ]
+    assert "mesh" not in messages[0]
+
+
+def test_impress_unsafe_payload_refusal_does_not_recover_as_mesh_or_mutate_payload() -> None:
+    payload = make_impress_document_payload([_all_codec_covered_family_body()])
+    patch_payload = next(
+        patch for patch in payload["patches"].values()  # type: ignore[union-attr]
+        if isinstance(patch, dict) and patch.get("kind") == "ImplicitSurfacePatch"
+    )
+    geometry = dict(patch_payload["geometry"])
+    field = dict(geometry["field"])
+    field["parameters"] = {"script": "lambda x: x"}
+    geometry["field"] = field
+    patch_payload["geometry"] = geometry
+    before = dumps_impress_json(payload)
+
+    with pytest.raises(ImpressFormatError, match="Unsafe implicit field payload"):
+        loads_impress_json(before)
+
+    assert dumps_impress_json(payload) == before
+    assert "mesh" not in payload
 
 
 def test_loads_impress_json_returns_load_result_without_path() -> None:
@@ -1013,6 +1256,71 @@ def test_encode_decode_implicit_surface_patch_payload_round_trips_safe_field_tre
     assert decoded.bounds == (-1.0, 1.0, -1.5, 1.5, -2.0, 2.0)
 
 
+def test_decode_implicit_surface_patch_payload_preserves_metadata_domain_and_identity() -> None:
+    patch = ImplicitSurfacePatch(
+        family="implicit",
+        field=make_implicit_field_node("sphere", parameters={"radius": 0.75}),
+        domain=ParameterDomain(u_range=(-1.0, 1.0), v_range=(-2.0, 2.0), normalized=False),
+        metadata={"kernel": {"fixture": "implicit-safe"}, "consumer": {"label": "field"}},
+    )
+
+    payload = encode_surface_patch_payload(patch)
+    decoded = decode_surface_patch_payload(payload)
+
+    assert payload["stable_identity"] == patch.stable_identity
+    assert decoded.stable_identity == patch.stable_identity
+    assert decoded.domain == patch.domain
+    assert decoded.metadata == patch.metadata
+
+
+def test_decode_implicit_surface_patch_payload_reports_path_specific_unknown_node() -> None:
+    patch = ImplicitSurfacePatch(family="implicit")
+    payload = encode_surface_patch_payload(patch)
+    geometry = dict(payload["geometry"])  # type: ignore[arg-type]
+    geometry["field"] = {
+        "kind": "union",
+        "parameters": {},
+        "children": [{"kind": "__import__", "parameters": {}, "children": []}],
+    }
+    payload["geometry"] = geometry
+
+    with pytest.raises(ImpressFormatError, match=r"field\.children\[0\].*allowed nodes"):
+        decode_surface_patch_payload(payload)
+
+
+def test_decode_implicit_surface_patch_payload_refuses_over_budget_tree_with_path() -> None:
+    patch = ImplicitSurfacePatch(family="implicit")
+    payload = encode_surface_patch_payload(patch)
+    geometry = dict(payload["geometry"])  # type: ignore[arg-type]
+    geometry["field"] = {
+        "kind": "union",
+        "parameters": {},
+        "children": [
+            {"kind": "sphere", "parameters": {"radius": 1.0}, "children": []}
+            for _index in range(9)
+        ],
+    }
+    payload["geometry"] = geometry
+
+    with pytest.raises(ImpressFormatError, match=r"field\.children.*max_children_per_node"):
+        decode_surface_patch_payload(payload)
+
+
+def test_decode_implicit_surface_patch_payload_refuses_executable_parameter_with_path() -> None:
+    patch = ImplicitSurfacePatch(family="implicit")
+    payload = encode_surface_patch_payload(patch)
+    geometry = dict(payload["geometry"])  # type: ignore[arg-type]
+    geometry["field"] = {
+        "kind": "sphere",
+        "parameters": {"label": "__import__('os').system('boom')"},
+        "children": [],
+    }
+    payload["geometry"] = geometry
+
+    with pytest.raises(ImpressFormatError, match=r"field\.parameters\.label.*executable payloads"):
+        decode_surface_patch_payload(payload)
+
+
 def test_encode_decode_heightmap_surface_patch_payload_round_trips_sampled_grid() -> None:
     patch = HeightmapSurfacePatch(
         family="heightmap",
@@ -1228,6 +1536,72 @@ def test_decode_implicit_surface_patch_payload_rejects_unsafe_or_invalid_geometr
 
     with pytest.raises(ImpressFormatError, match=message):
         decode_surface_patch_payload(payload)
+
+
+def test_impress_unsafe_payload_negative_fixtures_feed_diagnostic_matrix() -> None:
+    planar_payload = encode_surface_patch_payload(PlanarSurfacePatch(family="planar"))
+    unsupported_family_payload = dict(planar_payload)
+    unsupported_family_payload["kind"] = "UnknownSurfacePatch"
+    unsupported_family_payload["family"] = "unknown"
+    unsafe_implicit_payload = encode_surface_patch_payload(ImplicitSurfacePatch(family="implicit"))
+    unsafe_implicit_geometry = dict(unsafe_implicit_payload["geometry"])  # type: ignore[arg-type]
+    unsafe_implicit_geometry["field"] = {
+        "kind": "sphere",
+        "parameters": {"eval": "boom"},
+        "children": [],
+    }
+    unsafe_implicit_payload["geometry"] = unsafe_implicit_geometry
+    wrapper_patch = PlanarSurfacePatch(
+        family="planar",
+        metadata={"kernel": {"producer": "heightmap", "triangle_face_index": 0}},
+    )
+
+    fixtures = (
+        _impress_negative_fixture("impress/malformed-json", lambda: loads_impress_json("{")),
+        _impress_negative_fixture(
+            "impress/unsupported-document-field",
+            lambda: decode_impress_document_payload(
+                {
+                    "format": IMPRESS_FORMAT,
+                    "schema_version": CURRENT_IMPRESS_SCHEMA_VERSION,
+                    "units": {"length": DEFAULT_IMPRESS_LENGTH_UNIT},
+                    "metadata": {},
+                    "body_store": {"bodies": []},
+                    "bodies": {},
+                    "patches": {},
+                    "mesh": {},
+                }
+            ),
+        ),
+        _impress_negative_fixture(
+            "impress/unsupported-family",
+            lambda: decode_surface_patch_payload(unsupported_family_payload),
+        ),
+        _impress_negative_fixture(
+            "impress/unsafe-implicit-field",
+            lambda: decode_surface_patch_payload(unsafe_implicit_payload),
+        ),
+        _impress_negative_fixture(
+            "impress/mesh-wrapper-serialization",
+            lambda: encode_surface_patch_payload(wrapper_patch),
+        ),
+    )
+
+    report = evaluate_negative_diagnostic_fixture_matrix(fixtures, required_domains=(".impress",))
+
+    assert report.passed is True
+    assert report.domain_coverage[0].fixture_count == 5
+    assert all(fixture.expected_snapshot is not None for fixture in fixtures)
+    assert any(
+        fixture.fixture_id == "impress/unsafe-implicit-field"
+        and "Unsafe implicit field payload" in fixture.expected_snapshot.payload["message"]  # type: ignore[index, union-attr]
+        for fixture in fixtures
+    )
+    assert any(
+        fixture.fixture_id == "impress/mesh-wrapper-serialization"
+        and "mesh-derived surface wrapper" in fixture.expected_snapshot.payload["message"]  # type: ignore[index, union-attr]
+        for fixture in fixtures
+    )
 
 
 @pytest.mark.parametrize(

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, Sequence, Tuple, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal, Mapping, Sequence, Tuple, cast
 
 import numpy as np
 
@@ -12,6 +14,23 @@ if TYPE_CHECKING:
     from .surface import SurfaceBody
 
 Backend = Literal["mesh", "surface"]
+LegacyPrimitiveMeshAssumptionKind = Literal[
+    "surface-native consumer",
+    "tessellation-boundary consumer",
+    "explicit mesh compatibility consumer",
+    "obsolete mesh-primary test",
+]
+
+_MESH_REQUIRED_CALLS = (
+    "mesh_to_pyvista",
+    "combine_meshes",
+    "union_meshes",
+    "export_stl",
+    "save_stl",
+    "repair_mesh",
+    "analyze_mesh",
+)
+_MESH_ATTRIBUTE_NAMES = ("vertices", "faces", "n_faces")
 
 
 @dataclass(frozen=True)
@@ -32,6 +51,125 @@ class PrimitiveCSGRouteRecord:
         }
 
 
+@dataclass(frozen=True)
+class PrimitivePatchProducerSelectionRecord:
+    """Surface-native patch producer chosen for a public primitive call."""
+
+    caller_id: str
+    primitive: str
+    selected_patch_families: tuple[str, ...]
+    surface_constructor: str
+    exact_surface_truth: bool = True
+    mesh_substitution_allowed: bool = False
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "caller_id": self.caller_id,
+            "exact_surface_truth": self.exact_surface_truth,
+            "mesh_substitution_allowed": self.mesh_substitution_allowed,
+            "primitive": self.primitive,
+            "selected_patch_families": self.selected_patch_families,
+            "surface_constructor": self.surface_constructor,
+        }
+
+
+@dataclass(frozen=True)
+class LegacyPrimitiveMeshAssumptionClassificationRecord:
+    """Classification for a primitive call in a mesh-sensitive context."""
+
+    classification: LegacyPrimitiveMeshAssumptionKind
+    rewrite_rule: str
+    stale_assumption: bool = False
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "classification": self.classification,
+            "rewrite_rule": self.rewrite_rule,
+            "stale_assumption": self.stale_assumption,
+        }
+
+
+@dataclass(frozen=True)
+class LegacyPrimitiveMeshAssumptionFindingRecord:
+    """Repository inventory finding for primitive calls that may assume mesh output."""
+
+    path: str
+    line_number: int
+    primitive_constructor: str
+    context: str
+    classification: LegacyPrimitiveMeshAssumptionClassificationRecord
+    diagnostic: str = ""
+
+    def __post_init__(self) -> None:
+        line_number = int(self.line_number)
+        if line_number < 1:
+            raise ValueError("Legacy primitive mesh assumption findings require a positive line number.")
+        object.__setattr__(self, "line_number", line_number)
+
+    @property
+    def stale_assumption(self) -> bool:
+        return self.classification.stale_assumption
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "classification": self.classification.canonical_payload(),
+            "context": self.context,
+            "diagnostic": self.diagnostic,
+            "line_number": self.line_number,
+            "path": self.path,
+            "primitive_constructor": self.primitive_constructor,
+            "stale_assumption": self.stale_assumption,
+        }
+
+
+@dataclass(frozen=True)
+class LegacyPrimitiveMeshAssumptionInventoryReport:
+    """Bounded inventory report for stale public-primitive mesh assumptions."""
+
+    findings: tuple[LegacyPrimitiveMeshAssumptionFindingRecord, ...]
+
+    @property
+    def stale_findings(self) -> tuple[LegacyPrimitiveMeshAssumptionFindingRecord, ...]:
+        return tuple(finding for finding in self.findings if finding.stale_assumption)
+
+    @property
+    def passed(self) -> bool:
+        return not self.stale_findings
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "finding_count": len(self.findings),
+            "findings": [finding.canonical_payload() for finding in self.findings],
+            "passed": self.passed,
+            "stale_count": len(self.stale_findings),
+        }
+
+
+@dataclass(frozen=True)
+class UnsupportedPrimitiveProducerDiagnostic:
+    """Explicit diagnostic for a primitive request that cannot produce surface truth."""
+
+    caller_id: str
+    primitive: str
+    requested_backend: str
+    reason: str
+
+    @property
+    def message(self) -> str:
+        return (
+            f"{self.caller_id} cannot produce surface truth for primitive {self.primitive!r}: "
+            f"{self.reason}"
+        )
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "caller_id": self.caller_id,
+            "primitive": self.primitive,
+            "reason": self.reason,
+            "requested_backend": self.requested_backend,
+        }
+
+
 PRIMITIVE_CSG_ROUTE_INVENTORY: tuple[PrimitiveCSGRouteRecord, ...] = (
     PrimitiveCSGRouteRecord("primitive.make_box", "make_box", "make_box_mesh"),
     PrimitiveCSGRouteRecord("primitive.make_cylinder", "make_cylinder", "make_cylinder_mesh"),
@@ -43,12 +181,188 @@ PRIMITIVE_CSG_ROUTE_INVENTORY: tuple[PrimitiveCSGRouteRecord, ...] = (
     PrimitiveCSGRouteRecord("primitive.make_cone", "make_cone", "make_cone_mesh"),
     PrimitiveCSGRouteRecord("primitive.make_prism", "make_prism", "make_prism_mesh"),
 )
+PRIMITIVE_PATCH_PRODUCER_SELECTIONS: tuple[PrimitivePatchProducerSelectionRecord, ...] = (
+    PrimitivePatchProducerSelectionRecord("primitive.make_box", "box", ("planar",), "make_surface_box"),
+    PrimitivePatchProducerSelectionRecord("primitive.make_cylinder", "cylinder", ("planar", "revolution"), "make_surface_cylinder"),
+    PrimitivePatchProducerSelectionRecord("primitive.make_ngon", "ngon", ("planar", "ruled"), "make_surface_ngon"),
+    PrimitivePatchProducerSelectionRecord("primitive.make_polyhedron", "polyhedron", ("planar",), "make_surface_polyhedron"),
+    PrimitivePatchProducerSelectionRecord("primitive.make_nhedron", "nhedron", ("planar",), "make_surface_nhedron"),
+    PrimitivePatchProducerSelectionRecord("primitive.make_sphere", "sphere", ("revolution",), "make_surface_sphere"),
+    PrimitivePatchProducerSelectionRecord("primitive.make_torus", "torus", ("revolution",), "make_surface_torus"),
+    PrimitivePatchProducerSelectionRecord("primitive.make_cone", "cone", ("planar", "revolution"), "make_surface_cone"),
+    PrimitivePatchProducerSelectionRecord("primitive.make_prism", "prism", ("planar", "ruled"), "make_surface_prism"),
+)
+_PRIMITIVE_PATCH_PRODUCER_SELECTION_BY_CALLER = {
+    record.caller_id: record for record in PRIMITIVE_PATCH_PRODUCER_SELECTIONS
+}
 
 
 def primitive_csg_route_inventory() -> tuple[PrimitiveCSGRouteRecord, ...]:
     """Return primitive authored routes guarded against hidden mesh fallback."""
 
     return PRIMITIVE_CSG_ROUTE_INVENTORY
+
+
+def primitive_patch_producer_selection_inventory() -> tuple[PrimitivePatchProducerSelectionRecord, ...]:
+    """Return deterministic surface patch family selections for public primitives."""
+
+    return PRIMITIVE_PATCH_PRODUCER_SELECTIONS
+
+
+def _primitive_constructor_names() -> tuple[str, ...]:
+    return tuple(record.surface_constructor for record in PRIMITIVE_CSG_ROUTE_INVENTORY)
+
+
+def classify_legacy_primitive_mesh_assumption(
+    context: str,
+    primitive_constructor: str,
+) -> LegacyPrimitiveMeshAssumptionClassificationRecord:
+    """Classify one primitive call site against the explicit tessellation-boundary policy."""
+
+    stripped = " ".join(str(context).strip().split())
+    primitive = str(primitive_constructor).strip()
+    if not stripped:
+        raise ValueError("Legacy primitive mesh assumption context must be non-empty.")
+    if primitive not in _primitive_constructor_names():
+        raise ValueError(f"Unsupported primitive constructor {primitive_constructor!r}.")
+    if f"{primitive}_mesh(" in stripped or f"backend=\"mesh\"" in stripped or f"backend='mesh'" in stripped:
+        return LegacyPrimitiveMeshAssumptionClassificationRecord(
+            classification="explicit mesh compatibility consumer",
+            rewrite_rule="keep mesh-specific intent behind make_*_mesh(...) or backend='mesh'",
+        )
+    if "tessellate_surface_body(" in stripped or "mesh_from_surface_body(" in stripped:
+        return LegacyPrimitiveMeshAssumptionClassificationRecord(
+            classification="tessellation-boundary consumer",
+            rewrite_rule="keep the visible tessellation boundary around the surface primitive",
+        )
+    mesh_call = any(f"{name}(" in stripped for name in _MESH_REQUIRED_CALLS)
+    mesh_attribute = any(f".{name}" in stripped for name in _MESH_ATTRIBUTE_NAMES)
+    if mesh_call or mesh_attribute:
+        return LegacyPrimitiveMeshAssumptionClassificationRecord(
+            classification="obsolete mesh-primary test",
+            rewrite_rule="rewrite to tessellate_surface_body(make_*(...)) or use make_*_mesh(...) when testing mesh compatibility",
+            stale_assumption=True,
+        )
+    return LegacyPrimitiveMeshAssumptionClassificationRecord(
+        classification="surface-native consumer",
+        rewrite_rule="keep the public primitive as a SurfaceBody assertion",
+    )
+
+
+def inventory_legacy_primitive_mesh_assumptions(
+    sources: Mapping[str, str],
+) -> LegacyPrimitiveMeshAssumptionInventoryReport:
+    """Inventory primitive call sites in supplied source text for stale mesh assumptions."""
+
+    findings: list[LegacyPrimitiveMeshAssumptionFindingRecord] = []
+    primitive_names = _primitive_constructor_names()
+    assignment_by_variable: dict[str, str] = {}
+    assignment_pattern = re.compile(
+        rf"^\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?P<primitive>{'|'.join(primitive_names)})\("
+    )
+    for path, source in sources.items():
+        assignment_by_variable.clear()
+        lines = str(source).splitlines()
+        for line_number, line in enumerate(lines, start=1):
+            assignment = assignment_pattern.search(line)
+            if assignment is not None:
+                assignment_by_variable[assignment.group("name")] = assignment.group("primitive")
+            for route in PRIMITIVE_CSG_ROUTE_INVENTORY:
+                if f"{route.explicit_mesh_constructor}(" not in line:
+                    continue
+                classification = classify_legacy_primitive_mesh_assumption(line, route.surface_constructor)
+                findings.append(
+                    LegacyPrimitiveMeshAssumptionFindingRecord(
+                        path=str(path),
+                        line_number=line_number,
+                        primitive_constructor=route.surface_constructor,
+                        context=line.strip(),
+                        classification=classification,
+                    )
+                )
+            for primitive in primitive_names:
+                if f"{primitive}(" not in line:
+                    continue
+                classification = classify_legacy_primitive_mesh_assumption(line, primitive)
+                if classification.classification == "surface-native consumer" and assignment is not None:
+                    continue
+                diagnostic = ""
+                if classification.stale_assumption:
+                    diagnostic = (
+                        f"{path}:{line_number} passes {primitive}(...) into a mesh-sensitive context; "
+                        f"{classification.rewrite_rule}."
+                    )
+                findings.append(
+                    LegacyPrimitiveMeshAssumptionFindingRecord(
+                        path=str(path),
+                        line_number=line_number,
+                        primitive_constructor=primitive,
+                        context=line.strip(),
+                        classification=classification,
+                        diagnostic=diagnostic,
+                    )
+                )
+            for variable, primitive in assignment_by_variable.items():
+                if not any(f"{variable}.{attribute}" in line for attribute in _MESH_ATTRIBUTE_NAMES):
+                    continue
+                classification = classify_legacy_primitive_mesh_assumption(line, primitive)
+                diagnostic = (
+                    f"{path}:{line_number} accesses mesh attributes on {variable} assigned from {primitive}(...); "
+                    f"{classification.rewrite_rule}."
+                )
+                findings.append(
+                    LegacyPrimitiveMeshAssumptionFindingRecord(
+                        path=str(path),
+                        line_number=line_number,
+                        primitive_constructor=primitive,
+                        context=line.strip(),
+                        classification=classification,
+                        diagnostic=diagnostic,
+                    )
+                )
+    return LegacyPrimitiveMeshAssumptionInventoryReport(findings=tuple(findings))
+
+
+def scan_legacy_primitive_mesh_assumptions(
+    root: str | Path,
+    *,
+    suffixes: tuple[str, ...] = (".py", ".md"),
+) -> LegacyPrimitiveMeshAssumptionInventoryReport:
+    """Scan a repository tree for stale primitive mesh assumptions."""
+
+    root_path = Path(root)
+    sources: dict[str, str] = {}
+    for path in sorted(candidate for candidate in root_path.rglob("*") if candidate.suffix in suffixes):
+        if any(part in {".git", ".venv", "__pycache__"} for part in path.parts):
+            continue
+        sources[str(path.relative_to(root_path))] = path.read_text(encoding="utf-8")
+    return inventory_legacy_primitive_mesh_assumptions(sources)
+
+
+def select_primitive_patch_producer(caller_id: str) -> PrimitivePatchProducerSelectionRecord:
+    """Return the surface-native producer selection for a primitive caller."""
+
+    try:
+        return _PRIMITIVE_PATCH_PRODUCER_SELECTION_BY_CALLER[caller_id]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported primitive surface producer caller_id {caller_id!r}.") from exc
+
+
+def unsupported_primitive_producer_diagnostic(
+    caller_id: str,
+    *,
+    requested_backend: str,
+    reason: str,
+) -> UnsupportedPrimitiveProducerDiagnostic:
+    """Build an explicit unsupported producer diagnostic without falling back to mesh."""
+
+    primitive = caller_id.rsplit(".", maxsplit=1)[-1].removeprefix("make_")
+    return UnsupportedPrimitiveProducerDiagnostic(
+        caller_id=caller_id,
+        primitive=primitive,
+        requested_backend=requested_backend,
+        reason=reason,
+    )
 
 
 def _ensure_backend(backend: Backend) -> None:
@@ -66,8 +380,30 @@ def _surface_metadata(*, color: Sequence[float] | str | None) -> dict[str, objec
 
 def _surface_primitive_result(caller_id: str, result: SurfaceBody) -> SurfaceBody:
     from .csg import assert_no_hidden_surface_csg_mesh_fallback
+    from .surface import SurfaceBody
 
-    return cast("SurfaceBody", assert_no_hidden_surface_csg_mesh_fallback(caller_id, result))
+    selection = select_primitive_patch_producer(caller_id)
+    checked = assert_no_hidden_surface_csg_mesh_fallback(caller_id, result)
+    if not isinstance(checked, SurfaceBody):
+        diagnostic = unsupported_primitive_producer_diagnostic(
+            caller_id,
+            requested_backend="surface",
+            reason=f"producer returned {type(checked).__name__}, expected SurfaceBody",
+        )
+        raise TypeError(diagnostic.message)
+    emitted_families = {patch.family for patch in checked.iter_patches()}
+    expected_families = set(selection.selected_patch_families)
+    if not emitted_families <= expected_families:
+        diagnostic = unsupported_primitive_producer_diagnostic(
+            caller_id,
+            requested_backend="surface",
+            reason=(
+                f"producer emitted patch families {sorted(emitted_families)} outside "
+                f"selected families {sorted(expected_families)}"
+            ),
+        )
+        raise ValueError(diagnostic.message)
+    return cast("SurfaceBody", checked)
 
 
 def make_box(

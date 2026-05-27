@@ -7,7 +7,14 @@ import impression.modeling as modeling
 import impression.modeling.csg as csg_module
 from impression.mesh import Mesh
 from impression.modeling import (
+    LegacyPrimitiveMeshAssumptionClassificationRecord,
+    LegacyPrimitiveMeshAssumptionFindingRecord,
+    LegacyPrimitiveMeshAssumptionInventoryReport,
     PrimitiveCSGRouteRecord,
+    PrimitivePatchProducerSelectionRecord,
+    UnsupportedPrimitiveProducerDiagnostic,
+    classify_legacy_primitive_mesh_assumption,
+    inventory_legacy_primitive_mesh_assumptions,
     make_box,
     make_box_mesh,
     make_cone,
@@ -28,6 +35,10 @@ from impression.modeling import (
     make_torus,
     make_torus_mesh,
     primitive_csg_route_inventory,
+    primitive_patch_producer_selection_inventory,
+    scan_legacy_primitive_mesh_assumptions,
+    select_primitive_patch_producer,
+    unsupported_primitive_producer_diagnostic,
 )
 from impression.modeling._surface_primitives import (
     make_surface_box,
@@ -40,11 +51,62 @@ from impression.modeling._surface_primitives import (
     make_surface_sphere,
     make_surface_torus,
 )
+from tests.reference_images import (
+    ExpectedDiagnosticKeyRecord,
+    NegativeDiagnosticFixtureRecord,
+    evaluate_negative_diagnostic_fixture_matrix,
+    normalize_diagnostic_snapshot,
+)
+
+
+def _mesh_boundary_negative_fixture(
+    fixture_id: str,
+    operation,
+    *,
+    expected_keys: tuple[ExpectedDiagnosticKeyRecord, ...],
+) -> NegativeDiagnosticFixtureRecord:
+    try:
+        diagnostic = operation()
+    except Exception as exc:  # noqa: BLE001 - negative fixture runner records refusal shape.
+        snapshot = normalize_diagnostic_snapshot(
+            {
+                "code": type(exc).__name__,
+                "message": str(exc),
+            },
+            fixture_id=fixture_id,
+        )
+    else:
+        snapshot = normalize_diagnostic_snapshot(diagnostic, fixture_id=fixture_id)
+    return NegativeDiagnosticFixtureRecord(
+        fixture_id=fixture_id,
+        domain="mesh-boundary",
+        expected_keys=expected_keys,
+        expected_snapshot=snapshot,
+    )
+
+
+def _seam_continuity_negative_fixture(
+    fixture_id: str,
+    diagnostic: object,
+    *,
+    expected_keys: tuple[ExpectedDiagnosticKeyRecord, ...],
+) -> NegativeDiagnosticFixtureRecord:
+    return NegativeDiagnosticFixtureRecord(
+        fixture_id=fixture_id,
+        domain="seam-continuity",
+        expected_keys=expected_keys,
+        expected_snapshot=normalize_diagnostic_snapshot(diagnostic, fixture_id=fixture_id),
+    )
 from impression.modeling._surface_ops import make_surface_linear_extrude, make_surface_rotate_extrude
 from impression.modeling import (
     PATCH_FAMILY_CAPABILITY_MATRIX,
     PATCH_FAMILY_FEATURE_COVERAGE,
+    PATCH_FAMILY_PROMOTION_CRITERIA,
     REQUIRED_V1_PATCH_FAMILIES,
+    SURFACE_BODY_COMPLETION_TRACKS,
+    SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS,
+    SURFACE_REFERENCE_ARTIFACT_CLASSES,
+    SURFACE_REFERENCE_FIXTURE_CONTRACTS,
     SUPPORTED_SURFACE_PATCH_FAMILIES,
     SURFACE_SPEC_66_RETIREMENT_NOTE,
     AdapterLossiness,
@@ -57,6 +119,9 @@ from impression.modeling import (
     compare_tessellation_modes,
     DisplacementSurfacePatch,
     export_tessellation_request,
+    feature_surface_handoff_diagnostic,
+    FeatureSurfaceHandoffDiagnostic,
+    FeatureSurfaceHandoffRecord,
     flatten_surface_scene,
     handoff_surface_scene,
     HeightmapSurfacePatch,
@@ -88,23 +153,51 @@ from impression.modeling import (
     SurfaceBody,
     SurfaceBoundaryDescriptor,
     SurfaceBoundaryRef,
+    SurfaceBodyCompletionEvidenceRecord,
+    SurfaceReferenceArtifactClassRecord,
+    SurfaceReferenceEvidenceMatrixReport,
+    SurfaceReferenceFixtureContractRecord,
+    SurfaceReferenceFixtureRequirementRecord,
     SurfaceComposition,
     SurfaceCompositionError,
     SurfaceCompositionTraversalRecord,
     SurfaceContinuityMetadata,
+    SurfaceContinuityRequest,
+    SurfaceContinuitySupportRecord,
+    SurfaceContinuityTolerancePolicy,
+    SurfaceContinuityConstraintDiagnostic,
+    SurfaceBoundaryDerivativeDiagnostic,
+    SurfaceBoundaryDerivativeSample,
+    SurfaceBoundaryDerivativeSummary,
+    SurfaceContinuityResidualMetrics,
+    SurfaceObservedContinuityClassRecord,
+    SurfaceHigherOrderContinuityValidationReport,
+    SurfaceContinuitySeamParameterLocator,
+    SurfaceContinuityViolationRecord,
+    SurfaceContinuityViolationDiagnostics,
+    SurfaceContinuityEnforcementRequest,
+    SurfaceContinuityEnforcementRefusalDiagnostic,
+    SurfaceContinuityEnforcementResult,
     SurfaceConsumerCollection,
     SurfaceCollectionTessellationResult,
     SurfaceFamilyTessellationAdapter,
     SurfaceFamilyTessellationAdapterCoverageRecord,
     SURFACE_FAMILY_TESSELLATION_ADAPTERS,
+    SUPPORTED_SEAM_CONTINUITY_CLASSES,
     SurfaceBooleanFamilyEligibilityResult,
     SurfaceBooleanFamilyPairSupport,
     SurfaceBooleanOperands,
+    SurfaceBooleanSupportState,
     SurfaceBooleanUnsupportedFamilyDiagnostic,
+    SurfaceUnsupportedContinuityDiagnostic,
     SurfaceCSGHigherOrderRefusalDiagnostic,
     SurfaceCSGHigherOrderSupportRecord,
+    SurfaceCSGPrimitiveAnalyticPairRecord,
     SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX,
     SURFACE_BOOLEAN_OPERATIONS,
+    ANALYTIC_SURFACE_CSG_FAMILIES,
+    HIGHER_ORDER_SURFACE_CSG_FAMILIES,
+    SAMPLED_SURFACE_CSG_FAMILIES,
     SurfaceSeamParticipationRecord,
     SurfaceSeamValidationResult,
     SubdivisionCrease,
@@ -114,6 +207,8 @@ from impression.modeling import (
     SurfaceSceneGroup,
     SurfaceSceneNode,
     SurfaceSeam,
+    SurfaceSeamBoundaryUseRef,
+    SurfaceSeamContinuityConstraint,
     SurfaceShell,
     SurfaceToMeshAdapterRecord,
     SURFACE_TO_MESH_HELPER_CONTRACT,
@@ -124,16 +219,33 @@ from impression.modeling import (
     assert_implicit_tessellation_sampling_safety,
     assert_subdivision_tessellation_approximation,
     assert_surface_family_tessellation_adapter_coverage,
+    assert_surface_reference_requirement_matrix_covers_capabilities,
+    audit_all_patch_family_promotion_readiness,
+    audit_patch_family_promotion_readiness,
+    build_surface_unsupported_continuity_diagnostic,
     classify_surface_seam_continuity,
+    evaluate_surface_body_completion_gate,
+    evaluate_surface_body_completion_reference_evidence_matrix,
+    evaluate_surface_boundary_derivatives,
+    compute_surface_continuity_residual_metrics,
+    classify_surface_continuity_residuals,
+    validate_higher_order_surface_continuity,
+    build_surface_continuity_violation_locators,
+    format_surface_continuity_violation_diagnostic,
+    check_surface_continuity_enforcement_eligibility,
+    validate_surface_continuity_enforcement_result,
     evaluate_implicit_field,
     evaluate_implicit_field_domain,
     extract_surface_boundary_descriptor,
     inspect_surface_family_tessellation_adapter_coverage,
+    load_surface_reference_requirement_matrix,
+    make_surface_body_completion_evidence_from_capabilities,
     make_surface_body,
     make_surface_shell,
     make_implicit_surface,
     make_subdivision_surface,
     make_implicit_field_node,
+    normalize_surface_seam_continuity_constraint,
     prepare_surface_boolean_operands,
     assess_implicit_field_security,
     refine_subdivision_control_cage,
@@ -141,9 +253,18 @@ from impression.modeling import (
     surface_boolean_family_eligibility,
     surface_boolean_family_pair_support,
     surface_boolean_result,
+    surface_body_completion_reference_evidence_matrix,
+    surface_reference_artifact_classes,
+    surface_reference_fixture_contracts,
+    surface_continuity_support,
+    surface_csg_analytic_primitive_pair_support,
+    surface_csg_completion_support_matrix,
+    surface_csg_refusal_record,
     surface_composition_to_consumer_collection,
     surface_group,
+    validate_feature_surface_handoff,
     validate_implicit_field_security,
+    validate_surface_seam_continuity_constraint,
     validate_surface_seam_participation,
     validate_tessellation_helper_boundary_input,
     tessellate_surface_body,
@@ -648,6 +769,63 @@ def test_primitive_csg_route_inventory_covers_surface_defaults_and_mesh_compatib
     assert all(str(record.explicit_mesh_constructor).endswith("_mesh") for record in inventory)
 
 
+def test_legacy_primitive_mesh_assumption_inventory_classifies_stale_and_accepted_sites(tmp_path) -> None:
+    sources = {
+        "tests/stale_preview.py": "\n".join(
+            [
+                "mesh_to_pyvista(make_box(size=(1, 1, 1)))",
+                "body = make_cylinder(radius=1.0, height=2.0)",
+                "count = body.n_faces",
+            ]
+        ),
+        "tests/accepted_preview.py": "\n".join(
+            [
+                "mesh = make_box_mesh(size=(1, 1, 1))",
+                "preview = mesh_to_pyvista(tessellate_surface_body(make_sphere(radius=1.0)).mesh)",
+                "assert make_torus(major_radius=1.0, minor_radius=0.2).patch_count > 0",
+            ]
+        ),
+    }
+
+    report = inventory_legacy_primitive_mesh_assumptions(sources)
+
+    assert isinstance(report, LegacyPrimitiveMeshAssumptionInventoryReport)
+    assert report.passed is False
+    assert len(report.findings) == 5
+    assert len(report.stale_findings) == 2
+    assert all(isinstance(finding, LegacyPrimitiveMeshAssumptionFindingRecord) for finding in report.findings)
+    assert {finding.primitive_constructor for finding in report.stale_findings} == {"make_box", "make_cylinder"}
+    assert {finding.classification.classification for finding in report.findings} == {
+        "obsolete mesh-primary test",
+        "explicit mesh compatibility consumer",
+        "tessellation-boundary consumer",
+        "surface-native consumer",
+    }
+    assert all("tessellate_surface_body" in finding.classification.rewrite_rule for finding in report.stale_findings)
+    payload = report.canonical_payload()
+    assert payload["stale_count"] == 2
+    assert payload["finding_count"] == 5
+
+    fixture = tmp_path / "inventory_fixture.py"
+    fixture.write_text("mesh_to_pyvista(make_prism(height=1.0))\n", encoding="utf-8")
+    scanned = scan_legacy_primitive_mesh_assumptions(tmp_path)
+    assert len(scanned.stale_findings) == 1
+    assert scanned.stale_findings[0].path == "inventory_fixture.py"
+
+
+def test_legacy_primitive_mesh_assumption_classifier_rejects_unknown_primitives() -> None:
+    classification = classify_legacy_primitive_mesh_assumption(
+        "mesh_from_surface_body(make_box(size=(1, 1, 1)))",
+        "make_box",
+    )
+
+    assert isinstance(classification, LegacyPrimitiveMeshAssumptionClassificationRecord)
+    assert classification.classification == "tessellation-boundary consumer"
+    assert classification.stale_assumption is False
+    with pytest.raises(ValueError, match="Unsupported primitive constructor"):
+        classify_legacy_primitive_mesh_assumption("mesh_to_pyvista(make_widget())", "make_widget")
+
+
 def test_private_surface_builders_do_not_leak_through_public_modeling_namespace() -> None:
     assert not hasattr(modeling, "make_surface_box")
     assert not hasattr(modeling, "make_surface_ngon")
@@ -690,6 +868,151 @@ def test_patch_family_scope_constants_are_explicit() -> None:
         "diagnostics",
         "no-hidden-fallback",
     )
+
+
+def test_surface_body_completion_gate_requires_explicit_non_documentation_evidence() -> None:
+    evidence = (
+        SurfaceBodyCompletionEvidenceRecord(
+            track="patch-family",
+            state="verified",
+            spec="Surface Spec 242",
+            implementation_owner="src/impression/modeling/surface.py",
+            evidence_type="unit-test",
+            source="documentation",
+        ),
+    )
+
+    report = evaluate_surface_body_completion_gate(evidence)
+
+    assert report.passed is False
+    assert any(diagnostic.code == "documentation-only-evidence" for diagnostic in report.diagnostics)
+    assert any(diagnostic.track == "csg" and diagnostic.code == "missing-track-evidence" for diagnostic in report.diagnostics)
+
+
+def test_surface_body_completion_gate_passes_with_all_required_track_evidence() -> None:
+    evidence = tuple(
+        SurfaceBodyCompletionEvidenceRecord(
+            track=track,
+            state="verified",
+            spec=f"{track}:fixture",
+            implementation_owner="tests/test_surface.py",
+            evidence_type="unit-test",
+        )
+        for track in SURFACE_BODY_COMPLETION_TRACKS
+    )
+
+    report = evaluate_surface_body_completion_gate(evidence)
+
+    assert report.passed is True
+    assert report.diagnostics == ()
+
+
+def test_surface_body_completion_capability_evidence_is_implementation_backed() -> None:
+    evidence = make_surface_body_completion_evidence_from_capabilities()
+
+    assert evidence
+    assert all(record.source == "implementation" for record in evidence)
+    assert any(record.track == "patch-family" and record.spec == "patch-family:planar" for record in evidence)
+
+
+def test_surface_body_completion_reference_evidence_matrix_requires_promoted_artifacts() -> None:
+    requirements = surface_body_completion_reference_evidence_matrix()
+    evidence = tuple(
+        SurfaceBodyCompletionEvidenceRecord(
+            track=requirement.track,
+            state="verified",
+            spec=f"{requirement.track}:{evidence_type}",
+            implementation_owner="tests/test_surface.py",
+            evidence_type=evidence_type,
+        )
+        for requirement in requirements
+        for evidence_type in requirement.required_evidence_types
+    )
+
+    report = evaluate_surface_body_completion_reference_evidence_matrix(evidence)
+
+    assert SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS == requirements
+    assert all(isinstance(requirement, SurfaceReferenceFixtureRequirementRecord) for requirement in requirements)
+    assert isinstance(report, SurfaceReferenceEvidenceMatrixReport)
+    assert report.passed is True
+    assert report.diagnostics == ()
+
+
+def test_surface_reference_requirement_matrix_loads_artifact_classes_and_fixture_contracts() -> None:
+    requirements = load_surface_reference_requirement_matrix()
+    artifact_classes = surface_reference_artifact_classes()
+    fixture_contracts = surface_reference_fixture_contracts()
+
+    assert requirements == SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS
+    assert artifact_classes == SURFACE_REFERENCE_ARTIFACT_CLASSES
+    assert fixture_contracts == SURFACE_REFERENCE_FIXTURE_CONTRACTS
+    assert all(isinstance(record, SurfaceReferenceArtifactClassRecord) for record in artifact_classes)
+    assert all(isinstance(record, SurfaceReferenceFixtureContractRecord) for record in fixture_contracts)
+    assert {record.artifact_class for record in artifact_classes} >= {
+        ".impress-roundtrip",
+        "reference-artifact",
+        "refusal-diagnostic",
+        "tessellation-artifact",
+    }
+    assert {contract.track for contract in fixture_contracts} == set(SURFACE_BODY_COMPLETION_TRACKS)
+
+
+def test_surface_reference_requirement_matrix_coverage_assertion_reports_missing_and_duplicate_tracks() -> None:
+    requirements = load_surface_reference_requirement_matrix()
+
+    assert assert_surface_reference_requirement_matrix_covers_capabilities(requirements) == requirements
+
+    broken = (
+        SurfaceReferenceFixtureRequirementRecord("patch-family", ("unit-test",)),
+        SurfaceReferenceFixtureRequirementRecord("patch-family", ("reference-artifact",)),
+        SurfaceReferenceFixtureRequirementRecord("unknown-track", ("unit-test",)),
+    )
+
+    with pytest.raises(AssertionError, match="missing reference requirement tracks"):
+        assert_surface_reference_requirement_matrix_covers_capabilities(broken)
+    with pytest.raises(AssertionError, match="duplicate reference requirement tracks"):
+        assert_surface_reference_requirement_matrix_covers_capabilities(broken, tracks=("patch-family", "unknown-track"))
+
+
+def test_surface_body_completion_reference_evidence_matrix_rejects_missing_and_dirty_artifacts() -> None:
+    dirty = SurfaceBodyCompletionEvidenceRecord(
+        track="primitive",
+        state="verified",
+        spec="dirty:primitive-reference",
+        implementation_owner="project/reference-artifacts/dirty",
+        evidence_type="tessellation-artifact",
+        source="dirty-artifact",
+    )
+
+    report = evaluate_surface_body_completion_reference_evidence_matrix((dirty,))
+
+    assert report.passed is False
+    assert any(diagnostic.code == "dirty-artifact-not-promoted" for diagnostic in report.diagnostics)
+    assert any(
+        diagnostic.code == "missing-reference-evidence" and diagnostic.track == ".impress"
+        for diagnostic in report.diagnostics
+    )
+
+
+def test_patch_family_promotion_readiness_audits_each_criterion_separately() -> None:
+    records = audit_all_patch_family_promotion_readiness()
+    by_family = {record.family: record for record in records}
+
+    assert set(by_family) == set(SUPPORTED_SURFACE_PATCH_FAMILIES)
+    assert tuple(PATCH_FAMILY_PROMOTION_CRITERIA) == by_family["planar"].supported_criteria + tuple(
+        gap.criterion for gap in by_family["planar"].gaps
+    )
+    assert by_family["planar"].promotable is True
+    assert by_family["bspline"].promotable is False
+    assert {gap.criterion for gap in by_family["bspline"].gaps} >= {"csg", "loft", "diagnostics"}
+
+
+def test_patch_family_promotion_readiness_reports_missing_family_record() -> None:
+    record = audit_patch_family_promotion_readiness("torus")
+
+    assert record.promotable is False
+    assert record.gaps[0].criterion == "record"
+    assert "PATCH_FAMILY_CAPABILITY_MATRIX" in record.gaps[0].message
 
 
 def test_parameter_domain_validates_positive_spans() -> None:
@@ -1739,6 +2062,398 @@ def test_cross_family_seam_validation_reports_unsupported_continuity_request() -
     assert any("unsupported continuity request" in diagnostic for diagnostic in result.diagnostics)
 
 
+def test_surface_continuity_support_records_supported_and_future_classes() -> None:
+    supported = surface_continuity_support(SurfaceContinuityRequest("G0", source="loft"))
+    future = surface_continuity_support("G1")
+
+    assert SUPPORTED_SEAM_CONTINUITY_CLASSES == ("C0", "G0")
+    assert isinstance(supported, SurfaceContinuitySupportRecord)
+    assert supported.supported is True
+    assert supported.support_state == "supported"
+    assert future.supported is False
+    assert future.support_state == "not-yet-implemented"
+    assert "supported classes are C0, G0" in future.diagnostic
+
+
+def test_surface_unsupported_continuity_diagnostic_is_structured() -> None:
+    diagnostic = build_surface_unsupported_continuity_diagnostic("C2")
+
+    assert isinstance(diagnostic, SurfaceUnsupportedContinuityDiagnostic)
+    assert diagnostic.requested == "C2"
+    assert diagnostic.supported_classes == ("C0", "G0")
+    assert "unsupported continuity request" in diagnostic.message
+    with pytest.raises(ValueError, match="Supported seam continuity requests"):
+        build_surface_unsupported_continuity_diagnostic("C0")
+
+
+def test_surface_seam_continuity_constraint_normalizes_higher_order_requests() -> None:
+    seam = SurfaceSeam(
+        "join",
+        (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")),
+        continuity="g2",
+    )
+    policy = SurfaceContinuityTolerancePolicy(
+        position_tolerance=1e-8,
+        tangent_tolerance=1e-5,
+        curvature_tolerance=1e-4,
+    )
+
+    constraint = normalize_surface_seam_continuity_constraint(seam, tolerance_policy=policy)
+
+    assert isinstance(constraint, SurfaceSeamContinuityConstraint)
+    assert constraint.requested == "G2"
+    assert constraint.tolerance_policy is policy
+    assert tuple(use.role for use in constraint.boundary_uses) == ("first", "second")
+    assert all(isinstance(use, SurfaceSeamBoundaryUseRef) for use in constraint.boundary_uses)
+    assert validate_surface_seam_continuity_constraint(constraint) == ()
+    assert constraint.canonical_payload()["requested"] == "G2"
+
+
+def test_surface_seam_continuity_constraint_supports_explicit_request_source_and_open_boundary() -> None:
+    seam = SurfaceSeam("open-top", (SurfaceBoundaryRef(0, "top"),), continuity="C0")
+    request = SurfaceContinuityRequest("C1", source="authored-loft")
+
+    constraint = normalize_surface_seam_continuity_constraint(seam, request=request)
+
+    assert constraint.requested == "C1"
+    assert constraint.source == "authored-loft"
+    assert tuple(use.role for use in constraint.boundary_uses) == ("open",)
+    assert validate_surface_seam_continuity_constraint(constraint) == ()
+
+
+def test_surface_seam_continuity_constraint_validator_reports_invalid_requests() -> None:
+    constraint = SurfaceSeamContinuityConstraint(
+        seam_id="bad",
+        requested="H1",
+        boundary_uses=(
+            SurfaceSeamBoundaryUseRef("bad", SurfaceBoundaryRef(0, "right"), role="first"),
+            SurfaceSeamBoundaryUseRef("bad", SurfaceBoundaryRef(0, "right"), role="second"),
+        ),
+    )
+
+    diagnostics = validate_surface_seam_continuity_constraint(constraint)
+
+    assert all(isinstance(diagnostic, SurfaceContinuityConstraintDiagnostic) for diagnostic in diagnostics)
+    assert {diagnostic.code for diagnostic in diagnostics} == {"invalid-continuity", "duplicate-boundary"}
+    assert diagnostics[0].canonical_payload()["seam_id"] == "bad"
+    with pytest.raises(ValueError, match="positive finite"):
+        SurfaceContinuityTolerancePolicy(tangent_tolerance=0.0)
+
+
+def test_surface_boundary_derivative_evaluator_samples_planar_boundary() -> None:
+    patch = PlanarSurfacePatch(
+        family="planar",
+        origin=(0.0, 0.0, 0.0),
+        u_axis=(2.0, 0.0, 0.0),
+        v_axis=(0.0, 3.0, 0.0),
+    )
+
+    summary = evaluate_surface_boundary_derivatives(patch, "right", patch_index=2, sample_count=3)
+
+    assert isinstance(summary, SurfaceBoundaryDerivativeSummary)
+    assert summary.supported is True
+    assert summary.diagnostics == ()
+    assert len(summary.samples) == 3
+    assert all(isinstance(sample, SurfaceBoundaryDerivativeSample) for sample in summary.samples)
+    assert all(sample.boundary == SurfaceBoundaryRef(2, "right") for sample in summary.samples)
+    assert all(sample.du == pytest.approx((2.0, 0.0, 0.0)) for sample in summary.samples)
+    assert all(sample.dv == pytest.approx((0.0, 3.0, 0.0)) for sample in summary.samples)
+    assert all(sample.normal == pytest.approx((0.0, 0.0, 1.0)) for sample in summary.samples)
+    assert all(sample.tangent == pytest.approx((0.0, 1.0, 0.0)) for sample in summary.samples)
+    assert summary.canonical_payload()["supported"] is True
+
+
+def test_surface_boundary_derivative_evaluator_samples_ruled_and_revolution_boundaries() -> None:
+    ruled = RuledSurfacePatch(
+        family="ruled",
+        start_curve=((0.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+        end_curve=((1.0, 0.0, 0.0), (1.0, 1.0, 1.0)),
+    )
+    revolution = RevolutionSurfacePatch(
+        family="revolution",
+        profile_curve=((1.0, 0.0, -1.0), (1.0, 0.0, 1.0)),
+    )
+
+    ruled_summary = evaluate_surface_boundary_derivatives(ruled, "top", sample_count=4)
+    revolution_summary = evaluate_surface_boundary_derivatives(revolution, "left", sample_count=4)
+
+    assert ruled_summary.supported is True
+    assert revolution_summary.supported is True
+    assert len(ruled_summary.samples) == 4
+    assert len(revolution_summary.samples) == 4
+    assert all(np.linalg.norm(sample.normal) == pytest.approx(1.0) for sample in ruled_summary.samples)
+    assert all(np.linalg.norm(sample.normal) == pytest.approx(1.0) for sample in revolution_summary.samples)
+    assert ruled_summary.residual_metadata["second_derivative_method"] == "finite-difference"
+
+
+def test_surface_boundary_derivative_evaluator_reports_unsupported_implicit_family() -> None:
+    summary = evaluate_surface_boundary_derivatives(ImplicitSurfacePatch(family="implicit"), "left")
+
+    assert summary.supported is False
+    assert summary.samples == ()
+    assert all(isinstance(diagnostic, SurfaceBoundaryDerivativeDiagnostic) for diagnostic in summary.diagnostics)
+    assert summary.diagnostics[0].code == "unsupported-family"
+
+
+def test_higher_order_continuity_residual_validation_accepts_c1_planar_seam() -> None:
+    first_patch = PlanarSurfacePatch(family="planar")
+    second_patch = PlanarSurfacePatch(family="planar", origin=(1.0, 0.0, 0.0))
+    seam = SurfaceSeam("c1", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")), continuity="C1")
+    constraint = normalize_surface_seam_continuity_constraint(seam)
+    first = evaluate_surface_boundary_derivatives(first_patch, "right", patch_index=0, sample_count=3)
+    second = evaluate_surface_boundary_derivatives(second_patch, "left", patch_index=1, sample_count=3)
+
+    report = validate_higher_order_surface_continuity(constraint, first, second)
+
+    assert isinstance(report, SurfaceHigherOrderContinuityValidationReport)
+    assert report.passed is True
+    assert isinstance(report.residuals, SurfaceContinuityResidualMetrics)
+    assert isinstance(report.observed, SurfaceObservedContinuityClassRecord)
+    assert report.observed.passed_requested is True
+    assert "C1" in report.observed.observed_classes
+    assert report.residuals.max_position_delta == pytest.approx(0.0)
+    assert report.canonical_payload()["passed"] is True
+
+
+def test_higher_order_continuity_residual_validation_fails_without_downgrading_request() -> None:
+    first_patch = PlanarSurfacePatch(family="planar")
+    second_patch = PlanarSurfacePatch(
+        family="planar",
+        origin=(1.0, 0.0, 0.0),
+        u_axis=(1.0, 0.0, 0.0),
+        v_axis=(0.0, 1.0, 0.25),
+    )
+    seam = SurfaceSeam("g1", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")), continuity="G1")
+    constraint = normalize_surface_seam_continuity_constraint(seam)
+    first = evaluate_surface_boundary_derivatives(first_patch, "right", patch_index=0, sample_count=3)
+    second = evaluate_surface_boundary_derivatives(second_patch, "left", patch_index=1, sample_count=3)
+
+    report = validate_higher_order_surface_continuity(constraint, first, second)
+
+    assert report.passed is False
+    assert report.observed is not None
+    assert report.observed.requested == "G1"
+    assert report.observed.passed_requested is False
+    assert "G1" not in report.observed.observed_classes
+    assert report.residuals is not None
+    assert report.residuals.max_normal_delta > constraint.tolerance_policy.tangent_tolerance
+
+
+def test_higher_order_continuity_residual_classifier_reports_observed_classes() -> None:
+    residuals = SurfaceContinuityResidualMetrics(
+        max_position_delta=0.0,
+        max_tangent_delta=0.0,
+        max_normal_delta=0.0,
+        max_second_derivative_delta=0.0,
+        sample_count=2,
+    )
+    policy = SurfaceContinuityTolerancePolicy()
+
+    observed = classify_surface_continuity_residuals("G2", residuals, policy)
+
+    assert observed.passed_requested is True
+    assert observed.observed_classes == ("C0", "G0", "G1", "C1", "G2", "C2")
+    with pytest.raises(ValueError, match="at least one paired sample"):
+        compute_surface_continuity_residual_metrics(
+            SurfaceBoundaryDerivativeSummary(family="planar", boundary_id="left"),
+            SurfaceBoundaryDerivativeSummary(family="planar", boundary_id="right"),
+        )
+
+
+def test_higher_order_continuity_violation_locators_name_parameter_hotspots() -> None:
+    first_patch = PlanarSurfacePatch(family="planar")
+    second_patch = PlanarSurfacePatch(
+        family="planar",
+        origin=(1.0, 0.0, 0.0),
+        u_axis=(1.0, 0.0, 0.0),
+        v_axis=(0.0, 1.0, 0.25),
+    )
+    seam = SurfaceSeam("g1", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")), continuity="G1")
+    constraint = normalize_surface_seam_continuity_constraint(seam)
+    first = evaluate_surface_boundary_derivatives(first_patch, "right", patch_index=0, sample_count=3)
+    second = evaluate_surface_boundary_derivatives(second_patch, "left", patch_index=1, sample_count=3)
+    report = validate_higher_order_surface_continuity(constraint, first, second)
+
+    diagnostics = build_surface_continuity_violation_locators(report, first, second)
+
+    assert isinstance(diagnostics, SurfaceContinuityViolationDiagnostics)
+    assert diagnostics.has_violations is True
+    assert all(isinstance(violation, SurfaceContinuityViolationRecord) for violation in diagnostics.violations)
+    normal = next(violation for violation in diagnostics.violations if violation.residual_kind == "normal")
+    assert isinstance(normal.locator, SurfaceContinuitySeamParameterLocator)
+    assert normal.locator.seam_id == "g1"
+    assert normal.locator.first_boundary == SurfaceBoundaryRef(0, "right")
+    assert normal.locator.second_boundary == SurfaceBoundaryRef(1, "left")
+    assert "failed requested G1 normal residual" in normal.message
+    assert format_surface_continuity_violation_diagnostic(normal) == normal.message
+    assert diagnostics.canonical_payload()["has_violations"] is True
+
+
+def test_seam_continuity_negative_diagnostic_fixtures_feed_matrix() -> None:
+    unsupported = build_surface_unsupported_continuity_diagnostic("C2")
+    invalid_constraint = SurfaceSeamContinuityConstraint(
+        seam_id="bad",
+        requested="H1",
+        boundary_uses=(
+            SurfaceSeamBoundaryUseRef("bad", SurfaceBoundaryRef(0, "right"), role="first"),
+            SurfaceSeamBoundaryUseRef("bad", SurfaceBoundaryRef(0, "right"), role="second"),
+        ),
+    )
+    invalid_constraint_diagnostics = validate_surface_seam_continuity_constraint(invalid_constraint)
+    first_patch = PlanarSurfacePatch(family="planar")
+    second_patch = PlanarSurfacePatch(
+        family="planar",
+        origin=(1.0, 0.0, 0.0),
+        u_axis=(1.0, 0.0, 0.0),
+        v_axis=(0.0, 1.0, 0.25),
+    )
+    seam = SurfaceSeam("g1", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")), continuity="G1")
+    constraint = normalize_surface_seam_continuity_constraint(seam)
+    first = evaluate_surface_boundary_derivatives(first_patch, "right", patch_index=0, sample_count=3)
+    second = evaluate_surface_boundary_derivatives(second_patch, "left", patch_index=1, sample_count=3)
+    report = validate_higher_order_surface_continuity(constraint, first, second)
+    locator_diagnostics = build_surface_continuity_violation_locators(report, first, second)
+    normal_violation = next(
+        violation for violation in locator_diagnostics.violations if violation.residual_kind == "normal"
+    )
+
+    fixtures = (
+        _seam_continuity_negative_fixture(
+            "seam-continuity/unsupported-request",
+            {
+                "message": unsupported.message,
+                "requested": unsupported.requested,
+                "supported_classes": unsupported.supported_classes,
+            },
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("requested",), "C2"),
+                ExpectedDiagnosticKeyRecord(("supported_classes",), ("C0", "G0")),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+        _seam_continuity_negative_fixture(
+            "seam-continuity/invalid-constraint",
+            invalid_constraint_diagnostics[0],
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("code",), "invalid-continuity"),
+                ExpectedDiagnosticKeyRecord(("seam_id",), "bad"),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+        _seam_continuity_negative_fixture(
+            "seam-continuity/failed-residual-locator",
+            {
+                "locator": normal_violation.locator.canonical_payload(),
+                "observed": report.observed.canonical_payload() if report.observed is not None else None,
+                "requested": normal_violation.requested,
+                "residual_kind": normal_violation.residual_kind,
+                "residual_value": normal_violation.residual_value,
+                "seam_id": normal_violation.seam_id,
+                "tolerance": normal_violation.tolerance,
+            },
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("requested",), "G1"),
+                ExpectedDiagnosticKeyRecord(("residual_kind",), "normal"),
+                ExpectedDiagnosticKeyRecord(("locator", "seam_id"), "g1"),
+                ExpectedDiagnosticKeyRecord(("locator", "first_boundary", "boundary_id"), "right"),
+                ExpectedDiagnosticKeyRecord(("locator", "second_boundary", "boundary_id"), "left"),
+                ExpectedDiagnosticKeyRecord(("observed", "passed_requested"), False),
+            ),
+        ),
+    )
+
+    matrix = evaluate_negative_diagnostic_fixture_matrix(fixtures, required_domains=("seam-continuity",))
+
+    assert matrix.passed is True
+    assert not matrix.diagnostics
+    assert matrix.domain_coverage[0].fixture_count == 3
+
+
+def test_higher_order_continuity_violation_locators_are_empty_for_passing_report() -> None:
+    first_patch = PlanarSurfacePatch(family="planar")
+    second_patch = PlanarSurfacePatch(family="planar", origin=(1.0, 0.0, 0.0))
+    seam = SurfaceSeam("c1", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")), continuity="C1")
+    constraint = normalize_surface_seam_continuity_constraint(seam)
+    first = evaluate_surface_boundary_derivatives(first_patch, "right", patch_index=0, sample_count=3)
+    second = evaluate_surface_boundary_derivatives(second_patch, "left", patch_index=1, sample_count=3)
+    report = validate_higher_order_surface_continuity(constraint, first, second)
+
+    diagnostics = build_surface_continuity_violation_locators(report, first, second)
+
+    assert report.passed is True
+    assert diagnostics.has_violations is False
+    assert diagnostics.violations == ()
+
+
+def test_surface_continuity_enforcement_refuses_validation_only_and_source_mutation() -> None:
+    seam = SurfaceSeam("c1", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")), continuity="C1")
+    constraint = normalize_surface_seam_continuity_constraint(seam)
+    request = SurfaceContinuityEnforcementRequest(
+        operation_id="loft-1",
+        producer="loft",
+        constraint=constraint,
+        owns_generated_geometry=False,
+        mutates_source_geometry=True,
+    )
+
+    diagnostics = check_surface_continuity_enforcement_eligibility(request)
+
+    assert all(isinstance(diagnostic, SurfaceContinuityEnforcementRefusalDiagnostic) for diagnostic in diagnostics)
+    assert {diagnostic.code for diagnostic in diagnostics} == {"validation-only", "source-mutation-forbidden"}
+    assert diagnostics[0].canonical_payload()["operation_id"] == "loft-1"
+
+
+def test_surface_continuity_enforcement_accepts_operation_owned_passing_output() -> None:
+    first_patch = PlanarSurfacePatch(family="planar")
+    second_patch = PlanarSurfacePatch(family="planar", origin=(1.0, 0.0, 0.0))
+    seam = SurfaceSeam("c1", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")), continuity="C1")
+    constraint = normalize_surface_seam_continuity_constraint(seam)
+    first = evaluate_surface_boundary_derivatives(first_patch, "right", patch_index=0, sample_count=3)
+    second = evaluate_surface_boundary_derivatives(second_patch, "left", patch_index=1, sample_count=3)
+    report = validate_higher_order_surface_continuity(constraint, first, second)
+    request = SurfaceContinuityEnforcementRequest(
+        operation_id="blend-1",
+        producer="blend",
+        constraint=constraint,
+        owns_generated_geometry=True,
+    )
+
+    result = validate_surface_continuity_enforcement_result(request, report)
+
+    assert isinstance(result, SurfaceContinuityEnforcementResult)
+    assert result.accepted is True
+    assert result.diagnostics == ()
+    assert result.validation_report is report
+    assert result.canonical_payload()["accepted"] is True
+
+
+def test_surface_continuity_enforcement_rejects_operation_owned_failed_output() -> None:
+    first_patch = PlanarSurfacePatch(family="planar")
+    second_patch = PlanarSurfacePatch(
+        family="planar",
+        origin=(1.0, 0.0, 0.0),
+        u_axis=(1.0, 0.0, 0.0),
+        v_axis=(0.0, 1.0, 0.25),
+    )
+    seam = SurfaceSeam("g1", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")), continuity="G1")
+    constraint = normalize_surface_seam_continuity_constraint(seam)
+    first = evaluate_surface_boundary_derivatives(first_patch, "right", patch_index=0, sample_count=3)
+    second = evaluate_surface_boundary_derivatives(second_patch, "left", patch_index=1, sample_count=3)
+    report = validate_higher_order_surface_continuity(constraint, first, second)
+    request = SurfaceContinuityEnforcementRequest(
+        operation_id="sweep-1",
+        producer="sweep",
+        constraint=constraint,
+        owns_generated_geometry=True,
+    )
+
+    result = validate_surface_continuity_enforcement_result(request, report)
+
+    assert result.accepted is False
+    assert {diagnostic.code for diagnostic in result.diagnostics} == {"validation-failed"}
+    assert "failed requested G1" in result.diagnostics[0].message
+
+
 def test_subdivision_boundary_descriptor_records_approximation_and_implicit_seams_refuse() -> None:
     descriptor = extract_surface_boundary_descriptor(SubdivisionSurfacePatch(family="subdivision"), "left")
 
@@ -1935,6 +2650,48 @@ def test_tessellation_helper_contract_accepts_only_surface_boundary_inputs() -> 
     assert "SurfaceBody" in diagnostic.expected_inputs
 
 
+def test_mesh_boundary_negative_fixtures_feed_diagnostic_matrix() -> None:
+    fixtures = (
+        _mesh_boundary_negative_fixture(
+            "mesh-boundary/dict-primitive-input",
+            lambda: validate_tessellation_helper_boundary_input({"kind": "box", "size": (1.0, 1.0, 1.0)}),
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("helper_name",), "surface-to-mesh-adapter"),
+                ExpectedDiagnosticKeyRecord(("received_type",), "dict"),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+        _mesh_boundary_negative_fixture(
+            "mesh-boundary/list-points-input",
+            lambda: validate_tessellation_helper_boundary_input([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]),
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("helper_name",), "surface-to-mesh-adapter"),
+                ExpectedDiagnosticKeyRecord(("received_type",), "list"),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+        _mesh_boundary_negative_fixture(
+            "mesh-boundary/adapter-record-refuses-primitive-args",
+            lambda: make_surface_to_mesh_adapter_record({"kind": "sphere", "radius": 1.0}),  # type: ignore[arg-type]
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("code",), "ValueError"),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+    )
+
+    report = evaluate_negative_diagnostic_fixture_matrix(fixtures, required_domains=("mesh-boundary",))
+
+    assert report.passed is True
+    assert report.domain_coverage[0].fixture_count == 3
+    assert any(
+        fixture.fixture_id == "mesh-boundary/adapter-record-refuses-primitive-args"
+        and "tessellation boundary" in fixture.expected_snapshot.payload["message"]  # type: ignore[index, union-attr]
+        for fixture in fixtures
+    )
+    assert all(fixture.expected_snapshot is not None for fixture in fixtures)
+
+
 def test_surface_primitive_family_appropriateness_matrix_stays_exact_and_native() -> None:
     primitive_families = {
         "box": {patch.family for patch in make_surface_box(size=(1.0, 1.0, 1.0)).iter_patches()},
@@ -1964,6 +2721,35 @@ def test_surface_primitive_family_appropriateness_matrix_stays_exact_and_native(
     )
     assert heightmap_patch.family == "heightmap"
     assert displacement_patch.family == "displacement"
+
+
+def test_public_primitive_patch_producer_selection_is_explicit_and_surface_native() -> None:
+    inventory = primitive_patch_producer_selection_inventory()
+    by_caller = {record.caller_id: record for record in inventory}
+
+    assert all(isinstance(record, PrimitivePatchProducerSelectionRecord) for record in inventory)
+    assert set(by_caller) == {record.caller_id for record in primitive_csg_route_inventory()}
+    assert select_primitive_patch_producer("primitive.make_sphere").selected_patch_families == ("revolution",)
+    assert select_primitive_patch_producer("primitive.make_box").mesh_substitution_allowed is False
+
+    result = make_box(size=(1.0, 1.0, 1.0))
+    assert isinstance(result, SurfaceBody)
+    assert {patch.family for patch in result.iter_patches()} == {"planar"}
+    with pytest.raises(ValueError, match="Unsupported primitive surface producer"):
+        select_primitive_patch_producer("primitive.make_unknown")
+
+
+def test_unsupported_primitive_producer_diagnostic_is_explicit() -> None:
+    diagnostic = unsupported_primitive_producer_diagnostic(
+        "primitive.make_unknown",
+        requested_backend="surface",
+        reason="no surface constructor is registered",
+    )
+
+    assert isinstance(diagnostic, UnsupportedPrimitiveProducerDiagnostic)
+    assert diagnostic.primitive == "unknown"
+    assert "no surface constructor" in diagnostic.message
+    assert diagnostic.canonical_payload()["requested_backend"] == "surface"
 
 
 def test_planar_patch_tessellates_to_mesh_from_domain_or_trim() -> None:
@@ -2131,6 +2917,7 @@ def test_surface_boolean_family_pair_matrix_declares_every_known_family_pair() -
     expected_count = len(SURFACE_BOOLEAN_OPERATIONS) * len(PATCH_FAMILY_CAPABILITY_MATRIX) ** 2
 
     assert len(SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX) == expected_count
+    assert len(surface_csg_completion_support_matrix()) == expected_count
     for operation in SURFACE_BOOLEAN_OPERATIONS:
         for left_family in PATCH_FAMILY_CAPABILITY_MATRIX:
             for right_family in PATCH_FAMILY_CAPABILITY_MATRIX:
@@ -2140,15 +2927,52 @@ def test_surface_boolean_family_pair_matrix_declares_every_known_family_pair() -
                 assert record.operation == operation
                 assert record.left_family == left_family
                 assert record.right_family == right_family
+                assert record.support_state in {"exact", "declared-tolerance", "adapter", "unsupported", "not-yet-implemented"}
                 if (
                     PATCH_FAMILY_CAPABILITY_MATRIX[left_family].support_phase == "available"
                     and PATCH_FAMILY_CAPABILITY_MATRIX[right_family].support_phase == "available"
                 ):
                     assert record.supported is True
+                    assert record.support_state == "exact"
                     assert record.required_future_capability is None
                 else:
                     assert record.supported is False
                     assert record.required_future_capability
+
+
+def test_surface_csg_refusal_record_is_structured_and_constant_time_policy() -> None:
+    diagnostic = surface_csg_refusal_record("union", "planar", "bspline")
+
+    assert isinstance(diagnostic, SurfaceBooleanUnsupportedFamilyDiagnostic)
+    payload = diagnostic.canonical_payload()
+    assert payload["operation"] == "union"
+    assert payload["left_family"] == "planar"
+    assert payload["right_family"] == "bspline"
+    assert payload["required_future_capability"]
+
+
+def test_surface_csg_analytic_primitive_pair_support_uses_declared_tolerances() -> None:
+    record = surface_csg_analytic_primitive_pair_support(
+        "intersection",
+        "planar",
+        "revolution",
+        policy={"snap_tolerance": 1e-6, "equality_tolerance": 1e-6},
+    )
+
+    assert isinstance(record, SurfaceCSGPrimitiveAnalyticPairRecord)
+    assert record.supported is True
+    assert record.support_state == "exact"
+    assert record.tolerance_policy.snap_tolerance == pytest.approx(1e-6)
+    assert record.diagnostic == ""
+
+
+def test_surface_csg_analytic_primitive_pair_refuses_higher_order_without_mesh() -> None:
+    record = surface_csg_analytic_primitive_pair_support("difference", "planar", "implicit")
+
+    assert record.supported is False
+    assert record.support_state == "unsupported"
+    assert "sampled-tessellation-boundary" in record.diagnostic
+    assert "mesh" not in record.diagnostic.lower()
 
 
 def test_surface_boolean_family_eligibility_reports_unsupported_mixed_family_without_mesh_fallback() -> None:
@@ -2177,7 +3001,7 @@ def test_surface_boolean_unsupported_family_diagnostic_builder_refuses_supported
 
 
 def test_higher_order_csg_solver_boundary_names_advanced_family_refusals() -> None:
-    advanced_families = ("bspline", "nurbs", "sweep", "subdivision", "implicit", "heightmap", "displacement", "torus")
+    advanced_families = tuple(HIGHER_ORDER_SURFACE_CSG_FAMILIES)
 
     for family in advanced_families:
         support = classify_higher_order_csg_pair("intersection", "planar", family)
@@ -2186,7 +3010,8 @@ def test_higher_order_csg_solver_boundary_names_advanced_family_refusals() -> No
         assert isinstance(support, SurfaceCSGHigherOrderSupportRecord)
         assert isinstance(diagnostic, SurfaceCSGHigherOrderRefusalDiagnostic)
         assert support.supported is False
-        assert support.solver_boundary == "higher-order-exact-solver"
+        expected_boundary = "sampled-tessellation-boundary" if family in SAMPLED_SURFACE_CSG_FAMILIES else "higher-order-exact-solver"
+        assert support.solver_boundary == expected_boundary
         assert family in diagnostic.message
         assert "requires" in diagnostic.message
 
@@ -2263,6 +3088,26 @@ def test_surface_scene_handoff_preserves_order_without_tessellating() -> None:
     assert flattened.items[0].metadata["label"] == "A"
     assert flattened.items[1].metadata["label"] == "B"
     assert np.allclose(flattened.items[1].body.bounds_estimate(), (6.0, 7.0, 0.0, 1.0, 0.0, 0.0))
+
+
+def test_feature_surface_handoff_validator_accepts_surface_truth_only() -> None:
+    body = make_surface_body([make_surface_shell([PlanarSurfacePatch(family="planar")])])
+    collection = make_surface_consumer_collection([body], source_prefix="feature")
+
+    body_record = validate_feature_surface_handoff("feature.body", body)
+    collection_record = validate_feature_surface_handoff("feature.collection", collection)
+    diagnostic = feature_surface_handoff_diagnostic("feature.mesh", make_box_mesh())
+
+    assert isinstance(body_record, FeatureSurfaceHandoffRecord)
+    assert body_record.output_type == "SurfaceBody"
+    assert body_record.body_identities == (body.stable_identity,)
+    assert collection_record.output_type == "SurfaceConsumerCollection"
+    assert collection_record.body_identities == (body.stable_identity,)
+    assert isinstance(diagnostic, FeatureSurfaceHandoffDiagnostic)
+    assert diagnostic.explicit_mesh_api_required is True
+    assert "SurfaceBody, SurfaceConsumerCollection" in diagnostic.message
+    with pytest.raises(TypeError, match="explicitly mesh-named API"):
+        validate_feature_surface_handoff("feature.mesh", make_box_mesh())
 
 
 def test_surface_composition_public_type_groups_surface_bodies_without_tessellating() -> None:

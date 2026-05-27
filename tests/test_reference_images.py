@@ -12,6 +12,7 @@ from impression.modeling import (
     Loft,
     as_section,
     handoff_hinge_surface,
+    inventory_legacy_primitive_mesh_assumptions,
     make_bistable_hinge,
     make_box,
     make_living_hinge,
@@ -43,8 +44,12 @@ from tests.reference_images import (
     CvArtifactBundleContract,
     CvFixtureContract,
     DiagnosticPanelContract,
+    DiagnosticSnapshotKeyPolicy,
+    ExpectedDiagnosticKeyRecord,
+    NegativeDiagnosticFixtureRecord,
     assess_cv_result,
     canonical_object_view_camera_contracts,
+    classify_reference_fixture_pair_promotion_gate,
     classify_handedness_from_silhouettes,
     clean_reference_path,
     clean_reference_stl_path,
@@ -64,9 +69,15 @@ from tests.reference_images import (
     invalidate_reference_image_bundle,
     initial_text_cv_scope_support,
     HandednessSpaceAnchorContract,
+    compare_diagnostic_snapshots,
+    compare_negative_diagnostic_fixture_snapshot,
+    evaluate_negative_diagnostic_fixture_matrix,
+    normalize_diagnostic_snapshot,
     planar_loop_bounds,
     reference_artifact_state,
+    reference_artifact_contract_version_path,
     reference_fixture_pair_state,
+    write_reference_artifact_contract_version,
     required_reference_fixture_pair_failures,
     render_canonical_object_view_bundle,
     render_mesh_image_with_camera_contract,
@@ -87,12 +98,21 @@ from tests.reference_images import (
     write_surface_consumer_collection_stl,
 )
 
+PREVIEW_AND_REFERENCE_FILES = (
+    Path(__file__).resolve().with_name("test_preview_isolation.py"),
+    Path(__file__).resolve(),
+)
+
 SYMBOL_FONT_PATH = (
     Path(__file__).resolve().parents[1]
     / "assets"
     / "fonts"
     / "NotoSansSymbols2-Regular.ttf"
 )
+
+
+def _tessellate_reference_mesh(body):
+    return tessellate_surface_body(body).mesh
 
 
 def _require_text_cv_font() -> Path:
@@ -337,6 +357,206 @@ def test_reference_fixture_pair_prefers_clean_baselines(tmp_path: Path) -> None:
 
     assert image_reference == clean_image
     assert stl_reference == clean_stl
+
+
+def test_reference_fixture_pair_promotion_gate_accepts_clean_contract_version(tmp_path: Path) -> None:
+    reference_image_root = tmp_path / "reference-images"
+    reference_stl_root = tmp_path / "reference-stl"
+    name = "demo/fixture"
+    _write_small_image(clean_reference_path(reference_image_root, name), color=(40, 50, 60))
+    _write_text_fixture(clean_reference_stl_path(reference_stl_root, name), "solid clean\nendsolid clean\n")
+    image_state = reference_artifact_state(reference_image_root, name, kind="image")
+    stl_state = reference_artifact_state(reference_stl_root, name, kind="stl")
+    write_reference_artifact_contract_version(
+        image_state,
+        classify_reference_fixture_pair_promotion_gate(
+            reference_image_root=reference_image_root,
+            reference_stl_root=reference_stl_root,
+            name=name,
+        ).contract,
+    )
+    write_reference_artifact_contract_version(
+        stl_state,
+        classify_reference_fixture_pair_promotion_gate(
+            reference_image_root=reference_image_root,
+            reference_stl_root=reference_stl_root,
+            name=name,
+        ).contract,
+    )
+
+    report = classify_reference_fixture_pair_promotion_gate(
+        reference_image_root=reference_image_root,
+        reference_stl_root=reference_stl_root,
+        name=name,
+    )
+
+    assert report.promoted is True
+    assert report.diagnostics == ()
+    assert reference_artifact_contract_version_path(image_state).exists()
+
+
+def test_reference_fixture_pair_promotion_gate_rejects_dirty_missing_partial_and_invalidated_contracts(tmp_path: Path) -> None:
+    reference_image_root = tmp_path / "reference-images"
+    reference_stl_root = tmp_path / "reference-stl"
+    dirty_name = "demo/dirty"
+    partial_name = "demo/partial"
+    invalid_name = "demo/invalid"
+    _write_small_image(dirty_reference_path(reference_image_root, dirty_name), color=(10, 20, 30))
+    _write_text_fixture(dirty_reference_stl_path(reference_stl_root, dirty_name), "solid dirty\nendsolid dirty\n")
+    _write_small_image(clean_reference_path(reference_image_root, partial_name), color=(40, 50, 60))
+    _write_small_image(clean_reference_path(reference_image_root, invalid_name), color=(70, 80, 90))
+    _write_text_fixture(clean_reference_stl_path(reference_stl_root, invalid_name), "solid invalid\nendsolid invalid\n")
+
+    dirty_report = classify_reference_fixture_pair_promotion_gate(
+        reference_image_root=reference_image_root,
+        reference_stl_root=reference_stl_root,
+        name=dirty_name,
+    )
+    missing_report = classify_reference_fixture_pair_promotion_gate(
+        reference_image_root=reference_image_root,
+        reference_stl_root=reference_stl_root,
+        name="demo/missing",
+    )
+    partial_report = classify_reference_fixture_pair_promotion_gate(
+        reference_image_root=reference_image_root,
+        reference_stl_root=reference_stl_root,
+        name=partial_name,
+    )
+    invalid_report = classify_reference_fixture_pair_promotion_gate(
+        reference_image_root=reference_image_root,
+        reference_stl_root=reference_stl_root,
+        name=invalid_name,
+    )
+
+    assert dirty_report.promoted is False
+    assert {diagnostic.code for diagnostic in dirty_report.diagnostics} == {"dirty-artifact"}
+    assert {diagnostic.code for diagnostic in missing_report.diagnostics} == {"missing-artifact"}
+    assert any(diagnostic.code == "partial-fixture" for diagnostic in partial_report.diagnostics)
+    assert {diagnostic.code for diagnostic in invalid_report.diagnostics} == {"invalidated-contract"}
+
+
+def test_diagnostic_snapshot_normalization_strips_paths_and_volatile_keys(tmp_path: Path) -> None:
+    diagnostic = {
+        "code": "unsafe-payload",
+        "message": f"Refused file {tmp_path / 'nested' / 'payload.impress'}",
+        "path": tmp_path / "nested" / "payload.impress",
+        "stack_trace": "machine specific stack",
+        "details": {"b": 2, "a": f"{tmp_path}/scratch.txt"},
+    }
+
+    snapshot = normalize_diagnostic_snapshot(diagnostic, fixture_id="unsafe/impress")
+
+    assert snapshot.payload == {
+        "code": "unsafe-payload",
+        "details": {"a": "<path:scratch.txt>", "b": 2},
+        "message": "Refused file <path:payload.impress>",
+        "path": "<path:payload.impress>",
+    }
+    assert "stack_trace" not in snapshot.stable_json()
+    assert str(tmp_path) not in snapshot.stable_json()
+
+
+def test_diagnostic_snapshot_comparator_uses_stable_payload_ordering() -> None:
+    policy = DiagnosticSnapshotKeyPolicy(ignored_keys=("traceback",), path_keys=("file",))
+    expected = normalize_diagnostic_snapshot(
+        {"b": 2, "a": 1, "file": "/tmp/demo/thing.json", "traceback": "ignored"},
+        fixture_id="diagnostic/order",
+        policy=policy,
+    )
+    actual = normalize_diagnostic_snapshot(
+        {"file": "/private/tmp/other/thing.json", "a": 1, "b": 2},
+        fixture_id="diagnostic/order",
+        policy=policy,
+    )
+    drift = normalize_diagnostic_snapshot(
+        {"file": "/private/tmp/other/thing.json", "a": 3, "b": 2},
+        fixture_id="diagnostic/order",
+        policy=policy,
+    )
+
+    assert compare_diagnostic_snapshots(expected, actual).matches is True
+    comparison = compare_diagnostic_snapshots(expected, drift)
+    assert comparison.matches is False
+    assert comparison.drift_kind == "changed"
+    assert "diagnostic/order" in comparison.message
+
+
+def test_negative_diagnostic_fixture_matrix_reports_domain_and_key_coverage() -> None:
+    impress_snapshot = normalize_diagnostic_snapshot(
+        {"code": "unsafe-payload", "message": "refused"},
+        fixture_id="impress/unsafe",
+    )
+    csg_snapshot = normalize_diagnostic_snapshot(
+        {"code": "unsupported-family-pair", "family_pair": ("implicit", "mesh")},
+        fixture_id="csg/unsupported",
+    )
+    fixtures = (
+        NegativeDiagnosticFixtureRecord(
+            fixture_id="impress/unsafe",
+            domain=".impress",
+            expected_keys=(ExpectedDiagnosticKeyRecord(("code",), "unsafe-payload"),),
+            expected_snapshot=impress_snapshot,
+        ),
+        NegativeDiagnosticFixtureRecord(
+            fixture_id="csg/unsupported",
+            domain="csg",
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("code",), "unsupported-family-pair"),
+                ExpectedDiagnosticKeyRecord(("family_pair",)),
+            ),
+            expected_snapshot=csg_snapshot,
+        ),
+    )
+
+    report = evaluate_negative_diagnostic_fixture_matrix(fixtures, required_domains=(".impress", "csg"))
+
+    assert report.passed is True
+    assert {coverage.domain: coverage.fixture_count for coverage in report.domain_coverage} == {
+        ".impress": 1,
+        "csg": 1,
+    }
+    assert report.diagnostics == ()
+
+
+def test_negative_diagnostic_fixture_matrix_reports_missing_domain_and_key() -> None:
+    snapshot = normalize_diagnostic_snapshot(
+        {"code": "unsafe-payload"},
+        fixture_id="impress/unsafe",
+    )
+    fixtures = (
+        NegativeDiagnosticFixtureRecord(
+            fixture_id="impress/unsafe",
+            domain=".impress",
+            expected_keys=(ExpectedDiagnosticKeyRecord(("message",)),),
+            expected_snapshot=snapshot,
+        ),
+    )
+
+    report = evaluate_negative_diagnostic_fixture_matrix(fixtures, required_domains=(".impress", "csg"))
+
+    assert report.passed is False
+    assert {diagnostic.code for diagnostic in report.diagnostics} == {"missing-domain", "missing-diagnostic-key"}
+    assert any(diagnostic.domain == "csg" for diagnostic in report.diagnostics)
+    assert any(diagnostic.fixture_id == "impress/unsafe" for diagnostic in report.diagnostics)
+
+
+def test_negative_diagnostic_fixture_snapshot_comparison_uses_normalized_snapshots() -> None:
+    expected = normalize_diagnostic_snapshot(
+        {"code": "unsafe-payload", "path": "/tmp/a/payload.impress"},
+        fixture_id="impress/unsafe",
+    )
+    actual = normalize_diagnostic_snapshot(
+        {"path": "/private/tmp/b/payload.impress", "code": "unsafe-payload"},
+        fixture_id="impress/unsafe",
+    )
+    fixture = NegativeDiagnosticFixtureRecord(
+        fixture_id="impress/unsafe",
+        domain=".impress",
+        expected_keys=(ExpectedDiagnosticKeyRecord(("code",), "unsafe-payload"),),
+        expected_snapshot=expected,
+    )
+
+    assert compare_negative_diagnostic_fixture_snapshot(fixture, actual).matches is True
 
 
 def test_reference_fixture_pair_fails_for_partial_existing_group(tmp_path: Path) -> None:
@@ -824,8 +1044,8 @@ def test_handedness_anchor_contract_detects_space_drift() -> None:
 def test_handedness_classifier_detects_same_and_mirrored_witness(tmp_path: Path) -> None:
     mesh = combine_meshes(
         [
-            make_box(size=(1.2, 0.4, 1.0), center=(0.0, 0.0, 0.0)),
-            make_box(size=(0.3, 0.4, 0.3), center=(0.75, 0.0, 0.55)),
+            _tessellate_reference_mesh(make_box(size=(1.2, 0.4, 1.0), center=(0.0, 0.0, 0.0))),
+            _tessellate_reference_mesh(make_box(size=(0.3, 0.4, 0.3), center=(0.75, 0.0, 0.55))),
         ]
     )
     bundle = render_canonical_object_view_bundle(mesh, tmp_path / "expected", stem="arrow")
@@ -841,6 +1061,16 @@ def test_handedness_classifier_detects_same_and_mirrored_witness(tmp_path: Path)
     assert same.witness_adequate
     assert same.result_class == "same_handedness"
     assert mirrored.result_class == "mirrored"
+
+
+def test_preview_and_reference_files_have_no_stale_public_primitive_mesh_assumptions() -> None:
+    report = inventory_legacy_primitive_mesh_assumptions(
+        {str(path.relative_to(Path(__file__).resolve().parents[1])): path.read_text(encoding="utf-8")
+         for path in PREVIEW_AND_REFERENCE_FILES}
+    )
+
+    assert report.stale_findings == ()
+    assert report.passed is True
 
 
 def test_handedness_classifier_returns_unknown_for_symmetric_witness(tmp_path: Path) -> None:

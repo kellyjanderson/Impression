@@ -39,6 +39,31 @@ def _require_finite_vec2(value: Sequence[float], field_name: str) -> np.ndarray:
     return point
 
 
+def _require_nonempty_builder_token(value: object, field_name: str) -> str:
+    token = str(value).strip()
+    if not token:
+        raise ValueError(f"{field_name} must be a non-empty string.")
+    return token
+
+
+def _optional_builder_token(value: object | None, field_name: str) -> str | None:
+    if value is None:
+        return None
+    return _require_nonempty_builder_token(value, field_name)
+
+
+def _normalize_segment_points(
+    points: Iterable[Sequence[float]] | None,
+    field_name: str,
+) -> tuple[np.ndarray, ...]:
+    if points is None:
+        return ()
+    normalized = tuple(_require_finite_vec2(point, field_name) for point in points)
+    if len(normalized) < 2:
+        raise ValueError(f"{field_name} must contain at least two points.")
+    return normalized
+
+
 @dataclass(frozen=True)
 class TopologyPathSamplingPolicy:
     sample_count: int | str = "auto"
@@ -157,6 +182,7 @@ class TopologySegment:
     source_kind: str = "polyline"
     start_ref: str | None = None
     end_ref: str | None = None
+    points: tuple[np.ndarray, ...] | Iterable[Sequence[float]] | None = None
     curve: object | None = None
     correspondence_id: str | None = None
     landmarks: tuple[TopologyLandmark, ...] = ()
@@ -175,8 +201,19 @@ class TopologySegment:
         if not str(segment_id):
             raise ValueError("TopologySegment id must not be empty.")
         landmarks = tuple(self.landmarks)
+        points = _normalize_segment_points(self.points, "TopologySegment points")
+        if points and self.curve is not None:
+            raise ValueError("TopologySegment cannot define both points and curve.")
+        correspondence_id = _optional_builder_token(self.correspondence_id, "TopologySegment correspondence_id")
+        source_kind = str(self.source_kind)
+        if points and source_kind == "curve":
+            source_kind = "polyline"
+        if self.curve is not None and source_kind == "polyline":
+            source_kind = "curve"
         object.__setattr__(self, "id", str(segment_id))
-        object.__setattr__(self, "source_kind", str(self.source_kind))
+        object.__setattr__(self, "source_kind", source_kind)
+        object.__setattr__(self, "points", points)
+        object.__setattr__(self, "correspondence_id", correspondence_id)
         object.__setattr__(self, "landmarks", landmarks)
         object.__setattr__(self, "provenance", provenance)
 
@@ -690,6 +727,8 @@ class TopologyPath:
     def to_section_loop(self) -> Loop:
         if self.points:
             return Loop(np.vstack([point.coordinates for point in self.points]))
+        if len(self.segments) == 1 and self.segments[0].points:
+            return Loop(np.vstack(self.segments[0].points))
         if len(self.segments) == 1 and hasattr(self.segments[0].curve, "sample"):
             return Loop(np.asarray(self.segments[0].curve.sample(), dtype=float))
         raise ValueError("TopologyPath cannot be converted to a Loop without point or sampleable curve data.")
@@ -714,42 +753,56 @@ class TopologyPathBuilder:
         *,
         id: str | None = None,
         correspond: str | None = None,
+        anchor: bool = False,
         role: str | None = None,
     ) -> "TopologyPathBuilder":
-        self.points.append(
-            TopologyPoint(
-                id=id,
-                name=name,
-                coordinates=coordinates,
-                ordinal=len(self.points),
-                role=role or "corner",
-                correspondence_id=correspond if correspond is not None else name,
-                provenance={"source": "builder.point"},
-            )
+        point_name = _require_nonempty_builder_token(name, "point name")
+        point_id = _optional_builder_token(id, "point id")
+        correspondence_id = _optional_builder_token(correspond, "point correspond")
+        point = TopologyPoint(
+            id=point_id,
+            name=point_name,
+            coordinates=coordinates,
+            ordinal=len(self.points),
+            role=role or "corner",
+            correspondence_id=correspondence_id if correspondence_id is not None else point_name,
+            provenance={"source": "builder.point"},
         )
+        self._validate_new_point(point)
+        if anchor:
+            if self.anchor is not None and self.anchor != point.id:
+                raise ValueError(f"point anchor conflicts with existing path anchor {self.anchor!r}.")
+            self.anchor = point.id
+        self.points.append(point)
         return self
 
     def segment(
         self,
         name: str,
         *,
+        id: str | None = None,
+        points: Iterable[Sequence[float]] | None = None,
         curve: object | None = None,
         landmarks: Iterable[TopologyLandmark] | None = None,
         correspond: str | None = None,
     ) -> "TopologyPathBuilder":
-        segment_id = derive_stable_id(name)
+        segment_name = _require_nonempty_builder_token(name, "segment name")
+        segment_id = _optional_builder_token(id, "segment id") or derive_stable_id(segment_name)
+        if points is not None and curve is not None:
+            raise ValueError("segment cannot define both points and curve.")
         segment_landmarks = tuple(landmarks or ())
-        self.segments.append(
-            TopologySegment(
-                id=segment_id,
-                name=name,
-                source_kind="curve" if curve is not None else "polyline",
-                curve=curve,
-                correspondence_id=correspond,
-                landmarks=segment_landmarks,
-                provenance={"source": "builder.segment"},
-            )
+        segment = TopologySegment(
+            id=segment_id,
+            name=segment_name,
+            source_kind="curve" if curve is not None else "polyline",
+            points=None if points is None else tuple(points),
+            curve=curve,
+            correspondence_id=_optional_builder_token(correspond, "segment correspond"),
+            landmarks=segment_landmarks,
+            provenance={"source": "builder.segment"},
         )
+        self._validate_new_segment(segment)
+        self.segments.append(segment)
         self.landmarks.extend(segment_landmarks)
         return self
 
@@ -878,6 +931,29 @@ class TopologyPathBuilder:
             landmarks=tuple(self.landmarks),
             metadata=metadata,
         )
+
+    def _validate_new_point(self, point: TopologyPoint) -> None:
+        point_ids = {existing.id for existing in self.points}
+        if point.id in point_ids:
+            raise ValueError(f"point id {point.id!r} duplicates an existing topology point.")
+        if point.name is not None:
+            point_names = {existing.name for existing in self.points if existing.name is not None}
+            if point.name in point_names:
+                raise ValueError(f"point name {point.name!r} duplicates an existing topology point.")
+        if point.correspondence_id is not None and not str(point.correspondence_id).strip():
+            raise ValueError("point correspond must be a non-empty string.")
+
+    def _validate_new_segment(self, segment: TopologySegment) -> None:
+        segment_ids = {existing.id for existing in self.segments}
+        if segment.id in segment_ids:
+            raise ValueError(f"segment id {segment.id!r} duplicates an existing topology segment.")
+        landmark_ids: set[str] = {landmark.id for landmark in self.landmarks}
+        for landmark in segment.landmarks:
+            if landmark.id in landmark_ids:
+                raise ValueError(f"segment landmark id {landmark.id!r} duplicates an existing topology landmark.")
+            landmark_ids.add(landmark.id)
+        if self.closed and not self.points and segment.points and len(segment.points) < 3:
+            raise ValueError("closed segment-only TopologyPath requires at least three authored segment points.")
 
     def _validate_lifecycle_requests(self) -> None:
         known_refs = {str(point.id) for point in self.points}

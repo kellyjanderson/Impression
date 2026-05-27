@@ -10,12 +10,12 @@ from pathlib import Path
 
 from impression.io import write_stl
 
-from impression.modeling import make_box, make_cylinder, union_meshes
+from impression.modeling import make_box_mesh, make_cylinder_mesh, union_meshes
 
 
 def build():
-    box = make_box(size=(2, 2, 1), color=(0.35, 0.55, 0.95))
-    cyl = make_cylinder(radius=0.8, height=1.5, color=(1.0, 0.6, 0.2))
+    box = make_box_mesh(size=(2, 2, 1), color=(0.35, 0.55, 0.95))
+    cyl = make_cylinder_mesh(radius=0.8, height=1.5, color=(1.0, 0.6, 0.2))
     # union_meshes accepts any iterable or mapping
     return union_meshes({"box": box, "cyl": cyl})
 

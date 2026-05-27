@@ -61,17 +61,17 @@ source ~/.impression/env
 
 ## Your First Preview
 
-Every model is a Python module that exposes a `build()` function returning internal meshes.
-Use the primitives and helpers in `impression.modeling` (not PyVista objects).
+Every model is a Python module that exposes a `build()` function. Public
+primitives return `SurfaceBody` objects by default; preview and export
+tessellate them explicitly at the consumer boundary. Use the primitives and
+helpers in `impression.modeling` (not PyVista objects).
 
 ```python
-from impression.modeling import make_box, make_cylinder, boolean_union
+from impression.modeling import make_box
 
 
 def build():
-    body = make_box(size=(2, 2, 1))
-    post = make_cylinder(radius=0.4, height=2.0)
-    return boolean_union([body, post])
+    return make_box(size=(2, 2, 1))
 ```
 
 Preview it:

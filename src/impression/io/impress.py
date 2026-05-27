@@ -14,7 +14,9 @@ from impression.modeling.surface import (
     BSplineSurfacePatch,
     DisplacementSurfacePatch,
     HeightmapSurfacePatch,
+    IMPLICIT_FIELD_NODE_KINDS,
     ImplicitFieldNode,
+    ImplicitFieldSafetyPolicy,
     ImplicitSurfacePatch,
     NURBSSurfacePatch,
     PATCH_FAMILY_CAPABILITY_MATRIX,
@@ -39,6 +41,7 @@ IMPRESS_FORMAT = "impress"
 CURRENT_IMPRESS_SCHEMA_VERSION = "1.0"
 DEFAULT_IMPRESS_LENGTH_UNIT = "unitless"
 SUPPORTED_IMPRESS_LENGTH_UNITS = frozenset({"unitless", "mm", "cm", "m", "in", "ft"})
+IMPRESS_DIAGNOSTIC_METADATA_FIELDS = frozenset({"code", "message", "path", "severity"})
 _PATCH_KIND_FAMILIES = {
     "PlanarSurfacePatch": "planar",
     "RuledSurfacePatch": "ruled",
@@ -57,6 +60,18 @@ _SWEEP_PATCH_PAYLOAD_VERSION = 1
 _SUBDIVISION_PATCH_PAYLOAD_VERSION = 1
 _IMPLICIT_PATCH_PAYLOAD_VERSION = 1
 _SAMPLED_PATCH_PAYLOAD_VERSION = 1
+_PATCH_FAMILY_PAYLOAD_VERSIONS = {
+    "PlanarSurfacePatch": _ANALYTIC_PATCH_PAYLOAD_VERSION,
+    "RuledSurfacePatch": _ANALYTIC_PATCH_PAYLOAD_VERSION,
+    "RevolutionSurfacePatch": _ANALYTIC_PATCH_PAYLOAD_VERSION,
+    "BSplineSurfacePatch": _SPLINE_PATCH_PAYLOAD_VERSION,
+    "NURBSSurfacePatch": _SPLINE_PATCH_PAYLOAD_VERSION,
+    "SweepSurfacePatch": _SWEEP_PATCH_PAYLOAD_VERSION,
+    "SubdivisionSurfacePatch": _SUBDIVISION_PATCH_PAYLOAD_VERSION,
+    "ImplicitSurfacePatch": _IMPLICIT_PATCH_PAYLOAD_VERSION,
+    "HeightmapSurfacePatch": _SAMPLED_PATCH_PAYLOAD_VERSION,
+    "DisplacementSurfacePatch": _SAMPLED_PATCH_PAYLOAD_VERSION,
+}
 
 
 @dataclass(frozen=True)
@@ -73,6 +88,76 @@ class ImpressPatchCodecCoverageRecord:
     @property
     def covered(self) -> bool:
         return self.encode_supported and self.decode_supported
+
+
+@dataclass(frozen=True)
+class ImpressWholeStoreFixtureCoverageReport:
+    """Deterministic coverage report for a whole-store `.impress` fixture."""
+
+    required_families: tuple[str, ...]
+    covered_families: tuple[str, ...]
+    covered_store_areas: tuple[str, ...]
+    missing_payloads: tuple[str, ...]
+    mesh_truth_present: bool
+
+    @property
+    def covered(self) -> bool:
+        return not self.missing_payloads and not self.mesh_truth_present
+
+    @property
+    def diagnostic(self) -> str:
+        problems = list(self.missing_payloads)
+        if self.mesh_truth_present:
+            problems.append("mesh truth payload")
+        if not problems:
+            return "Whole-store `.impress` fixture coverage is complete."
+        return "Whole-store `.impress` fixture coverage is incomplete: " + ", ".join(problems)
+
+
+@dataclass(frozen=True)
+class SurfacePatchBasePayload:
+    """Decoded base fields shared by every `.impress` surface patch family."""
+
+    kind: str
+    family: str
+    domain: ParameterDomain
+    capability_flags: frozenset[str]
+    trim_loops: tuple[TrimLoop, ...]
+    transform_matrix: np.ndarray
+    metadata: dict[str, object]
+    geometry: Mapping[str, object]
+    stable_identity: str | None = None
+
+    def constructor_kwargs(self) -> dict[str, object]:
+        """Return constructor arguments owned by the shared SurfacePatch base class."""
+
+        return {
+            "family": self.family,
+            "domain": self.domain,
+            "capability_flags": self.capability_flags,
+            "trim_loops": self.trim_loops,
+            "transform_matrix": self.transform_matrix,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class SurfacePatchFamilyDispatchRecord:
+    """Allow-listed `.impress` patch family dispatch target."""
+
+    kind: str
+    family: str
+    payload_version: int
+
+
+_PATCH_FAMILY_DISPATCH = {
+    kind: SurfacePatchFamilyDispatchRecord(
+        kind=kind,
+        family=family,
+        payload_version=_PATCH_FAMILY_PAYLOAD_VERSIONS[kind],
+    )
+    for kind, family in _PATCH_KIND_FAMILIES.items()
+}
 
 
 class ImpressFormatError(ValueError):
@@ -116,6 +201,100 @@ def assert_impress_patch_codec_coverage_for_available_families() -> tuple[Impres
         joined = ", ".join(record.family for record in missing)
         raise ImpressFormatError(f"Missing `.impress` patch codec coverage for available families: {joined}")
     return records
+
+
+def inspect_impress_whole_store_fixture_coverage(
+    payload: Mapping[str, object],
+) -> ImpressWholeStoreFixtureCoverageReport:
+    """Inspect whether a fixture exercises the complete surface-native store shape."""
+
+    required_families = tuple(sorted(record.family for record in inspect_impress_patch_codec_coverage() if record.covered))
+    missing: list[str] = []
+    covered_store_areas: list[str] = []
+
+    body_store = payload.get("body_store") if isinstance(payload, Mapping) else None
+    bodies = payload.get("bodies") if isinstance(payload, Mapping) else None
+    patches = payload.get("patches") if isinstance(payload, Mapping) else None
+    metadata = payload.get("metadata", {}) if isinstance(payload, Mapping) else {}
+
+    if isinstance(body_store, Mapping):
+        covered_store_areas.append("body_store")
+        body_entries = body_store.get("bodies")
+        if not isinstance(body_entries, Sequence) or isinstance(body_entries, (str, bytes)) or not body_entries:
+            missing.append("body_store.bodies")
+        elif not all(isinstance(entry, Mapping) and entry.get("body_id") and entry.get("stable_identity") for entry in body_entries):
+            missing.append("body_store.identity")
+    else:
+        missing.append("body_store")
+
+    if isinstance(bodies, Mapping) and bodies:
+        covered_store_areas.append("bodies")
+        if not _payload_contains_body_area(bodies, "shells"):
+            missing.append("bodies.shells")
+        if not _payload_contains_body_area(bodies, "seams"):
+            missing.append("bodies.shells.seams")
+        if not _payload_contains_body_area(bodies, "adjacency"):
+            missing.append("bodies.shells.adjacency")
+    else:
+        missing.append("bodies")
+
+    covered_families: tuple[str, ...] = ()
+    if isinstance(patches, Mapping) and patches:
+        covered_store_areas.append("patches")
+        families = {
+            str(patch_payload.get("family"))
+            for patch_payload in patches.values()
+            if isinstance(patch_payload, Mapping) and patch_payload.get("family")
+        }
+        covered_families = tuple(sorted(families))
+        for family in required_families:
+            if family not in families:
+                missing.append(f"patches.family[{family}]")
+        if not any(
+            isinstance(patch_payload, Mapping) and patch_payload.get("trim_loops")
+            for patch_payload in patches.values()
+        ):
+            missing.append("patches.trim_loops")
+        if not all(
+            isinstance(patch_payload, Mapping) and patch_payload.get("stable_identity")
+            for patch_payload in patches.values()
+        ):
+            missing.append("patches.identity")
+    else:
+        missing.append("patches")
+
+    if not isinstance(metadata, Mapping):
+        missing.append("metadata")
+    else:
+        for key in ("topology_rails", "lifecycle_records", "operation_provenance"):
+            if key not in metadata:
+                missing.append(f"metadata.{key}")
+
+    mesh_truth_present = _payload_contains_key(payload, "mesh")
+    return ImpressWholeStoreFixtureCoverageReport(
+        required_families=required_families,
+        covered_families=covered_families,
+        covered_store_areas=tuple(sorted(set(covered_store_areas))),
+        missing_payloads=tuple(sorted(set(missing))),
+        mesh_truth_present=mesh_truth_present,
+    )
+
+
+def assert_impress_whole_store_fixture_coverage(
+    payload: Mapping[str, object],
+) -> ImpressWholeStoreFixtureCoverageReport:
+    """Return whole-store coverage or raise with a deterministic diagnostic."""
+
+    report = inspect_impress_whole_store_fixture_coverage(payload)
+    if not report.covered:
+        raise ImpressFormatError(report.diagnostic)
+    return report
+
+
+def inspect_impress_patch_family_dispatch() -> tuple[SurfacePatchFamilyDispatchRecord, ...]:
+    """Return the allow-listed patch dispatch table used by `.impress` loading."""
+
+    return tuple(_PATCH_FAMILY_DISPATCH[kind] for kind in sorted(_PATCH_FAMILY_DISPATCH))
 
 
 @dataclass(frozen=True)
@@ -714,8 +893,16 @@ def decode_surface_adjacency_payload(
 def encode_surface_patch_payload(patch: SurfacePatch) -> dict[str, object]:
     """Encode base patch fields and supported family geometry for `.impress` persistence."""
 
+    payload = encode_surface_patch_base_payload(patch)
+    payload["geometry"] = _encode_patch_geometry_payload(patch)
+    return payload
+
+
+def encode_surface_patch_base_payload(patch: SurfacePatch) -> dict[str, object]:
+    """Encode the base fields shared by every `.impress` surface patch family."""
+
     if not isinstance(patch, SurfacePatch):
-        raise ImpressFormatError("encode_surface_patch_payload requires a SurfacePatch.")
+        raise ImpressFormatError("encode_surface_patch_base_payload requires a SurfacePatch.")
     diagnostic = validate_surface_patch_serialization_guard(patch)
     if diagnostic is not None:
         raise ImpressFormatError(
@@ -724,6 +911,7 @@ def encode_surface_patch_payload(patch: SurfacePatch) -> dict[str, object]:
         )
     _validate_patch_kind_family(type(patch).__name__, patch.family)
     return {
+        "stable_identity": patch.stable_identity,
         "kind": type(patch).__name__,
         "family": patch.family,
         "domain": _encode_parameter_domain_payload(patch.domain),
@@ -731,16 +919,16 @@ def encode_surface_patch_payload(patch: SurfacePatch) -> dict[str, object]:
         "transform_matrix": patch.transform_matrix.tolist(),
         "metadata": dict(patch.metadata),
         "trim_loops": [encode_trim_loop_payload(trim_loop) for trim_loop in patch.trim_loops],
-        "geometry": _encode_patch_geometry_payload(patch),
     }
 
 
-def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
-    """Decode a `.impress` patch payload through the public patch constructors."""
+def decode_surface_patch_base_payload(payload: Mapping[str, object]) -> SurfacePatchBasePayload:
+    """Decode shared patch fields and leave family geometry opaque for dispatch."""
 
     if not isinstance(payload, Mapping):
         raise ImpressFormatError("SurfacePatch payload must be an object.")
     unknown_keys = set(payload) - {
+        "stable_identity",
         "kind",
         "family",
         "domain",
@@ -754,6 +942,9 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
         keys = ", ".join(sorted(str(key) for key in unknown_keys))
         raise ImpressFormatError(f"Unsupported SurfacePatch payload fields: {keys}.")
 
+    stable_identity = payload.get("stable_identity")
+    if stable_identity is not None and (not isinstance(stable_identity, str) or not stable_identity):
+        raise ImpressFormatError("SurfacePatch stable_identity must be a non-empty string when present.")
     kind = payload.get("kind")
     if not isinstance(kind, str) or not kind:
         raise ImpressFormatError("SurfacePatch payload requires a non-empty kind.")
@@ -783,42 +974,53 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
 
     domain = _decode_parameter_domain_payload(payload.get("domain"))
     transform_matrix = _validate_matrix4_payload(payload.get("transform_matrix"))
-    common = {
-        "family": family,
-        "domain": domain,
-        "capability_flags": frozenset(flags),
-        "trim_loops": trim_loops,
-        "transform_matrix": transform_matrix,
-        "metadata": dict(metadata),
-    }
+    return SurfacePatchBasePayload(
+        stable_identity=stable_identity,
+        kind=kind,
+        family=family,
+        domain=domain,
+        capability_flags=frozenset(flags),
+        trim_loops=trim_loops,
+        transform_matrix=transform_matrix,
+        metadata=dict(metadata),
+        geometry=geometry,
+    )
+
+
+def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
+    """Decode a `.impress` patch payload through allow-listed public patch constructors."""
+
+    base = decode_surface_patch_base_payload(payload)
+    common = base.constructor_kwargs()
+    geometry = base.geometry
     try:
-        if kind == "PlanarSurfacePatch":
+        if base.kind == "PlanarSurfacePatch":
             _validate_patch_geometry_fields(
                 geometry,
-                kind=kind,
+                kind=base.kind,
                 allowed_fields={"payload_version", "origin", "u_axis", "v_axis"},
             )
-            return PlanarSurfacePatch(
+            patch = PlanarSurfacePatch(
                 **common,
                 origin=_validate_vec3_payload(geometry.get("origin"), "origin"),
                 u_axis=_validate_vec3_payload(geometry.get("u_axis"), "u_axis"),
                 v_axis=_validate_vec3_payload(geometry.get("v_axis"), "v_axis"),
             )
-        if kind == "RuledSurfacePatch":
+        elif base.kind == "RuledSurfacePatch":
             _validate_patch_geometry_fields(
                 geometry,
-                kind=kind,
+                kind=base.kind,
                 allowed_fields={"payload_version", "start_curve", "end_curve"},
             )
-            return RuledSurfacePatch(
+            patch = RuledSurfacePatch(
                 **common,
                 start_curve=_validate_points3_payload(geometry.get("start_curve"), "start_curve"),
                 end_curve=_validate_points3_payload(geometry.get("end_curve"), "end_curve"),
             )
-        if kind == "RevolutionSurfacePatch":
+        elif base.kind == "RevolutionSurfacePatch":
             _validate_patch_geometry_fields(
                 geometry,
-                kind=kind,
+                kind=base.kind,
                 allowed_fields={
                     "payload_version",
                     "profile_curve",
@@ -828,7 +1030,7 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                     "sweep_angle_deg",
                 },
             )
-            return RevolutionSurfacePatch(
+            patch = RevolutionSurfacePatch(
                 **common,
                 profile_curve=_validate_points3_payload(geometry.get("profile_curve"), "profile_curve"),
                 axis_origin=_validate_vec3_payload(geometry.get("axis_origin"), "axis_origin"),
@@ -836,14 +1038,14 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 start_angle_deg=_validate_float_payload(geometry.get("start_angle_deg"), "start_angle_deg"),
                 sweep_angle_deg=_validate_float_payload(geometry.get("sweep_angle_deg"), "sweep_angle_deg"),
             )
-        if kind == "BSplineSurfacePatch":
+        elif base.kind == "BSplineSurfacePatch":
             _validate_patch_geometry_fields(
                 geometry,
-                kind=kind,
+                kind=base.kind,
                 allowed_fields={"payload_version", "degree_u", "degree_v", "knots_u", "knots_v", "control_net"},
                 expected_payload_version=_SPLINE_PATCH_PAYLOAD_VERSION,
             )
-            return BSplineSurfacePatch(
+            patch = BSplineSurfacePatch(
                 **common,
                 degree_u=_validate_positive_int_payload(geometry.get("degree_u"), "degree_u"),
                 degree_v=_validate_positive_int_payload(geometry.get("degree_v"), "degree_v"),
@@ -851,10 +1053,10 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 knots_v=_validate_float_tuple_payload(geometry.get("knots_v"), "knots_v"),
                 control_net=_validate_control_net3_payload(geometry.get("control_net"), "control_net"),
             )
-        if kind == "NURBSSurfacePatch":
+        elif base.kind == "NURBSSurfacePatch":
             _validate_patch_geometry_fields(
                 geometry,
-                kind=kind,
+                kind=base.kind,
                 allowed_fields={
                     "payload_version",
                     "degree_u",
@@ -866,7 +1068,7 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 },
                 expected_payload_version=_SPLINE_PATCH_PAYLOAD_VERSION,
             )
-            return NURBSSurfacePatch(
+            patch = NURBSSurfacePatch(
                 **common,
                 degree_u=_validate_positive_int_payload(geometry.get("degree_u"), "degree_u"),
                 degree_v=_validate_positive_int_payload(geometry.get("degree_v"), "degree_v"),
@@ -875,10 +1077,10 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 control_net=_validate_control_net3_payload(geometry.get("control_net"), "control_net"),
                 weights=_validate_weight_net_payload(geometry.get("weights"), "weights"),
             )
-        if kind == "SweepSurfacePatch":
+        elif base.kind == "SweepSurfacePatch":
             _validate_patch_geometry_fields(
                 geometry,
-                kind=kind,
+                kind=base.kind,
                 allowed_fields={
                     "payload_version",
                     "profile_points_uv",
@@ -889,7 +1091,7 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 },
                 expected_payload_version=_SWEEP_PATCH_PAYLOAD_VERSION,
             )
-            return SweepSurfacePatch(
+            patch = SweepSurfacePatch(
                 **common,
                 profile_points_uv=_validate_profile_points2_payload(geometry.get("profile_points_uv"), "profile_points_uv"),
                 path=Path3D.from_points(_validate_points3_payload(geometry.get("path_points"), "path_points")),
@@ -897,10 +1099,10 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 profile_reference=_validate_optional_string_payload(geometry.get("profile_reference"), "profile_reference"),
                 path_reference=_validate_optional_string_payload(geometry.get("path_reference"), "path_reference"),
             )
-        if kind == "SubdivisionSurfacePatch":
+        elif base.kind == "SubdivisionSurfacePatch":
             _validate_patch_geometry_fields(
                 geometry,
-                kind=kind,
+                kind=base.kind,
                 allowed_fields={
                     "payload_version",
                     "scheme",
@@ -911,7 +1113,7 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 },
                 expected_payload_version=_SUBDIVISION_PATCH_PAYLOAD_VERSION,
             )
-            return SubdivisionSurfacePatch(
+            patch = SubdivisionSurfacePatch(
                 **common,
                 scheme=_validate_string_payload(geometry.get("scheme"), "scheme"),
                 subdivision_level=_validate_nonnegative_int_payload(
@@ -922,22 +1124,22 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 faces=_validate_subdivision_faces_payload(geometry.get("faces"), "faces"),
                 creases=tuple(_decode_subdivision_crease_payload(crease) for crease in _validate_array_payload(geometry.get("creases"), "creases")),
             )
-        if kind == "ImplicitSurfacePatch":
+        elif base.kind == "ImplicitSurfacePatch":
             _validate_patch_geometry_fields(
                 geometry,
-                kind=kind,
+                kind=base.kind,
                 allowed_fields={"payload_version", "field", "bounds"},
                 expected_payload_version=_IMPLICIT_PATCH_PAYLOAD_VERSION,
             )
-            return ImplicitSurfacePatch(
+            patch = ImplicitSurfacePatch(
                 **common,
                 field=_decode_implicit_field_node_payload(geometry.get("field")),
                 bounds=_validate_bounds3_payload(geometry.get("bounds"), "bounds"),
             )
-        if kind == "HeightmapSurfacePatch":
+        elif base.kind == "HeightmapSurfacePatch":
             _validate_patch_geometry_fields(
                 geometry,
-                kind=kind,
+                kind=base.kind,
                 allowed_fields={
                     "payload_version",
                     "height_samples",
@@ -949,7 +1151,7 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 },
                 expected_payload_version=_SAMPLED_PATCH_PAYLOAD_VERSION,
             )
-            return HeightmapSurfacePatch(
+            patch = HeightmapSurfacePatch(
                 **common,
                 height_samples=_validate_numeric_grid_payload(geometry.get("height_samples"), "height_samples"),
                 alpha_mask=_validate_bool_grid_payload(geometry.get("alpha_mask"), "alpha_mask"),
@@ -958,10 +1160,10 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 center=_validate_vec3_payload(geometry.get("center"), "center"),
                 height_scale=_validate_float_payload(geometry.get("height_scale"), "height_scale"),
             )
-        if kind == "DisplacementSurfacePatch":
+        elif base.kind == "DisplacementSurfacePatch":
             _validate_patch_geometry_fields(
                 geometry,
-                kind=kind,
+                kind=base.kind,
                 allowed_fields={
                     "payload_version",
                     "source_patch",
@@ -976,7 +1178,7 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 },
                 expected_payload_version=_SAMPLED_PATCH_PAYLOAD_VERSION,
             )
-            return DisplacementSurfacePatch(
+            patch = DisplacementSurfacePatch(
                 **common,
                 source_patch=decode_surface_patch_payload(_required_mapping(geometry.get("source_patch"), "source_patch")),
                 displacement_samples=_validate_numeric_grid_payload(
@@ -991,9 +1193,13 @@ def decode_surface_patch_payload(payload: Mapping[str, object]) -> SurfacePatch:
                 plane=_validate_string_payload(geometry.get("plane"), "plane"),
                 projection_bounds=_validate_bounds2_payload(geometry.get("projection_bounds"), "projection_bounds"),
             )
+        else:
+            raise ImpressFormatError(f"Unsupported SurfacePatch kind {base.kind!r}.")
     except (TypeError, ValueError) as exc:
         raise ImpressFormatError(str(exc)) from exc
-    raise ImpressFormatError(f"Unsupported SurfacePatch kind {kind!r}.")
+    if base.stable_identity is not None and patch.stable_identity != base.stable_identity:
+        raise ImpressFormatError("SurfacePatch stable_identity does not match decoded patch payload.")
+    return patch
 
 
 def validate_surface_patch_serialization_guard(patch: SurfacePatch) -> InvalidSurfaceWrapperDiagnostic | None:
@@ -1150,6 +1356,29 @@ def _required_mapping(payload: object, name: str) -> Mapping[str, object]:
     if non_string_keys:
         raise ImpressFormatError(f"`.impress` {name} keys must be strings.")
     return payload
+
+
+def _payload_contains_key(payload: object, key: str) -> bool:
+    if isinstance(payload, Mapping):
+        return key in payload or any(_payload_contains_key(value, key) for value in payload.values())
+    if isinstance(payload, Sequence) and not isinstance(payload, (str, bytes)):
+        return any(_payload_contains_key(value, key) for value in payload)
+    return False
+
+
+def _payload_contains_body_area(bodies: Mapping[str, object], area: str) -> bool:
+    for body_payload in bodies.values():
+        if not isinstance(body_payload, Mapping):
+            continue
+        shell_payloads = body_payload.get("shells")
+        if area == "shells" and isinstance(shell_payloads, Sequence) and not isinstance(shell_payloads, (str, bytes)) and shell_payloads:
+            return True
+        if not isinstance(shell_payloads, Sequence) or isinstance(shell_payloads, (str, bytes)):
+            continue
+        for shell_payload in shell_payloads:
+            if isinstance(shell_payload, Mapping) and shell_payload.get(area):
+                return True
+    return False
 
 
 def _validate_patch_identity_payload(patch_id: object) -> str:
@@ -1333,12 +1562,12 @@ def _validate_patch_geometry_fields(
 
 
 def _validate_patch_kind_family(kind: str, family: str) -> None:
-    expected_family = _PATCH_KIND_FAMILIES.get(kind)
-    if expected_family is None:
+    dispatch = _PATCH_FAMILY_DISPATCH.get(kind)
+    if dispatch is None:
         raise ImpressFormatError(f"Unsupported SurfacePatch kind {kind!r}.")
-    if family != expected_family:
+    if family != dispatch.family:
         raise ImpressFormatError(
-            f"SurfacePatch kind {kind!r} requires family {expected_family!r}; got {family!r}."
+            f"SurfacePatch kind {kind!r} requires family {dispatch.family!r}; got {family!r}."
         )
 
 
@@ -1586,29 +1815,112 @@ def _decode_subdivision_crease_payload(payload: object) -> SubdivisionCrease:
         raise ImpressFormatError(str(exc)) from exc
 
 
-def _decode_implicit_field_node_payload(payload: object) -> ImplicitFieldNode:
+def _decode_implicit_field_node_payload(
+    payload: object,
+    *,
+    path: str = "field",
+    policy: ImplicitFieldSafetyPolicy | None = None,
+    state: dict[str, int] | None = None,
+    depth: int = 1,
+) -> ImplicitFieldNode:
+    policy = ImplicitFieldSafetyPolicy() if policy is None else policy
+    state = {"node_count": 0} if state is None else state
+    state["node_count"] += 1
+    if state["node_count"] > policy.max_nodes:
+        raise ImpressFormatError(
+            f"Unsafe implicit field payload at {path}: field tree exceeds max_nodes "
+            f"{policy.max_nodes}."
+        )
+    if depth > policy.max_depth:
+        raise ImpressFormatError(
+            f"Unsafe implicit field payload at {path}: field tree exceeds max_depth "
+            f"{policy.max_depth}."
+        )
     if not isinstance(payload, Mapping):
-        raise ImpressFormatError("Implicit field payload must be an object.")
+        raise ImpressFormatError(f"Implicit field payload at {path} must be an object.")
     unknown_keys = set(payload) - {"kind", "parameters", "children"}
     if unknown_keys:
         keys = ", ".join(sorted(str(key) for key in unknown_keys))
-        raise ImpressFormatError(f"Unsupported implicit field node fields: {keys}.")
+        raise ImpressFormatError(f"Unsupported implicit field node fields at {path}: {keys}.")
     kind = payload.get("kind")
     if not isinstance(kind, str) or not kind.strip():
-        raise ImpressFormatError("Implicit field node kind must be a non-empty string.")
+        raise ImpressFormatError(f"Implicit field node kind at {path} must be a non-empty string.")
+    if kind not in IMPLICIT_FIELD_NODE_KINDS:
+        allowed = ", ".join(sorted(IMPLICIT_FIELD_NODE_KINDS))
+        raise ImpressFormatError(
+            f"Unsupported implicit field node kind {kind!r} at {path}; allowed nodes: {allowed}."
+        )
     parameters = payload.get("parameters", {})
     if not isinstance(parameters, Mapping):
-        raise ImpressFormatError("Implicit field node parameters must be an object.")
+        raise ImpressFormatError(f"Implicit field node parameters at {path} must be an object.")
+    if len(parameters) > policy.max_parameters_per_node:
+        raise ImpressFormatError(
+            f"Unsafe implicit field payload at {path}.parameters: field node exceeds "
+            f"max_parameters_per_node {policy.max_parameters_per_node}."
+        )
+    for key, value in parameters.items():
+        parameter_path = f"{path}.parameters.{key}"
+        if _implicit_parameter_has_unsafe_payload(str(key), value, policy):
+            raise ImpressFormatError(
+                f"Unsafe implicit field payload at {parameter_path}: executable payloads are not allowed; "
+                f"allowed nodes: {', '.join(sorted(IMPLICIT_FIELD_NODE_KINDS))}."
+            )
     children_payload = payload.get("children", [])
     children = _validate_array_payload(children_payload, "field.children")
+    if len(children) > policy.max_children_per_node:
+        raise ImpressFormatError(
+            f"Unsafe implicit field payload at {path}.children: field node exceeds "
+            f"max_children_per_node {policy.max_children_per_node}."
+        )
     try:
         return ImplicitFieldNode(
             kind=kind,
             parameters=dict(parameters),
-            children=tuple(_decode_implicit_field_node_payload(child) for child in children),
+            children=tuple(
+                _decode_implicit_field_node_payload(
+                    child,
+                    path=f"{path}.children[{index}]",
+                    policy=policy,
+                    state=state,
+                    depth=depth + 1,
+                )
+                for index, child in enumerate(children)
+            ),
         )
     except (TypeError, ValueError) as exc:
-        raise ImpressFormatError(str(exc)) from exc
+        raise ImpressFormatError(f"Invalid implicit field payload at {path}: {exc}") from exc
+
+
+def _implicit_parameter_has_unsafe_payload(
+    name: str,
+    value: object,
+    policy: ImplicitFieldSafetyPolicy,
+) -> bool:
+    normalized_name = name.strip().lower()
+    if normalized_name.startswith("__") or normalized_name in {
+        "__builtins__",
+        "callable",
+        "code",
+        "eval",
+        "exec",
+        "function",
+        "globals",
+        "import",
+        "lambda",
+        "locals",
+        "module",
+    }:
+        return True
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if len(value) > policy.max_string_length:
+            return True
+        return any(token in text for token in ("__", "import ", "eval(", "exec(", "lambda "))
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return any(_implicit_parameter_has_unsafe_payload(name, item, policy) for item in value)
+    if isinstance(value, Mapping):
+        return any(_implicit_parameter_has_unsafe_payload(str(key), nested_value, policy) for key, nested_value in value.items())
+    return False
 
 
 def validate_impress_document_root(root: Mapping[str, object]) -> ImpressDocumentRoot:
@@ -1636,6 +1948,34 @@ def validate_impress_document_root(root: Mapping[str, object]) -> ImpressDocumen
     metadata = root.get("metadata", {})
     if not isinstance(metadata, Mapping):
         raise ImpressFormatError("`.impress` root metadata must be an object when present.")
+    _validate_impress_diagnostic_metadata(metadata)
 
     units = validate_impress_units(root.get("units"))
     return ImpressDocumentRoot(schema_version=schema_version, units=units, metadata=dict(metadata))
+
+
+def _validate_impress_diagnostic_metadata(metadata: Mapping[str, object]) -> None:
+    diagnostics = metadata.get("diagnostics")
+    if diagnostics is None:
+        return
+    if not isinstance(diagnostics, Sequence) or isinstance(diagnostics, (str, bytes)):
+        raise ImpressFormatError("`.impress` diagnostic metadata must be an array.")
+    for index, diagnostic in enumerate(diagnostics):
+        if not isinstance(diagnostic, Mapping):
+            raise ImpressFormatError(f"`.impress` diagnostic metadata at diagnostics[{index}] must be an object.")
+        unknown_keys = set(diagnostic) - IMPRESS_DIAGNOSTIC_METADATA_FIELDS
+        if unknown_keys:
+            keys = ", ".join(sorted(str(key) for key in unknown_keys))
+            raise ImpressFormatError(f"Unsupported `.impress` diagnostic metadata fields at diagnostics[{index}]: {keys}.")
+        code = diagnostic.get("code")
+        message = diagnostic.get("message")
+        severity = diagnostic.get("severity", "error")
+        if not isinstance(code, str) or not code.strip():
+            raise ImpressFormatError(f"`.impress` diagnostic metadata at diagnostics[{index}].code must be a non-empty string.")
+        if not isinstance(message, str) or not message.strip():
+            raise ImpressFormatError(f"`.impress` diagnostic metadata at diagnostics[{index}].message must be a non-empty string.")
+        if not isinstance(severity, str) or not severity.strip():
+            raise ImpressFormatError(f"`.impress` diagnostic metadata at diagnostics[{index}].severity must be a non-empty string.")
+        path = diagnostic.get("path")
+        if path is not None and (not isinstance(path, str) or not path.strip()):
+            raise ImpressFormatError(f"`.impress` diagnostic metadata at diagnostics[{index}].path must be a non-empty string.")

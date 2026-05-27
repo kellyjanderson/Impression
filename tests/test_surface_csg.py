@@ -11,13 +11,20 @@ from tests.csg_reference_fixtures import (
     build_csg_union_box_post_fixture,
     surface_body_section_loops,
 )
-from tests.reference_images import compare_planar_loop_silhouettes
+from tests.reference_images import (
+    ExpectedDiagnosticKeyRecord,
+    NegativeDiagnosticFixtureRecord,
+    compare_planar_loop_silhouettes,
+    evaluate_negative_diagnostic_fixture_matrix,
+    normalize_diagnostic_snapshot,
+)
 from impression.modeling import (
     BooleanOperationError,
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
     SurfaceBody,
+    SurfaceBooleanFamilyPairSupport,
     SurfaceBooleanIntersectionStage,
     SurfaceBooleanOperands,
     SurfaceBooleanPatchRef,
@@ -26,38 +33,70 @@ from impression.modeling import (
     SurfaceBooleanTrimmedPatchFragment,
     SurfaceCSGAnalyticIntersectionRecord,
     SurfaceCSGArrangementDiagnostic,
+    SurfaceCSGBoundaryExposureDiagnostic,
     SurfaceCSGBoundaryUseProvenanceRecord,
+    SurfaceCSGCapConstructionRecord,
     SurfaceCSGCallerInventoryRecord,
     SurfaceCSGConicDiagnostic,
     SurfaceCSGCutCapRequirementRecord,
+    SurfaceCSGCutBoundaryRecord,
     SurfaceCSGCurvePrimitive,
     SurfaceCSGCurveMappingDiagnostic,
     SurfaceCSGFeatureGateDiagnostic,
     SurfaceCSGFragmentClassificationDiagnostic,
+    SurfaceCSGFragmentClassificationEdgeRecord,
+    SurfaceCSGFragmentGraphDiagnostic,
+    SurfaceCSGFragmentGraphRecord,
     SurfaceCSGFragmentClassificationRecord,
     SurfaceCSGFragmentProvenanceRecord,
+    SurfaceCSGGeneratedCapPatchPayloadRecord,
+    SurfaceCSGOperationPlan,
+    SurfaceCSGOperandOrderingNormalizationRecord,
+    SurfaceCSGSolverRegistryDiagnostic,
+    SurfaceCSGSolverRegistryRecord,
     SurfaceCSGOperationSelectionRecord,
+    SurfaceCSGPairDispatchRecord,
     SurfaceCSGPatchLocalCurve,
     SurfaceCSGPatchLocalArrangementGraph,
     SurfaceCSGPatchLocalCurveMappingResult,
     SurfaceCSGPlanarRelationDiagnostic,
+    SurfaceCSGPlanDiagnostic,
+    SurfaceCSGPostReconstructionValidityDiagnostic,
     SurfaceCSGProvenanceMetadataRecord,
+    SurfaceCSGProvenanceDiagnostic,
+    SurfaceCSGReconstructionDiagnostic,
+    SurfaceCSGResultPatchProvenanceRecord,
+    SurfaceCSGResultProvenanceMap,
     SurfaceCSGRevolutionIntersectionRecord,
     SurfaceCSGShellAssemblyRecord,
+    SurfaceCSGShellOrderingRecord,
     SurfaceCSGSeamRebuildRecord,
     SurfaceCSGSplitTrimLoopRecord,
     SurfaceCSGToleranceDiagnostic,
     SurfaceCSGTolerancePolicy,
+    SurfaceCSGTrimAttachmentRecord,
+    SurfaceCSGUnsupportedCapDiagnostic,
     SurfaceCSGValidityDiagnostic,
     SurfaceCSGValidityGateRecord,
+    SurfaceCSGValidityHandoffRecord,
+    SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX,
+    SURFACE_BOOLEAN_OPERATIONS,
+    SURFACE_CSG_SOLVER_REGISTRY,
     SurfaceShell,
     TrimLoop,
+    assert_surface_csg_solver_registry_complete,
     assert_no_hidden_surface_csg_mesh_fallback,
     boolean_difference,
     boolean_intersection,
     boolean_union,
+    build_surface_csg_solver_registry,
+    assemble_surface_csg_result_shells,
     assemble_surface_csg_shells_from_fragments,
+    build_surface_csg_cap_patches,
+    build_surface_csg_cut_boundary_trims,
+    build_surface_csg_fragment_graph,
     build_surface_csg_patch_arrangement,
+    build_surface_csg_result_provenance_map,
     classify_surface_csg_fragment_against_body,
     classify_surface_csg_point_against_bounds,
     intersect_axis_compatible_revolution_pair,
@@ -72,6 +111,9 @@ from impression.modeling import (
     make_sphere,
     make_surface_body,
     make_surface_shell,
+    normalize_surface_csg_operand_ordering,
+    plan_prepared_surface_csg_operation,
+    plan_surface_csg_operation,
     prepare_surface_boolean_difference_operands,
     prepare_surface_boolean_operands,
     rebuild_surface_csg_shell_seams,
@@ -81,6 +123,7 @@ from impression.modeling import (
     surface_csg_curve_key,
     surface_csg_curves_equal,
     surface_csg_feature_gate,
+    surface_csg_solver_support_state,
     surface_boolean_overlap_fragments,
     surface_boolean_intersection_stage,
     surface_boolean_result,
@@ -90,7 +133,23 @@ from impression.modeling import (
     surface_csg_selection_is_empty,
     validate_surface_csg_curve,
     validate_surface_csg_patch_local_curve_domain,
+    validate_surface_csg_result_handoff,
 )
+from impression.modeling.surface import PATCH_FAMILY_CAPABILITY_MATRIX
+
+
+def _csg_negative_fixture(
+    fixture_id: str,
+    diagnostic: object,
+    *,
+    expected_keys: tuple[ExpectedDiagnosticKeyRecord, ...],
+) -> NegativeDiagnosticFixtureRecord:
+    return NegativeDiagnosticFixtureRecord(
+        fixture_id=fixture_id,
+        domain="csg",
+        expected_keys=expected_keys,
+        expected_snapshot=normalize_diagnostic_snapshot(diagnostic, fixture_id=fixture_id),
+    )
 
 
 def test_surface_csg_curve_primitives_have_deterministic_payload_keys_and_digests() -> None:
@@ -364,6 +423,168 @@ def test_surface_csg_caller_inventory_names_surface_and_explicit_mesh_routes() -
     assert all("caller_id" in record.canonical_payload() for record in inventory)
 
 
+def test_surface_csg_solver_registry_covers_all_promoted_family_pairs() -> None:
+    registry = build_surface_csg_solver_registry()
+
+    assert isinstance(registry, SurfaceCSGSolverRegistryRecord)
+    assert registry.passed is True
+    assert registry.diagnostics == ()
+    assert registry is not SURFACE_CSG_SOLVER_REGISTRY
+    assert assert_surface_csg_solver_registry_complete(registry) is registry
+    assert len(registry.support_records) == (
+        len(SURFACE_BOOLEAN_OPERATIONS)
+        * len(PATCH_FAMILY_CAPABILITY_MATRIX)
+        * len(PATCH_FAMILY_CAPABILITY_MATRIX)
+    )
+    assert registry.support_for("union", "planar", "revolution").support_state == "exact"
+    assert surface_csg_solver_support_state("union", "revolution", "planar", registry=registry) == "exact"
+    assert registry.canonical_payload()["passed"] is True
+
+
+def test_surface_csg_solver_registry_reports_missing_and_unknown_pairs() -> None:
+    missing_key = ("union", "planar", "planar")
+    extra_key = ("union", "mystery", "planar")
+    broken_matrix = {
+        key: value
+        for key, value in SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX.items()
+        if key != missing_key
+    }
+    broken_matrix[extra_key] = SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX[missing_key]
+
+    registry = build_surface_csg_solver_registry(broken_matrix)
+
+    assert registry.passed is False
+    assert all(isinstance(diagnostic, SurfaceCSGSolverRegistryDiagnostic) for diagnostic in registry.diagnostics)
+    assert {diagnostic.code for diagnostic in registry.diagnostics} == {"missing-pair", "unknown-pair"}
+    with pytest.raises(ValueError, match="missing-pair:union:planar/planar"):
+        assert_surface_csg_solver_registry_complete(registry)
+
+
+def test_surface_csg_operation_plan_accumulates_invalid_operand_diagnostics() -> None:
+    plan = plan_surface_csg_operation("union", (object(), object()))
+
+    assert isinstance(plan, SurfaceCSGOperationPlan)
+    assert plan.executable is False
+    assert plan.operands is None
+    assert all(isinstance(diagnostic, SurfaceCSGPlanDiagnostic) for diagnostic in plan.diagnostics)
+    assert [diagnostic.code for diagnostic in plan.diagnostics] == ["invalid-operand", "invalid-operand"]
+    assert "no mesh fallback" in plan.diagnostics[0].message
+    with pytest.raises(BooleanOperationError, match="operand 0.*operand 1"):
+        plan.assert_executable()
+
+
+def test_surface_csg_operation_plan_dispatches_family_pairs_and_refuses_unsupported_registry_entries() -> None:
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_sphere(radius=0.5, backend="surface")
+    operands = prepare_surface_boolean_operands("union", (left, right))
+    supported = plan_prepared_surface_csg_operation(operands)
+
+    assert supported.executable is True
+    assert all(isinstance(record, SurfaceCSGPairDispatchRecord) for record in supported.pair_dispatch)
+    assert {record.support_state for record in supported.pair_dispatch} == {"exact"}
+
+    broken_matrix = dict(SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX)
+    broken_matrix[("union", "planar", "revolution")] = SurfaceBooleanFamilyPairSupport(
+        operation="union",
+        left_family="planar",
+        right_family="revolution",
+        supported=False,
+        phase="intersection-kernel",
+        support_state="not-yet-implemented",
+        required_future_capability="fixture exact planar/revolution solver",
+    )
+    registry = assert_surface_csg_solver_registry_complete(build_surface_csg_solver_registry(broken_matrix))
+    unsupported = plan_prepared_surface_csg_operation(operands, registry=registry)
+
+    assert unsupported.executable is False
+    assert unsupported.diagnostics[0].code == "unsupported-family-pair"
+    assert "planar/revolution" in unsupported.diagnostics[0].message
+    assert unsupported.canonical_payload()["executable"] is False
+
+
+def test_surface_csg_negative_diagnostic_fixtures_feed_matrix() -> None:
+    invalid_plan = plan_surface_csg_operation("union", (object(), object()))
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_sphere(radius=0.5, backend="surface")
+    operands = prepare_surface_boolean_operands("union", (left, right))
+    broken_matrix = dict(SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX)
+    broken_matrix[("union", "planar", "revolution")] = SurfaceBooleanFamilyPairSupport(
+        operation="union",
+        left_family="planar",
+        right_family="revolution",
+        supported=False,
+        phase="intersection-kernel",
+        support_state="not-yet-implemented",
+        required_future_capability="fixture exact planar/revolution solver",
+    )
+    unsupported_plan = plan_prepared_surface_csg_operation(
+        operands,
+        registry=assert_surface_csg_solver_registry_complete(build_surface_csg_solver_registry(broken_matrix)),
+    )
+    non_executable_graph = build_surface_csg_fragment_graph(invalid_plan)
+    cap_plan = SurfaceCSGOperationPlan(
+        operation="difference",
+        operands=SurfaceBooleanOperands(operation="difference", bodies=(left, right)),
+    )
+    cap_graph = SurfaceCSGFragmentGraphRecord(
+        operation="difference",
+        plan=cap_plan,
+        classification_edges=(
+            SurfaceCSGFragmentClassificationEdgeRecord(
+                patch=SurfaceBooleanPatchRef(1, 0),
+                relation="inside",
+                role="cut_cap",
+                cut_curve_ids=("cut-revolution",),
+            ),
+        ),
+    )
+    unsupported_caps = build_surface_csg_cap_patches(cap_graph)
+    fixtures = (
+        _csg_negative_fixture(
+            "csg/invalid-operands",
+            invalid_plan.diagnostics[0],
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("code",), "invalid-operand"),
+                ExpectedDiagnosticKeyRecord(("operation",), "union"),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+        _csg_negative_fixture(
+            "csg/unsupported-family-pair",
+            unsupported_plan.diagnostics[0],
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("code",), "unsupported-family-pair"),
+                ExpectedDiagnosticKeyRecord(("operation",), "union"),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+        _csg_negative_fixture(
+            "csg/non-executable-fragment-graph",
+            non_executable_graph.diagnostics[0],
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("code",), "non-executable-plan"),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+        _csg_negative_fixture(
+            "csg/unsupported-cap-family",
+            unsupported_caps.diagnostics[0],
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("code",), "unsupported-cap-family"),
+                ExpectedDiagnosticKeyRecord(("cap_family",), "revolution"),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+    )
+
+    report = evaluate_negative_diagnostic_fixture_matrix(fixtures, required_domains=("csg",))
+
+    assert report.passed is True
+    assert report.domain_coverage[0].fixture_count == 4
+    assert all(fixture.expected_snapshot is not None for fixture in fixtures)
+    assert "planar/revolution" in unsupported_plan.diagnostics[0].message
+
+
 def test_surface_csg_feature_gate_reports_supported_and_unsupported_without_mesh_fallback() -> None:
     left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
     right = make_box(size=(1.0, 1.0, 1.0), center=(1.25, 0.0, 0.0), backend="surface")
@@ -496,6 +717,153 @@ def test_surface_csg_validity_gate_rejects_open_shell_with_diagnostics() -> None
     assert all(isinstance(diagnostic, SurfaceCSGValidityDiagnostic) for diagnostic in gate.diagnostics)
     assert gate.diagnostics[0].code == "invalid-shell"
     assert "missing seam coverage" in gate.diagnostics[0].message
+
+
+def test_surface_csg_validity_handoff_accepts_assembled_closed_shell_candidate() -> None:
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0), backend="surface")
+    operands = prepare_surface_boolean_operands("union", [left, right])
+    assembly = SurfaceCSGShellAssemblyRecord(
+        operation="union",
+        classification="closed",
+        shells=(left.iter_shells(world=True)[0],),
+    )
+
+    handoff = validate_surface_csg_result_handoff(assembly, operands)
+
+    assert isinstance(handoff, SurfaceCSGValidityHandoffRecord)
+    assert handoff.accepted is True
+    assert handoff.status == "succeeded"
+    assert handoff.body is not None
+    assert handoff.validity_gate is not None
+    assert handoff.validity_gate.accepted is True
+    assert all(isinstance(record, SurfaceCSGSeamRebuildRecord) for record in handoff.seam_rebuilds)
+    assert handoff.diagnostics == ()
+    assert handoff.canonical_payload()["accepted"] is True
+
+
+def test_surface_csg_validity_handoff_preserves_empty_success_without_body() -> None:
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0), backend="surface")
+    operands = prepare_surface_boolean_operands("intersection", [left, right])
+    assembly = SurfaceCSGShellAssemblyRecord(operation="intersection", classification="empty")
+
+    handoff = validate_surface_csg_result_handoff(assembly, operands)
+
+    assert handoff.accepted is True
+    assert handoff.classification == "empty"
+    assert handoff.body is None
+    assert handoff.validity_gate is None
+
+
+def test_surface_csg_validity_handoff_reports_invalid_reconstructed_shells() -> None:
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
+    operands = prepare_surface_boolean_difference_operands(left, [right])
+    graph = build_surface_csg_fragment_graph(plan_surface_csg_operation("difference", (left, right)))
+    caps = build_surface_csg_cap_patches(graph)
+    boundaries = build_surface_csg_cut_boundary_trims(graph, caps)
+    assembly = assemble_surface_csg_result_shells(graph, caps, boundaries)
+
+    handoff = validate_surface_csg_result_handoff(assembly, operands)
+
+    assert handoff.accepted is False
+    assert handoff.status == "invalid"
+    assert handoff.body is None
+    assert handoff.validity_gate is not None
+    assert all(isinstance(diagnostic, SurfaceCSGPostReconstructionValidityDiagnostic) for diagnostic in handoff.diagnostics)
+    assert {diagnostic.code for diagnostic in handoff.diagnostics} >= {
+        "seam-rebuild-failed",
+        "validity-gate-rejected",
+    }
+
+
+def test_surface_csg_operand_ordering_normalizer_sorts_commutative_operations_only() -> None:
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0), backend="surface")
+    union_operands = prepare_surface_boolean_operands("union", [right, left])
+    difference_operands = prepare_surface_boolean_difference_operands(right, [left])
+
+    union_order = normalize_surface_csg_operand_ordering("union", union_operands)
+    difference_order = normalize_surface_csg_operand_ordering("difference", difference_operands)
+
+    assert isinstance(union_order, SurfaceCSGOperandOrderingNormalizationRecord)
+    assert union_order.normalized_operand_ids == tuple(sorted(union_operands.body_ids))
+    assert difference_order.normalized_operand_ids == difference_operands.body_ids
+    assert difference_order.normalized_to_original_indices == (0, 1)
+
+
+def test_surface_csg_result_provenance_map_tracks_fragments_caps_and_boundaries() -> None:
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
+    operands = prepare_surface_boolean_difference_operands(left, [right])
+    graph = build_surface_csg_fragment_graph(plan_surface_csg_operation("difference", (left, right)))
+    caps = build_surface_csg_cap_patches(graph)
+    boundaries = build_surface_csg_cut_boundary_trims(graph, caps)
+    assembly = assemble_surface_csg_result_shells(graph, caps, boundaries)
+
+    provenance = build_surface_csg_result_provenance_map(
+        assembly,
+        operands,
+        graph=graph,
+        cap_construction=caps,
+        cut_boundary=boundaries,
+    )
+
+    assert isinstance(provenance, SurfaceCSGResultProvenanceMap)
+    assert provenance.supported is True
+    assert provenance.diagnostics == ()
+    assert all(isinstance(record, SurfaceCSGResultPatchProvenanceRecord) for record in provenance.result_patches)
+    assert {record.source_role for record in provenance.result_patches} == {"surviving-fragment", "generated-cap"}
+    cap_records = [record for record in provenance.result_patches if record.source_role == "generated-cap"]
+    assert cap_records
+    assert all(record.cap_payload_index is not None for record in cap_records)
+    assert all(record.boundary_attachment_index is not None for record in cap_records)
+    assert provenance.canonical_payload()["supported"] is True
+
+
+def test_surface_csg_result_provenance_map_reports_missing_generated_boundary_attachment() -> None:
+    source_patch = SurfaceBooleanPatchRef(1, 0)
+    assembly = SurfaceCSGShellAssemblyRecord(
+        operation="difference",
+        classification="closed",
+        shells=(
+            make_surface_shell(
+                (
+                    replace(
+                        PlanarSurfacePatch(family="planar"),
+                        metadata={"kernel": {"generated_role": "csg_generated_cap"}},
+                    ),
+                )
+            ),
+        ),
+        provenance=(
+            SurfaceCSGFragmentProvenanceRecord(
+                source_patch=source_patch,
+                result_shell_index=0,
+                result_patch_index=0,
+                cut_curve_ids=("cut-a",),
+            ),
+        ),
+    )
+    operands = prepare_surface_boolean_difference_operands(make_box(backend="surface"), [make_box(backend="surface")])
+    caps = SurfaceCSGCapConstructionRecord(
+        operation="difference",
+        cap_payloads=(
+            SurfaceCSGGeneratedCapPatchPayloadRecord(
+                source_patch=source_patch,
+                cap_family="planar",
+                patch=PlanarSurfacePatch(family="planar"),
+                cut_curve_ids=("cut-a",),
+            ),
+        ),
+    )
+
+    provenance = build_surface_csg_result_provenance_map(assembly, operands, cap_construction=caps)
+
+    assert provenance.supported is False
+    assert all(isinstance(diagnostic, SurfaceCSGProvenanceDiagnostic) for diagnostic in provenance.diagnostics)
+    assert provenance.diagnostics[0].code == "missing-boundary-attachment"
 
 
 def test_planar_linear_analytic_intersection_emits_exact_line_record() -> None:
@@ -1135,6 +1503,202 @@ def test_surface_boolean_intersection_stage_supports_disjoint_boxes_with_no_cut_
     assert stage.cut_curves == ()
     assert {classification.relation for classification in stage.patch_classifications} == {"outside"}
     assert {record.role for record in stage.split_records} == {"discard"}
+
+
+def test_surface_csg_fragment_graph_preserves_classification_edges_and_cut_provenance() -> None:
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
+    plan = plan_surface_csg_operation("union", (left, right))
+
+    graph = build_surface_csg_fragment_graph(plan)
+
+    assert isinstance(graph, SurfaceCSGFragmentGraphRecord)
+    assert graph.supported is True
+    assert graph.diagnostics == ()
+    assert graph.intersection_stage is not None
+    assert graph.intersection_stage.supported is True
+    assert all(isinstance(edge, SurfaceCSGFragmentClassificationEdgeRecord) for edge in graph.classification_edges)
+    assert len(graph.classification_edges) == len(graph.intersection_stage.patch_classifications)
+    assert {edge.role for edge in graph.classification_edges} == {"survive", "discard"}
+    assert any(edge.cut_curve_ids for edge in graph.classification_edges)
+    assert graph.canonical_payload()["supported"] is True
+
+
+def test_surface_csg_fragment_graph_refuses_non_executable_plans() -> None:
+    plan = plan_surface_csg_operation("union", (object(), object()))
+
+    graph = build_surface_csg_fragment_graph(plan)
+
+    assert graph.supported is False
+    assert all(isinstance(diagnostic, SurfaceCSGFragmentGraphDiagnostic) for diagnostic in graph.diagnostics)
+    assert graph.diagnostics[0].code == "non-executable-plan"
+    assert graph.classification_edges == ()
+
+
+def test_surface_csg_cap_patch_builder_generates_planar_payloads_from_cut_cap_edges() -> None:
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
+    graph = build_surface_csg_fragment_graph(plan_surface_csg_operation("difference", (left, right)))
+
+    caps = build_surface_csg_cap_patches(graph)
+
+    assert isinstance(caps, SurfaceCSGCapConstructionRecord)
+    assert caps.supported is True
+    assert caps.diagnostics == ()
+    assert caps.cap_payloads
+    assert all(isinstance(payload, SurfaceCSGGeneratedCapPatchPayloadRecord) for payload in caps.cap_payloads)
+    assert {payload.cap_family for payload in caps.cap_payloads} == {"planar"}
+    assert all(isinstance(payload.patch, PlanarSurfacePatch) for payload in caps.cap_payloads)
+    assert all("generated-csg-cap" in payload.patch.capability_flags for payload in caps.cap_payloads)
+    assert all(payload.patch.kernel_metadata()["generated_role"] == "csg_cap" for payload in caps.cap_payloads)
+    assert caps.canonical_payload()["supported"] is True
+
+
+def test_surface_csg_cap_patch_builder_refuses_non_planar_cap_families() -> None:
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_sphere(radius=0.5, backend="surface")
+    operands = SurfaceBooleanOperands(operation="difference", bodies=(left, right))
+    plan = SurfaceCSGOperationPlan(operation="difference", operands=operands)
+    graph = SurfaceCSGFragmentGraphRecord(
+        operation="difference",
+        plan=plan,
+        classification_edges=(
+            SurfaceCSGFragmentClassificationEdgeRecord(
+                patch=SurfaceBooleanPatchRef(1, 0),
+                relation="inside",
+                role="cut_cap",
+                cut_curve_ids=("cut-revolution",),
+            ),
+        ),
+    )
+
+    caps = build_surface_csg_cap_patches(graph)
+
+    assert caps.supported is False
+    assert all(isinstance(diagnostic, SurfaceCSGUnsupportedCapDiagnostic) for diagnostic in caps.diagnostics)
+    assert caps.diagnostics[0].code == "unsupported-cap-family"
+    assert caps.diagnostics[0].cap_family == "revolution"
+
+
+def test_surface_csg_cut_boundary_trims_attach_generated_cap_payloads() -> None:
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
+    graph = build_surface_csg_fragment_graph(plan_surface_csg_operation("difference", (left, right)))
+    caps = build_surface_csg_cap_patches(graph)
+
+    boundaries = build_surface_csg_cut_boundary_trims(graph, caps)
+
+    assert isinstance(boundaries, SurfaceCSGCutBoundaryRecord)
+    assert boundaries.supported is True
+    assert boundaries.diagnostics == ()
+    assert len(boundaries.trim_attachments) == len(caps.cap_payloads)
+    assert all(isinstance(attachment, SurfaceCSGTrimAttachmentRecord) for attachment in boundaries.trim_attachments)
+    assert {attachment.exposure for attachment in boundaries.trim_attachments} == {"shared"}
+    assert all(attachment.trim_loop.category == "outer" for attachment in boundaries.trim_attachments)
+    assert all(attachment.cut_curve_ids for attachment in boundaries.trim_attachments)
+    assert boundaries.canonical_payload()["supported"] is True
+
+
+def test_surface_csg_cut_boundary_trims_report_open_generated_cap_boundaries() -> None:
+    patch_ref = SurfaceBooleanPatchRef(0, 0)
+    payload = SurfaceCSGGeneratedCapPatchPayloadRecord(
+        source_patch=patch_ref,
+        cap_family="planar",
+        patch=PlanarSurfacePatch(family="planar"),
+        cut_curve_ids=(),
+    )
+    plan = SurfaceCSGOperationPlan(
+        operation="difference",
+        operands=SurfaceBooleanOperands(operation="difference", bodies=(make_box(backend="surface"), make_box(backend="surface"))),
+    )
+    graph = SurfaceCSGFragmentGraphRecord(operation="difference", plan=plan)
+    caps = SurfaceCSGCapConstructionRecord(operation="difference", cap_payloads=(payload,))
+
+    boundaries = build_surface_csg_cut_boundary_trims(graph, caps)
+
+    assert boundaries.supported is False
+    assert all(isinstance(diagnostic, SurfaceCSGBoundaryExposureDiagnostic) for diagnostic in boundaries.diagnostics)
+    assert boundaries.diagnostics[0].code == "open-boundary"
+    assert boundaries.trim_attachments[0].exposure == "open"
+
+
+def test_surface_csg_result_shell_assembly_builds_body_candidate_from_graph_and_caps() -> None:
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
+    graph = build_surface_csg_fragment_graph(plan_surface_csg_operation("difference", (left, right)))
+    caps = build_surface_csg_cap_patches(graph)
+    boundaries = build_surface_csg_cut_boundary_trims(graph, caps)
+
+    assembly = assemble_surface_csg_result_shells(graph, caps, boundaries)
+
+    assert isinstance(assembly, SurfaceCSGShellAssemblyRecord)
+    assert assembly.supported is True
+    assert assembly.diagnostics == ()
+    assert assembly.classification == "closed"
+    assert len(assembly.shells) == 1
+    assert all(isinstance(record, SurfaceCSGShellOrderingRecord) for record in assembly.shell_ordering)
+    assert len(assembly.provenance) == assembly.shells[0].patch_count
+    assert any(
+        patch.kernel_metadata().get("generated_role") == "csg_generated_cap"
+        for patch in assembly.shells[0].iter_patches(world=True)
+    )
+    body = assembly.to_body(metadata={"kernel": {"boolean_operation": "difference"}})
+    assert isinstance(body, SurfaceBody)
+    assert body.patch_count == assembly.shells[0].patch_count
+    assert assembly.canonical_payload()["shell_ordering"][0]["result_shell_index"] == 0
+
+
+def test_surface_csg_result_shell_assembly_reports_cut_boundary_diagnostics() -> None:
+    patch_ref = SurfaceBooleanPatchRef(0, 0)
+    payload = SurfaceCSGGeneratedCapPatchPayloadRecord(
+        source_patch=patch_ref,
+        cap_family="planar",
+        patch=PlanarSurfacePatch(family="planar"),
+        cut_curve_ids=(),
+    )
+    plan = SurfaceCSGOperationPlan(
+        operation="difference",
+        operands=SurfaceBooleanOperands(
+            operation="difference",
+            bodies=(make_box(backend="surface"), make_box(backend="surface")),
+        ),
+    )
+    graph = SurfaceCSGFragmentGraphRecord(
+        operation="difference",
+        plan=plan,
+        classification_edges=(
+            SurfaceCSGFragmentClassificationEdgeRecord(
+                patch=patch_ref,
+                relation="inside",
+                role="cut_cap",
+            ),
+        ),
+    )
+    caps = SurfaceCSGCapConstructionRecord(operation="difference", cap_payloads=(payload,))
+    boundaries = build_surface_csg_cut_boundary_trims(graph, caps)
+
+    assembly = assemble_surface_csg_result_shells(graph, caps, boundaries)
+
+    assert assembly.supported is False
+    assert all(isinstance(diagnostic, SurfaceCSGReconstructionDiagnostic) for diagnostic in assembly.diagnostics)
+    assert assembly.diagnostics[0].code == "invalid-cut-boundary"
+    with pytest.raises(BooleanOperationError, match="Generated CSG cap payload"):
+        assembly.to_body()
+
+
+def test_surface_csg_result_shell_assembly_can_emit_stably_ordered_multi_shells() -> None:
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
+    graph = build_surface_csg_fragment_graph(plan_surface_csg_operation("union", (left, right)))
+    caps = build_surface_csg_cap_patches(graph)
+    boundaries = build_surface_csg_cut_boundary_trims(graph, caps)
+
+    assembly = assemble_surface_csg_result_shells(graph, caps, boundaries, multi_shell=True)
+
+    assert assembly.supported is True
+    assert len(assembly.shells) > 1
+    assert tuple(record.result_shell_index for record in assembly.shell_ordering) == tuple(range(len(assembly.shells)))
+    assert tuple(record.patch_count for record in assembly.shell_ordering) == (1,) * len(assembly.shells)
 
 
 def test_surface_boolean_intersection_stage_emits_operation_aware_split_records() -> None:
