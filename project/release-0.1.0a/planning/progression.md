@@ -447,8 +447,8 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 239: CSG Feature Builder Boolean Migration (v1.0)](../specifications/surface-239-csg-feature-builder-boolean-migration-v1_0.md)
 
 ### Additional Manifest Splits
-- [ ] [Impress Spec 14: .impress Base Patch Payload Codec (v1.0)](../specifications/impress-14-impress-base-patch-payload-codec-v1_0.md)
-- [ ] [Impress Spec 15: .impress Patch Family Dispatch And Validation (v1.0)](../specifications/impress-15-impress-patch-family-dispatch-and-validation-v1_0.md)
+- [x] [Impress Spec 14: .impress Base Patch Payload Codec (v1.0)](../specifications/impress-14-impress-base-patch-payload-codec-v1_0.md)
+- [x] [Impress Spec 15: .impress Patch Family Dispatch And Validation (v1.0)](../specifications/impress-15-impress-patch-family-dispatch-and-validation-v1_0.md)
 - [ ] [Loft Spec 65: Topology Point Builder API (v1.0)](../specifications/loft-65-topology-point-builder-api-v1_0.md)
 - [ ] [Loft Spec 66: Topology Segment Builder API (v1.0)](../specifications/loft-66-topology-segment-builder-api-v1_0.md)
 - [ ] [Surface Spec 240: .impress Implicit Patch Payload Codec (v1.0)](../specifications/surface-240-impress-implicit-patch-payload-codec-v1_0.md)

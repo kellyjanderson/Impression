@@ -15,12 +15,14 @@ from impression.io import (
     ImpressUnits,
     InvalidSurfaceWrapperDiagnostic,
     SurfaceBodyStore,
+    SurfacePatchBasePayload,
     UnsupportedImpressSchemaVersion,
     atomic_write_text,
     assert_impress_patch_codec_coverage_for_available_families,
     decode_surface_adjacency_payload,
     decode_surface_boundary_ref_payload,
     decode_surface_body_payload,
+    decode_surface_patch_base_payload,
     decode_surface_patch_payload,
     decode_surface_seam_payload,
     decode_surface_shell_payload,
@@ -30,6 +32,7 @@ from impression.io import (
     encode_surface_adjacency_payload,
     encode_surface_boundary_ref_payload,
     encode_surface_body_payload,
+    encode_surface_patch_base_payload,
     encode_surface_patch_payload,
     encode_surface_seam_payload,
     encode_surface_shell_payload,
@@ -37,6 +40,7 @@ from impression.io import (
     make_impress_document_payload,
     make_impress_document_root,
     make_surface_body_store,
+    inspect_impress_patch_family_dispatch,
     inspect_impress_patch_codec_coverage,
     load_impress,
     loads_impress_json,
@@ -99,6 +103,35 @@ def test_impress_patch_codec_coverage_inventory_covers_available_families() -> N
 def test_impress_patch_codec_coverage_inventory_reports_supported_family_list() -> None:
     records = inspect_impress_patch_codec_coverage()
 
+    assert {record.family for record in records} == {
+        "planar",
+        "ruled",
+        "revolution",
+        "bspline",
+        "nurbs",
+        "sweep",
+        "subdivision",
+        "implicit",
+        "heightmap",
+        "displacement",
+    }
+
+
+def test_impress_patch_family_dispatch_inventory_is_allow_listed() -> None:
+    records = inspect_impress_patch_family_dispatch()
+
+    assert {record.kind for record in records} == {
+        "PlanarSurfacePatch",
+        "RuledSurfacePatch",
+        "RevolutionSurfacePatch",
+        "BSplineSurfacePatch",
+        "NURBSSurfacePatch",
+        "SweepSurfacePatch",
+        "SubdivisionSurfacePatch",
+        "ImplicitSurfacePatch",
+        "HeightmapSurfacePatch",
+        "DisplacementSurfacePatch",
+    }
     assert {record.family for record in records} == {
         "planar",
         "ruled",
@@ -297,6 +330,74 @@ def _codec_covered_patch_fixtures() -> tuple[object, ...]:
             bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
         ),
     )
+
+
+def test_encode_surface_patch_base_payload_preserves_identity_and_metadata_without_geometry() -> None:
+    patch = PlanarSurfacePatch(
+        family="planar",
+        metadata={"kernel": {"face": "base"}, "consumer": {"name": "panel"}},
+        capability_flags=frozenset({"analytic"}),
+        trim_loops=(TrimLoop(points_uv=[(0.0, 0.0), (0.0, 1.0), (1.0, 1.0)], category="outer"),),
+    )
+
+    payload = encode_surface_patch_base_payload(patch)
+
+    assert payload["stable_identity"] == patch.stable_identity
+    assert payload["kind"] == "PlanarSurfacePatch"
+    assert payload["family"] == "planar"
+    assert payload["metadata"] == patch.metadata
+    assert payload["capability_flags"] == ["analytic"]
+    assert "geometry" not in payload
+
+
+def test_decode_surface_patch_base_payload_returns_typed_bundle_before_family_dispatch() -> None:
+    patch = PlanarSurfacePatch(family="planar", metadata={"kernel": {"face": "base"}})
+    payload = encode_surface_patch_payload(patch)
+
+    base = decode_surface_patch_base_payload(payload)
+
+    assert isinstance(base, SurfacePatchBasePayload)
+    assert base.kind == "PlanarSurfacePatch"
+    assert base.family == "planar"
+    assert base.stable_identity == patch.stable_identity
+    assert base.metadata == patch.metadata
+    assert base.geometry == payload["geometry"]
+    assert base.constructor_kwargs()["metadata"] == patch.metadata
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda payload: payload.pop("kind"), "requires a non-empty kind"),
+        (lambda payload: payload.update({"stable_identity": ""}), "stable_identity must be a non-empty string"),
+        (lambda payload: payload.update({"metadata": []}), "metadata must be an object"),
+        (lambda payload: payload.update({"capability_flags": ["ok", ""]}), "capability_flags must contain"),
+        (lambda payload: payload.update({"transform_matrix": [[1.0]]}), "transform_matrix must be a 4x4"),
+    ],
+)
+def test_decode_surface_patch_base_payload_refuses_malformed_base_fields(mutate, message) -> None:  # noqa: ANN001
+    payload = encode_surface_patch_payload(PlanarSurfacePatch(family="planar"))
+    mutate(payload)
+
+    with pytest.raises(ImpressFormatError, match=message):
+        decode_surface_patch_base_payload(payload)
+
+
+def test_decode_surface_patch_payload_refuses_stable_identity_mismatch() -> None:
+    payload = encode_surface_patch_payload(PlanarSurfacePatch(family="planar"))
+    payload["metadata"] = {"kernel": {"changed": True}}
+
+    with pytest.raises(ImpressFormatError, match="stable_identity does not match"):
+        decode_surface_patch_payload(payload)
+
+
+def test_decode_surface_patch_payload_refuses_unknown_family_before_geometry_interpretation() -> None:
+    payload = encode_surface_patch_payload(PlanarSurfacePatch(family="planar"))
+    payload["kind"] = "MysterySurfacePatch"
+    payload["geometry"] = {"unexpected": "family-specific"}
+
+    with pytest.raises(ImpressFormatError, match="Unsupported SurfacePatch kind"):
+        decode_surface_patch_payload(payload)
 
 
 def _all_codec_covered_family_body() -> object:
