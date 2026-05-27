@@ -488,6 +488,56 @@ class SurfaceBooleanPatchClassification:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGFragmentClassificationDiagnostic:
+    """Explicit diagnostic for ambiguous fragment classification."""
+
+    code: Literal["open-body", "ambiguous-boundary", "outside-domain", "unstable-sample"]
+    message: str
+    patch: SurfaceBooleanPatchRef
+    sample_point: tuple[float, float, float] | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+            "sample_point": self.sample_point,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGFragmentClassificationRecord:
+    """Surface-native inside/outside/on classification for one split fragment."""
+
+    patch: SurfaceBooleanPatchRef
+    relation: SurfaceBooleanPatchRelation
+    sample_uv: tuple[float, float]
+    sample_point: tuple[float, float, float]
+    cut_curve_ids: tuple[str, ...] = ()
+    diagnostics: tuple[SurfaceCSGFragmentClassificationDiagnostic, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cut_curve_ids": self.cut_curve_ids,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+            "relation": self.relation,
+            "sample_point": self.sample_point,
+            "sample_uv": self.sample_uv,
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceBooleanSplitRecord:
     """One deterministic surfaced split-selection record for a source patch fragment."""
 
@@ -2611,27 +2661,126 @@ def _classify_patch_against_bounds(
     u = float(sum(patch.domain.u_range) * 0.5)
     v = float(sum(patch.domain.v_range) * 0.5)
     point = patch.point_at(u, v)
+    return classify_surface_csg_point_against_bounds(point, bounds, epsilon=epsilon)
+
+
+def select_surface_csg_fragment_sample(
+    patch: PlanarSurfacePatch,
+    *,
+    trim_loop: TrimLoop | None = None,
+) -> tuple[float, float]:
+    """Select a deterministic patch-local sample point for fragment classification."""
+
+    if trim_loop is not None:
+        points = np.asarray(trim_loop.points_uv, dtype=float)
+        centroid = points.mean(axis=0)
+        return (float(centroid[0]), float(centroid[1]))
+    return (
+        float(sum(patch.domain.u_range) * 0.5),
+        float(sum(patch.domain.v_range) * 0.5),
+    )
+
+
+def classify_surface_csg_point_against_bounds(
+    point: Sequence[float],
+    bounds: tuple[float, float, float, float, float, float],
+    *,
+    epsilon: float = 1e-9,
+) -> SurfaceBooleanPatchRelation:
+    """Classify one surface-native sample point against an opposing closed bounds proxy."""
+
+    point_array = np.asarray(point, dtype=float).reshape(3)
     inside = (
-        (bounds[0] + epsilon) < point[0] < (bounds[1] - epsilon)
-        and (bounds[2] + epsilon) < point[1] < (bounds[3] - epsilon)
-        and (bounds[4] + epsilon) < point[2] < (bounds[5] - epsilon)
+        (bounds[0] + epsilon) < point_array[0] < (bounds[1] - epsilon)
+        and (bounds[2] + epsilon) < point_array[1] < (bounds[3] - epsilon)
+        and (bounds[4] + epsilon) < point_array[2] < (bounds[5] - epsilon)
     )
     if inside:
         return "inside"
     on = (
-        (bounds[0] - epsilon) <= point[0] <= (bounds[1] + epsilon)
-        and (bounds[2] - epsilon) <= point[1] <= (bounds[3] + epsilon)
-        and (bounds[4] - epsilon) <= point[2] <= (bounds[5] + epsilon)
+        (bounds[0] - epsilon) <= point_array[0] <= (bounds[1] + epsilon)
+        and (bounds[2] - epsilon) <= point_array[1] <= (bounds[3] + epsilon)
+        and (bounds[4] - epsilon) <= point_array[2] <= (bounds[5] + epsilon)
         and (
-            abs(point[0] - bounds[0]) <= epsilon
-            or abs(point[0] - bounds[1]) <= epsilon
-            or abs(point[1] - bounds[2]) <= epsilon
-            or abs(point[1] - bounds[3]) <= epsilon
-            or abs(point[2] - bounds[4]) <= epsilon
-            or abs(point[2] - bounds[5]) <= epsilon
+            abs(point_array[0] - bounds[0]) <= epsilon
+            or abs(point_array[0] - bounds[1]) <= epsilon
+            or abs(point_array[1] - bounds[2]) <= epsilon
+            or abs(point_array[1] - bounds[3]) <= epsilon
+            or abs(point_array[2] - bounds[4]) <= epsilon
+            or abs(point_array[2] - bounds[5]) <= epsilon
         )
     )
     return "on" if on else "outside"
+
+
+def classify_surface_csg_fragment_against_body(
+    patch_ref: SurfaceBooleanPatchRef,
+    patch: PlanarSurfacePatch,
+    opposing_body: SurfaceBody,
+    *,
+    trim_loop: TrimLoop | None = None,
+    cut_curve_ids: Sequence[str] = (),
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> SurfaceCSGFragmentClassificationRecord:
+    """Classify one split fragment against the opposing surface body."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    sample_uv = select_surface_csg_fragment_sample(patch, trim_loop=trim_loop)
+    diagnostics: list[SurfaceCSGFragmentClassificationDiagnostic] = []
+    if not patch.domain.contains(sample_uv[0], sample_uv[1]):
+        diagnostics.append(
+            SurfaceCSGFragmentClassificationDiagnostic(
+                code="outside-domain",
+                message="Fragment classification sample is outside the patch domain.",
+                patch=patch_ref,
+            )
+        )
+        sample_point = (float("nan"), float("nan"), float("nan"))
+        relation: SurfaceBooleanPatchRelation = "outside"
+    else:
+        point_array = patch.point_at(*sample_uv)
+        sample_point = (float(point_array[0]), float(point_array[1]), float(point_array[2]))
+        try:
+            if _classify_surface_body(opposing_body) != "closed":
+                diagnostics.append(
+                    SurfaceCSGFragmentClassificationDiagnostic(
+                        code="open-body",
+                        message="Opposing body is not closed-valid for CSG containment classification.",
+                        patch=patch_ref,
+                        sample_point=sample_point,
+                    )
+                )
+        except Exception:
+            diagnostics.append(
+                SurfaceCSGFragmentClassificationDiagnostic(
+                    code="open-body",
+                    message="Opposing body classification failed during CSG containment classification.",
+                    patch=patch_ref,
+                    sample_point=sample_point,
+                )
+            )
+        relation = classify_surface_csg_point_against_bounds(
+            sample_point,
+            opposing_body.bounds_estimate(),
+            epsilon=normalized_policy.equality_tolerance,
+        )
+        if relation == "on" and not cut_curve_ids:
+            diagnostics.append(
+                SurfaceCSGFragmentClassificationDiagnostic(
+                    code="ambiguous-boundary",
+                    message="Fragment sample lies on the opposing boundary without cut-curve provenance.",
+                    patch=patch_ref,
+                    sample_point=sample_point,
+                )
+            )
+    return SurfaceCSGFragmentClassificationRecord(
+        patch=patch_ref,
+        relation=relation,
+        sample_uv=sample_uv,
+        sample_point=sample_point,
+        cut_curve_ids=tuple(sorted(cut_curve_ids)),
+        diagnostics=tuple(diagnostics),
+    )
 
 
 def _surface_boolean_split_role(

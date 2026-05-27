@@ -29,6 +29,8 @@ from impression.modeling import (
     SurfaceCSGConicDiagnostic,
     SurfaceCSGCurvePrimitive,
     SurfaceCSGCurveMappingDiagnostic,
+    SurfaceCSGFragmentClassificationDiagnostic,
+    SurfaceCSGFragmentClassificationRecord,
     SurfaceCSGPatchLocalCurve,
     SurfaceCSGPatchLocalArrangementGraph,
     SurfaceCSGPatchLocalCurveMappingResult,
@@ -43,6 +45,8 @@ from impression.modeling import (
     boolean_intersection,
     boolean_union,
     build_surface_csg_patch_arrangement,
+    classify_surface_csg_fragment_against_body,
+    classify_surface_csg_point_against_bounds,
     intersect_axis_compatible_revolution_pair,
     intersect_planar_linear_patch_pair,
     intersect_planar_revolution_patch_pair,
@@ -63,6 +67,7 @@ from impression.modeling import (
     surface_boolean_overlap_fragments,
     surface_boolean_intersection_stage,
     surface_boolean_result,
+    select_surface_csg_fragment_sample,
     validate_surface_csg_curve,
     validate_surface_csg_patch_local_curve_domain,
 )
@@ -215,6 +220,52 @@ def test_surface_csg_patch_arrangement_reports_zero_length_fragments_and_outside
     assert graph.supported is False
     assert all(isinstance(diagnostic, SurfaceCSGArrangementDiagnostic) for diagnostic in graph.diagnostics)
     assert {diagnostic.code for diagnostic in graph.diagnostics} == {"outside-domain", "zero-length-fragment"}
+
+
+def test_surface_csg_fragment_classification_distinguishes_inside_outside_and_on_boundary() -> None:
+    opposing = make_box(size=(2.0, 2.0, 2.0), backend="surface")
+    patch_ref = SurfaceBooleanPatchRef(0, 0)
+    inside_patch = PlanarSurfacePatch(family="planar", origin=(-0.25, -0.25, 0.0), u_axis=(0.5, 0.0, 0.0), v_axis=(0.0, 0.5, 0.0))
+    outside_patch = PlanarSurfacePatch(family="planar", origin=(2.0, 2.0, 2.0), u_axis=(0.5, 0.0, 0.0), v_axis=(0.0, 0.5, 0.0))
+    boundary_patch = PlanarSurfacePatch(family="planar", origin=(-0.5, -0.5, 1.0), u_axis=(1.0, 0.0, 0.0), v_axis=(0.0, 1.0, 0.0))
+
+    inside = classify_surface_csg_fragment_against_body(patch_ref, inside_patch, opposing)
+    outside = classify_surface_csg_fragment_against_body(patch_ref, outside_patch, opposing)
+    boundary = classify_surface_csg_fragment_against_body(
+        patch_ref,
+        boundary_patch,
+        opposing,
+        cut_curve_ids=("cut-on-boundary",),
+    )
+
+    assert isinstance(inside, SurfaceCSGFragmentClassificationRecord)
+    assert inside.relation == "inside"
+    assert outside.relation == "outside"
+    assert boundary.relation == "on"
+    assert boundary.cut_curve_ids == ("cut-on-boundary",)
+    assert boundary.supported is True
+    assert classify_surface_csg_point_against_bounds((0.0, 0.0, 1.0), opposing.bounds_estimate()) == "on"
+
+
+def test_surface_csg_fragment_classification_reports_ambiguous_and_domain_failures() -> None:
+    opposing = make_box(size=(2.0, 2.0, 2.0), backend="surface")
+    patch_ref = SurfaceBooleanPatchRef(0, 0)
+    boundary_patch = PlanarSurfacePatch(family="planar", origin=(-0.5, -0.5, 1.0), u_axis=(1.0, 0.0, 0.0), v_axis=(0.0, 1.0, 0.0))
+    outside_loop = TrimLoop(((2.0, 2.0), (3.0, 2.0), (2.5, 3.0)), category="outer")
+
+    ambiguous = classify_surface_csg_fragment_against_body(patch_ref, boundary_patch, opposing)
+    outside_domain = classify_surface_csg_fragment_against_body(
+        patch_ref,
+        boundary_patch,
+        opposing,
+        trim_loop=outside_loop,
+    )
+
+    assert all(isinstance(diagnostic, SurfaceCSGFragmentClassificationDiagnostic) for diagnostic in ambiguous.diagnostics)
+    assert ambiguous.diagnostics[0].code == "ambiguous-boundary"
+    assert outside_domain.supported is False
+    assert outside_domain.diagnostics[0].code == "outside-domain"
+    assert select_surface_csg_fragment_sample(boundary_patch, trim_loop=outside_loop) == pytest.approx((2.5, 7.0 / 3.0))
 
 
 def test_planar_linear_analytic_intersection_emits_exact_line_record() -> None:
