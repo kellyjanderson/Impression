@@ -27,10 +27,12 @@ from impression.modeling import (
     SurfaceCSGAnalyticIntersectionRecord,
     SurfaceCSGArrangementDiagnostic,
     SurfaceCSGConicDiagnostic,
+    SurfaceCSGCutCapRequirementRecord,
     SurfaceCSGCurvePrimitive,
     SurfaceCSGCurveMappingDiagnostic,
     SurfaceCSGFragmentClassificationDiagnostic,
     SurfaceCSGFragmentClassificationRecord,
+    SurfaceCSGOperationSelectionRecord,
     SurfaceCSGPatchLocalCurve,
     SurfaceCSGPatchLocalArrangementGraph,
     SurfaceCSGPatchLocalCurveMappingResult,
@@ -68,6 +70,9 @@ from impression.modeling import (
     surface_boolean_intersection_stage,
     surface_boolean_result,
     select_surface_csg_fragment_sample,
+    select_surface_csg_operation_fragment,
+    select_surface_csg_operation_fragments,
+    surface_csg_selection_is_empty,
     validate_surface_csg_curve,
     validate_surface_csg_patch_local_curve_domain,
 )
@@ -266,6 +271,65 @@ def test_surface_csg_fragment_classification_reports_ambiguous_and_domain_failur
     assert outside_domain.supported is False
     assert outside_domain.diagnostics[0].code == "outside-domain"
     assert select_surface_csg_fragment_sample(boundary_patch, trim_loop=outside_loop) == pytest.approx((2.5, 7.0 / 3.0))
+
+
+def test_surface_csg_operation_selection_tables_cover_all_operations_and_relations() -> None:
+    classifications = tuple(
+        SurfaceCSGFragmentClassificationRecord(
+            patch=SurfaceBooleanPatchRef(operand_index, index),
+            relation=relation,
+            sample_uv=(0.5, 0.5),
+            sample_point=(0.0, 0.0, 0.0),
+            cut_curve_ids=(f"cut-{relation}",),
+        )
+        for index, relation in enumerate(("inside", "outside", "on"))
+        for operand_index in (0, 1)
+    )
+
+    union = select_surface_csg_operation_fragments("union", classifications)
+    intersection = select_surface_csg_operation_fragments("intersection", classifications)
+    difference = select_surface_csg_operation_fragments("difference", classifications)
+
+    assert all(isinstance(record, SurfaceCSGOperationSelectionRecord) for record in union)
+    assert {record.relation: record.role for record in union if record.patch.operand_index == 0} == {
+        "inside": "discard",
+        "outside": "survive",
+        "on": "survive",
+    }
+    assert {record.relation: record.role for record in intersection if record.patch.operand_index == 0} == {
+        "inside": "survive",
+        "outside": "discard",
+        "on": "survive",
+    }
+    assert {record.relation: record.role for record in difference if record.patch.operand_index == 0} == {
+        "inside": "discard",
+        "outside": "survive",
+        "on": "survive",
+    }
+    assert {record.relation: record.role for record in difference if record.patch.operand_index == 1} == {
+        "inside": "cut_cap",
+        "outside": "discard",
+        "on": "cut_cap",
+    }
+    assert all(isinstance(record.cut_cap, SurfaceCSGCutCapRequirementRecord) for record in difference)
+    assert all(record.cut_cap.required for record in difference if record.role == "cut_cap")
+
+
+def test_surface_csg_operation_selection_reports_empty_result() -> None:
+    discarded = (
+        select_surface_csg_operation_fragment(
+            "intersection",
+            SurfaceCSGFragmentClassificationRecord(
+                patch=SurfaceBooleanPatchRef(0, 0),
+                relation="outside",
+                sample_uv=(0.5, 0.5),
+                sample_point=(2.0, 2.0, 2.0),
+            ),
+        ),
+    )
+
+    assert surface_csg_selection_is_empty(discarded) is True
+    assert discarded[0].survives is False
 
 
 def test_planar_linear_analytic_intersection_emits_exact_line_record() -> None:

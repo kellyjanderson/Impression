@@ -538,6 +538,57 @@ class SurfaceCSGFragmentClassificationRecord:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGCutCapRequirementRecord:
+    """Operation-specific indication that a classified fragment contributes a cut cap."""
+
+    patch: SurfaceBooleanPatchRef
+    required: bool
+    reason: str
+    cut_curve_ids: tuple[str, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cut_curve_ids": self.cut_curve_ids,
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+            "reason": self.reason,
+            "required": self.required,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGOperationSelectionRecord:
+    """Deterministic operation-selection result for one classified fragment."""
+
+    operation: SurfaceBooleanOperation
+    patch: SurfaceBooleanPatchRef
+    relation: SurfaceBooleanPatchRelation
+    role: SurfaceBooleanSplitRole
+    cut_cap: SurfaceCSGCutCapRequirementRecord
+    cut_curve_ids: tuple[str, ...] = ()
+
+    @property
+    def survives(self) -> bool:
+        return self.role in {"survive", "cut_cap"}
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cut_cap": self.cut_cap.canonical_payload(),
+            "cut_curve_ids": self.cut_curve_ids,
+            "operation": self.operation,
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+            "relation": self.relation,
+            "role": self.role,
+            "survives": self.survives,
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceBooleanSplitRecord:
     """One deterministic surfaced split-selection record for a source patch fragment."""
 
@@ -2789,13 +2840,75 @@ def _surface_boolean_split_role(
     operand_index: int,
     relation: SurfaceBooleanPatchRelation,
 ) -> SurfaceBooleanSplitRole:
+    selection = select_surface_csg_operation_fragment(
+        operation,
+        SurfaceCSGFragmentClassificationRecord(
+            patch=SurfaceBooleanPatchRef(operand_index, -1),
+            relation=relation,
+            sample_uv=(0.0, 0.0),
+            sample_point=(0.0, 0.0, 0.0),
+        ),
+    )
+    return selection.role
+
+
+def select_surface_csg_operation_fragment(
+    operation: SurfaceBooleanOperation,
+    classification: SurfaceCSGFragmentClassificationRecord,
+) -> SurfaceCSGOperationSelectionRecord:
+    """Apply operation-specific survive/discard/cut-cap rules to one fragment."""
+
+    relation = classification.relation
     if operation == "union":
-        return "discard" if relation == "inside" else "survive"
-    if operation == "intersection":
-        return "discard" if relation == "outside" else "survive"
-    if operand_index == 0:
-        return "discard" if relation == "inside" else "survive"
-    return "discard" if relation == "outside" else "cut_cap"
+        role: SurfaceBooleanSplitRole = "discard" if relation == "inside" else "survive"
+        cap_required = False
+        reason = "union keeps exterior and boundary fragments"
+    elif operation == "intersection":
+        role = "discard" if relation == "outside" else "survive"
+        cap_required = False
+        reason = "intersection keeps interior and boundary fragments"
+    elif classification.patch.operand_index == 0:
+        role = "discard" if relation == "inside" else "survive"
+        cap_required = False
+        reason = "difference keeps base exterior and boundary fragments"
+    else:
+        role = "discard" if relation == "outside" else "cut_cap"
+        cap_required = role == "cut_cap"
+        reason = "difference converts cutter interior and boundary fragments into cut caps"
+    cut_cap = SurfaceCSGCutCapRequirementRecord(
+        patch=classification.patch,
+        required=cap_required,
+        reason=reason,
+        cut_curve_ids=classification.cut_curve_ids,
+    )
+    return SurfaceCSGOperationSelectionRecord(
+        operation=operation,
+        patch=classification.patch,
+        relation=relation,
+        role=role,
+        cut_cap=cut_cap,
+        cut_curve_ids=classification.cut_curve_ids,
+    )
+
+
+def select_surface_csg_operation_fragments(
+    operation: SurfaceBooleanOperation,
+    classifications: Sequence[SurfaceCSGFragmentClassificationRecord],
+) -> tuple[SurfaceCSGOperationSelectionRecord, ...]:
+    """Return deterministic operation-selection records for classified fragments."""
+
+    return tuple(
+        sorted(
+            (select_surface_csg_operation_fragment(operation, classification) for classification in classifications),
+            key=lambda record: (record.patch.operand_index, record.patch.patch_index, record.relation, record.role),
+        )
+    )
+
+
+def surface_csg_selection_is_empty(selections: Sequence[SurfaceCSGOperationSelectionRecord]) -> bool:
+    """Return whether operation selection produces an explicit empty result."""
+
+    return not any(selection.survives for selection in selections)
 
 
 def _cut_curve_id(
