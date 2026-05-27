@@ -108,6 +108,8 @@ from impression.modeling import (
     SurfaceContinuityMetadata,
     SurfaceContinuityRequest,
     SurfaceContinuitySupportRecord,
+    SurfaceContinuityTolerancePolicy,
+    SurfaceContinuityConstraintDiagnostic,
     SurfaceConsumerCollection,
     SurfaceCollectionTessellationResult,
     SurfaceFamilyTessellationAdapter,
@@ -137,6 +139,8 @@ from impression.modeling import (
     SurfaceSceneGroup,
     SurfaceSceneNode,
     SurfaceSeam,
+    SurfaceSeamBoundaryUseRef,
+    SurfaceSeamContinuityConstraint,
     SurfaceShell,
     SurfaceToMeshAdapterRecord,
     SURFACE_TO_MESH_HELPER_CONTRACT,
@@ -163,6 +167,7 @@ from impression.modeling import (
     make_implicit_surface,
     make_subdivision_surface,
     make_implicit_field_node,
+    normalize_surface_seam_continuity_constraint,
     prepare_surface_boolean_operands,
     assess_implicit_field_security,
     refine_subdivision_control_cage,
@@ -179,6 +184,7 @@ from impression.modeling import (
     surface_group,
     validate_feature_surface_handoff,
     validate_implicit_field_security,
+    validate_surface_seam_continuity_constraint,
     validate_surface_seam_participation,
     validate_tessellation_helper_boundary_input,
     tessellate_surface_body,
@@ -1905,6 +1911,60 @@ def test_surface_unsupported_continuity_diagnostic_is_structured() -> None:
     assert "unsupported continuity request" in diagnostic.message
     with pytest.raises(ValueError, match="Supported seam continuity requests"):
         build_surface_unsupported_continuity_diagnostic("C0")
+
+
+def test_surface_seam_continuity_constraint_normalizes_higher_order_requests() -> None:
+    seam = SurfaceSeam(
+        "join",
+        (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")),
+        continuity="g2",
+    )
+    policy = SurfaceContinuityTolerancePolicy(
+        position_tolerance=1e-8,
+        tangent_tolerance=1e-5,
+        curvature_tolerance=1e-4,
+    )
+
+    constraint = normalize_surface_seam_continuity_constraint(seam, tolerance_policy=policy)
+
+    assert isinstance(constraint, SurfaceSeamContinuityConstraint)
+    assert constraint.requested == "G2"
+    assert constraint.tolerance_policy is policy
+    assert tuple(use.role for use in constraint.boundary_uses) == ("first", "second")
+    assert all(isinstance(use, SurfaceSeamBoundaryUseRef) for use in constraint.boundary_uses)
+    assert validate_surface_seam_continuity_constraint(constraint) == ()
+    assert constraint.canonical_payload()["requested"] == "G2"
+
+
+def test_surface_seam_continuity_constraint_supports_explicit_request_source_and_open_boundary() -> None:
+    seam = SurfaceSeam("open-top", (SurfaceBoundaryRef(0, "top"),), continuity="C0")
+    request = SurfaceContinuityRequest("C1", source="authored-loft")
+
+    constraint = normalize_surface_seam_continuity_constraint(seam, request=request)
+
+    assert constraint.requested == "C1"
+    assert constraint.source == "authored-loft"
+    assert tuple(use.role for use in constraint.boundary_uses) == ("open",)
+    assert validate_surface_seam_continuity_constraint(constraint) == ()
+
+
+def test_surface_seam_continuity_constraint_validator_reports_invalid_requests() -> None:
+    constraint = SurfaceSeamContinuityConstraint(
+        seam_id="bad",
+        requested="H1",
+        boundary_uses=(
+            SurfaceSeamBoundaryUseRef("bad", SurfaceBoundaryRef(0, "right"), role="first"),
+            SurfaceSeamBoundaryUseRef("bad", SurfaceBoundaryRef(0, "right"), role="second"),
+        ),
+    )
+
+    diagnostics = validate_surface_seam_continuity_constraint(constraint)
+
+    assert all(isinstance(diagnostic, SurfaceContinuityConstraintDiagnostic) for diagnostic in diagnostics)
+    assert {diagnostic.code for diagnostic in diagnostics} == {"invalid-continuity", "duplicate-boundary"}
+    assert diagnostics[0].canonical_payload()["seam_id"] == "bad"
+    with pytest.raises(ValueError, match="positive finite"):
+        SurfaceContinuityTolerancePolicy(tangent_tolerance=0.0)
 
 
 def test_subdivision_boundary_descriptor_records_approximation_and_implicit_seams_refuse() -> None:

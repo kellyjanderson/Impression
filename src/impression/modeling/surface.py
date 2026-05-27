@@ -173,6 +173,109 @@ class SurfaceUnsupportedContinuityDiagnostic:
 
 
 @dataclass(frozen=True)
+class SurfaceContinuityTolerancePolicy:
+    """Tolerance policy carried by authored higher-order seam continuity constraints."""
+
+    position_tolerance: float = 1e-9
+    tangent_tolerance: float = 1e-6
+    curvature_tolerance: float = 1e-5
+
+    def __post_init__(self) -> None:
+        for name in ("position_tolerance", "tangent_tolerance", "curvature_tolerance"):
+            value = float(getattr(self, name))
+            if not np.isfinite(value) or value <= 0.0:
+                raise ValueError(f"SurfaceContinuityTolerancePolicy.{name} must be a positive finite value.")
+            object.__setattr__(self, name, value)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "curvature_tolerance": self.curvature_tolerance,
+            "position_tolerance": self.position_tolerance,
+            "tangent_tolerance": self.tangent_tolerance,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSeamBoundaryUseRef:
+    """One participating boundary use in an authored seam continuity constraint."""
+
+    seam_id: str
+    boundary: "SurfaceBoundaryRef"
+    role: Literal["first", "second", "open"] = "first"
+
+    def __post_init__(self) -> None:
+        seam_id = str(self.seam_id).strip()
+        role = str(self.role).strip()
+        if not seam_id:
+            raise ValueError("SurfaceSeamBoundaryUseRef.seam_id must be non-empty.")
+        if role not in {"first", "second", "open"}:
+            raise ValueError("SurfaceSeamBoundaryUseRef.role must be first, second, or open.")
+        object.__setattr__(self, "seam_id", seam_id)
+        object.__setattr__(self, "role", role)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary": self.boundary.canonical_payload(),
+            "role": self.role,
+            "seam_id": self.seam_id,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceContinuityConstraintDiagnostic:
+    """Validation diagnostic for authored seam continuity constraints."""
+
+    code: Literal["invalid-continuity", "invalid-boundary-count", "duplicate-boundary", "invalid-role"]
+    message: str
+    seam_id: str | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "seam_id": self.seam_id,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSeamContinuityConstraint:
+    """Authored C/G continuity intent for one seam and its boundary uses."""
+
+    seam_id: str
+    requested: str
+    boundary_uses: tuple[SurfaceSeamBoundaryUseRef, ...]
+    tolerance_policy: SurfaceContinuityTolerancePolicy = field(default_factory=SurfaceContinuityTolerancePolicy)
+    source: str = "authored"
+
+    def __post_init__(self) -> None:
+        seam_id = str(self.seam_id).strip()
+        requested = str(self.requested).strip().upper()
+        source = str(self.source).strip()
+        boundary_uses = tuple(self.boundary_uses)
+        if not seam_id:
+            raise ValueError("SurfaceSeamContinuityConstraint.seam_id must be non-empty.")
+        if not requested:
+            raise ValueError("SurfaceSeamContinuityConstraint.requested must be non-empty.")
+        if not source:
+            raise ValueError("SurfaceSeamContinuityConstraint.source must be non-empty.")
+        if not all(isinstance(boundary_use, SurfaceSeamBoundaryUseRef) for boundary_use in boundary_uses):
+            raise TypeError("SurfaceSeamContinuityConstraint boundary_uses must be SurfaceSeamBoundaryUseRef instances.")
+        object.__setattr__(self, "seam_id", seam_id)
+        object.__setattr__(self, "requested", requested)
+        object.__setattr__(self, "boundary_uses", boundary_uses)
+        object.__setattr__(self, "source", source)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary_uses": [boundary_use.canonical_payload() for boundary_use in self.boundary_uses],
+            "requested": self.requested,
+            "seam_id": self.seam_id,
+            "source": self.source,
+            "tolerance_policy": self.tolerance_policy.canonical_payload(),
+        }
+
+
+@dataclass(frozen=True)
 class PatchFamilyPromotionGapRecord:
     """One missing or unsupported promotion criterion for a patch family."""
 
@@ -3314,6 +3417,99 @@ def surface_continuity_support(request: SurfaceContinuityRequest | str) -> Surfa
     )
 
 
+def normalize_surface_seam_continuity_constraint(
+    seam: SurfaceSeam,
+    *,
+    request: SurfaceContinuityRequest | str | None = None,
+    tolerance_policy: SurfaceContinuityTolerancePolicy | None = None,
+) -> SurfaceSeamContinuityConstraint:
+    """Normalize an authored seam continuity request into a durable constraint record."""
+
+    requested = seam.continuity if request is None else (
+        request.requested if isinstance(request, SurfaceContinuityRequest) else str(request)
+    )
+    boundaries = tuple(seam.boundaries)
+    if len(boundaries) == 1:
+        roles: tuple[Literal["open"], ...] = ("open",)
+    else:
+        roles = ("first", "second")  # type: ignore[assignment]
+    boundary_uses = tuple(
+        SurfaceSeamBoundaryUseRef(seam.seam_id, boundary, role=role)
+        for boundary, role in zip(boundaries, roles, strict=True)
+    )
+    return SurfaceSeamContinuityConstraint(
+        seam_id=seam.seam_id,
+        requested=requested,
+        boundary_uses=boundary_uses,
+        tolerance_policy=SurfaceContinuityTolerancePolicy()
+        if tolerance_policy is None
+        else tolerance_policy,
+        source="authored" if request is None or isinstance(request, str) else request.source,
+    )
+
+
+def validate_surface_seam_continuity_constraint(
+    constraint: SurfaceSeamContinuityConstraint,
+) -> tuple[SurfaceContinuityConstraintDiagnostic, ...]:
+    """Validate authored seam continuity intent without enforcing it."""
+
+    diagnostics: list[SurfaceContinuityConstraintDiagnostic] = []
+    supported_requests = {"C0", "G0", "C1", "G1", "C2", "G2"}
+    if constraint.requested not in supported_requests:
+        diagnostics.append(
+            SurfaceContinuityConstraintDiagnostic(
+                code="invalid-continuity",
+                seam_id=constraint.seam_id,
+                message=(
+                    f"Surface seam continuity constraint {constraint.seam_id!r} requested "
+                    f"unsupported continuity {constraint.requested!r}."
+                ),
+            )
+        )
+    if len(constraint.boundary_uses) not in {1, 2}:
+        diagnostics.append(
+            SurfaceContinuityConstraintDiagnostic(
+                code="invalid-boundary-count",
+                seam_id=constraint.seam_id,
+                message="Surface seam continuity constraints require one open boundary use or two shared boundary uses.",
+            )
+        )
+    boundary_keys = tuple(
+        (boundary_use.boundary.patch_index, boundary_use.boundary.boundary_id)
+        for boundary_use in constraint.boundary_uses
+    )
+    if len(set(boundary_keys)) != len(boundary_keys):
+        diagnostics.append(
+            SurfaceContinuityConstraintDiagnostic(
+                code="duplicate-boundary",
+                seam_id=constraint.seam_id,
+                message="Surface seam continuity constraint boundary uses must be unique.",
+            )
+        )
+    expected_roles = {"open"} if len(constraint.boundary_uses) == 1 else {"first", "second"}
+    actual_roles = {boundary_use.role for boundary_use in constraint.boundary_uses}
+    if len(constraint.boundary_uses) in {1, 2} and actual_roles != expected_roles:
+        diagnostics.append(
+            SurfaceContinuityConstraintDiagnostic(
+                code="invalid-role",
+                seam_id=constraint.seam_id,
+                message=(
+                    "Surface seam continuity constraint roles must be "
+                    f"{tuple(sorted(expected_roles))} for this boundary count."
+                ),
+            )
+        )
+    if any(boundary_use.seam_id != constraint.seam_id for boundary_use in constraint.boundary_uses):
+        diagnostics.append(
+            SurfaceContinuityConstraintDiagnostic(
+                code="invalid-role",
+                seam_id=constraint.seam_id,
+                message="Surface seam continuity constraint boundary-use seam IDs must match the constraint seam ID.",
+            )
+        )
+    return tuple(diagnostics)
+
+
 def build_surface_unsupported_continuity_diagnostic(
     request: SurfaceContinuityRequest | str,
 ) -> SurfaceUnsupportedContinuityDiagnostic:
@@ -3621,6 +3817,10 @@ __all__ = [
     "SurfaceContinuityRequest",
     "SurfaceContinuitySupportRecord",
     "SurfaceUnsupportedContinuityDiagnostic",
+    "SurfaceContinuityTolerancePolicy",
+    "SurfaceSeamBoundaryUseRef",
+    "SurfaceContinuityConstraintDiagnostic",
+    "SurfaceSeamContinuityConstraint",
     "PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS",
     "PATCH_FAMILY_CAPABILITY_MATRIX",
     "PATCH_FAMILY_FEATURE_COVERAGE",
@@ -3637,11 +3837,13 @@ __all__ = [
     "audit_patch_family_promotion_readiness",
     "assess_patch_family_availability_promotion",
     "build_surface_unsupported_continuity_diagnostic",
+    "normalize_surface_seam_continuity_constraint",
     "evaluate_surface_body_completion_gate",
     "evaluate_surface_body_completion_reference_evidence_matrix",
     "make_surface_body_completion_evidence_from_capabilities",
     "run_patch_family_availability_promotion_pass",
     "surface_continuity_support",
+    "validate_surface_seam_continuity_constraint",
     "surface_body_completion_reference_evidence_matrix",
     "validate_patch_family_availability_gate",
     "IMPLICIT_FIELD_NODE_KINDS",
