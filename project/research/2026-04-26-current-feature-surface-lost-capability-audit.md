@@ -31,7 +31,6 @@ The public modeling namespace currently includes:
 - topology
 - loft
 - text
-- threading
 - hinges
 - drafting
 - transforms

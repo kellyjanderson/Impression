@@ -245,7 +245,12 @@ In practical terms, this means the executor should consume:
 
 instead of relying on loose event labels.
 
-The executor should never receive unresolved ambiguity records.
+The executor should never receive executable work with unresolved ambiguity
+records. Planners may return a non-executable plan that contains unresolved
+ambiguity records so diagnostics can report all known authoring problems at
+once, but the executor must refuse that plan until the ambiguity records are
+resolved by authored rails, anchors, lifecycle declarations, or other explicit
+constraints.
 
 ### Bounded Constraint Propagation
 
@@ -313,3 +318,9 @@ specification tree.
 
 No child specifications are created here yet because the broader loft evolution
 branch is still being finalized.
+
+## Change History
+
+- 2026-05-27: Clarified that planning may return non-executable plans with all
+  unresolved ambiguity records, while execution must refuse those plans instead
+  of resolving ambiguity automatically.

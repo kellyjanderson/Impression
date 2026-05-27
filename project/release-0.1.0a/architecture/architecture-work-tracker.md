@@ -17,7 +17,7 @@ release progression, implementation checklists, or GitHub issues.
 
 ## Audit Date
 
-2026-05-26
+2026-05-27
 
 ## Audit Scope
 
@@ -49,6 +49,95 @@ The audit looked for:
   is implementation and verification.
 - `Monitor`: architecture has downstream specs or process coverage; keep visible
   but it is not a current manifest blocker.
+
+## Priority 0: Surface Body Completion Architecture Needed
+
+These items capture the new surface-body completion standard. They supersede
+the assumption that a checked progression means the surface-body kernel is
+complete.
+
+### Surface Body Completion Program
+
+- Status: `Needs Manifest`
+- Architecture: [Surface Body Completion Architecture](surface-body-completion-architecture.md)
+
+Architecture-defined work:
+
+- promote every authored patch family from `planned` to verified `available`
+  where it belongs in the surface-body kernel
+- make B-spline, NURBS, sweep, subdivision, implicit, heightmap, and
+  displacement first-class surface-body citizens across storage, evaluation,
+  seams, tessellation, `.impress`, and diagnostics
+- expand surface CSG from bounded planar/box execution to broad analytic and
+  higher-order surface-body boolean coverage
+- build exact or declared-tolerance CSG intersection, trim graph, fragment
+  classification, shell assembly, cap construction, seam rebuild, validity, and
+  provenance for supported family pairs
+- define remaining CSG solver boundaries as explicit refusal records, not as
+  mesh fallback or vague "not implemented" strings
+- make authored topology rails the primary loft correspondence mechanism
+- continue loft planning after ambiguities are found so all ambiguity and
+  invalid-input records are reported together
+- refuse loft execution for any plan carrying unresolved ambiguity records
+- provide exact ambiguity locators: topology, station, interval, entity,
+  relationship group, candidate lifecycle, and suggested authored rail
+- promote seam and continuity support beyond the current C0/G0 baseline with
+  structured diagnostics for unsupported continuity classes
+- complete `.impress` persistence for the full authored surface-body store,
+  including all promoted patch families, trims, seams, adjacency, metadata,
+  identities, topology rails, and operation provenance
+- ensure primitives and Impression-owned feature builders select appropriate
+  patch families and return surface truth
+- keep mesh output only at tessellation, preview, export, analysis, or explicit
+  compatibility boundaries
+- add reference artifact and round-trip evidence for every promoted
+  model-outputting capability
+
+Open architecture decisions:
+
+- what exact threshold promotes a family from `planned` to `available`
+- which CSG family pairs must be exact for the completion claim and which may
+  be declared-tolerance or explicitly unsupported
+- whether implicit, heightmap, and displacement booleans are kernel operations,
+  bounded adapters, or explicit non-CSG families
+- how `.impress` versions family payloads independently without fragmenting the
+  document root
+- how much automatic loft ambiguity resolution is permitted when authored rails
+  are missing but the deterministic answer is obvious
+
+Manifest notes:
+
+- This should become the next specification-manifest pass.
+- The manifest should not bundle "complete surface body" into one large spec.
+- Expected spec branches include patch-family promotion, CSG completion, loft
+  ambiguity execution gate, seam/continuity promotion, `.impress` completion,
+  primitive/feature integration, and verification evidence.
+
+### Authored Loft Ambiguity Contract Refresh
+
+- Status: `Needs Spec Revision`
+- Architecture:
+  - [Surface Body Completion Architecture](surface-body-completion-architecture.md)
+  - [Loft Ambiguity and Diagnostics Architecture](loft-ambiguity-and-diagnostics.md)
+  - [Loft Plan Object Architecture](loft-plan-object-architecture.md)
+  - [Loft Topology Point Correspondence Architecture](loft-topology-point-correspondence-architecture.md)
+
+Issue:
+
+- The intended product contract is authored topology first.
+- Automatic ambiguity resolution is useful but not required for this version.
+- A plan should continue collecting all ambiguity records, but unresolved
+  ambiguity must make execution impossible.
+
+Required work:
+
+- ensure loft architecture consistently states authored rails and named
+  topology entities are primary
+- ensure ambiguity records include exact "what and where" locators
+- ensure planners accumulate all ambiguities before returning
+- ensure executors refuse unresolved ambiguity records
+- remove any implication that automatic ambiguity resolution is required for
+  completion
 
 ## Priority 1: Manifest Promoted To Final Specs
 
@@ -145,7 +234,7 @@ Architecture-defined work:
 - primitive surface defaults and primitive mesh path excision
 - text and drafting surface defaults
 - heightmap native surface representation
-- threading and hinge surface assemblies as canonical modeled output
+- hinge surface assemblies as canonical modeled output
 - surface transform and composition layer replacing `MeshGroup` as authored
   composition
 - mesh utility quarantine
@@ -296,7 +385,6 @@ Remaining architecture work to implement:
 - surface-native drafting
 - surface-native text
 - surface-body booleans
-- surface-native threading
 - surface-native hinges
 - surface-native heightfields and displacement
 

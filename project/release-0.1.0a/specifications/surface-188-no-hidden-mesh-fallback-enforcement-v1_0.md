@@ -25,7 +25,7 @@ This specification promotes the manifest candidate `No Hidden Mesh Fallback Enfo
   - CSG
   - primitives
   - text/drafting
-  - heightmap/threading/hinges
+  - heightmap/hinges
   - `.impress` serializer
 - Returns/outputs/signals:
   - explicit unsupported result

@@ -192,7 +192,7 @@ Responsibilities:
 Consumers:
 
 - public CSG
-- hinge/thread/heightfield operations
+- hinge/heightfield operations
 - future shell/thicken/fillet/chamfer work
 
 ### `surface.metadata`
@@ -212,7 +212,6 @@ Consumers:
 - primitives
 - drafting
 - text
-- threading
 - hinges
 - CSG
 

@@ -18,8 +18,6 @@ _SURFACEBODY_FILES = {
     "test_surface_replacements.py",
     "test_surface_csg.py",
     "test_surface_csg_docs.py",
-    "test_surface_threading.py",
-    "test_surface_threading_docs.py",
     "test_surface_hinges.py",
     "test_surface_hinges_docs.py",
 }
@@ -29,7 +27,6 @@ _DEPRECATION_FILES = {
     "test_heightmap.py",
     "test_hinges.py",
     "test_text.py",
-    "test_threading.py",
     "test_mesh_deprecations.py",
 }
 _DEPRECATION_NODEID_SUBSTRINGS = (

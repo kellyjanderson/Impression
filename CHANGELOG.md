@@ -29,8 +29,7 @@
   modeling stack plus surfaced tessellation, scene, and primitive helpers.
 - Reworked loft around the newer surfaced planner/executor and added stronger
   slice-based diagnostics and regression coverage.
-- Added surfaced implementations for drafting, text, threading, hinges, and
-  heightmaps.
+- Added surfaced implementations for drafting, text, hinges, and heightmaps.
 - Removed public `morph` and public `extrude` from the supported modeling
   surface.
 

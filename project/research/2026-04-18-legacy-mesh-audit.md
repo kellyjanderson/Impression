@@ -46,13 +46,6 @@ These still return `Mesh` today, but now explicitly warn that the surfaced loft 
 - `drafting.make_plane`
 - `drafting.make_arrow`
 - `drafting.make_dimension`
-- `threading.make_external_thread`
-- `threading.make_internal_thread`
-- `threading.make_threaded_rod`
-- `threading.make_tapped_hole_cutter`
-- `threading.make_hex_nut`
-- `threading.make_round_nut`
-- `threading.make_runout_relief`
 - `hinges.make_traditional_hinge_leaf`
 - `hinges.make_traditional_hinge_pair`
 - `hinges.make_living_hinge`
@@ -118,11 +111,6 @@ truth and are on the deprecation/removal path.
   - notable mesh triangulation/endcap execution points at lines `1539`, `1554`,
     `1574`, `1595`, `1608`, `1612`, `2934`, `4565`
   - intended end state: surfaced loft canonical path only
-
-- `src/impression/modeling/threading.py`
-  - threading convenience helpers still depend on public legacy booleans at
-    lines `16`, `671`, `736`, `801`
-  - intended end state: surfaced thread assemblies and surfaced CSG
 
 - `src/impression/modeling/hinges.py`
   - hinge composition still depends on public legacy booleans at lines `13`,
@@ -261,7 +249,6 @@ sectioning exists.
 3. Land surface-native replacements for:
    - text
    - booleans
-   - threading
    - hinges
    - heightfields / displacement
 4. Remove `SurfaceMeshAdapter` and `mesh_from_surface_body` once all known consumers operate on `SurfaceBody` or standardized tessellation requests.

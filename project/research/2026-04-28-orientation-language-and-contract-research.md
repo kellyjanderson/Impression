@@ -127,18 +127,7 @@ Then it rotates from that base vector toward the requested direction.
 
 That is a perfectly reasonable local convention, but it is a separate one, and it is not explained through any shared global orientation contract.
 
-### 6. Threading
-
-Threading also constructs its own basis locally.
-
-`src/impression/modeling/threading.py`:
-
-- normalizes `axis_direction`
-- builds an axis basis by choosing a helper axis and crossing into a local frame
-
-Again, this is mathematically fine, but semantically isolated.
-
-### 7. Verification Tooling
+### 6. Verification Tooling
 
 The strongest orientation-contract work in the repository currently lives in **tests**, not production code.
 
@@ -234,7 +223,6 @@ The following modules each derive local bases independently:
 - `loft.py`
 - `path3d.py`
 - `text.py`
-- `threading.py`
 - parts of `drafting.py`
 
 That does not automatically mean they are numerically wrong, but it does mean:
@@ -391,7 +379,6 @@ Examples:
 
 - `optical_frame`
 - `aircraft_body_frame`
-- `thread_axis_frame`
 - `station_frame`
 
 For example, an aircraft body frame could be declared as:
@@ -616,7 +603,6 @@ Reason:
 
 - `src/impression/modeling/path3d.py`
 - `src/impression/modeling/text.py`
-- `src/impression/modeling/threading.py`
 
 Reason:
 

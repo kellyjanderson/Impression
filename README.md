@@ -91,7 +91,7 @@ Full CLI reference: [`docs/cli.md`](docs/cli.md)
 ## Documentation Map
 
 - [`docs/index.md`](docs/index.md) - documentation portal
-- [`docs/modeling/`](docs/modeling/) - primitives, CSG, mesh analysis tools, drawing2d, paths, loft, threading, hinges, text
+- [`docs/modeling/`](docs/modeling/) - primitives, CSG, mesh analysis tools, drawing2d, paths, loft, hinges, text
 - [`docs/examples/`](docs/examples/) - runnable scripts that power the docs
 - [`docs/tutorials/`](docs/tutorials/) - guided walkthroughs for new and advanced users
 - [`docs/agents/`](docs/agents/) - agent usage guide for building with Impression

@@ -21,6 +21,7 @@ Architecture documents define:
 - [Full Surface Patch Family Architecture](full-surface-patch-family-architecture.md)
 - [Patch Family Integration Architecture](patch-family-integration-architecture.md)
 - [Surface-Native Capability Replacement Architecture](surface-native-capability-replacement-architecture.md)
+- [Surface Body Completion Architecture](surface-body-completion-architecture.md)
 - [Mesh Analysis and Repair Architecture](surface-mesh-decommission-architecture.md)
 - [Mesh Execution To Tessellation Boundary Architecture](mesh-execution-tessellation-boundary-architecture.md)
 - [SurfaceBody Seam and Adjacency Architecture](surfacebody-seam-adjacency-architecture.md)

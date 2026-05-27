@@ -39,8 +39,6 @@ Required outcome:
 ### Stubbed Surface Assemblies
 
 - traditional hinge surface leaves create a pin bore but do not apply it.
-- several thread surface functions return structured assembly descriptors
-  rather than executable surface bodies.
 
 Required outcome:
 
@@ -55,7 +53,6 @@ Many public APIs still default to mesh:
 - primitives
 - drafting
 - text
-- threading
 - hinges
 - heightmap
 - CSG
@@ -122,8 +119,6 @@ Exit criteria:
 
 - [ ] implement traditional hinge pin bores with surface booleans or mark the
   bore subtraction unsupported in the returned surface assembly contract.
-- [ ] decide whether thread surface assemblies are intermediate descriptors or
-  executable `SurfaceBody` results.
 - [ ] add handoff tests for every descriptor-only surface result.
 
 Exit criteria:
@@ -158,8 +153,7 @@ Exit criteria:
 - static grep/AST test for forbidden mesh calls inside surface branches
 - unit tests for empty/no-output surface cases
 - unit tests for unsupported surface operation reporting
-- reference artifact tests for replacement heightfield, hinge, text, and thread
-  outputs
+- reference artifact tests for replacement heightfield, hinge, and text outputs
 - documentation tests ensuring examples use surface-first paths
 
 ## Done Definition

@@ -122,7 +122,6 @@ Primary unblockers:
 - spheres
 - tori
 - rotate-extrude
-- thread foundations
 
 ## Freeform Patch Families
 
@@ -189,7 +188,6 @@ Role:
 Role:
 
 - pipes
-- helical threads
 - path-driven solids
 - sweep-like loft workflows
 
@@ -324,7 +322,6 @@ Initial family-pair order:
 - [ ] public loft surface output
 - [ ] text extrusion
 - [ ] drafting geometry
-- [ ] threading
 - [ ] hinges
 - [ ] heightfields/displacement
 - [ ] CSG

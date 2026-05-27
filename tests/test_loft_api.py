@@ -24,7 +24,7 @@ def _assert_surface_body_tessellates(body: SurfaceBody) -> None:
     assert result.mesh.n_faces > 0
 
 
-def test_public_loft_api_threads_interactive_selection() -> None:
+def test_public_loft_api_passes_interactive_selection() -> None:
     left = make_rect(size=(0.85, 0.85), center=(-1.0, 0.0))
     right = make_rect(size=(0.85, 0.85), center=(1.0, 0.0))
     left_end = make_rect(size=(0.8, 0.8), center=(-1.0, 0.0))
@@ -58,7 +58,7 @@ def test_public_loft_api_threads_interactive_selection() -> None:
     _assert_surface_body_tessellates(body)
 
 
-def test_public_loft_profiles_api_threads_probabilistic_controls_reproducibly() -> None:
+def test_public_loft_profiles_api_passes_probabilistic_controls_reproducibly() -> None:
     left = make_rect(size=(0.85, 0.85), center=(-1.0, 0.0))
     right = make_rect(size=(0.85, 0.85), center=(1.0, 0.0))
     left_end = make_rect(size=(0.8, 0.8), center=(-1.0, 0.0))

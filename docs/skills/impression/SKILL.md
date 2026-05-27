@@ -28,8 +28,8 @@ modeling framework.
 ## Feature Selection
 
 Read [references/feature-map.md](references/feature-map.md) when you need help
-choosing between primitives, drawing2d, topology, loft, text, threading,
-hinges, drafting, heightmaps, or CSG.
+choosing between primitives, drawing2d, topology, loft, text, hinges, drafting,
+heightmaps, or CSG.
 
 ## Loft
 

@@ -2138,15 +2138,6 @@ SURFACE_CSG_CALLER_INVENTORY: tuple[SurfaceCSGCallerInventoryRecord, ...] = (
         explicit_mesh_route=True,
     ),
     SurfaceCSGCallerInventoryRecord(
-        caller_id="threading.lower_thread_surface_assembly",
-        module="impression.modeling.threading",
-        category="feature",
-        operation="difference",
-        surface_route="lower_thread_surface_assembly",
-        mesh_route="make_thread_mesh_compatibility_result",
-        explicit_mesh_route=True,
-    ),
-    SurfaceCSGCallerInventoryRecord(
         caller_id="hinges.make_traditional_hinge_pair",
         module="impression.modeling.hinges",
         category="feature",

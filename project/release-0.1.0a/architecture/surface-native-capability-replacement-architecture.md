@@ -45,7 +45,6 @@ surface-native replacements before mesh decommission can proceed:
 - drafting
 - text
 - booleans
-- threading
 - hinges
 - heightfields and displacement
 
@@ -92,11 +91,6 @@ raised, inset, or embossed bodies through surface-first modeling ops.
 
 Boolean replacement is expected to operate on surface bodies, shells, seams,
 and trims rather than triangle meshes.
-
-### Threading
-
-Threading replacements should use analytic or structured surface patch families
-where possible and only tessellate at consumer boundaries.
 
 ### Hinges
 

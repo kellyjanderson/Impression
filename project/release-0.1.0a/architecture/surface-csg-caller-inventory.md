@@ -8,8 +8,8 @@ The source of truth for executable checks is `surface_csg_caller_inventory()`.
 - Public CSG API: `csg.boolean_union`, `csg.boolean_difference`, and
   `csg.boolean_intersection` route `backend="surface"` through
   `surface_boolean_result`.
-- Feature builders: thread and hinge lowering routes are expected to call the
-  shared CSG gate before invoking surface booleans.
+- Feature builders: Impression-owned feature builders, such as hinges, are
+  expected to call the shared CSG gate before invoking surface booleans.
 - Primitive builders: boolean-dependent primitive helpers must use surface CSG
   for authored surface output or emit an explicit diagnostic.
 
@@ -27,3 +27,7 @@ The source of truth for executable checks is `surface_csg_caller_inventory()`.
   `SurfaceCSGFeatureGateDiagnostic` for support checks.
 - `assert_no_hidden_surface_csg_mesh_fallback(...)` fails any authored surface
   route that produces `Mesh` or `MeshGroup`.
+
+## Change History
+
+- 2026-05-27: Limited the inventory to Impression-owned CSG callers.

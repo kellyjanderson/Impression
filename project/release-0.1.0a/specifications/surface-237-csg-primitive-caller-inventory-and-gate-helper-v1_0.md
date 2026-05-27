@@ -63,7 +63,7 @@ Routes:
 
 Reuse/extraction decision:
 
-- one helper shared by primitives, threads, and hinges
+- one helper shared by primitives, hinges, and other Impression-owned feature builders
 
 UI field/control inventory:
 
@@ -128,4 +128,3 @@ Final.
 ## Child Specifications
 
 None. Final leaf.
-

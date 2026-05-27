@@ -32,7 +32,6 @@ library, the tools, and the examples.
 - [Advanced patch families](modeling/advanced-patch-families.md) - B-spline, NURBS, sweep, subdivision, implicit, heightmap, and displacement surface authoring.
 - [Heightmaps](modeling/heightmaps.md) - heightfield generation and image-based displacement.
 - [Text](modeling/text.md) - topology-native glyph outlines and surfaced text bodies with full color support.
-- [Threading](modeling/threading.md) - standards-based thread specs, fit presets, and part generators.
 - [Hinges](modeling/hinges.md) - traditional, living, and bistable hinge generators.
 - [Drafting Helpers](modeling/drafting.md) - lines, planes, arrows, and dimensions for 2.5D annotations.
 - [Transforms](modeling/transforms.md) - rotate and translate meshes after creation.

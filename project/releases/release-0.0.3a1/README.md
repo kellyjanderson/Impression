@@ -42,7 +42,7 @@ This release is centered on three visible outcomes:
 - loft has been reworked around the newer surfaced planner/executor stack, with
   substantially broader regression coverage and diagnostic slice comparison
   support
-- drafting, threading, hinges, heightmaps, and text all have surfaced support
+- drafting, hinges, heightmaps, and text all have surfaced support
   and surfaced regression coverage
 - public `morph` and public `extrude` have been removed from the supported
   modeling surface
@@ -76,7 +76,6 @@ This release is centered on three visible outcomes:
   - `src/impression/modeling/heightmap.py`
   - `src/impression/modeling/hinges.py`
   - `src/impression/modeling/text.py`
-  - `src/impression/modeling/threading.py`
   - `src/impression/modeling/primitives.py`
   - `src/impression/modeling/ops.py`
 
@@ -103,7 +102,6 @@ This release is centered on three visible outcomes:
   - `tests/test_surface_csg.py`
   - `tests/test_surface_csg_docs.py`
   - `tests/test_surface_hinges.py`
-  - `tests/test_surface_threading.py`
   - `tests/test_surface_replacements.py`
   - `tests/test_loft_api.py`
   - `tests/test_loft_correspondence.py`

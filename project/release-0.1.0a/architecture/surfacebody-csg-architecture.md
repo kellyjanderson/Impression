@@ -771,7 +771,8 @@ Responsibilities:
   - no-mesh-fallback assertion fixture
 - Dependencies/services:
   - primitives
-  - threading and hinge feature builders
+  - Impression-owned feature builders such as hinges
+  - generic external feature interop boundaries
   - CSG support gate
 - Returns/outputs/signals:
   - surface primitive result or diagnostic
@@ -950,5 +951,7 @@ Split decision:
 
 ## Change History
 
+- 2026-05-27: Limited feature-builder CSG language to Impression-owned
+  feature builders.
 - 2026-05-26: Added CSG completion scope and manifest entries for full
   surface-native CSG without mesh fallback.

@@ -24,7 +24,6 @@ This branch must define surface-first replacements for:
 - drafting
 - text
 - booleans
-- threading
 - hinges
 - heightfields and displacement
 - reference artifacts and documentation rules needed to verify and deliver those replacements
@@ -46,7 +45,6 @@ This parent branch does not represent executable work directly.
 - [Surface Spec 100: Surface-Native Drafting Replacement](surface-100-surface-native-drafting-replacement-v1_0.md)
 - [Surface Spec 101: Surface-Native Text Replacement](surface-101-surface-native-text-replacement-v1_0.md)
 - [Surface Spec 102: Surface-Body Boolean Replacement](surface-102-surface-body-boolean-replacement-v1_0.md)
-- [Surface Spec 103: Surface-Native Threading Replacement](surface-103-surface-native-threading-replacement-v1_0.md)
 - [Surface Spec 104: Surface-Native Hinge Replacement](surface-104-surface-native-hinge-replacement-v1_0.md)
 - [Surface Spec 105: Surface-Native Heightfield and Displacement Replacement](surface-105-surface-native-heightfield-displacement-v1_0.md)
 - [Surface Spec 106: Reference Artifact Regression Suite](surface-106-reference-artifact-regression-suite-v1_0.md)

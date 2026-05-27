@@ -197,7 +197,9 @@ Primary producers:
 
 - cylinders/cones/spheres/torus-like primitives where represented analytically
 - rotate-extrude
-- round threading and hinge elements where rotational truth is useful
+- round hinge elements where rotational truth is useful
+- external sibling-project features that import or export `SurfaceBody`
+  instances through generic interop boundaries
 
 ### BSplineSurfacePatch
 
@@ -277,7 +279,6 @@ Primary producers:
 
 - path extrude
 - pipe/tube
-- threading
 - cables/rails
 - swept text/strokes
 
@@ -2438,6 +2439,9 @@ Split decision:
 
 ## Change History
 
+- 2026-05-27: Removed external fastener-profile modeling as an
+  Impression-owned primary producer and kept feature producer examples limited
+  to Impression-owned features.
 - 2026-05-26: Further split high-scoring manifest entries where review exposed hidden payload-family boundaries.
 - 2026-05-26: Split all manifest candidates that scored 25+ into smaller assessed candidates for spec promotion.
 - 2026-05-26: Replaced the lightweight specification list with a

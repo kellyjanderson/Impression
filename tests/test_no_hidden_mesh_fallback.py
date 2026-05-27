@@ -17,24 +17,19 @@ from impression.modeling import (
     SurfaceBooleanOperands,
     SurfaceBooleanResult,
     TextMeshCompatibilityResult,
-    ThreadMeshCompatibilityResult,
-    ThreadSurfaceRepresentation,
     as_section,
     boolean_union,
     heightmap,
     heightmap_mesh_compatibility_result,
     loft_execute_plan,
     loft_plan_sections,
-    lookup_standard_thread,
     make_box,
-    make_external_thread,
     make_line,
     make_sphere,
     make_surface_body,
     make_surface_shell,
     make_text,
     make_text_mesh_result,
-    make_thread_mesh_compatibility_result,
     make_traditional_hinge_pair,
     surface_boolean_result,
 )
@@ -107,14 +102,12 @@ def _assert_no_hidden_mesh_fallback(fixture: NoFallbackFixture) -> object:
 
 def test_authored_surface_api_matrix_has_no_hidden_mesh_fallbacks() -> None:
     image = np.asarray([[0.0, 1.0], [1.0, 0.0]], dtype=float)
-    spec = lookup_standard_thread("metric", "M6x1", length=6.0)
     fixtures = (
         NoFallbackFixture("primitive", lambda: make_box(size=(1.0, 1.0, 1.0)), SurfaceBody),
         NoFallbackFixture("loft", _simple_loft_body, SurfaceBody),
         NoFallbackFixture("text", lambda: make_text("", backend="surface"), SurfaceBody),
         NoFallbackFixture("drafting", lambda: make_line((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)), SurfaceBody),
         NoFallbackFixture("heightmap-surface", lambda: heightmap(image, backend="surface"), SurfaceBody),
-        NoFallbackFixture("threading", lambda: make_external_thread(spec, backend="surface"), ThreadSurfaceRepresentation),
         NoFallbackFixture("hinge", lambda: make_traditional_hinge_pair(width=24.0, knuckle_count=5), HingeSurfaceAssembly),
     )
 
@@ -124,7 +117,6 @@ def test_authored_surface_api_matrix_has_no_hidden_mesh_fallbacks() -> None:
 
 def test_explicit_mesh_compatibility_matrix_names_mesh_boundaries() -> None:
     image = np.asarray([[0.0, 1.0], [1.0, 0.0]], dtype=float)
-    spec = lookup_standard_thread("metric", "M6x1", length=6.0)
     fixtures = (
         NoFallbackFixture(
             "text-mesh-compatibility",
@@ -136,12 +128,6 @@ def test_explicit_mesh_compatibility_matrix_names_mesh_boundaries() -> None:
             "heightmap-mesh-compatibility",
             lambda: heightmap_mesh_compatibility_result(image),
             HeightmapMeshCompatibilityResult,
-            "explicit-mesh-compatibility",
-        ),
-        NoFallbackFixture(
-            "thread-mesh-compatibility",
-            lambda: make_thread_mesh_compatibility_result(spec, builder="external"),
-            ThreadMeshCompatibilityResult,
             "explicit-mesh-compatibility",
         ),
     )

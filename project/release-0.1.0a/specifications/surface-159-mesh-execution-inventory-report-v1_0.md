@@ -48,7 +48,7 @@ rg -n "backend=\\\"mesh\\\"|Literal\\[.*mesh|Mesh \\| SurfaceBody|SurfaceBody \\
 | Transforms | `translate`, `rotate`, `scale`, `resize`, `mirror`, `multmatrix`, `_bounds` in `src/impression/modeling/transform.py` | `legacy-compatibility` while accepting only `Mesh | MeshGroup` | Surface Specs 182-184 | Public authored transform defaults operate on surface/composition objects; mesh transforms stay explicit compatibility. |
 | Hull and mesh ops | `hull`, `hull_mesh`, `manifold_from_mesh_group`, `mesh_from_manifold` in `src/impression/modeling/ops.py` and `_ops_mesh.py` | `explicit-mesh-tool` when inputs are mesh; invalid if used as authored surface fallback | Surface Specs 187-188 | Keep mesh hull as explicit utility; surface/topology hull must not route through mesh silently. |
 | Color helpers | `set_mesh_color`, `get_mesh_color`, `get_mesh_rgba`, `transfer_mesh_color`, `set_cell_colors` in `src/impression/modeling/_color.py` | `mesh-consumer` / `legacy-compatibility` | Surface Specs 184-188 | Keep for mesh consumers; surface color metadata must use surface metadata paths. |
-| Threading and hinges shims | `src/impression/modeling/threading.py`, `src/impression/modeling/hinges.py` now load sibling projects | `legacy-compatibility` until sibling implementations are updated | Surface Specs 177-181 | Sibling libraries own updates to surface-first defaults and explicit mesh compatibility. |
+| Hinge shims | `src/impression/modeling/hinges.py` now loads sibling-project-oriented compatibility code | `legacy-compatibility` until sibling implementations are updated | Surface Specs 180-181 | Sibling libraries own updates to surface-first defaults and explicit mesh compatibility. |
 
 ## Public API Risk List
 

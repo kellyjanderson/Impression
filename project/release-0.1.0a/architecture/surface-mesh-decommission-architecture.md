@@ -58,7 +58,6 @@ We should not continue implementing canonical modeling capability in mesh for:
 - text generation
 - drafting geometry
 - hinges
-- threading
 - heightfield/displacement as modeled truth
 - public boolean modeling truth
 

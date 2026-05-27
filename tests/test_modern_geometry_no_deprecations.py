@@ -17,7 +17,6 @@ _FORBIDDEN_DEPRECATION_FILES = (
     Path("src/impression/modeling/surface.py"),
     Path("src/impression/modeling/primitives.py"),
     Path("src/impression/modeling/loft.py"),
-    Path("src/impression/modeling/threading.py"),
     Path("src/impression/modeling/hinges.py"),
 )
 

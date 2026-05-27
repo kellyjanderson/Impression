@@ -309,7 +309,6 @@ Primary uses:
 - cones/frustums
 - spheres
 - tori
-- round thread bases
 - rotate-extrude operations
 
 Key risks:
@@ -453,7 +452,6 @@ Primary uses:
 - pipes
 - rails
 - path-driven solids
-- helical threads
 - advanced loft replacement for sweep-like workflows
 
 Key risks:
@@ -649,7 +647,6 @@ Surface-body modeling needs these body constructors:
 - wedge: planar and ruled patches
 - polyhedron: trimmed planar patches plus explicit seams
 - text extrusion: planar glyph regions plus ruled sidewalls and planar caps
-- thread body: helical/sweep patches or structured ruled/revolution patch set
 - hinge components: compositions of boxes, cylinders, boolean cuts, and
   structured thin surfaces
 - heightfield body: displaced surface plus sidewalls/caps when solidified

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Migrate feature builders such as threading and hinges to the shared surface CSG
+Migrate feature builders such as hinges to the shared surface CSG
 gate and remove hidden mesh boolean fallback from authored feature paths.
 
 ## Backlink
@@ -23,7 +23,6 @@ Surface Spec 222.
   - feature CSG dependency record
   - feature diagnostic assertion
 - Dependencies/services:
-  - threading feature builders
   - hinge feature builders
   - shared CSG caller gate
 - Returns/outputs/signals:
@@ -54,7 +53,7 @@ Surface Spec 222.
 
 Owner/module:
 
-- threading, hinge, and other feature builder modules that call CSG
+- hinge and other Impression-owned feature builder modules that call CSG
 
 Routes:
 
@@ -93,7 +92,7 @@ The implementation must:
 
 Test strategy:
 
-- feature route tests for threading, hinges, and any additional inventoried
+- feature route tests for hinges and any additional inventoried
   feature builders
 
 ## Manifest Assessment
@@ -129,4 +128,3 @@ Final.
 ## Child Specifications
 
 None. Final leaf.
-

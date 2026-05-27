@@ -6654,7 +6654,7 @@ def _expected_region_pair_action(
 def _synthetic_seed_scale(split_merge_steps: int, split_merge_bias: float) -> float:
     """Return deterministic synthetic seed scale used for birth/death decomposition.
 
-    `split_merge_steps` and `split_merge_bias` are threaded through the v1 resolve
+    `split_merge_steps` and `split_merge_bias` are passed through the v1 resolve
     path so progression stays deterministic and configurable without introducing
     random or ad-hoc seeds.
     """

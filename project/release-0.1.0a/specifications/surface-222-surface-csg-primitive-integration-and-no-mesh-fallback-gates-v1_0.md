@@ -24,7 +24,7 @@ Integration And No-Mesh Fallback Gates` into a final implementation leaf.
   - no-mesh-fallback assertion fixture
 - Dependencies/services:
   - primitives
-  - threading and hinge feature builders
+  - hinge feature builders
   - CSG support gate
 - Returns/outputs/signals:
   - surface primitive result or diagnostic

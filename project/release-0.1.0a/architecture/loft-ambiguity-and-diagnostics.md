@@ -17,6 +17,11 @@ If no such rule exists, the planner must report ambiguity.
 The intended response to ambiguity is to request additional directional
 correspondence from the user and then re-plan deterministically.
 
+Impression targets authored topologies. The system should not be judged
+incomplete because it refuses to guess ambiguous authored topology. The
+required behavior is complete, precise ambiguity reporting and an execution
+gate that blocks unresolved ambiguity.
+
 ## Architectural Bias
 
 Ambiguity should be the exception, not the default.
@@ -45,10 +50,16 @@ An ambiguity record describes:
 
 - stable diagnostic id
 - progression interval
+- station or station-pair locator
 - the topology state that holds the ambiguity
-- the regions inside that topology state that remain ambiguous
+- the entity type and entity ids that remain ambiguous
+- the regions, loops, paths, points, or lifecycle records inside that topology
+  state that remain ambiguous
 - the relationship group when the ambiguity exists inside an already-related
   subset
+- the candidate resolutions that remain valid
+- the smallest authored rail, anchor, predecessor/successor reference, or
+  lifecycle declaration likely to resolve the ambiguity
 
 Additional classification or debugging detail may be attached where useful for:
 
@@ -191,6 +202,9 @@ This supports:
 - editor highlighting across multiple intervals
 - AI-assisted correction suggestions
 
+Planning must not stop at the first ambiguity. A plan may be returned with many
+ambiguity records so the user can fix all known authoring problems in one pass.
+
 After constraint injection, the planner should be rerun and the expectation is
 that the affected intervals become deterministic.
 
@@ -231,9 +245,15 @@ is resolution-bound.
 The normal ambiguity contract should be:
 
 - ambiguity blocks execution of the affected intervals
+- any unresolved ambiguity makes the full loft plan non-executable
+- planners may still return non-executable plans for diagnostic consumption
 - user supplies additional directional correspondence
 - planner reruns
 - execution proceeds only from the resolved result
+
+The executor must reject any plan with unresolved ambiguity records. It should
+not attempt automatic ambiguity resolution, choose a branch, or invoke a mesh
+path as a substitute.
 
 ## System Properties
 
@@ -262,3 +282,9 @@ inspection.
 This architecture branch is intended to feed the eventual loft diagnostic and
 ambiguity specification leaves once the broader next-gen loft architecture is
 fully stabilized.
+
+## Change History
+
+- 2026-05-27: Clarified the authored-topology contract: ambiguity does not need
+  automatic resolution in this version, planning should accumulate all
+  ambiguity records, and unresolved ambiguity makes a loft plan non-executable.
