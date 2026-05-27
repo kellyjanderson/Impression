@@ -156,6 +156,7 @@ class SurfaceIntersectionSupportDiagnostic:
         "unknown-registry-entry",
         "budget-exhausted",
         "unsafe-implicit-field",
+        "non-convergent",
     ]
     message: str
     family_pair: tuple[str, str]
@@ -470,6 +471,81 @@ class SurfaceImplicitContourExtractionTrace:
             "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
             "safety_decision": self.safety_decision.canonical_payload(),
             "solver_id": self.solver_id,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceImplicitNonConvergenceDiagnostic:
+    """Implicit result diagnostic that distinguishes refusal and residual failure causes."""
+
+    reason: Literal["budget-exhausted", "unsafe-implicit-field", "residual-failure", "unsupported-family-pair"]
+    message: str
+    residual: float | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "message": self.message,
+            "reason": self.reason,
+            "residual": self.residual,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceImplicitResidualReport:
+    """Residual report for declared-tolerance implicit contour extraction output."""
+
+    contour_count: int
+    evaluated_cell_count: int
+    max_abs_field_residual: float
+    tolerance: float
+    non_convergence: tuple[SurfaceImplicitNonConvergenceDiagnostic, ...] = ()
+
+    def __post_init__(self) -> None:
+        contour_count = int(self.contour_count)
+        evaluated_cell_count = int(self.evaluated_cell_count)
+        max_abs_field_residual = float(self.max_abs_field_residual)
+        tolerance = float(self.tolerance)
+        if contour_count < 0:
+            raise ValueError("SurfaceImplicitResidualReport.contour_count must be non-negative.")
+        if evaluated_cell_count < 0:
+            raise ValueError("SurfaceImplicitResidualReport.evaluated_cell_count must be non-negative.")
+        if not np.isfinite(max_abs_field_residual) or max_abs_field_residual < 0.0:
+            raise ValueError("SurfaceImplicitResidualReport.max_abs_field_residual must be finite and non-negative.")
+        if not np.isfinite(tolerance) or tolerance <= 0.0:
+            raise ValueError("SurfaceImplicitResidualReport.tolerance must be positive and finite.")
+        object.__setattr__(self, "contour_count", contour_count)
+        object.__setattr__(self, "evaluated_cell_count", evaluated_cell_count)
+        object.__setattr__(self, "max_abs_field_residual", max_abs_field_residual)
+        object.__setattr__(self, "tolerance", tolerance)
+
+    @property
+    def within_tolerance(self) -> bool:
+        return self.contour_count > 0 and self.max_abs_field_residual <= self.tolerance and not self.non_convergence
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "contour_count": self.contour_count,
+            "evaluated_cell_count": self.evaluated_cell_count,
+            "max_abs_field_residual": self.max_abs_field_residual,
+            "non_convergence": [diagnostic.canonical_payload() for diagnostic in self.non_convergence],
+            "tolerance": self.tolerance,
+            "within_tolerance": self.within_tolerance,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceImplicitResultClassificationRecord:
+    """Declared-tolerance classification for implicit intersection results."""
+
+    classification: Literal["declared-tolerance", "non-convergent", "refused"]
+    residual_report: SurfaceImplicitResidualReport
+    result_quality: Literal["within-tolerance", "unsupported"]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "classification": self.classification,
+            "residual_report": self.residual_report.canonical_payload(),
+            "result_quality": self.result_quality,
         }
 
 
@@ -1345,6 +1421,108 @@ def solve_subdivision_surface_intersection_adapter(
     )
 
 
+def build_implicit_non_convergence_diagnostic(
+    trace: SurfaceImplicitContourExtractionTrace,
+    *,
+    residual: float | None = None,
+) -> SurfaceImplicitNonConvergenceDiagnostic:
+    """Build a stable implicit non-convergence diagnostic from extraction trace state."""
+
+    reasons = {diagnostic.code for diagnostic in trace.diagnostics + trace.safety_decision.diagnostics}
+    if "budget-exhausted" in reasons:
+        return SurfaceImplicitNonConvergenceDiagnostic(
+            reason="budget-exhausted",
+            message="implicit contour extraction did not execute because the intersection budget was exhausted",
+            residual=residual,
+        )
+    if "unsafe-implicit-field" in reasons:
+        return SurfaceImplicitNonConvergenceDiagnostic(
+            reason="unsafe-implicit-field",
+            message="implicit contour extraction did not execute because an implicit field failed safety policy",
+            residual=residual,
+        )
+    if "unsupported-family-pair" in reasons:
+        return SurfaceImplicitNonConvergenceDiagnostic(
+            reason="unsupported-family-pair",
+            message="implicit contour extraction did not execute because the family pair is unsupported",
+            residual=residual,
+        )
+    return SurfaceImplicitNonConvergenceDiagnostic(
+        reason="residual-failure",
+        message="implicit contour extraction residual exceeded declared tolerance or produced no contours",
+        residual=residual,
+    )
+
+
+def classify_implicit_intersection_residuals(
+    trace: SurfaceImplicitContourExtractionTrace,
+    *,
+    tolerance_policy: SurfaceIntersectionTolerancePolicy | None = None,
+) -> SurfaceImplicitResultClassificationRecord:
+    """Classify implicit contour trace residuals into declared-tolerance result state."""
+
+    policy = DEFAULT_SURFACE_INTERSECTION_TOLERANCE_POLICY if tolerance_policy is None else tolerance_policy
+    tolerance = max(policy.position_tolerance * 10.0, policy.degeneracy_tolerance)
+    contour_count = len(trace.contours)
+    evaluated_cell_count = sum(contour.evaluated_cell_count for contour in trace.contours)
+    max_residual = max((contour.max_abs_field_residual for contour in trace.contours), default=0.0)
+    non_convergence: tuple[SurfaceImplicitNonConvergenceDiagnostic, ...] = ()
+    if not trace.safety_decision.executable or trace.diagnostics:
+        non_convergence = (build_implicit_non_convergence_diagnostic(trace, residual=max_residual),)
+        classification: Literal["declared-tolerance", "non-convergent", "refused"] = "refused"
+    elif contour_count == 0 or max_residual > tolerance:
+        non_convergence = (build_implicit_non_convergence_diagnostic(trace, residual=max_residual),)
+        classification = "non-convergent"
+    else:
+        classification = "declared-tolerance"
+    residual_report = SurfaceImplicitResidualReport(
+        contour_count=contour_count,
+        evaluated_cell_count=evaluated_cell_count,
+        max_abs_field_residual=max_residual,
+        tolerance=tolerance,
+        non_convergence=non_convergence,
+    )
+    return SurfaceImplicitResultClassificationRecord(
+        classification=classification,
+        residual_report=residual_report,
+        result_quality="within-tolerance" if residual_report.within_tolerance else "unsupported",
+    )
+
+
+def assemble_implicit_intersection_result(
+    request: SurfaceIntersectionRequest,
+    trace: SurfaceImplicitContourExtractionTrace,
+    *,
+    tolerance_policy: SurfaceIntersectionTolerancePolicy | None = None,
+) -> tuple[SurfaceIntersectionResultRecord, SurfaceImplicitResultClassificationRecord]:
+    """Assemble normalized intersection result records from implicit contour classification."""
+
+    classification = classify_implicit_intersection_residuals(trace, tolerance_policy=tolerance_policy)
+    if classification.residual_report.within_tolerance:
+        result = normalize_surface_intersection_result(
+            request,
+            curves=tuple(contour.curve for contour in trace.contours),
+            max_residual=classification.residual_report.max_abs_field_residual,
+            quality="within-tolerance",
+        )
+    else:
+        degeneracies = tuple(
+            SurfaceIntersectionDegeneracyRecord(
+                code="high-residual",
+                message=diagnostic.message,
+                residual=diagnostic.residual,
+            )
+            for diagnostic in classification.residual_report.non_convergence
+        )
+        result = normalize_surface_intersection_result(
+            request,
+            max_residual=classification.residual_report.max_abs_field_residual,
+            quality="unsupported",
+            degeneracies=degeneracies,
+        )
+    return result, classification
+
+
 def solve_spline_spline_surface_intersection(
     request: SurfaceIntersectionRequest,
     *,
@@ -1656,17 +1834,23 @@ __all__ = [
     "SurfaceImplicitContourRecord",
     "SurfaceImplicitIntersectionBudget",
     "SurfaceImplicitIntersectionSafetyDecision",
+    "SurfaceImplicitNonConvergenceDiagnostic",
+    "SurfaceImplicitResidualReport",
+    "SurfaceImplicitResultClassificationRecord",
     "SurfaceSplineSplineResidualReport",
     "SurfaceSplineSplineSolverIterationRecord",
     "SurfaceSubdivisionIntersectionAdapterReport",
     "SurfaceSubdivisionIntersectionBudget",
     "SurfaceSubdivisionRefinedContourRecord",
     "assert_surface_intersection_solver_registry_complete",
+    "assemble_implicit_intersection_result",
     "build_surface_intersection_solver_registry",
+    "build_implicit_non_convergence_diagnostic",
     "check_implicit_intersection_budget",
     "check_implicit_intersection_safety",
     "check_subdivision_intersection_budget",
     "classify_surface_intersection_degeneracy",
+    "classify_implicit_intersection_residuals",
     "lookup_surface_intersection_solver",
     "make_surface_intersection_request",
     "normalize_surface_intersection_result",
