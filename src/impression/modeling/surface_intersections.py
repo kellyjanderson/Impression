@@ -8,12 +8,16 @@ import numpy as np
 from .surface import (
     PATCH_FAMILY_CAPABILITY_MATRIX,
     BSplineSurfacePatch,
+    ImplicitFieldSafetyPolicy,
+    ImplicitFieldValidationDiagnostic,
+    ImplicitSurfacePatch,
     NURBSSurfacePatch,
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
     SubdivisionSurfacePatch,
     SurfacePatch,
+    assess_implicit_field_security,
 )
 
 SurfaceIntersectionSupportState = Literal["exact", "declared-tolerance", "adapter", "unsupported"]
@@ -151,6 +155,7 @@ class SurfaceIntersectionSupportDiagnostic:
         "missing-registry-entry",
         "unknown-registry-entry",
         "budget-exhausted",
+        "unsafe-implicit-field",
     ]
     message: str
     family_pair: tuple[str, str]
@@ -359,6 +364,55 @@ class SurfaceSubdivisionIntersectionAdapterReport:
             "converged": self.converged,
             "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
             "solver_id": self.solver_id,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceImplicitIntersectionBudget:
+    """Strict budget gate for implicit surface intersection execution."""
+
+    max_cells: int = 4096
+    max_depth: int = 8
+    max_iterations: int = 96
+
+    def __post_init__(self) -> None:
+        for name in ("max_cells", "max_depth", "max_iterations"):
+            value = int(getattr(self, name))
+            if value <= 0:
+                raise ValueError(f"SurfaceImplicitIntersectionBudget.{name} must be positive.")
+            object.__setattr__(self, name, value)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "max_cells": self.max_cells,
+            "max_depth": self.max_depth,
+            "max_iterations": self.max_iterations,
+        }
+
+
+DEFAULT_SURFACE_IMPLICIT_INTERSECTION_BUDGET = SurfaceImplicitIntersectionBudget()
+
+
+@dataclass(frozen=True)
+class SurfaceImplicitIntersectionSafetyDecision:
+    """Serializable safety and budget decision for an implicit intersection request."""
+
+    request: SurfaceIntersectionRequest
+    budget: SurfaceImplicitIntersectionBudget
+    implicit_diagnostics: tuple[ImplicitFieldValidationDiagnostic, ...] = ()
+    diagnostics: tuple[SurfaceIntersectionSupportDiagnostic, ...] = ()
+
+    @property
+    def executable(self) -> bool:
+        return not self.diagnostics and all(diagnostic.safe for diagnostic in self.implicit_diagnostics)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "budget": self.budget.canonical_payload(),
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "executable": self.executable,
+            "implicit_diagnostics": [diagnostic.canonical_payload() for diagnostic in self.implicit_diagnostics],
+            "request": self.request.canonical_payload(),
         }
 
 
@@ -625,6 +679,10 @@ def _surface_intersection_is_subdivision_family(patch: SurfacePatch) -> bool:
     return isinstance(patch, SubdivisionSurfacePatch)
 
 
+def _surface_intersection_is_implicit_family(patch: SurfacePatch) -> bool:
+    return isinstance(patch, ImplicitSurfacePatch)
+
+
 def _surface_intersection_is_analytic_family(patch: SurfacePatch) -> bool:
     return isinstance(patch, (PlanarSurfacePatch, RuledSurfacePatch, RevolutionSurfacePatch))
 
@@ -853,6 +911,105 @@ def check_subdivision_intersection_budget(
                 )
             )
     return tuple(diagnostics)
+
+
+def check_implicit_intersection_budget(
+    request: SurfaceIntersectionRequest,
+    *,
+    budget: SurfaceImplicitIntersectionBudget = DEFAULT_SURFACE_IMPLICIT_INTERSECTION_BUDGET,
+    cell_count: int,
+    depth: int,
+    iteration_count: int,
+) -> tuple[SurfaceIntersectionSupportDiagnostic, ...]:
+    """Return deterministic diagnostics when implicit intersection work exceeds budget."""
+
+    diagnostics: list[SurfaceIntersectionSupportDiagnostic] = []
+    cell_count = int(cell_count)
+    depth = int(depth)
+    iteration_count = int(iteration_count)
+    if cell_count > budget.max_cells:
+        diagnostics.append(
+            SurfaceIntersectionSupportDiagnostic(
+                code="budget-exhausted",
+                consumer=request.consumer,
+                family_pair=request.normalized_family_pair,
+                message=f"implicit intersection cell budget exhausted: {cell_count} cells exceeds {budget.max_cells}",
+            )
+        )
+    if depth > budget.max_depth:
+        diagnostics.append(
+            SurfaceIntersectionSupportDiagnostic(
+                code="budget-exhausted",
+                consumer=request.consumer,
+                family_pair=request.normalized_family_pair,
+                message=f"implicit intersection depth budget exhausted: {depth} exceeds {budget.max_depth}",
+            )
+        )
+    if iteration_count > budget.max_iterations:
+        diagnostics.append(
+            SurfaceIntersectionSupportDiagnostic(
+                code="budget-exhausted",
+                consumer=request.consumer,
+                family_pair=request.normalized_family_pair,
+                message=(
+                    "implicit intersection iteration budget exhausted: "
+                    f"{iteration_count} iterations exceeds {budget.max_iterations}"
+                ),
+            )
+        )
+    return tuple(diagnostics)
+
+
+def check_implicit_intersection_safety(
+    request: SurfaceIntersectionRequest,
+    *,
+    budget: SurfaceImplicitIntersectionBudget = DEFAULT_SURFACE_IMPLICIT_INTERSECTION_BUDGET,
+    field_safety_policy: ImplicitFieldSafetyPolicy | None = None,
+    cell_count: int = 1,
+    depth: int = 1,
+    iteration_count: int = 1,
+) -> SurfaceImplicitIntersectionSafetyDecision:
+    """Gate implicit intersection execution before any solver samples field values."""
+
+    implicit_patches = tuple(patch for patch in (request.first_patch, request.second_patch) if isinstance(patch, ImplicitSurfacePatch))
+    diagnostics: list[SurfaceIntersectionSupportDiagnostic] = []
+    implicit_diagnostics: list[ImplicitFieldValidationDiagnostic] = []
+    if not implicit_patches:
+        diagnostics.append(
+            SurfaceIntersectionSupportDiagnostic(
+                code="unsupported-family-pair",
+                consumer=request.consumer,
+                family_pair=request.normalized_family_pair,
+                message="implicit intersection safety gate requires at least one implicit surface",
+            )
+        )
+    for patch in implicit_patches:
+        implicit_diagnostic = assess_implicit_field_security(patch.field, policy=field_safety_policy)
+        implicit_diagnostics.append(implicit_diagnostic)
+        if not implicit_diagnostic.safe:
+            diagnostics.append(
+                SurfaceIntersectionSupportDiagnostic(
+                    code="unsafe-implicit-field",
+                    consumer=request.consumer,
+                    family_pair=request.normalized_family_pair,
+                    message=f"implicit intersection refused unsafe field: {implicit_diagnostic.reason}",
+                )
+            )
+    diagnostics.extend(
+        check_implicit_intersection_budget(
+            request,
+            budget=budget,
+            cell_count=cell_count,
+            depth=depth,
+            iteration_count=iteration_count,
+        )
+    )
+    return SurfaceImplicitIntersectionSafetyDecision(
+        request=request,
+        budget=budget,
+        implicit_diagnostics=tuple(implicit_diagnostics),
+        diagnostics=tuple(diagnostics),
+    )
 
 
 def solve_subdivision_surface_intersection_adapter(
@@ -1271,6 +1428,7 @@ def lookup_surface_intersection_solver(
 
 __all__ = [
     "DEFAULT_SURFACE_INTERSECTION_TOLERANCE_POLICY",
+    "DEFAULT_SURFACE_IMPLICIT_INTERSECTION_BUDGET",
     "DEFAULT_SURFACE_SUBDIVISION_INTERSECTION_BUDGET",
     "SURFACE_INTERSECTION_SOLVER_REGISTRY",
     "SurfaceAnalyticSplineResidualReport",
@@ -1285,6 +1443,8 @@ __all__ = [
     "SurfaceIntersectionSupportDiagnostic",
     "SurfaceIntersectionSupportState",
     "SurfaceIntersectionTolerancePolicy",
+    "SurfaceImplicitIntersectionBudget",
+    "SurfaceImplicitIntersectionSafetyDecision",
     "SurfaceSplineSplineResidualReport",
     "SurfaceSplineSplineSolverIterationRecord",
     "SurfaceSubdivisionIntersectionAdapterReport",
@@ -1292,6 +1452,8 @@ __all__ = [
     "SurfaceSubdivisionRefinedContourRecord",
     "assert_surface_intersection_solver_registry_complete",
     "build_surface_intersection_solver_registry",
+    "check_implicit_intersection_budget",
+    "check_implicit_intersection_safety",
     "check_subdivision_intersection_budget",
     "classify_surface_intersection_degeneracy",
     "lookup_surface_intersection_solver",

@@ -4,6 +4,8 @@ import pytest
 
 from impression.modeling import (
     BSplineSurfacePatch,
+    ImplicitFieldSafetyPolicy,
+    ImplicitSurfacePatch,
     NURBSSurfacePatch,
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
@@ -19,6 +21,8 @@ from impression.modeling import (
     SurfaceIntersectionSolverRegistryRecord,
     SurfaceIntersectionSupportDiagnostic,
     SurfaceIntersectionTolerancePolicy,
+    SurfaceImplicitIntersectionBudget,
+    SurfaceImplicitIntersectionSafetyDecision,
     SurfaceSplineSplineResidualReport,
     SurfaceSplineSplineSolverIterationRecord,
     SurfaceSubdivisionIntersectionAdapterReport,
@@ -27,6 +31,8 @@ from impression.modeling import (
     SubdivisionSurfacePatch,
     assert_surface_intersection_solver_registry_complete,
     build_surface_intersection_solver_registry,
+    check_implicit_intersection_budget,
+    check_implicit_intersection_safety,
     check_subdivision_intersection_budget,
     classify_surface_intersection_degeneracy,
     lookup_surface_intersection_solver,
@@ -35,6 +41,7 @@ from impression.modeling import (
     solve_analytic_spline_surface_intersection,
     solve_spline_spline_surface_intersection,
     solve_subdivision_surface_intersection_adapter,
+    make_implicit_field_node,
 )
 
 
@@ -371,3 +378,84 @@ def test_subdivision_intersection_adapter_refuses_non_subdivision_dispatch() -> 
     assert result.supported is False
     assert report.converged is False
     assert report.diagnostics[0].code == "unsupported-family-pair"
+
+
+def test_implicit_intersection_safety_accepts_safe_field_within_budget() -> None:
+    implicit = ImplicitSurfacePatch(
+        family="implicit",
+        field=make_implicit_field_node("sphere", parameters={"radius": 0.75}),
+    )
+    request = make_surface_intersection_request(implicit, PlanarSurfacePatch(family="planar"), consumer="csg")
+
+    decision = check_implicit_intersection_safety(
+        request,
+        budget=SurfaceImplicitIntersectionBudget(max_cells=64, max_depth=4, max_iterations=12),
+        cell_count=27,
+        depth=3,
+        iteration_count=6,
+    )
+
+    assert isinstance(decision, SurfaceImplicitIntersectionSafetyDecision)
+    assert decision.executable is True
+    assert decision.diagnostics == ()
+    assert decision.implicit_diagnostics[0].safe is True
+    assert decision.canonical_payload()["executable"] is True
+
+
+def test_implicit_intersection_safety_refuses_field_that_violates_safety_policy() -> None:
+    implicit = ImplicitSurfacePatch(
+        family="implicit",
+        field=make_implicit_field_node(
+            "union",
+            children=(
+                make_implicit_field_node("sphere"),
+                make_implicit_field_node("box"),
+            ),
+        ),
+    )
+    request = make_surface_intersection_request(implicit, PlanarSurfacePatch(family="planar"), consumer="seam")
+
+    decision = check_implicit_intersection_safety(
+        request,
+        field_safety_policy=ImplicitFieldSafetyPolicy(max_nodes=2),
+    )
+
+    assert decision.executable is False
+    assert decision.implicit_diagnostics[0].safe is False
+    assert decision.diagnostics[0].code == "unsafe-implicit-field"
+    assert "max_nodes" in decision.diagnostics[0].message
+
+
+def test_implicit_intersection_budget_reports_all_budget_exhaustion_reasons() -> None:
+    request = make_surface_intersection_request(
+        ImplicitSurfacePatch(family="implicit"),
+        PlanarSurfacePatch(family="planar"),
+    )
+    budget = SurfaceImplicitIntersectionBudget(max_cells=4, max_depth=2, max_iterations=3)
+
+    diagnostics = check_implicit_intersection_budget(
+        request,
+        budget=budget,
+        cell_count=8,
+        depth=3,
+        iteration_count=4,
+    )
+
+    assert len(diagnostics) == 3
+    assert {diagnostic.code for diagnostic in diagnostics} == {"budget-exhausted"}
+    assert "cell budget exhausted" in diagnostics[0].message
+    assert "depth budget exhausted" in diagnostics[1].message
+    assert "iteration budget exhausted" in diagnostics[2].message
+
+
+def test_implicit_intersection_safety_refuses_non_implicit_request() -> None:
+    request = make_surface_intersection_request(
+        PlanarSurfacePatch(family="planar"),
+        PlanarSurfacePatch(family="planar"),
+    )
+
+    decision = check_implicit_intersection_safety(request)
+
+    assert decision.executable is False
+    assert decision.implicit_diagnostics == ()
+    assert decision.diagnostics[0].code == "unsupported-family-pair"
