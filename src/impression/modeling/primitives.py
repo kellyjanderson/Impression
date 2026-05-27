@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Sequence, Tuple, cast
 
 import numpy as np
@@ -11,6 +12,43 @@ if TYPE_CHECKING:
     from .surface import SurfaceBody
 
 Backend = Literal["mesh", "surface"]
+
+
+@dataclass(frozen=True)
+class PrimitiveCSGRouteRecord:
+    """Primitive authored route covered by the no-hidden-mesh CSG policy."""
+
+    caller_id: str
+    surface_constructor: str
+    explicit_mesh_constructor: str
+    csg_gate: str = "assert_no_hidden_surface_csg_mesh_fallback"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "caller_id": self.caller_id,
+            "csg_gate": self.csg_gate,
+            "explicit_mesh_constructor": self.explicit_mesh_constructor,
+            "surface_constructor": self.surface_constructor,
+        }
+
+
+PRIMITIVE_CSG_ROUTE_INVENTORY: tuple[PrimitiveCSGRouteRecord, ...] = (
+    PrimitiveCSGRouteRecord("primitive.make_box", "make_box", "make_box_mesh"),
+    PrimitiveCSGRouteRecord("primitive.make_cylinder", "make_cylinder", "make_cylinder_mesh"),
+    PrimitiveCSGRouteRecord("primitive.make_ngon", "make_ngon", "make_ngon_mesh"),
+    PrimitiveCSGRouteRecord("primitive.make_polyhedron", "make_polyhedron", "make_polyhedron_mesh"),
+    PrimitiveCSGRouteRecord("primitive.make_nhedron", "make_nhedron", "make_nhedron_mesh"),
+    PrimitiveCSGRouteRecord("primitive.make_sphere", "make_sphere", "make_sphere_mesh"),
+    PrimitiveCSGRouteRecord("primitive.make_torus", "make_torus", "make_torus_mesh"),
+    PrimitiveCSGRouteRecord("primitive.make_cone", "make_cone", "make_cone_mesh"),
+    PrimitiveCSGRouteRecord("primitive.make_prism", "make_prism", "make_prism_mesh"),
+)
+
+
+def primitive_csg_route_inventory() -> tuple[PrimitiveCSGRouteRecord, ...]:
+    """Return primitive authored routes guarded against hidden mesh fallback."""
+
+    return PRIMITIVE_CSG_ROUTE_INVENTORY
 
 
 def _ensure_backend(backend: Backend) -> None:
@@ -26,6 +64,12 @@ def _surface_metadata(*, color: Sequence[float] | str | None) -> dict[str, objec
     return {"consumer": {"color": color}}
 
 
+def _surface_primitive_result(caller_id: str, result: SurfaceBody) -> SurfaceBody:
+    from .csg import assert_no_hidden_surface_csg_mesh_fallback
+
+    return cast("SurfaceBody", assert_no_hidden_surface_csg_mesh_fallback(caller_id, result))
+
+
 def make_box(
     size: Sequence[float] = (1.0, 1.0, 1.0),
     center: Sequence[float] = (0.0, 0.0, 0.0),
@@ -38,7 +82,10 @@ def make_box(
     if backend == "surface":
         from ._surface_primitives import make_surface_box
 
-        return make_surface_box(size=size, center=center, metadata=_surface_metadata(color=color))
+        return _surface_primitive_result(
+            "primitive.make_box",
+            make_surface_box(size=size, center=center, metadata=_surface_metadata(color=color)),
+        )
 
     from ._legacy_mesh_primitives import box_mesh
 
@@ -64,14 +111,17 @@ def make_cylinder(
     if backend == "surface":
         from ._surface_primitives import make_surface_cylinder
 
-        return make_surface_cylinder(
-            radius=radius,
-            height=height,
-            center=center,
-            direction=direction,
-            resolution=resolution,
-            capping=capping,
-            metadata=_surface_metadata(color=color),
+        return _surface_primitive_result(
+            "primitive.make_cylinder",
+            make_surface_cylinder(
+                radius=radius,
+                height=height,
+                center=center,
+                direction=direction,
+                resolution=resolution,
+                capping=capping,
+                metadata=_surface_metadata(color=color),
+            ),
         )
 
     direction = _normalize(direction)
@@ -111,14 +161,17 @@ def make_ngon(
     if backend == "surface":
         from ._surface_primitives import make_surface_ngon
 
-        return make_surface_ngon(
-            sides=sides,
-            radius=radius,
-            height=height,
-            center=center,
-            direction=direction,
-            side_length=side_length,
-            metadata=_surface_metadata(color=color),
+        return _surface_primitive_result(
+            "primitive.make_ngon",
+            make_surface_ngon(
+                sides=sides,
+                radius=radius,
+                height=height,
+                center=center,
+                direction=direction,
+                side_length=side_length,
+                metadata=_surface_metadata(color=color),
+            ),
         )
 
     direction = _normalize(direction)
@@ -148,11 +201,14 @@ def make_polyhedron(
     if backend == "surface":
         from ._surface_primitives import make_surface_polyhedron
 
-        return make_surface_polyhedron(
-            faces=faces,
-            radius=radius,
-            center=center,
-            metadata=_surface_metadata(color=color),
+        return _surface_primitive_result(
+            "primitive.make_polyhedron",
+            make_surface_polyhedron(
+                faces=faces,
+                radius=radius,
+                center=center,
+                metadata=_surface_metadata(color=color),
+            ),
         )
 
     vertices, face_list = _regular_polyhedron_data(faces)
@@ -181,13 +237,16 @@ def make_nhedron(
 ) -> Mesh | SurfaceBody:
     """Compatibility wrapper for make_polyhedron."""
 
-    return make_polyhedron(
+    result = make_polyhedron(
         faces=faces,
         radius=radius,
         center=center,
         backend=backend,
         color=color,
     )
+    if backend == "surface":
+        return _surface_primitive_result("primitive.make_nhedron", cast("SurfaceBody", result))
+    return result
 
 
 def make_sphere(
@@ -202,12 +261,15 @@ def make_sphere(
     if backend == "surface":
         from ._surface_primitives import make_surface_sphere
 
-        return make_surface_sphere(
-            radius=radius,
-            center=center,
-            theta_resolution=theta_resolution,
-            phi_resolution=phi_resolution,
-            metadata=_surface_metadata(color=color),
+        return _surface_primitive_result(
+            "primitive.make_sphere",
+            make_surface_sphere(
+                radius=radius,
+                center=center,
+                theta_resolution=theta_resolution,
+                phi_resolution=phi_resolution,
+                metadata=_surface_metadata(color=color),
+            ),
         )
     from ._legacy_mesh_primitives import sphere_mesh
 
@@ -234,14 +296,17 @@ def make_torus(
     if backend == "surface":
         from ._surface_primitives import make_surface_torus
 
-        return make_surface_torus(
-            major_radius=major_radius,
-            minor_radius=minor_radius,
-            center=center,
-            direction=direction,
-            n_theta=n_theta,
-            n_phi=n_phi,
-            metadata=_surface_metadata(color=color),
+        return _surface_primitive_result(
+            "primitive.make_torus",
+            make_surface_torus(
+                major_radius=major_radius,
+                minor_radius=minor_radius,
+                center=center,
+                direction=direction,
+                n_theta=n_theta,
+                n_phi=n_phi,
+                metadata=_surface_metadata(color=color),
+            ),
         )
 
     direction = _normalize(direction)
@@ -283,14 +348,17 @@ def make_cone(
     if backend == "surface":
         from ._surface_primitives import make_surface_cone
 
-        return make_surface_cone(
-            bottom_diameter=bottom_diameter,
-            top_diameter=top_diameter,
-            height=height,
-            center=center,
-            direction=direction,
-            resolution=resolution,
-            metadata=_surface_metadata(color=color),
+        return _surface_primitive_result(
+            "primitive.make_cone",
+            make_surface_cone(
+                bottom_diameter=bottom_diameter,
+                top_diameter=top_diameter,
+                height=height,
+                center=center,
+                direction=direction,
+                resolution=resolution,
+                metadata=_surface_metadata(color=color),
+            ),
         )
 
     from ._legacy_mesh_primitives import circular_frustum_mesh, orient_mesh
@@ -320,13 +388,16 @@ def make_prism(
     if backend == "surface":
         from ._surface_primitives import make_surface_prism
 
-        return make_surface_prism(
-            base_size=base_size,
-            top_size=top_size,
-            height=height,
-            center=center,
-            direction=direction,
-            metadata=_surface_metadata(color=color),
+        return _surface_primitive_result(
+            "primitive.make_prism",
+            make_surface_prism(
+                base_size=base_size,
+                top_size=top_size,
+                height=height,
+                center=center,
+                direction=direction,
+                metadata=_surface_metadata(color=color),
+            ),
         )
 
     if top_size is None:

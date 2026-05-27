@@ -7,6 +7,7 @@ import impression.modeling as modeling
 import impression.modeling.csg as csg_module
 from impression.mesh import Mesh
 from impression.modeling import (
+    PrimitiveCSGRouteRecord,
     make_box,
     make_box_mesh,
     make_cone,
@@ -26,6 +27,7 @@ from impression.modeling import (
     make_sphere_mesh,
     make_torus,
     make_torus_mesh,
+    primitive_csg_route_inventory,
 )
 from impression.modeling._surface_primitives import (
     make_surface_box,
@@ -624,6 +626,26 @@ def test_explicit_primitive_mesh_compatibility_apis_return_meshes(surface_factor
     assert isinstance(surface_result, SurfaceBody)
     assert isinstance(mesh_result, Mesh)
     assert mesh_result.n_faces > 0
+
+
+def test_primitive_csg_route_inventory_covers_surface_defaults_and_mesh_compatibility_names() -> None:
+    inventory = primitive_csg_route_inventory()
+    payloads = [record.canonical_payload() for record in inventory]
+
+    assert all(isinstance(record, PrimitiveCSGRouteRecord) for record in inventory)
+    assert {record.surface_constructor for record in inventory} == {
+        "make_box",
+        "make_cone",
+        "make_cylinder",
+        "make_ngon",
+        "make_nhedron",
+        "make_polyhedron",
+        "make_prism",
+        "make_sphere",
+        "make_torus",
+    }
+    assert all(payload["csg_gate"] == "assert_no_hidden_surface_csg_mesh_fallback" for payload in payloads)
+    assert all(str(record.explicit_mesh_constructor).endswith("_mesh") for record in inventory)
 
 
 def test_private_surface_builders_do_not_leak_through_public_modeling_namespace() -> None:
