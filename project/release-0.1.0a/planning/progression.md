@@ -498,7 +498,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 280: .impress Unsafe Payload Negative Fixtures (v1.0)](../specifications/surface-280-impress-unsafe-payload-negative-fixtures-v1_0.md)
 - [x] [Surface Spec 281: Mesh Boundary Negative Fixtures (v1.0)](../specifications/surface-281-mesh-boundary-negative-fixtures-v1_0.md)
 - [x] [Surface Spec 282: CSG Negative Diagnostic Fixtures (v1.0)](../specifications/surface-282-csg-negative-diagnostic-fixtures-v1_0.md)
-- [ ] [Surface Spec 283: Loft Ambiguity Negative Diagnostic Fixtures (v1.0)](../specifications/surface-283-loft-ambiguity-negative-diagnostic-fixtures-v1_0.md)
+- [x] [Surface Spec 283: Loft Ambiguity Negative Diagnostic Fixtures (v1.0)](../specifications/surface-283-loft-ambiguity-negative-diagnostic-fixtures-v1_0.md)
 - [ ] [Surface Spec 284: Seam Continuity Negative Diagnostic Fixtures (v1.0)](../specifications/surface-284-seam-continuity-negative-diagnostic-fixtures-v1_0.md)
 - [ ] [Surface Spec 285: Legacy Primitive Mesh Assumption Inventory (v1.0)](../specifications/surface-285-legacy-primitive-mesh-assumption-inventory-v1_0.md)
 - [ ] [Surface Spec 286: Preview And Reference Tests Explicit Tessellation Rewrite (v1.0)](../specifications/surface-286-preview-and-reference-tests-explicit-tessellation-rewrite-v1_0.md)

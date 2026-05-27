@@ -53,6 +53,26 @@ from impression.modeling.loft import (
     _minimum_cost_hole_assignment,
     _local_assignment_fairness,
 )
+from tests.reference_images import (
+    ExpectedDiagnosticKeyRecord,
+    NegativeDiagnosticFixtureRecord,
+    evaluate_negative_diagnostic_fixture_matrix,
+    normalize_diagnostic_snapshot,
+)
+
+
+def _loft_negative_fixture(
+    fixture_id: str,
+    diagnostic: object,
+    *,
+    expected_keys: tuple[ExpectedDiagnosticKeyRecord, ...],
+) -> NegativeDiagnosticFixtureRecord:
+    return NegativeDiagnosticFixtureRecord(
+        fixture_id=fixture_id,
+        domain="loft",
+        expected_keys=expected_keys,
+        expected_snapshot=normalize_diagnostic_snapshot(diagnostic, fixture_id=fixture_id),
+    )
 
 
 def _assert_mesh_quality(mesh) -> None:
@@ -2665,6 +2685,62 @@ def test_loft_plan_sections_ambiguity_mode_fail_rejects_auto_resolvable_ambiguit
             split_merge_mode="resolve",
             ambiguity_mode="fail",
         )
+
+
+def test_loft_ambiguity_negative_diagnostic_fixture_feeds_matrix():
+    left = make_rect(size=(0.85, 0.85), center=(-1.0, 0.0))
+    right = make_rect(size=(0.85, 0.85), center=(1.0, 0.0))
+    left_end = make_rect(size=(0.8, 0.8), center=(-1.0, 0.0))
+    center_end = make_rect(size=(0.7, 0.7), center=(0.0, 0.0))
+    right_end = make_rect(size=(0.8, 0.8), center=(1.0, 0.0))
+    s0 = Section((as_section(left).regions[0], as_section(right).regions[0]))
+    s1 = Section(
+        (
+            as_section(left_end).regions[0],
+            as_section(center_end).regions[0],
+            as_section(right_end).regions[0],
+        )
+    )
+    stations = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    with pytest.raises(LoftPlanningBlockedError) as excinfo:
+        loft_plan_sections(
+            stations,
+            samples=30,
+            split_merge_mode="resolve",
+            ambiguity_mode="fail",
+        )
+    error = excinfo.value
+    fixture = _loft_negative_fixture(
+        "loft/ambiguity-mode-fail",
+        {
+            "code": type(error).__name__,
+            "message": str(error),
+            "ambiguity_record": error.ambiguity_record.canonical_payload(),
+            "constraint_request": {
+                "interval": error.constraint_request.interval,
+                "topology_state_index": error.constraint_request.topology_state_index,
+                "ambiguous_region_indices": error.constraint_request.ambiguous_region_indices,
+                "requested_ties": error.constraint_request.requested_ties,
+                "ambiguity_class": error.constraint_request.ambiguity_class,
+                "relationship_group": error.constraint_request.relationship_group,
+            },
+        },
+        expected_keys=(
+            ExpectedDiagnosticKeyRecord(("code",), "LoftPlanningBlockedError"),
+            ExpectedDiagnosticKeyRecord(("ambiguity_record", "interval"), (0, 1)),
+            ExpectedDiagnosticKeyRecord(("ambiguity_record", "relationship_group"), "many_to_many_regions"),
+            ExpectedDiagnosticKeyRecord(("constraint_request", "requested_ties")),
+        ),
+    )
+
+    report = evaluate_negative_diagnostic_fixture_matrix((fixture,), required_domains=("loft",))
+
+    assert report.passed is True
+    assert report.domain_coverage[0].fixture_count == 1
+    assert "unsupported_topology_ambiguity" in fixture.expected_snapshot.payload["message"]  # type: ignore[index, union-attr]
 
 
 def test_loft_plan_sections_reports_structured_residual_ambiguity_diagnostics_for_branch_budget_exhaustion():
