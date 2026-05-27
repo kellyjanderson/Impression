@@ -39,12 +39,15 @@ from impression.modeling import (
     SurfaceCSGPatchLocalArrangementGraph,
     SurfaceCSGPatchLocalCurveMappingResult,
     SurfaceCSGPlanarRelationDiagnostic,
+    SurfaceCSGProvenanceMetadataRecord,
     SurfaceCSGRevolutionIntersectionRecord,
     SurfaceCSGShellAssemblyRecord,
     SurfaceCSGSeamRebuildRecord,
     SurfaceCSGSplitTrimLoopRecord,
     SurfaceCSGToleranceDiagnostic,
     SurfaceCSGTolerancePolicy,
+    SurfaceCSGValidityDiagnostic,
+    SurfaceCSGValidityGateRecord,
     SurfaceShell,
     TrimLoop,
     boolean_difference,
@@ -57,6 +60,7 @@ from impression.modeling import (
     intersect_axis_compatible_revolution_pair,
     intersect_planar_linear_patch_pair,
     intersect_planar_revolution_patch_pair,
+    finalize_surface_csg_validity_gate,
     map_surface_csg_curve_to_patch_local,
     make_surface_csg_curve,
     make_surface_csg_line_curve,
@@ -411,6 +415,43 @@ def test_surface_csg_seam_rebuild_reports_open_boundaries() -> None:
     assert record.supported is False
     assert "missing seam coverage" in record.diagnostics[0]
     assert any(boundary_use.use_count == 0 for boundary_use in record.boundary_uses)
+
+
+def test_surface_csg_validity_gate_accepts_closed_body_and_records_provenance() -> None:
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_box(size=(1.0, 1.0, 1.0), center=(1.25, 0.0, 0.0), backend="surface")
+    operands = prepare_surface_boolean_operands("union", [left, right])
+
+    gate = finalize_surface_csg_validity_gate("union", operands, left)
+
+    assert isinstance(gate, SurfaceCSGValidityGateRecord)
+    assert gate.accepted is True
+    assert gate.status == "succeeded"
+    assert gate.body is not None
+    assert gate.diagnostics == ()
+    assert isinstance(gate.provenance, SurfaceCSGProvenanceMetadataRecord)
+    assert gate.provenance.canonical_payload() == {
+        "backend": "surface",
+        "operand_ids": operands.body_ids,
+        "operation": "union",
+    }
+
+
+def test_surface_csg_validity_gate_rejects_open_shell_with_diagnostics() -> None:
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_box(size=(1.0, 1.0, 1.0), center=(1.25, 0.0, 0.0), backend="surface")
+    operands = prepare_surface_boolean_operands("union", [left, right])
+    shell = left.iter_shells(world=True)[0]
+    invalid_body = make_surface_body((replace(shell, seams=shell.seams[:-1]),), metadata=left.metadata)
+
+    gate = finalize_surface_csg_validity_gate("union", operands, invalid_body)
+
+    assert gate.accepted is False
+    assert gate.status == "invalid"
+    assert gate.body is None
+    assert all(isinstance(diagnostic, SurfaceCSGValidityDiagnostic) for diagnostic in gate.diagnostics)
+    assert gate.diagnostics[0].code == "invalid-shell"
+    assert "missing seam coverage" in gate.diagnostics[0].message
 
 
 def test_planar_linear_analytic_intersection_emits_exact_line_record() -> None:
