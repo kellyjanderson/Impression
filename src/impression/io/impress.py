@@ -14,7 +14,9 @@ from impression.modeling.surface import (
     BSplineSurfacePatch,
     DisplacementSurfacePatch,
     HeightmapSurfacePatch,
+    IMPLICIT_FIELD_NODE_KINDS,
     ImplicitFieldNode,
+    ImplicitFieldSafetyPolicy,
     ImplicitSurfacePatch,
     NURBSSurfacePatch,
     PATCH_FAMILY_CAPABILITY_MATRIX,
@@ -1677,29 +1679,112 @@ def _decode_subdivision_crease_payload(payload: object) -> SubdivisionCrease:
         raise ImpressFormatError(str(exc)) from exc
 
 
-def _decode_implicit_field_node_payload(payload: object) -> ImplicitFieldNode:
+def _decode_implicit_field_node_payload(
+    payload: object,
+    *,
+    path: str = "field",
+    policy: ImplicitFieldSafetyPolicy | None = None,
+    state: dict[str, int] | None = None,
+    depth: int = 1,
+) -> ImplicitFieldNode:
+    policy = ImplicitFieldSafetyPolicy() if policy is None else policy
+    state = {"node_count": 0} if state is None else state
+    state["node_count"] += 1
+    if state["node_count"] > policy.max_nodes:
+        raise ImpressFormatError(
+            f"Unsafe implicit field payload at {path}: field tree exceeds max_nodes "
+            f"{policy.max_nodes}."
+        )
+    if depth > policy.max_depth:
+        raise ImpressFormatError(
+            f"Unsafe implicit field payload at {path}: field tree exceeds max_depth "
+            f"{policy.max_depth}."
+        )
     if not isinstance(payload, Mapping):
-        raise ImpressFormatError("Implicit field payload must be an object.")
+        raise ImpressFormatError(f"Implicit field payload at {path} must be an object.")
     unknown_keys = set(payload) - {"kind", "parameters", "children"}
     if unknown_keys:
         keys = ", ".join(sorted(str(key) for key in unknown_keys))
-        raise ImpressFormatError(f"Unsupported implicit field node fields: {keys}.")
+        raise ImpressFormatError(f"Unsupported implicit field node fields at {path}: {keys}.")
     kind = payload.get("kind")
     if not isinstance(kind, str) or not kind.strip():
-        raise ImpressFormatError("Implicit field node kind must be a non-empty string.")
+        raise ImpressFormatError(f"Implicit field node kind at {path} must be a non-empty string.")
+    if kind not in IMPLICIT_FIELD_NODE_KINDS:
+        allowed = ", ".join(sorted(IMPLICIT_FIELD_NODE_KINDS))
+        raise ImpressFormatError(
+            f"Unsupported implicit field node kind {kind!r} at {path}; allowed nodes: {allowed}."
+        )
     parameters = payload.get("parameters", {})
     if not isinstance(parameters, Mapping):
-        raise ImpressFormatError("Implicit field node parameters must be an object.")
+        raise ImpressFormatError(f"Implicit field node parameters at {path} must be an object.")
+    if len(parameters) > policy.max_parameters_per_node:
+        raise ImpressFormatError(
+            f"Unsafe implicit field payload at {path}.parameters: field node exceeds "
+            f"max_parameters_per_node {policy.max_parameters_per_node}."
+        )
+    for key, value in parameters.items():
+        parameter_path = f"{path}.parameters.{key}"
+        if _implicit_parameter_has_unsafe_payload(str(key), value, policy):
+            raise ImpressFormatError(
+                f"Unsafe implicit field payload at {parameter_path}: executable payloads are not allowed; "
+                f"allowed nodes: {', '.join(sorted(IMPLICIT_FIELD_NODE_KINDS))}."
+            )
     children_payload = payload.get("children", [])
     children = _validate_array_payload(children_payload, "field.children")
+    if len(children) > policy.max_children_per_node:
+        raise ImpressFormatError(
+            f"Unsafe implicit field payload at {path}.children: field node exceeds "
+            f"max_children_per_node {policy.max_children_per_node}."
+        )
     try:
         return ImplicitFieldNode(
             kind=kind,
             parameters=dict(parameters),
-            children=tuple(_decode_implicit_field_node_payload(child) for child in children),
+            children=tuple(
+                _decode_implicit_field_node_payload(
+                    child,
+                    path=f"{path}.children[{index}]",
+                    policy=policy,
+                    state=state,
+                    depth=depth + 1,
+                )
+                for index, child in enumerate(children)
+            ),
         )
     except (TypeError, ValueError) as exc:
-        raise ImpressFormatError(str(exc)) from exc
+        raise ImpressFormatError(f"Invalid implicit field payload at {path}: {exc}") from exc
+
+
+def _implicit_parameter_has_unsafe_payload(
+    name: str,
+    value: object,
+    policy: ImplicitFieldSafetyPolicy,
+) -> bool:
+    normalized_name = name.strip().lower()
+    if normalized_name.startswith("__") or normalized_name in {
+        "__builtins__",
+        "callable",
+        "code",
+        "eval",
+        "exec",
+        "function",
+        "globals",
+        "import",
+        "lambda",
+        "locals",
+        "module",
+    }:
+        return True
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if len(value) > policy.max_string_length:
+            return True
+        return any(token in text for token in ("__", "import ", "eval(", "exec(", "lambda "))
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return any(_implicit_parameter_has_unsafe_payload(name, item, policy) for item in value)
+    if isinstance(value, Mapping):
+        return any(_implicit_parameter_has_unsafe_payload(str(key), nested_value, policy) for key, nested_value in value.items())
+    return False
 
 
 def validate_impress_document_root(root: Mapping[str, object]) -> ImpressDocumentRoot:

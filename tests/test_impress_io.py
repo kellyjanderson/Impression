@@ -1114,6 +1114,71 @@ def test_encode_decode_implicit_surface_patch_payload_round_trips_safe_field_tre
     assert decoded.bounds == (-1.0, 1.0, -1.5, 1.5, -2.0, 2.0)
 
 
+def test_decode_implicit_surface_patch_payload_preserves_metadata_domain_and_identity() -> None:
+    patch = ImplicitSurfacePatch(
+        family="implicit",
+        field=make_implicit_field_node("sphere", parameters={"radius": 0.75}),
+        domain=ParameterDomain(u_range=(-1.0, 1.0), v_range=(-2.0, 2.0), normalized=False),
+        metadata={"kernel": {"fixture": "implicit-safe"}, "consumer": {"label": "field"}},
+    )
+
+    payload = encode_surface_patch_payload(patch)
+    decoded = decode_surface_patch_payload(payload)
+
+    assert payload["stable_identity"] == patch.stable_identity
+    assert decoded.stable_identity == patch.stable_identity
+    assert decoded.domain == patch.domain
+    assert decoded.metadata == patch.metadata
+
+
+def test_decode_implicit_surface_patch_payload_reports_path_specific_unknown_node() -> None:
+    patch = ImplicitSurfacePatch(family="implicit")
+    payload = encode_surface_patch_payload(patch)
+    geometry = dict(payload["geometry"])  # type: ignore[arg-type]
+    geometry["field"] = {
+        "kind": "union",
+        "parameters": {},
+        "children": [{"kind": "__import__", "parameters": {}, "children": []}],
+    }
+    payload["geometry"] = geometry
+
+    with pytest.raises(ImpressFormatError, match=r"field\.children\[0\].*allowed nodes"):
+        decode_surface_patch_payload(payload)
+
+
+def test_decode_implicit_surface_patch_payload_refuses_over_budget_tree_with_path() -> None:
+    patch = ImplicitSurfacePatch(family="implicit")
+    payload = encode_surface_patch_payload(patch)
+    geometry = dict(payload["geometry"])  # type: ignore[arg-type]
+    geometry["field"] = {
+        "kind": "union",
+        "parameters": {},
+        "children": [
+            {"kind": "sphere", "parameters": {"radius": 1.0}, "children": []}
+            for _index in range(9)
+        ],
+    }
+    payload["geometry"] = geometry
+
+    with pytest.raises(ImpressFormatError, match=r"field\.children.*max_children_per_node"):
+        decode_surface_patch_payload(payload)
+
+
+def test_decode_implicit_surface_patch_payload_refuses_executable_parameter_with_path() -> None:
+    patch = ImplicitSurfacePatch(family="implicit")
+    payload = encode_surface_patch_payload(patch)
+    geometry = dict(payload["geometry"])  # type: ignore[arg-type]
+    geometry["field"] = {
+        "kind": "sphere",
+        "parameters": {"label": "__import__('os').system('boom')"},
+        "children": [],
+    }
+    payload["geometry"] = geometry
+
+    with pytest.raises(ImpressFormatError, match=r"field\.parameters\.label.*executable payloads"):
+        decode_surface_patch_payload(payload)
+
+
 def test_encode_decode_heightmap_surface_patch_payload_round_trips_sampled_grid() -> None:
     patch = HeightmapSurfacePatch(
         family="heightmap",
