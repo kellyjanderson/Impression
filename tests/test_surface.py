@@ -119,6 +119,9 @@ from impression.modeling import (
     SurfaceContinuitySeamParameterLocator,
     SurfaceContinuityViolationRecord,
     SurfaceContinuityViolationDiagnostics,
+    SurfaceContinuityEnforcementRequest,
+    SurfaceContinuityEnforcementRefusalDiagnostic,
+    SurfaceContinuityEnforcementResult,
     SurfaceConsumerCollection,
     SurfaceCollectionTessellationResult,
     SurfaceFamilyTessellationAdapter,
@@ -172,6 +175,8 @@ from impression.modeling import (
     validate_higher_order_surface_continuity,
     build_surface_continuity_violation_locators,
     format_surface_continuity_violation_diagnostic,
+    check_surface_continuity_enforcement_eligibility,
+    validate_surface_continuity_enforcement_result,
     evaluate_implicit_field,
     evaluate_implicit_field_domain,
     extract_surface_boundary_descriptor,
@@ -2145,6 +2150,75 @@ def test_higher_order_continuity_violation_locators_are_empty_for_passing_report
     assert report.passed is True
     assert diagnostics.has_violations is False
     assert diagnostics.violations == ()
+
+
+def test_surface_continuity_enforcement_refuses_validation_only_and_source_mutation() -> None:
+    seam = SurfaceSeam("c1", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")), continuity="C1")
+    constraint = normalize_surface_seam_continuity_constraint(seam)
+    request = SurfaceContinuityEnforcementRequest(
+        operation_id="loft-1",
+        producer="loft",
+        constraint=constraint,
+        owns_generated_geometry=False,
+        mutates_source_geometry=True,
+    )
+
+    diagnostics = check_surface_continuity_enforcement_eligibility(request)
+
+    assert all(isinstance(diagnostic, SurfaceContinuityEnforcementRefusalDiagnostic) for diagnostic in diagnostics)
+    assert {diagnostic.code for diagnostic in diagnostics} == {"validation-only", "source-mutation-forbidden"}
+    assert diagnostics[0].canonical_payload()["operation_id"] == "loft-1"
+
+
+def test_surface_continuity_enforcement_accepts_operation_owned_passing_output() -> None:
+    first_patch = PlanarSurfacePatch(family="planar")
+    second_patch = PlanarSurfacePatch(family="planar", origin=(1.0, 0.0, 0.0))
+    seam = SurfaceSeam("c1", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")), continuity="C1")
+    constraint = normalize_surface_seam_continuity_constraint(seam)
+    first = evaluate_surface_boundary_derivatives(first_patch, "right", patch_index=0, sample_count=3)
+    second = evaluate_surface_boundary_derivatives(second_patch, "left", patch_index=1, sample_count=3)
+    report = validate_higher_order_surface_continuity(constraint, first, second)
+    request = SurfaceContinuityEnforcementRequest(
+        operation_id="blend-1",
+        producer="blend",
+        constraint=constraint,
+        owns_generated_geometry=True,
+    )
+
+    result = validate_surface_continuity_enforcement_result(request, report)
+
+    assert isinstance(result, SurfaceContinuityEnforcementResult)
+    assert result.accepted is True
+    assert result.diagnostics == ()
+    assert result.validation_report is report
+    assert result.canonical_payload()["accepted"] is True
+
+
+def test_surface_continuity_enforcement_rejects_operation_owned_failed_output() -> None:
+    first_patch = PlanarSurfacePatch(family="planar")
+    second_patch = PlanarSurfacePatch(
+        family="planar",
+        origin=(1.0, 0.0, 0.0),
+        u_axis=(1.0, 0.0, 0.0),
+        v_axis=(0.0, 1.0, 0.25),
+    )
+    seam = SurfaceSeam("g1", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")), continuity="G1")
+    constraint = normalize_surface_seam_continuity_constraint(seam)
+    first = evaluate_surface_boundary_derivatives(first_patch, "right", patch_index=0, sample_count=3)
+    second = evaluate_surface_boundary_derivatives(second_patch, "left", patch_index=1, sample_count=3)
+    report = validate_higher_order_surface_continuity(constraint, first, second)
+    request = SurfaceContinuityEnforcementRequest(
+        operation_id="sweep-1",
+        producer="sweep",
+        constraint=constraint,
+        owns_generated_geometry=True,
+    )
+
+    result = validate_surface_continuity_enforcement_result(request, report)
+
+    assert result.accepted is False
+    assert {diagnostic.code for diagnostic in result.diagnostics} == {"validation-failed"}
+    assert "failed requested G1" in result.diagnostics[0].message
 
 
 def test_subdivision_boundary_descriptor_records_approximation_and_implicit_seams_refuse() -> None:
