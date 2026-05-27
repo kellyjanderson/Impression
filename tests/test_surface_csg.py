@@ -32,12 +32,14 @@ from impression.modeling import (
     SurfaceCSGCurveMappingDiagnostic,
     SurfaceCSGFragmentClassificationDiagnostic,
     SurfaceCSGFragmentClassificationRecord,
+    SurfaceCSGFragmentProvenanceRecord,
     SurfaceCSGOperationSelectionRecord,
     SurfaceCSGPatchLocalCurve,
     SurfaceCSGPatchLocalArrangementGraph,
     SurfaceCSGPatchLocalCurveMappingResult,
     SurfaceCSGPlanarRelationDiagnostic,
     SurfaceCSGRevolutionIntersectionRecord,
+    SurfaceCSGShellAssemblyRecord,
     SurfaceCSGSplitTrimLoopRecord,
     SurfaceCSGToleranceDiagnostic,
     SurfaceCSGTolerancePolicy,
@@ -46,6 +48,7 @@ from impression.modeling import (
     boolean_difference,
     boolean_intersection,
     boolean_union,
+    assemble_surface_csg_shells_from_fragments,
     build_surface_csg_patch_arrangement,
     classify_surface_csg_fragment_against_body,
     classify_surface_csg_point_against_bounds,
@@ -330,6 +333,53 @@ def test_surface_csg_operation_selection_reports_empty_result() -> None:
 
     assert surface_csg_selection_is_empty(discarded) is True
     assert discarded[0].survives is False
+
+
+def test_surface_csg_shell_assembly_builds_single_shell_with_provenance() -> None:
+    fragments = (
+        SurfaceBooleanTrimmedPatchFragment(
+            source_patch=SurfaceBooleanPatchRef(0, 2),
+            patch=PlanarSurfacePatch(family="planar"),
+            cut_curve_ids=("cut-a",),
+        ),
+        SurfaceBooleanTrimmedPatchFragment(
+            source_patch=SurfaceBooleanPatchRef(1, 1),
+            patch=PlanarSurfacePatch(family="planar", origin=(1.0, 0.0, 0.0)),
+            cut_curve_ids=("cut-b",),
+        ),
+    )
+
+    assembly = assemble_surface_csg_shells_from_fragments("union", fragments)
+
+    assert isinstance(assembly, SurfaceCSGShellAssemblyRecord)
+    assert assembly.supported is True
+    assert assembly.classification == "closed"
+    assert len(assembly.shells) == 1
+    assert assembly.shells[0].patch_count == 2
+    assert all(isinstance(record, SurfaceCSGFragmentProvenanceRecord) for record in assembly.provenance)
+    assert tuple(record.source_patch for record in assembly.provenance) == (SurfaceBooleanPatchRef(0, 2), SurfaceBooleanPatchRef(1, 1))
+    assert assembly.to_body() is not None
+
+
+def test_surface_csg_shell_assembly_represents_empty_and_multi_shell_results() -> None:
+    empty = assemble_surface_csg_shells_from_fragments("intersection", ())
+    fragments = (
+        SurfaceBooleanTrimmedPatchFragment(
+            source_patch=SurfaceBooleanPatchRef(0, 0),
+            patch=PlanarSurfacePatch(family="planar"),
+        ),
+        SurfaceBooleanTrimmedPatchFragment(
+            source_patch=SurfaceBooleanPatchRef(0, 1),
+            patch=PlanarSurfacePatch(family="planar", origin=(2.0, 0.0, 0.0)),
+        ),
+    )
+    multi = assemble_surface_csg_shells_from_fragments("union", fragments, multi_shell=True)
+
+    assert empty.classification == "empty"
+    assert empty.to_body() is None
+    assert multi.classification == "closed"
+    assert len(multi.shells) == 2
+    assert tuple(record.result_shell_index for record in multi.provenance) == (0, 1)
 
 
 def test_planar_linear_analytic_intersection_emits_exact_line_record() -> None:
