@@ -370,6 +370,9 @@ Split decision:
 
 ## Change History
 
+- 2026-05-27: Critically reviewed and rescored the specification manifest.
+  Context: the inventory, test rewrite, and documentation/example migration
+  candidates remain bounded after review and did not need additional splitting.
 - 2026-05-27: Added legacy primitive mesh assumption migration architecture and
   manifest. Context: broad tests still exposed old assumptions that public
   primitives return meshes by default.

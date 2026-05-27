@@ -123,7 +123,14 @@ Architecture-defined work:
 
 Manifest notes:
 
-- [x] No manifest candidate is scored `25+`.
+- [x] Critical review, rescore, split, review, rescore pass completed across
+  the five depth-completion manifests.
+- [x] Reviewed manifests now contain 27 candidate specs; no candidate in this
+  reviewed set is scored `25+`.
+- [x] Hidden work was split out of CSG graph/reconstruction, analytic/spline
+  versus spline/spline intersections, subdivision versus implicit
+  intersections, continuity residual versus locator diagnostics, and negative
+  diagnostic fixtures.
 - [x] Every `16-24` candidate includes a split-review cohesion reason.
 - [x] Readiness blockers are carried where downstream intersection,
   derivative, reference-promotion, or artifact-policy work is prerequisite.

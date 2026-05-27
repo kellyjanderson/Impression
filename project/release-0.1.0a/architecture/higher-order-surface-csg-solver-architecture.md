@@ -354,28 +354,27 @@ Split decision:
 - Review for split. Cohesion reason: planning and executability are one
   lifecycle invariant; intersection execution is split separately.
 
-### Candidate Spec: Surface CSG Fragment Graph And Result Reconstruction
+### Candidate Spec: Surface CSG Fragment Graph Builder
 
 Discovery purpose:
-- Convert classified patch fragments into durable result shells without mesh
-  substitution.
+- Build the transient classified fragment graph from intersection records,
+  existing trims, and operation selection rules.
 
 Responsibilities:
 - Functions/methods:
   - fragment graph builder
   - operation fragment selector
-  - result reconstructor
 - Data structures/models:
-  - fragment graph
-  - result shell assembly record
-  - cap/cut-boundary record
+  - fragment graph record
+  - fragment provenance record
+  - fragment classification edge record
 - Dependencies/services:
   - intersection records
-  - seam rebuild
   - trim loops
+  - operation plan
 - Returns/outputs/signals:
-  - reconstructed SurfaceBody
-  - invalid reconstruction diagnostic
+  - classified fragment graph
+  - graph construction diagnostic
 - UI surfaces/components:
   - not applicable
 - UI fields/elements:
@@ -389,7 +388,7 @@ Responsibilities:
 - Async/concurrency behavior:
   - none
 - Destructive/write behavior:
-  - changes boolean result construction
+  - changes boolean internal execution state
 - Security/privacy-sensitive behavior:
   - none
 - Performance-sensitive behavior:
@@ -401,20 +400,21 @@ Project readiness fields:
 - Implementation owner/module:
   - `src/impression/modeling/csg.py`
 - Chosen defaults / parameters:
-  - invalid graph reconstruction refuses; no geometric invention
+  - invalid graph construction refuses; no mesh-derived graph substitute
 - Test strategy:
-  - trim, cap, multi-shell, empty-result, and provenance tests
+  - graph construction, provenance, empty fragment, and operation-selection
+    tests
 - Data ownership:
-  - fragment graph owns transient execution truth; result owns durable truth
+  - fragment graph owns transient execution truth
 - Routes:
-  - intersection records to graph to reconstructed SurfaceBody
+  - intersection records to graph to reconstruction specs
 - Open questions / nuance discovered:
-  - cap family selection must coordinate with patch-family registry
+  - overlap-region graph edges must preserve both source operand references
 - Readiness blockers:
   - exact intersection record contract from the intersection architecture
 
 Score:
-- Functions/methods: 3 x 2 = 6
+- Functions/methods: 2 x 2 = 4
 - Data structures/models: 3 x 1 = 3
 - Dependencies/services: 3 x 1 = 3
 - Returns/outputs/signals: 2 x 1 = 2
@@ -430,15 +430,188 @@ Score:
 - Async/concurrency behavior: 0 x 3 = 0
 - Cross-screen reusable behavior: 0 x 2 = 0
 - Readiness blockers: 1 x 2 = 2
-- Total: 22.5
+- Total: 20.5
 
 Split decision:
-- Review for split. Cohesion reason: graph building and reconstruction form the
-  single handoff from transient boolean truth to durable body truth. Cap family
-  details may split later if this candidate grows.
+- Review for split. Cohesion reason: this candidate now owns only the transient
+  fragment graph; cap construction and durable shell reconstruction are split.
+
+### Candidate Spec: Surface CSG Cap And Cut Boundary Construction
+
+Discovery purpose:
+- Construct cap surfaces, cut-boundary trims, and exposed/open boundary records
+  from classified fragment graph cuts.
+
+Responsibilities:
+- Functions/methods:
+  - cap family selector
+  - cut-boundary trim builder
+  - open/shared boundary classifier
+- Data structures/models:
+  - cap construction record
+  - cut-boundary record
+  - boundary exposure diagnostic
+- Dependencies/services:
+  - fragment graph
+  - patch family registry
+  - trim loops
+- Returns/outputs/signals:
+  - cap patch payloads
+  - cut-boundary trim loops
+  - unsupported cap diagnostic
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: current trim and CSG curve records
+  - Additions to existing reusable library/module: cap/cut-boundary helpers
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - changes boolean result construction
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - bounded by cut-boundary count
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - `src/impression/modeling/csg.py`
+- Chosen defaults / parameters:
+  - cap family must be explicit; unsupported cap cases refuse
+- Test strategy:
+  - planar caps, curved cut boundaries, unsupported cap diagnostics
+- Data ownership:
+  - cap construction owns generated patches; source fragments remain immutable
+- Routes:
+  - fragment graph to cap/cut records to result shell assembly
+- Open questions / nuance discovered:
+  - non-planar cap generation may require blend/loft producer coordination
+- Readiness blockers:
+  - fragment graph builder must exist
+
+Score:
+- Functions/methods: 3 x 2 = 6
+- Data structures/models: 3 x 1 = 3
+- Dependencies/services: 3 x 1 = 3
+- Returns/outputs/signals: 3 x 1 = 3
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 1 x 3 = 3
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 1 x 2 = 2
+- Total: 23.5
+
+Split decision:
+- Review for split. Cohesion reason: cap and cut-boundary construction are one
+  generated-boundary contract. Non-planar cap producers may become child specs
+  after this boundary is implemented.
+
+### Candidate Spec: Surface CSG Result Shell Reconstruction And Validity Handoff
+
+Discovery purpose:
+- Assemble surviving fragments and generated caps into durable result shells,
+  then hand them to seam rebuild and validity gates.
+
+Responsibilities:
+- Functions/methods:
+  - result shell assembler
+  - reconstruction diagnostic builder
+  - validity handoff validator
+- Data structures/models:
+  - result shell assembly record
+  - reconstruction diagnostic
+  - validity handoff record
+- Dependencies/services:
+  - fragment graph
+  - cap/cut-boundary records
+  - seam rebuild
+  - validity gate
+- Returns/outputs/signals:
+  - reconstructed SurfaceBody candidate
+  - invalid reconstruction diagnostic
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: shell assembly and validity records
+  - Additions to existing reusable library/module: result reconstruction
+    helpers
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - changes boolean result construction
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - bounded by fragment and shell count
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - `src/impression/modeling/csg.py`
+- Chosen defaults / parameters:
+  - invalid reconstruction refuses; no geometric invention
+- Test strategy:
+  - empty, single-shell, multi-shell, nested-shell, seam handoff, and
+    provenance tests
+- Data ownership:
+  - result body owns durable truth; fragment graph remains transient
+- Routes:
+  - fragment/cap records to SurfaceBody candidate to validity gate
+- Open questions / nuance discovered:
+  - multi-shell ordering must be stable across equivalent operand order
+- Readiness blockers:
+  - fragment graph and cap/cut-boundary records must exist
+
+Score:
+- Functions/methods: 3 x 2 = 6
+- Data structures/models: 3 x 1 = 3
+- Dependencies/services: 4 x 1 = 4
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 1 x 3 = 3
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 1 x 2 = 2
+- Total: 23.5
+
+Split decision:
+- Review for split. Cohesion reason: shell assembly and validity handoff are
+  the durable result boundary; seam rebuild and validity algorithms remain
+  separate downstream gates.
 
 ## Change History
 
+- 2026-05-27: Critically reviewed, rescored, and split the specification
+  manifest. Context: hidden work in fragment graph construction, cap/cut
+  boundary construction, and result shell reconstruction needed separate
+  candidate specs.
 - 2026-05-27: Added higher-order CSG solver architecture and manifest.
   Context: the surface-body system needed architecture for broad family-pair
   CSG coverage beyond the current bounded support matrix.

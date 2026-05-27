@@ -328,17 +328,17 @@ Score:
 Split decision:
 - No split needed. The candidate is a cohesive result-record contract.
 
-### Candidate Spec: Analytic And Spline Surface Intersection Solvers
+### Candidate Spec: Analytic To Spline Surface Intersection Solvers
 
 Discovery purpose:
-- Implement exact or declared-tolerance intersections for analytic/spline and
-  spline/spline pairs.
+- Implement exact or declared-tolerance intersections for planar/ruled/
+  revolution surfaces against B-spline and NURBS surfaces.
 
 Responsibilities:
 - Functions/methods:
   - analytic-spline solver
-  - spline-spline solver
   - Newton/refinement routine
+  - analytic seed generator
 - Data structures/models:
   - solver iteration record
   - residual report
@@ -375,14 +375,13 @@ Project readiness fields:
 - Chosen defaults / parameters:
   - deterministic seeds; bounded iteration; residual metadata required
 - Test strategy:
-  - planar/spline, revolution/spline, spline/spline positive and refusal tests
+  - planar/spline, ruled/spline, revolution/spline positive and refusal tests
 - Data ownership:
   - solver owns numeric process; result record owns reusable curve truth
 - Routes:
   - registry dispatch to solver to result record
 - Open questions / nuance discovered:
-  - exact closed-form is not expected for all spline pairs; declared-tolerance
-    is acceptable when residuals are explicit
+  - revolution/spline seeding may need conic-aware initial guesses
 - Readiness blockers:
   - spline derivative/evaluation coverage must be verified
 
@@ -406,26 +405,106 @@ Score:
 - Total: 17.5
 
 Split decision:
-- Review for split. Cohesion reason: analytic/spline and spline/spline share
-  evaluator, seeding, refinement, and residual infrastructure.
+- Review for split. Cohesion reason: analytic/spline intersections share
+  analytic seeding and spline projection; spline/spline is split separately.
 
-### Candidate Spec: Subdivision And Implicit Intersection Boundary
+### Candidate Spec: Spline To Spline Surface Intersection Solvers
 
 Discovery purpose:
-- Define bounded declared-tolerance intersection support for subdivision and
-  implicit pairs without unsafe execution or mesh fallback.
+- Implement declared-tolerance B-spline/NURBS to B-spline/NURBS surface
+  intersections with deterministic seeding, refinement, and residual metadata.
+
+Responsibilities:
+- Functions/methods:
+  - spline-spline seed generator
+  - marching/refinement solver
+  - convergence classifier
+- Data structures/models:
+  - solver iteration record
+  - residual report
+  - non-convergence diagnostic
+- Dependencies/services:
+  - B-spline/NURBS evaluators
+  - registry and result records
+- Returns/outputs/signals:
+  - intersection curve records
+  - non-convergence diagnostic
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: spline evaluation helpers
+  - Additions to existing reusable library/module: spline-pair solver routines
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - none
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - iteration and subdivision budgets
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - `src/impression/modeling/surface_intersections.py`
+- Chosen defaults / parameters:
+  - declared-tolerance is acceptable when residuals are explicit and bounded
+- Test strategy:
+  - spline/spline crossing, tangent, overlap, and non-convergence tests
+- Data ownership:
+  - solver owns numeric process; result record owns reusable curve truth
+- Routes:
+  - registry dispatch to solver to result record
+- Open questions / nuance discovered:
+  - overlap regions between spline surfaces need the shared degeneracy record
+- Readiness blockers:
+  - spline derivative/evaluation coverage must be verified
+
+Score:
+- Functions/methods: 3 x 2 = 6
+- Data structures/models: 3 x 1 = 3
+- Dependencies/services: 2 x 1 = 2
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 0 x 3 = 0
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 1 x 2 = 2
+- Total: 18.5
+
+Split decision:
+- Review for split. Cohesion reason: spline/spline intersection owns a distinct
+  numeric solver path from analytic/spline seeding.
+
+### Candidate Spec: Subdivision Surface Intersection Adapter
+
+Discovery purpose:
+- Define bounded declared-tolerance intersection support for subdivision
+  surfaces without mesh fallback.
 
 Responsibilities:
 - Functions/methods:
   - subdivision intersection adapter
-  - implicit intersection adapter
-  - budget/refusal checker
+  - subdivision budget checker
+  - refinement residual classifier
 - Data structures/models:
-  - budget record
-  - sampled contour record
+  - subdivision intersection budget
+  - refined patch contour record
   - refusal diagnostic
 - Dependencies/services:
-  - implicit field safety policy
   - subdivision evaluator
   - result records
 - Returns/outputs/signals:
@@ -436,9 +515,91 @@ Responsibilities:
 - UI fields/elements:
   - not applicable
 - Reusable code plan:
-  - Existing code reused as-is: implicit safety and subdivision refinement
-  - Additions to existing reusable library/module: bounded intersection
-    adapters
+  - Existing code reused as-is: subdivision refinement helpers
+  - Additions to existing reusable library/module: bounded subdivision
+    intersection adapter
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - none
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - strict budgets for refinement depth and contour count
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - `src/impression/modeling/surface_intersections.py`
+- Chosen defaults / parameters:
+  - budget exhaustion is deterministic refusal
+- Test strategy:
+  - subdivision positive fixture and budget refusal tests
+- Data ownership:
+  - subdivision family owns refinement; intersection owns result
+- Routes:
+  - registry dispatch to bounded subdivision adapter
+- Open questions / nuance discovered:
+  - refined contour records must not become canonical mesh truth
+- Readiness blockers:
+  - subdivision derivative/evaluation contract
+
+Score:
+- Functions/methods: 3 x 2 = 6
+- Data structures/models: 3 x 1 = 3
+- Dependencies/services: 2 x 1 = 2
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 0 x 3 = 0
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 1 x 2 = 2
+- Total: 18.5
+
+Split decision:
+- Review for split. Cohesion reason: subdivision intersection has a distinct
+  refinement budget and contour representation from implicit fields.
+
+### Candidate Spec: Implicit Surface Intersection Safety Boundary
+
+Discovery purpose:
+- Define bounded declared-tolerance intersection support for implicit field
+  surfaces without unsafe execution or mesh fallback.
+
+Responsibilities:
+- Functions/methods:
+  - implicit intersection adapter
+  - implicit safety checker
+  - budget/refusal checker
+- Data structures/models:
+  - implicit intersection budget
+  - implicit contour record
+  - refusal diagnostic
+- Dependencies/services:
+  - implicit field safety policy
+  - result records
+- Returns/outputs/signals:
+  - declared-tolerance result
+  - budget refusal
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: implicit safety policy
+  - Additions to existing reusable library/module: bounded implicit
+    intersection adapter
   - New reusable library/module to create: none
 - Database queries/tables/migrations:
   - none
@@ -465,14 +626,14 @@ Project readiness fields:
 - Routes:
   - registry dispatch to bounded adapter
 - Open questions / nuance discovered:
-  - sampled contour record must remain surface-native, not mesh truth
+  - sampled contour record must remain implicit/surface-native, not mesh truth
 - Readiness blockers:
-  - implicit and subdivision derivative/evaluation contracts
+  - implicit evaluation and safety contracts
 
 Score:
 - Functions/methods: 3 x 2 = 6
 - Data structures/models: 3 x 1 = 3
-- Dependencies/services: 3 x 1 = 3
+- Dependencies/services: 2 x 1 = 2
 - Returns/outputs/signals: 2 x 1 = 2
 - Existing reusable code reused as-is: 1 x 0.5 = 0.5
 - Adding code to an existing library/module: 1 x 1 = 1
@@ -486,15 +647,17 @@ Score:
 - Async/concurrency behavior: 0 x 3 = 0
 - Cross-screen reusable behavior: 0 x 2 = 0
 - Readiness blockers: 1 x 2 = 2
-- Total: 22.5
+- Total: 21.5
 
 Split decision:
-- Review for split. Cohesion reason: subdivision and implicit share the bounded
-  declared-tolerance/safety-budget boundary; concrete family sub-solvers may
-  split after this boundary is implemented.
+- Review for split. Cohesion reason: implicit intersections need one safety and
+  budget boundary; subdivision has been split into its own adapter.
 
 ## Change History
 
+- 2026-05-27: Critically reviewed, rescored, and split the specification
+  manifest. Context: analytic-to-spline, spline-to-spline, subdivision, and
+  implicit intersection work needed separate implementation boundaries.
 - 2026-05-27: Added exact surface intersection kernel architecture and
   manifest. Context: higher-order CSG and seam continuity require one shared
   intersection result vocabulary and solver registry.

@@ -304,25 +304,22 @@ Split decision:
 - Review for split. Cohesion reason: dirty/promoted classification and
   promotion refusal are one artifact lifecycle gate.
 
-### Candidate Spec: Negative Diagnostic Reference Fixtures
+### Candidate Spec: Diagnostic Snapshot Normalization
 
 Discovery purpose:
-- Promote stable negative diagnostics as first-class reference evidence for
-  unsupported or unsafe surface-body states.
+- Normalize refusal diagnostics into stable snapshot payloads that ignore
+  incidental stack traces, temporary paths, and machine-specific details.
 
 Responsibilities:
 - Functions/methods:
   - diagnostic snapshot normalizer
-  - negative fixture runner
   - snapshot comparator
 - Data structures/models:
-  - negative fixture record
   - diagnostic snapshot record
+  - diagnostic key policy record
 - Dependencies/services:
-  - `.impress` refusal
-  - CSG refusal
-  - loft ambiguity refusal
-  - seam continuity refusal
+  - current refusal diagnostics
+  - reference artifact lifecycle
 - Returns/outputs/signals:
   - stable diagnostic snapshot
   - diagnostic drift failure
@@ -341,7 +338,8 @@ Responsibilities:
 - Destructive/write behavior:
   - writes dirty diagnostic snapshots during bootstrap
 - Security/privacy-sensitive behavior:
-  - unsafe payload fixtures must not execute
+  - snapshots must not include sensitive local paths beyond normalized fixture
+    identifiers
 - Performance-sensitive behavior:
   - bounded fixture count
 - Cross-screen reusable behavior:
@@ -353,11 +351,11 @@ Project readiness fields:
 - Chosen defaults / parameters:
   - snapshots compare stable diagnostic keys, not incidental stack traces
 - Test strategy:
-  - negative fixtures for `.impress`, CSG, loft, seams, and mesh fallback
+  - normalization tests for path stripping, ordering, and stable keys
 - Data ownership:
-  - negative fixture owns expected refusal contract
+  - snapshot normalizer owns portable diagnostic representation
 - Routes:
-  - failing operation to diagnostic snapshot to promotion gate
+  - refusal exception/result to normalized snapshot to comparator
 - Open questions / nuance discovered:
   - diagnostic snapshots should avoid machine-specific path fragments
 - Readiness blockers:
@@ -366,7 +364,7 @@ Project readiness fields:
 Score:
 - Functions/methods: 3 x 2 = 6
 - Data structures/models: 2 x 1 = 2
-- Dependencies/services: 4 x 1 = 4
+- Dependencies/services: 2 x 1 = 2
 - Returns/outputs/signals: 2 x 1 = 2
 - Existing reusable code reused as-is: 1 x 0.5 = 0.5
 - Adding code to an existing library/module: 1 x 1 = 1
@@ -380,15 +378,419 @@ Score:
 - Async/concurrency behavior: 0 x 3 = 0
 - Cross-screen reusable behavior: 0 x 2 = 0
 - Readiness blockers: 0 x 2 = 0
-- Total: 23.5
+- Total: 19.5
 
 Split decision:
-- Review for split. Cohesion reason: the snapshot normalizer and negative
-  fixture runner are one diagnostic reference lane; domain-specific fixtures
-  remain data entries.
+- Review for split. Cohesion reason: normalization is one reusable snapshot
+  layer; domain-specific negative fixtures are split separately.
+
+### Candidate Spec: Negative Diagnostic Fixture Matrix Core
+
+Discovery purpose:
+- Define the matrix schema and coverage checker for negative diagnostic
+  fixtures without owning domain-specific fixture construction.
+
+Responsibilities:
+- Functions/methods:
+  - fixture matrix coverage checker
+  - snapshot comparator integration
+- Data structures/models:
+  - negative fixture record
+  - domain coverage record
+  - expected diagnostic key record
+- Dependencies/services:
+  - diagnostic snapshot normalizer
+  - reference artifact lifecycle
+- Returns/outputs/signals:
+  - negative fixture coverage report
+  - missing domain diagnostic
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: current refusal diagnostics
+  - Additions to existing reusable library/module: negative fixture matrix
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - none
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - bounded fixture count
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - reference test helpers under `tests/`
+- Chosen defaults / parameters:
+  - every explicit refusal boundary has at least one negative fixture entry
+- Test strategy:
+  - matrix coverage tests with accepted and missing domains
+- Data ownership:
+  - negative fixture matrix owns expected refusal coverage
+- Routes:
+  - domain fixture records to matrix coverage report
+- Open questions / nuance discovered:
+  - each domain owns fixture construction while the matrix owns coverage
+- Readiness blockers:
+  - diagnostic snapshot normalizer must exist
+
+Score:
+- Functions/methods: 2 x 2 = 4
+- Data structures/models: 3 x 1 = 3
+- Dependencies/services: 2 x 1 = 2
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 0 x 3 = 0
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 1 x 2 = 2
+- Total: 16.5
+
+Split decision:
+- Review for split. Cohesion reason: the core owns only fixture matrix schema
+  and coverage; domain fixtures are split separately.
+
+### Candidate Spec: .impress Unsafe Payload Negative Fixtures
+
+Discovery purpose:
+- Create negative diagnostic fixtures for unsafe or malformed `.impress`
+  payloads.
+
+Responsibilities:
+- Functions/methods:
+  - persistence negative fixture runner
+- Data structures/models:
+  - negative fixture record
+  - expected diagnostic key record
+- Dependencies/services:
+  - `.impress` refusal
+  - diagnostic snapshot normalizer
+- Returns/outputs/signals:
+  - diagnostic snapshot
+  - diagnostic drift failure
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: `.impress` refusal tests
+  - Additions to existing reusable library/module: fixture records
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - writes dirty diagnostic snapshots during bootstrap
+- Security/privacy-sensitive behavior:
+  - unsafe payload fixtures must not execute
+- Performance-sensitive behavior:
+  - bounded fixture count
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - reference test helpers under `tests/`
+- Chosen defaults / parameters:
+  - unsafe persistence states require stable negative fixtures
+- Test strategy:
+  - unsafe payload, malformed payload, unsupported family, and metadata
+    snapshot tests
+- Data ownership:
+  - domain fixture owns expected refusal contract
+- Routes:
+  - failing persistence operation to snapshot to matrix
+- Open questions / nuance discovered:
+  - unsafe payload fixtures must avoid executable side effects
+- Readiness blockers:
+  - diagnostic snapshot normalizer must exist
+
+Score:
+- Functions/methods: 1 x 2 = 2
+- Data structures/models: 2 x 1 = 2
+- Dependencies/services: 2 x 1 = 2
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 1 x 3 = 3
+- Security/privacy-sensitive behavior: 1 x 3 = 3
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 1 x 2 = 2
+- Total: 19.5
+
+Split decision:
+- Review for split. Cohesion reason: `.impress` unsafe payloads are one
+  persistence-domain fixture family.
+
+### Candidate Spec: Mesh Boundary Negative Fixtures
+
+Discovery purpose:
+- Create negative diagnostic fixtures for hidden mesh fallback and legacy mesh
+  assumption violations.
+
+Responsibilities:
+- Functions/methods:
+  - mesh-boundary negative fixture runner
+  - legacy call-site fixture builder
+- Data structures/models:
+  - negative fixture record
+  - expected diagnostic key record
+- Dependencies/services:
+  - mesh fallback refusal
+  - tessellation boundary policy
+  - diagnostic snapshot normalizer
+- Returns/outputs/signals:
+  - diagnostic snapshot
+  - diagnostic drift failure
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: mesh-boundary refusal tests
+  - Additions to existing reusable library/module: fixture records
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - writes dirty diagnostic snapshots during bootstrap
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - bounded fixture count
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - reference test helpers under `tests/`
+- Chosen defaults / parameters:
+  - hidden mesh fallback requires stable negative fixture coverage
+- Test strategy:
+  - hidden mesh fallback and stale primitive mesh assumption snapshot tests
+- Data ownership:
+  - domain fixture owns expected refusal contract
+- Routes:
+  - failing mesh-boundary operation to snapshot to matrix
+- Open questions / nuance discovered:
+  - legacy mesh-specific APIs remain accepted only when explicitly named
+- Readiness blockers:
+  - diagnostic snapshot normalizer must exist
+
+Score:
+- Functions/methods: 2 x 2 = 4
+- Data structures/models: 2 x 1 = 2
+- Dependencies/services: 3 x 1 = 3
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 1 x 3 = 3
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 1 x 2 = 2
+- Total: 19.5
+
+Split decision:
+- Review for split. Cohesion reason: mesh-boundary fixtures protect one
+  compatibility/refusal domain.
+
+### Candidate Spec: CSG Negative Diagnostic Fixtures
+
+Discovery purpose:
+- Create negative diagnostic fixtures for unsupported or non-executable CSG
+  solver states.
+
+Responsibilities:
+- Functions/methods:
+  - CSG negative fixture runner
+  - CSG unsupported fixture builder
+- Data structures/models:
+  - CSG negative fixture record
+  - expected diagnostic key record
+- Dependencies/services:
+  - CSG refusal
+  - diagnostic snapshot normalizer
+- Returns/outputs/signals:
+  - diagnostic snapshot
+  - diagnostic drift failure
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: current CSG refusal diagnostics
+  - Additions to existing reusable library/module: fixture records
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - writes dirty diagnostic snapshots during bootstrap
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - bounded fixture count
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - reference test helpers under `tests/`
+- Chosen defaults / parameters:
+  - unsupported CSG family pairs and invalid operands require negative fixtures
+- Test strategy:
+  - unsupported pair, invalid shell, non-executable plan snapshot tests
+- Data ownership:
+  - CSG fixture owns expected refusal contract
+- Routes:
+  - failing CSG operation to snapshot to matrix
+- Open questions / nuance discovered:
+  - CSG fixtures should pin diagnostic family pairs and solver stage
+- Readiness blockers:
+  - diagnostic snapshot normalizer must exist
+
+Score:
+- Functions/methods: 2 x 2 = 4
+- Data structures/models: 2 x 1 = 2
+- Dependencies/services: 2 x 1 = 2
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 1 x 3 = 3
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 1 x 2 = 2
+- Total: 18.5
+
+Split decision:
+- Review for split. Cohesion reason: CSG refusal fixtures are one geometry
+  domain and no longer bundle loft or seam diagnostics.
+
+### Candidate Spec: Loft And Seam Negative Diagnostic Fixtures
+
+Discovery purpose:
+- Create negative diagnostic fixtures for unresolved loft ambiguity and
+  unsupported higher-order seam continuity.
+
+Responsibilities:
+- Functions/methods:
+  - loft ambiguity fixture runner
+  - seam continuity fixture runner
+  - snapshot comparator integration
+- Data structures/models:
+  - loft negative fixture record
+  - seam negative fixture record
+  - expected diagnostic key record
+- Dependencies/services:
+  - loft ambiguity refusal
+  - seam continuity refusal
+  - diagnostic snapshot normalizer
+- Returns/outputs/signals:
+  - diagnostic snapshot
+  - diagnostic drift failure
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: current loft/seam refusal diagnostics
+  - Additions to existing reusable library/module: fixture records
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - writes dirty diagnostic snapshots during bootstrap
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - bounded fixture count
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - reference test helpers under `tests/`
+- Chosen defaults / parameters:
+  - loft fixtures report all ambiguities; seam fixtures pin requested and
+    observed continuity
+- Test strategy:
+  - unresolved loft ambiguity and unsupported continuity snapshot tests
+- Data ownership:
+  - loft/seam fixtures own expected refusal contracts
+- Routes:
+  - failing loft or seam validation to snapshot to matrix
+- Open questions / nuance discovered:
+  - loft fixtures should report all ambiguities, not first failure only
+- Readiness blockers:
+  - diagnostic snapshot normalizer must exist
+
+Score:
+- Functions/methods: 3 x 2 = 6
+- Data structures/models: 3 x 1 = 3
+- Dependencies/services: 3 x 1 = 3
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 1 x 3 = 3
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 1 x 2 = 2
+- Total: 22.5
+
+Split decision:
+- Review for split. Cohesion reason: loft and seam fixtures are both authored
+  topology diagnostics. CSG and persistence fixtures are split separately.
 
 ## Change History
 
+- 2026-05-27: Critically reviewed, rescored, and split the specification
+  manifest. Context: negative diagnostic references were under-defined until
+  snapshot normalization, unsafe payloads, mesh boundary, CSG, and loft/seam
+  fixture families were separated.
 - 2026-05-27: Added reference artifact promotion architecture and manifest.
   Context: surface-body completion requires promoted baselines and negative
   diagnostic fixtures, not dirty artifacts alone.
