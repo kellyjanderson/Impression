@@ -7,8 +7,10 @@ import pytest
 from impression.mesh import combine_meshes
 from impression.modeling import (
     HingeSurfaceAssembly,
+    SurfaceCSGFeatureDependencyRecord,
     SurfaceBody,
     SurfaceConsumerCollection,
+    hinge_feature_csg_dependencies,
     handoff_hinge_surface,
     make_bistable_hinge,
     make_living_hinge,
@@ -46,6 +48,22 @@ def test_traditional_hinge_defaults_lower_to_surface_outputs() -> None:
     collection = handoff_hinge_surface(pair)
     assert len(collection.items) == 3
     assert _combined_collection_mesh(collection).n_faces > 0
+
+
+def test_hinge_feature_csg_dependencies_name_surface_and_explicit_mesh_routes() -> None:
+    dependencies = hinge_feature_csg_dependencies()
+    caller_ids = {record.caller_id for record in dependencies}
+
+    assert all(isinstance(record, SurfaceCSGFeatureDependencyRecord) for record in dependencies)
+    assert {
+        "hinges.make_traditional_hinge_leaf",
+        "hinges.make_traditional_hinge_pair",
+        "hinges.make_living_hinge",
+        "hinges.make_bistable_hinge",
+    }.issubset(caller_ids)
+    assert all(record.surface_builder.startswith("make_") for record in dependencies)
+    assert all(record.explicit_mesh_route == "backend='mesh'" for record in dependencies)
+    assert any(record.operation == "union" for record in dependencies)
 
 
 def test_surface_hinge_paths_preserve_consumer_color_metadata() -> None:

@@ -31,28 +31,81 @@ __all__ = list(getattr(_extension, "__all__", ()))
 globals().update({name: getattr(_extension, name) for name in __all__})
 
 
+def hinge_feature_csg_dependencies():
+    from .csg import SurfaceCSGFeatureDependencyRecord
+
+    return (
+        SurfaceCSGFeatureDependencyRecord(
+            caller_id="hinges.make_traditional_hinge_leaf",
+            module="impression.modeling.hinges",
+            operation=None,
+            surface_builder="make_traditional_hinge_leaf",
+            explicit_mesh_route="backend='mesh'",
+        ),
+        SurfaceCSGFeatureDependencyRecord(
+            caller_id="hinges.make_traditional_hinge_pair",
+            module="impression.modeling.hinges",
+            operation="union",
+            surface_builder="make_traditional_hinge_pair",
+            explicit_mesh_route="backend='mesh'",
+        ),
+        SurfaceCSGFeatureDependencyRecord(
+            caller_id="hinges.make_living_hinge",
+            module="impression.modeling.hinges",
+            operation=None,
+            surface_builder="make_living_hinge",
+            explicit_mesh_route="backend='mesh'",
+        ),
+        SurfaceCSGFeatureDependencyRecord(
+            caller_id="hinges.make_bistable_hinge",
+            module="impression.modeling.hinges",
+            operation=None,
+            surface_builder="make_bistable_hinge",
+            explicit_mesh_route="backend='mesh'",
+        ),
+    )
+
+
+def _hinge_surface_result(caller_id: str, result):
+    from .csg import assert_no_hidden_surface_csg_mesh_fallback
+
+    return assert_no_hidden_surface_csg_mesh_fallback(caller_id, result)
+
+
 def make_traditional_hinge_leaf(*args, backend="surface", **kwargs):
     if backend == "mesh":
         return _call_with_legacy_mesh_primitives(_extension.make_traditional_hinge_leaf, *args, backend=backend, **kwargs)
-    return _extension.make_traditional_hinge_leaf(*args, backend=backend, **kwargs)
+    return _hinge_surface_result(
+        "hinges.make_traditional_hinge_leaf",
+        _extension.make_traditional_hinge_leaf(*args, backend=backend, **kwargs),
+    )
 
 
 def make_traditional_hinge_pair(*args, backend="surface", **kwargs):
     if backend == "mesh":
         return _call_with_legacy_mesh_primitives(_extension.make_traditional_hinge_pair, *args, backend=backend, **kwargs)
-    return _extension.make_traditional_hinge_pair(*args, backend=backend, **kwargs)
+    return _hinge_surface_result(
+        "hinges.make_traditional_hinge_pair",
+        _extension.make_traditional_hinge_pair(*args, backend=backend, **kwargs),
+    )
 
 
 def make_living_hinge(*args, backend="surface", **kwargs):
     if backend == "mesh":
         return _call_with_legacy_mesh_primitives(_extension.make_living_hinge, *args, backend=backend, **kwargs)
-    return _extension.make_living_hinge(*args, backend=backend, **kwargs)
+    return _hinge_surface_result(
+        "hinges.make_living_hinge",
+        _extension.make_living_hinge(*args, backend=backend, **kwargs),
+    )
 
 
 def make_bistable_hinge(*args, backend="surface", **kwargs):
     if backend == "mesh":
         return _call_with_legacy_mesh_primitives(_extension.make_bistable_hinge, *args, backend=backend, **kwargs)
-    return _extension.make_bistable_hinge(*args, backend=backend, **kwargs)
+    return _hinge_surface_result(
+        "hinges.make_bistable_hinge",
+        _extension.make_bistable_hinge(*args, backend=backend, **kwargs),
+    )
 
 
 def _call_with_legacy_mesh_primitives(fn, *args, **kwargs):
@@ -78,5 +131,6 @@ globals().update(
         "make_traditional_hinge_pair": make_traditional_hinge_pair,
         "make_living_hinge": make_living_hinge,
         "make_bistable_hinge": make_bistable_hinge,
+        "hinge_feature_csg_dependencies": hinge_feature_csg_dependencies,
     }
 )

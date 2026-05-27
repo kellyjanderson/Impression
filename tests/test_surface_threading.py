@@ -8,6 +8,7 @@ import pytest
 
 from impression.modeling import (
     MeshQuality,
+    SurfaceCSGFeatureDependencyRecord,
     SurfaceBody,
     ThreadAssemblyLoweringDiagnostic,
     ThreadAssemblyLoweringError,
@@ -16,6 +17,7 @@ from impression.modeling import (
     ThreadSurfaceRepresentation,
     apply_fit,
     lookup_standard_thread,
+    thread_feature_csg_dependencies,
     lower_thread_operand_to_surface_body,
     lower_thread_surface_assembly,
     make_external_thread,
@@ -135,6 +137,26 @@ def test_surface_thread_convenience_builders_return_structured_assemblies() -> N
     assert [operand.kind for operand in round_nut.operands] == ["primitive", "thread"]
 
     assert rod.stable_identity == make_threaded_rod(spec, backend="surface").stable_identity
+
+
+def test_thread_feature_csg_dependencies_name_surface_and_mesh_compatibility_routes() -> None:
+    dependencies = thread_feature_csg_dependencies()
+    caller_ids = {record.caller_id for record in dependencies}
+
+    assert all(isinstance(record, SurfaceCSGFeatureDependencyRecord) for record in dependencies)
+    assert {
+        "threading.make_external_thread",
+        "threading.make_internal_thread",
+        "threading.make_threaded_rod",
+        "threading.make_tapped_hole_cutter",
+        "threading.make_hex_nut",
+        "threading.make_round_nut",
+        "threading.make_runout_relief",
+        "threading.lower_thread_surface_assembly",
+    }.issubset(caller_ids)
+    assert all(record.surface_builder for record in dependencies)
+    assert all(record.explicit_mesh_route for record in dependencies)
+    assert any(record.operation == "difference" for record in dependencies)
 
 
 def test_thread_helpers_default_to_surface_representations_and_assemblies() -> None:
