@@ -476,7 +476,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 258: Surface CSG Cap Patch Family Selection (v1.0)](../specifications/surface-258-surface-csg-cap-patch-family-selection-v1_0.md)
 - [x] [Surface Spec 259: Surface CSG Cut Boundary Trim Construction (v1.0)](../specifications/surface-259-surface-csg-cut-boundary-trim-construction-v1_0.md)
 - [x] [Surface Spec 260: Surface CSG Result Shell Assembly (v1.0)](../specifications/surface-260-surface-csg-result-shell-assembly-v1_0.md)
-- [ ] [Surface Spec 261: Surface CSG Result Validity Handoff (v1.0)](../specifications/surface-261-surface-csg-result-validity-handoff-v1_0.md)
+- [x] [Surface Spec 261: Surface CSG Result Validity Handoff (v1.0)](../specifications/surface-261-surface-csg-result-validity-handoff-v1_0.md)
 - [ ] [Surface Spec 262: Surface CSG Result Provenance Mapping (v1.0)](../specifications/surface-262-surface-csg-result-provenance-mapping-v1_0.md)
 - [ ] [Surface Spec 263: Seam Continuity Constraint Records (v1.0)](../specifications/surface-263-seam-continuity-constraint-records-v1_0.md)
 - [ ] [Surface Spec 264: Boundary Derivative Evaluation For Continuity (v1.0)](../specifications/surface-264-boundary-derivative-evaluation-for-continuity-v1_0.md)
