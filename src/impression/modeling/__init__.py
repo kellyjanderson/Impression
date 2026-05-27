@@ -531,6 +531,8 @@ from .surface import (
 from .surface_intersections import (
     DEFAULT_SURFACE_INTERSECTION_TOLERANCE_POLICY,
     SURFACE_INTERSECTION_SOLVER_REGISTRY,
+    SurfaceAnalyticSplineResidualReport,
+    SurfaceAnalyticSplineSolverIterationRecord,
     SurfaceIntersectionCurveRecord,
     SurfaceIntersectionDegeneracyRecord,
     SurfaceIntersectionOverlapRegionRecord,
@@ -546,6 +548,7 @@ from .surface_intersections import (
     lookup_surface_intersection_solver,
     make_surface_intersection_request,
     normalize_surface_intersection_result,
+    solve_analytic_spline_surface_intersection,
 )
 from .tessellation import (
     AdapterLossiness,
@@ -1119,6 +1122,8 @@ __all__ = [
     "make_implicit_surface",
     "DEFAULT_SURFACE_INTERSECTION_TOLERANCE_POLICY",
     "SURFACE_INTERSECTION_SOLVER_REGISTRY",
+    "SurfaceAnalyticSplineResidualReport",
+    "SurfaceAnalyticSplineSolverIterationRecord",
     "SurfaceIntersectionCurveRecord",
     "SurfaceIntersectionDegeneracyRecord",
     "SurfaceIntersectionOverlapRegionRecord",
@@ -1134,6 +1139,7 @@ __all__ = [
     "lookup_surface_intersection_solver",
     "make_surface_intersection_request",
     "normalize_surface_intersection_result",
+    "solve_analytic_spline_surface_intersection",
     "AdapterLossiness",
     "CrossModeDriftReport",
     "FeatureSurfaceHandoffDiagnostic",

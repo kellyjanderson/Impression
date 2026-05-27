@@ -5,7 +5,15 @@ from typing import Literal, Sequence
 
 import numpy as np
 
-from .surface import PATCH_FAMILY_CAPABILITY_MATRIX, SurfacePatch
+from .surface import (
+    PATCH_FAMILY_CAPABILITY_MATRIX,
+    BSplineSurfacePatch,
+    NURBSSurfacePatch,
+    PlanarSurfacePatch,
+    RevolutionSurfacePatch,
+    RuledSurfacePatch,
+    SurfacePatch,
+)
 
 SurfaceIntersectionSupportState = Literal["exact", "declared-tolerance", "adapter", "unsupported"]
 
@@ -169,6 +177,45 @@ class SurfaceIntersectionSolverDispatchRecord:
             "request": self.request.canonical_payload(),
             "solver": None if self.solver is None else self.solver.canonical_payload(),
             "supported": self.supported,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceAnalyticSplineSolverIterationRecord:
+    """Bounded sampling/refinement witness for an analytic-to-spline solve."""
+
+    sample_count: int
+    accepted_point_count: int
+    max_residual: float
+    converged: bool
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "accepted_point_count": self.accepted_point_count,
+            "converged": self.converged,
+            "max_residual": self.max_residual,
+            "sample_count": self.sample_count,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceAnalyticSplineResidualReport:
+    """Residual and diagnostic report for an analytic-to-spline solve."""
+
+    solver_id: str
+    iterations: tuple[SurfaceAnalyticSplineSolverIterationRecord, ...]
+    diagnostics: tuple[SurfaceIntersectionSupportDiagnostic, ...] = ()
+
+    @property
+    def converged(self) -> bool:
+        return bool(self.iterations) and self.iterations[-1].converged and not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "converged": self.converged,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "iterations": [iteration.canonical_payload() for iteration in self.iterations],
+            "solver_id": self.solver_id,
         }
 
 
@@ -427,6 +474,167 @@ def normalize_surface_intersection_result(
     )
 
 
+def _surface_intersection_is_spline_family(patch: SurfacePatch) -> bool:
+    return isinstance(patch, (BSplineSurfacePatch, NURBSSurfacePatch))
+
+
+def _surface_intersection_is_analytic_family(patch: SurfacePatch) -> bool:
+    return isinstance(patch, (PlanarSurfacePatch, RuledSurfacePatch, RevolutionSurfacePatch))
+
+
+def _analytic_surface_residual(analytic: SurfacePatch, point: np.ndarray) -> float:
+    if isinstance(analytic, PlanarSurfacePatch):
+        du, dv = analytic.derivatives_at(0.5, 0.5)
+        normal = np.cross(du, dv)
+        norm = float(np.linalg.norm(normal))
+        if norm == 0.0:
+            return float("inf")
+        normal = normal / norm
+        origin = analytic.point_at(0.5, 0.5)
+        return abs(float(np.dot(point - origin, normal)))
+    # Declared-tolerance fallback for ruled/revolution analytic surfaces:
+    # sample the analytic parameter space deterministically and use closest
+    # surface distance as the residual witness.
+    u0, u1 = analytic.domain.u_range
+    v0, v1 = analytic.domain.v_range
+    samples = (
+        analytic.point_at(float(u), float(v))
+        for u in np.linspace(u0, u1, 9)
+        for v in np.linspace(v0, v1, 9)
+    )
+    return min(float(np.linalg.norm(point - sample)) for sample in samples)
+
+
+def solve_analytic_spline_surface_intersection(
+    request: SurfaceIntersectionRequest,
+    *,
+    sample_count: int = 17,
+) -> tuple[SurfaceIntersectionResultRecord, SurfaceAnalyticSplineResidualReport]:
+    """Solve analytic surface against B-spline/NURBS by bounded declared-tolerance sampling."""
+
+    dispatch = lookup_surface_intersection_solver(request)
+    if not dispatch.supported or dispatch.solver is None or dispatch.solver.solver_id != "analytic-spline-declared-tolerance":
+        diagnostic = SurfaceIntersectionSupportDiagnostic(
+            code="unsupported-family-pair",
+            consumer=request.consumer,
+            family_pair=request.normalized_family_pair,
+            message="analytic-to-spline solver requires a declared-tolerance analytic/spline registry dispatch",
+        )
+        result = normalize_surface_intersection_result(
+            request,
+            quality="unsupported",
+            degeneracies=(
+                SurfaceIntersectionDegeneracyRecord(
+                    code="high-residual",
+                    message=diagnostic.message,
+                ),
+            ),
+        )
+        return (
+            result,
+            SurfaceAnalyticSplineResidualReport(
+                solver_id="analytic-spline-declared-tolerance",
+                iterations=(),
+                diagnostics=(diagnostic,),
+            ),
+        )
+    first_is_analytic = _surface_intersection_is_analytic_family(request.first_patch)
+    second_is_analytic = _surface_intersection_is_analytic_family(request.second_patch)
+    first_is_spline = _surface_intersection_is_spline_family(request.first_patch)
+    second_is_spline = _surface_intersection_is_spline_family(request.second_patch)
+    if first_is_analytic and second_is_spline:
+        analytic = request.first_patch
+        spline = request.second_patch
+        analytic_is_first = True
+    elif second_is_analytic and first_is_spline:
+        analytic = request.second_patch
+        spline = request.first_patch
+        analytic_is_first = False
+    else:
+        diagnostic = SurfaceIntersectionSupportDiagnostic(
+            code="unsupported-family-pair",
+            consumer=request.consumer,
+            family_pair=request.normalized_family_pair,
+            message="analytic-to-spline solver requires exactly one analytic and one spline surface",
+        )
+        result = normalize_surface_intersection_result(request, quality="unsupported")
+        return (
+            result,
+            SurfaceAnalyticSplineResidualReport(
+                solver_id=dispatch.solver.solver_id,
+                iterations=(),
+                diagnostics=(diagnostic,),
+            ),
+        )
+
+    sample_count = max(3, int(sample_count))
+    u0, u1 = spline.domain.u_range
+    v0, v1 = spline.domain.v_range
+    accepted: list[tuple[tuple[float, float, float], tuple[float, float], float]] = []
+    threshold = max(request.tolerance_policy.position_tolerance * 10.0, request.tolerance_policy.degeneracy_tolerance)
+    max_residual = 0.0
+    for u in np.linspace(u0, u1, sample_count):
+        for v in np.linspace(v0, v1, sample_count):
+            point = spline.point_at(float(u), float(v))
+            residual = _analytic_surface_residual(analytic, point)
+            max_residual = max(max_residual, residual if np.isfinite(residual) else float("inf"))
+            if residual <= threshold:
+                accepted.append((tuple(float(component) for component in point), (float(u), float(v)), residual))
+
+    # Keep a deterministic curve-like ordering. This is a declared-tolerance
+    # seed/refinement boundary; later solver specs can replace the sampler with
+    # exact marching while preserving this result shape.
+    accepted = sorted(set(accepted), key=lambda item: (item[1], item[0]))
+    converged = len(accepted) >= 2 and max((item[2] for item in accepted), default=float("inf")) <= threshold
+    iteration = SurfaceAnalyticSplineSolverIterationRecord(
+        sample_count=sample_count * sample_count,
+        accepted_point_count=len(accepted),
+        max_residual=max((item[2] for item in accepted), default=max_residual),
+        converged=converged,
+    )
+    diagnostics: tuple[SurfaceIntersectionSupportDiagnostic, ...] = ()
+    if not converged:
+        diagnostics = (
+            SurfaceIntersectionSupportDiagnostic(
+                code="unsupported-family-pair",
+                consumer=request.consumer,
+                family_pair=request.normalized_family_pair,
+                message="analytic-to-spline solver did not converge within declared tolerance sampling budget",
+            ),
+        )
+    if converged:
+        points = tuple(item[0] for item in accepted)
+        spline_parameters = tuple(item[1] for item in accepted)
+        empty_parameters: tuple[tuple[float, float], ...] = ()
+        curve = SurfaceIntersectionCurveRecord(
+            curve_id="analytic-spline-curve-0",
+            kind="sampled",
+            points_3d=points,
+            first_parameters=empty_parameters if analytic_is_first else spline_parameters,
+            second_parameters=spline_parameters if analytic_is_first else empty_parameters,
+        )
+        result = normalize_surface_intersection_result(
+            request,
+            curves=(curve,),
+            max_residual=iteration.max_residual,
+            quality="within-tolerance",
+        )
+    else:
+        result = normalize_surface_intersection_result(
+            request,
+            max_residual=max_residual if np.isfinite(max_residual) else 0.0,
+            quality="unsupported",
+        )
+    return (
+        result,
+        SurfaceAnalyticSplineResidualReport(
+            solver_id=dispatch.solver.solver_id,
+            iterations=(iteration,),
+            diagnostics=diagnostics,
+        ),
+    )
+
+
 def _promoted_surface_family_names() -> tuple[str, ...]:
     return tuple(sorted(PATCH_FAMILY_CAPABILITY_MATRIX))
 
@@ -438,13 +646,33 @@ def _default_surface_intersection_solver_records() -> tuple[SurfaceIntersectionS
         ("planar", "revolution"): "planar-revolution-analytic",
         ("revolution", "revolution"): "axis-compatible-revolution-analytic",
     }
+    declared_tolerance_pairs = {
+        ("bspline", "planar"): "analytic-spline-declared-tolerance",
+        ("bspline", "revolution"): "analytic-spline-declared-tolerance",
+        ("bspline", "ruled"): "analytic-spline-declared-tolerance",
+        ("nurbs", "planar"): "analytic-spline-declared-tolerance",
+        ("nurbs", "revolution"): "analytic-spline-declared-tolerance",
+        ("nurbs", "ruled"): "analytic-spline-declared-tolerance",
+    }
     records: list[SurfaceIntersectionSolverRegistryRecord] = []
     families = _promoted_surface_family_names()
     for index, first_family in enumerate(families):
         for second_family in families[index:]:
             pair = tuple(sorted((first_family, second_family)))
             solver_id = exact_pairs.get(pair)
+            declared_solver_id = declared_tolerance_pairs.get(pair)
             if solver_id is None:
+                if declared_solver_id is not None:
+                    records.append(
+                        SurfaceIntersectionSolverRegistryRecord(
+                            first_family=pair[0],
+                            second_family=pair[1],
+                            solver_id=declared_solver_id,
+                            support_state="declared-tolerance",
+                            operations=("classification", "csg", "seam"),
+                        )
+                    )
+                    continue
                 records.append(
                     SurfaceIntersectionSolverRegistryRecord(
                         first_family=pair[0],
@@ -575,6 +803,8 @@ def lookup_surface_intersection_solver(
 __all__ = [
     "DEFAULT_SURFACE_INTERSECTION_TOLERANCE_POLICY",
     "SURFACE_INTERSECTION_SOLVER_REGISTRY",
+    "SurfaceAnalyticSplineResidualReport",
+    "SurfaceAnalyticSplineSolverIterationRecord",
     "SurfaceIntersectionCurveRecord",
     "SurfaceIntersectionDegeneracyRecord",
     "SurfaceIntersectionOverlapRegionRecord",
@@ -591,4 +821,5 @@ __all__ = [
     "lookup_surface_intersection_solver",
     "make_surface_intersection_request",
     "normalize_surface_intersection_result",
+    "solve_analytic_spline_surface_intersection",
 ]
