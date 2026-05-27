@@ -78,6 +78,41 @@ from impression.modeling.surface import (
     make_surface_shell,
     make_implicit_field_node,
 )
+from tests.reference_images import (
+    ExpectedDiagnosticKeyRecord,
+    NegativeDiagnosticFixtureRecord,
+    evaluate_negative_diagnostic_fixture_matrix,
+    normalize_diagnostic_snapshot,
+)
+
+
+def _impress_negative_fixture(
+    fixture_id: str,
+    operation,
+    *,
+    expected_code: str = "ImpressFormatError",
+) -> NegativeDiagnosticFixtureRecord:
+    try:
+        operation()
+    except Exception as exc:  # noqa: BLE001 - negative fixture runner records refusal shape.
+        snapshot = normalize_diagnostic_snapshot(
+            {
+                "code": type(exc).__name__,
+                "message": str(exc),
+            },
+            fixture_id=fixture_id,
+        )
+    else:
+        raise AssertionError(f".impress negative fixture {fixture_id!r} did not refuse.")
+    return NegativeDiagnosticFixtureRecord(
+        fixture_id=fixture_id,
+        domain=".impress",
+        expected_keys=(
+            ExpectedDiagnosticKeyRecord(("code",), expected_code),
+            ExpectedDiagnosticKeyRecord(("message",)),
+        ),
+        expected_snapshot=snapshot,
+    )
 
 
 def test_make_impress_document_root_declares_format_and_schema() -> None:
@@ -1501,6 +1536,72 @@ def test_decode_implicit_surface_patch_payload_rejects_unsafe_or_invalid_geometr
 
     with pytest.raises(ImpressFormatError, match=message):
         decode_surface_patch_payload(payload)
+
+
+def test_impress_unsafe_payload_negative_fixtures_feed_diagnostic_matrix() -> None:
+    planar_payload = encode_surface_patch_payload(PlanarSurfacePatch(family="planar"))
+    unsupported_family_payload = dict(planar_payload)
+    unsupported_family_payload["kind"] = "UnknownSurfacePatch"
+    unsupported_family_payload["family"] = "unknown"
+    unsafe_implicit_payload = encode_surface_patch_payload(ImplicitSurfacePatch(family="implicit"))
+    unsafe_implicit_geometry = dict(unsafe_implicit_payload["geometry"])  # type: ignore[arg-type]
+    unsafe_implicit_geometry["field"] = {
+        "kind": "sphere",
+        "parameters": {"eval": "boom"},
+        "children": [],
+    }
+    unsafe_implicit_payload["geometry"] = unsafe_implicit_geometry
+    wrapper_patch = PlanarSurfacePatch(
+        family="planar",
+        metadata={"kernel": {"producer": "heightmap", "triangle_face_index": 0}},
+    )
+
+    fixtures = (
+        _impress_negative_fixture("impress/malformed-json", lambda: loads_impress_json("{")),
+        _impress_negative_fixture(
+            "impress/unsupported-document-field",
+            lambda: decode_impress_document_payload(
+                {
+                    "format": IMPRESS_FORMAT,
+                    "schema_version": CURRENT_IMPRESS_SCHEMA_VERSION,
+                    "units": {"length": DEFAULT_IMPRESS_LENGTH_UNIT},
+                    "metadata": {},
+                    "body_store": {"bodies": []},
+                    "bodies": {},
+                    "patches": {},
+                    "mesh": {},
+                }
+            ),
+        ),
+        _impress_negative_fixture(
+            "impress/unsupported-family",
+            lambda: decode_surface_patch_payload(unsupported_family_payload),
+        ),
+        _impress_negative_fixture(
+            "impress/unsafe-implicit-field",
+            lambda: decode_surface_patch_payload(unsafe_implicit_payload),
+        ),
+        _impress_negative_fixture(
+            "impress/mesh-wrapper-serialization",
+            lambda: encode_surface_patch_payload(wrapper_patch),
+        ),
+    )
+
+    report = evaluate_negative_diagnostic_fixture_matrix(fixtures, required_domains=(".impress",))
+
+    assert report.passed is True
+    assert report.domain_coverage[0].fixture_count == 5
+    assert all(fixture.expected_snapshot is not None for fixture in fixtures)
+    assert any(
+        fixture.fixture_id == "impress/unsafe-implicit-field"
+        and "Unsafe implicit field payload" in fixture.expected_snapshot.payload["message"]  # type: ignore[index, union-attr]
+        for fixture in fixtures
+    )
+    assert any(
+        fixture.fixture_id == "impress/mesh-wrapper-serialization"
+        and "mesh-derived surface wrapper" in fixture.expected_snapshot.payload["message"]  # type: ignore[index, union-attr]
+        for fixture in fixtures
+    )
 
 
 @pytest.mark.parametrize(
