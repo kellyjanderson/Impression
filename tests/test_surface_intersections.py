@@ -21,6 +21,8 @@ from impression.modeling import (
     SurfaceIntersectionSolverRegistryRecord,
     SurfaceIntersectionSupportDiagnostic,
     SurfaceIntersectionTolerancePolicy,
+    SurfaceImplicitContourExtractionTrace,
+    SurfaceImplicitContourRecord,
     SurfaceImplicitIntersectionBudget,
     SurfaceImplicitIntersectionSafetyDecision,
     SurfaceSplineSplineResidualReport,
@@ -39,6 +41,7 @@ from impression.modeling import (
     make_surface_intersection_request,
     normalize_surface_intersection_result,
     solve_analytic_spline_surface_intersection,
+    solve_implicit_surface_intersection_adapter,
     solve_spline_spline_surface_intersection,
     solve_subdivision_surface_intersection_adapter,
     make_implicit_field_node,
@@ -70,9 +73,11 @@ def test_surface_intersection_solver_registry_covers_promoted_family_pairs() -> 
 
     assert ("planar", "planar") in registry
     assert ("bspline", "planar") in registry
+    assert ("implicit", "planar") in registry
     assert ("planar", "subdivision") in registry
     assert registry[("planar", "planar")].supported is True
     assert registry[("bspline", "planar")].support_state == "declared-tolerance"
+    assert registry[("implicit", "planar")].support_state == "adapter"
     assert registry[("planar", "subdivision")].support_state == "adapter"
     assert assert_surface_intersection_solver_registry_complete(registry) is registry
 
@@ -459,3 +464,57 @@ def test_implicit_intersection_safety_refuses_non_implicit_request() -> None:
     assert decision.executable is False
     assert decision.implicit_diagnostics == ()
     assert decision.diagnostics[0].code == "unsupported-family-pair"
+
+
+def test_implicit_contour_adapter_extracts_planar_sphere_contour_after_safety_gate() -> None:
+    implicit = ImplicitSurfacePatch(
+        family="implicit",
+        field=make_implicit_field_node("sphere", parameters={"radius": 1.0}),
+    )
+    plane = PlanarSurfacePatch(
+        family="planar",
+        origin=(0.0, 0.0, 0.0),
+        u_axis=(0.0, 1.0, 0.0),
+        v_axis=(0.0, 0.0, 1.0),
+    )
+    request = make_surface_intersection_request(implicit, plane, consumer="csg")
+
+    result, trace = solve_implicit_surface_intersection_adapter(request, sample_count=3)
+
+    assert result.supported is True
+    assert result.classification == "curves"
+    assert result.curves[0].kind == "implicit-contour"
+    assert result.curves[0].second_parameters
+    assert isinstance(trace, SurfaceImplicitContourExtractionTrace)
+    assert trace.converged is True
+    assert isinstance(trace.contours[0], SurfaceImplicitContourRecord)
+    assert trace.contours[0].evaluated_cell_count == 9
+    assert trace.contours[0].max_abs_field_residual == pytest.approx(0.0)
+    assert trace.safety_decision.executable is True
+
+
+def test_implicit_contour_adapter_refuses_before_sampling_when_budget_exhausts() -> None:
+    implicit = ImplicitSurfacePatch(family="implicit")
+    plane = PlanarSurfacePatch(family="planar")
+    request = make_surface_intersection_request(implicit, plane)
+    budget = SurfaceImplicitIntersectionBudget(max_cells=4, max_depth=4, max_iterations=4)
+
+    result, trace = solve_implicit_surface_intersection_adapter(request, budget=budget, sample_count=3)
+
+    assert result.supported is False
+    assert trace.converged is False
+    assert trace.contours == ()
+    assert trace.diagnostics[0].code == "budget-exhausted"
+
+
+def test_implicit_contour_adapter_refuses_non_implicit_dispatch() -> None:
+    request = make_surface_intersection_request(
+        PlanarSurfacePatch(family="planar"),
+        PlanarSurfacePatch(family="planar"),
+    )
+
+    result, trace = solve_implicit_surface_intersection_adapter(request)
+
+    assert result.supported is False
+    assert trace.converged is False
+    assert trace.diagnostics[0].code == "unsupported-family-pair"

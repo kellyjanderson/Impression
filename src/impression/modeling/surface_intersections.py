@@ -417,6 +417,63 @@ class SurfaceImplicitIntersectionSafetyDecision:
 
 
 @dataclass(frozen=True)
+class SurfaceImplicitContourRecord:
+    """Surface-native implicit contour extracted under a bounded adapter policy."""
+
+    contour_id: str
+    curve: SurfaceIntersectionCurveRecord
+    evaluated_cell_count: int
+    max_abs_field_residual: float
+
+    def __post_init__(self) -> None:
+        contour_id = str(self.contour_id).strip()
+        evaluated_cell_count = int(self.evaluated_cell_count)
+        max_abs_field_residual = float(self.max_abs_field_residual)
+        if not contour_id:
+            raise ValueError("SurfaceImplicitContourRecord.contour_id must be non-empty.")
+        if not isinstance(self.curve, SurfaceIntersectionCurveRecord):
+            raise TypeError("SurfaceImplicitContourRecord.curve must be a SurfaceIntersectionCurveRecord.")
+        if evaluated_cell_count <= 0:
+            raise ValueError("SurfaceImplicitContourRecord.evaluated_cell_count must be positive.")
+        if not np.isfinite(max_abs_field_residual) or max_abs_field_residual < 0.0:
+            raise ValueError("SurfaceImplicitContourRecord.max_abs_field_residual must be finite and non-negative.")
+        object.__setattr__(self, "contour_id", contour_id)
+        object.__setattr__(self, "evaluated_cell_count", evaluated_cell_count)
+        object.__setattr__(self, "max_abs_field_residual", max_abs_field_residual)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "contour_id": self.contour_id,
+            "curve": self.curve.canonical_payload(),
+            "evaluated_cell_count": self.evaluated_cell_count,
+            "max_abs_field_residual": self.max_abs_field_residual,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceImplicitContourExtractionTrace:
+    """Execution trace for a bounded implicit contour extraction adapter."""
+
+    solver_id: str
+    safety_decision: SurfaceImplicitIntersectionSafetyDecision
+    contours: tuple[SurfaceImplicitContourRecord, ...] = ()
+    diagnostics: tuple[SurfaceIntersectionSupportDiagnostic, ...] = ()
+
+    @property
+    def converged(self) -> bool:
+        return self.safety_decision.executable and bool(self.contours) and not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "contours": [contour.canonical_payload() for contour in self.contours],
+            "converged": self.converged,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "safety_decision": self.safety_decision.canonical_payload(),
+            "solver_id": self.solver_id,
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceIntersectionCurveRecord:
     """One normalized intersection curve or sampled curve segment."""
 
@@ -1012,6 +1069,152 @@ def check_implicit_intersection_safety(
     )
 
 
+def _implicit_field_residuals(
+    implicit_patches: Sequence[ImplicitSurfacePatch],
+    point: Sequence[float],
+) -> tuple[float, ...]:
+    return tuple(abs(float(patch.field_value_at(point).value)) for patch in implicit_patches)
+
+
+def _sample_implicit_bounds_points(
+    patch: ImplicitSurfacePatch,
+    sample_count: int,
+) -> tuple[tuple[tuple[float, float, float], tuple[float, float]], ...]:
+    xmin, xmax, ymin, ymax, zmin, zmax = patch.bounds_estimate()
+    xs = np.linspace(xmin, xmax, sample_count)
+    ys = np.linspace(ymin, ymax, sample_count)
+    zs = np.linspace(zmin, zmax, sample_count)
+    return tuple(
+        ((float(x), float(y), float(z)), (float(index), 0.0))
+        for index, (x, y, z) in enumerate((x, y, z) for z in zs for y in ys for x in xs)
+    )
+
+
+def solve_implicit_surface_intersection_adapter(
+    request: SurfaceIntersectionRequest,
+    *,
+    budget: SurfaceImplicitIntersectionBudget = DEFAULT_SURFACE_IMPLICIT_INTERSECTION_BUDGET,
+    field_safety_policy: ImplicitFieldSafetyPolicy | None = None,
+    sample_count: int = 9,
+) -> tuple[SurfaceIntersectionResultRecord, SurfaceImplicitContourExtractionTrace]:
+    """Extract bounded implicit contour records after explicit safety approval."""
+
+    dispatch = lookup_surface_intersection_solver(request)
+    if not dispatch.supported or dispatch.solver is None or dispatch.solver.solver_id != "implicit-contour-declared-tolerance":
+        diagnostic = SurfaceIntersectionSupportDiagnostic(
+            code="unsupported-family-pair",
+            consumer=request.consumer,
+            family_pair=request.normalized_family_pair,
+            message="implicit contour adapter requires an adapter-supported implicit registry dispatch",
+        )
+        safety_decision = check_implicit_intersection_safety(request, budget=budget, field_safety_policy=field_safety_policy)
+        return (
+            normalize_surface_intersection_result(request, quality="unsupported"),
+            SurfaceImplicitContourExtractionTrace(
+                solver_id="implicit-contour-declared-tolerance",
+                safety_decision=safety_decision,
+                diagnostics=(diagnostic,),
+            ),
+        )
+
+    sample_count = max(3, int(sample_count))
+    implicit_patches = tuple(patch for patch in (request.first_patch, request.second_patch) if isinstance(patch, ImplicitSurfacePatch))
+    if len(implicit_patches) == 2:
+        cell_count = sample_count * sample_count * sample_count
+        depth = sample_count
+    else:
+        cell_count = sample_count * sample_count
+        depth = 1
+    safety_decision = check_implicit_intersection_safety(
+        request,
+        budget=budget,
+        field_safety_policy=field_safety_policy,
+        cell_count=cell_count,
+        depth=depth,
+        iteration_count=sample_count,
+    )
+    if not safety_decision.executable:
+        return (
+            normalize_surface_intersection_result(request, quality="unsupported"),
+            SurfaceImplicitContourExtractionTrace(
+                solver_id=dispatch.solver.solver_id,
+                safety_decision=safety_decision,
+                diagnostics=safety_decision.diagnostics,
+            ),
+        )
+
+    non_implicit_patches = tuple(patch for patch in (request.first_patch, request.second_patch) if not isinstance(patch, ImplicitSurfacePatch))
+    if non_implicit_patches:
+        sampling_patch = non_implicit_patches[0]
+        samples = _sample_surface_points(sampling_patch, sample_count)
+    else:
+        samples = _sample_implicit_bounds_points(implicit_patches[0], sample_count)
+
+    threshold = max(request.tolerance_policy.position_tolerance * 10.0, request.tolerance_policy.degeneracy_tolerance)
+    accepted: list[tuple[tuple[float, float, float], tuple[float, float], float]] = []
+    for point, uv in samples:
+        residuals = _implicit_field_residuals(implicit_patches, point)
+        max_abs_residual = max(residuals, default=float("inf"))
+        if max_abs_residual <= threshold:
+            accepted.append((point, uv, max_abs_residual))
+
+    accepted = sorted(set(accepted), key=lambda item: (item[1], item[0]))
+    max_residual = max((item[2] for item in accepted), default=float("inf"))
+    if len(accepted) < 2 or max_residual > threshold:
+        diagnostic = SurfaceIntersectionSupportDiagnostic(
+            code="unsupported-family-pair",
+            consumer=request.consumer,
+            family_pair=request.normalized_family_pair,
+            message="implicit contour adapter did not extract a contour within declared tolerance sampling budget",
+        )
+        return (
+            normalize_surface_intersection_result(
+                request,
+                max_residual=max_residual if np.isfinite(max_residual) else 0.0,
+                quality="unsupported",
+            ),
+            SurfaceImplicitContourExtractionTrace(
+                solver_id=dispatch.solver.solver_id,
+                safety_decision=safety_decision,
+                diagnostics=(diagnostic,),
+            ),
+        )
+
+    first_parameters: tuple[tuple[float, float], ...] = ()
+    second_parameters: tuple[tuple[float, float], ...] = ()
+    if not isinstance(request.first_patch, ImplicitSurfacePatch):
+        first_parameters = tuple(item[1] for item in accepted)
+    if not isinstance(request.second_patch, ImplicitSurfacePatch):
+        second_parameters = tuple(item[1] for item in accepted)
+    curve = SurfaceIntersectionCurveRecord(
+        curve_id="implicit-contour-0",
+        kind="implicit-contour",
+        points_3d=tuple(item[0] for item in accepted),
+        first_parameters=first_parameters,
+        second_parameters=second_parameters,
+    )
+    contour = SurfaceImplicitContourRecord(
+        contour_id="implicit-contour-0",
+        curve=curve,
+        evaluated_cell_count=cell_count,
+        max_abs_field_residual=max_residual,
+    )
+    result = normalize_surface_intersection_result(
+        request,
+        curves=(curve,),
+        max_residual=max_residual,
+        quality="within-tolerance",
+    )
+    return (
+        result,
+        SurfaceImplicitContourExtractionTrace(
+            solver_id=dispatch.solver.solver_id,
+            safety_decision=safety_decision,
+            contours=(contour,),
+        ),
+    )
+
+
 def solve_subdivision_surface_intersection_adapter(
     request: SurfaceIntersectionRequest,
     *,
@@ -1268,6 +1471,12 @@ def _default_surface_intersection_solver_records() -> tuple[SurfaceIntersectionS
         tuple(sorted((family, "subdivision"))): "subdivision-adapter-declared-tolerance"
         for family in _promoted_surface_family_names()
     }
+    adapter_pairs.update(
+        {
+            tuple(sorted((family, "implicit"))): "implicit-contour-declared-tolerance"
+            for family in _promoted_surface_family_names()
+        }
+    )
     records: list[SurfaceIntersectionSolverRegistryRecord] = []
     families = _promoted_surface_family_names()
     for index, first_family in enumerate(families):
@@ -1443,6 +1652,8 @@ __all__ = [
     "SurfaceIntersectionSupportDiagnostic",
     "SurfaceIntersectionSupportState",
     "SurfaceIntersectionTolerancePolicy",
+    "SurfaceImplicitContourExtractionTrace",
+    "SurfaceImplicitContourRecord",
     "SurfaceImplicitIntersectionBudget",
     "SurfaceImplicitIntersectionSafetyDecision",
     "SurfaceSplineSplineResidualReport",
@@ -1460,6 +1671,7 @@ __all__ = [
     "make_surface_intersection_request",
     "normalize_surface_intersection_result",
     "solve_analytic_spline_surface_intersection",
+    "solve_implicit_surface_intersection_adapter",
     "solve_spline_spline_surface_intersection",
     "solve_subdivision_surface_intersection_adapter",
 ]
