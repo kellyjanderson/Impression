@@ -1,15 +1,26 @@
 # Modeling — CSG Helpers
 
-Imported from `impression.modeling`:
+Mesh compatibility helpers are imported from `impression.modeling`:
 
 ```python
-from impression.modeling import boolean_union, boolean_difference, boolean_intersection, union_meshes
+from impression.modeling import (
+    boolean_union,
+    boolean_difference,
+    boolean_intersection,
+    make_box_mesh,
+    make_cylinder_mesh,
+    union_meshes,
+)
 ```
 
 Booleans propagate per-object colors onto result faces. Union/intersection faces keep the originating mesh color; difference assigns new cut faces to the cutter’s color.
 If no input colors are provided, the result uses the default preview color.
 
-All helpers operate on internal triangle meshes and use `manifold3d` for robust, watertight-aware booleans.
+The mesh-lane helpers operate on internal triangle meshes and use `manifold3d`
+for robust, watertight-aware booleans. Feed them mesh-specific inputs such as
+`make_*_mesh(...)` or a mesh produced by an explicit tessellation boundary. Do
+not treat public `make_*` primitives as mesh constructors; those return
+`SurfaceBody` by default.
 Install requirement: `pip install manifold3d`.
 
 ## Surface-First Status
@@ -89,7 +100,8 @@ Within that surfaced lane, result posture is now explicit across three caller-fa
 
 The public boolean APIs are now split into two explicit lanes:
 
-- default mesh lane: returns executable mesh geometry today
+- default mesh lane: returns executable mesh geometry today and expects
+  mesh-specific inputs such as `make_*_mesh(...)`
 - surfaced lane: `backend="surface"` returns `SurfaceBooleanResult`
 
 The surfaced lane is the migration contract for downstream callers that want to stop depending on mesh-primary boolean truth. It is intentionally honest:
@@ -101,7 +113,10 @@ The surfaced lane is the migration contract for downstream callers that want to 
 - unsupported execution stays surfaced and does not fall back to mesh
 - legacy mesh deprecation posture remains in place for the executable mesh lane
 
-If you need renderable boolean output today, keep using the default mesh lane. If you are migrating consumers or tests onto the surface-first contract, use `backend="surface"` and inspect the returned `SurfaceBooleanResult`.
+If you need renderable boolean output today, keep using the default mesh lane
+with explicit mesh compatibility inputs. If you are migrating consumers or
+tests onto the surface-first contract, use `backend="surface"` and inspect the
+returned `SurfaceBooleanResult`.
 
 ## Reference Readiness
 
@@ -145,11 +160,11 @@ the same orientation, the same shape but rotated, or a different shape.
 - Preview: `impression preview docs/examples/csg/union_example.py`
 
 ```python
-from impression.modeling import boolean_union, make_box, make_cylinder
+from impression.modeling import boolean_union, make_box_mesh, make_cylinder_mesh
 
 def build():
-    box = make_box(size=(2, 2, 1))
-    cyl = make_cylinder(radius=0.6, height=1.5)
+    box = make_box_mesh(size=(2, 2, 1))
+    cyl = make_cylinder_mesh(radius=0.6, height=1.5)
     return boolean_union([box, cyl])
 ```
 
@@ -158,11 +173,11 @@ def build():
 You can also union a collection directly with `union_meshes`, which accepts either an iterable or a mapping (e.g., dict) of meshes:
 
 ```python
-from impression.modeling import make_box, make_cylinder, union_meshes
+from impression.modeling import make_box_mesh, make_cylinder_mesh, union_meshes
 
 def build():
-    a = make_box(size=(2, 2, 1), color="#5A7BFF")
-    b = make_cylinder(radius=0.8, height=1.5, color="#FF7A18")
+    a = make_box_mesh(size=(2, 2, 1), color="#5A7BFF")
+    b = make_cylinder_mesh(radius=0.8, height=1.5, color="#FF7A18")
     return union_meshes({"box": a, "cyl": b})
 ```
 
@@ -178,11 +193,11 @@ as canonical surfaced modeling truth.
 - Preview: `impression preview docs/examples/csg/difference_example.py`
 
 ```python
-from impression.modeling import boolean_difference, make_box, make_cylinder
+from impression.modeling import boolean_difference, make_box_mesh, make_cylinder_mesh
 
 def build():
-    base = make_box(size=(2, 2, 2))
-    cutter = make_cylinder(radius=0.4, height=2.5)
+    base = make_box_mesh(size=(2, 2, 2))
+    cutter = make_cylinder_mesh(radius=0.4, height=2.5)
     return boolean_difference(base, [cutter])
 ```
 
@@ -194,11 +209,11 @@ def build():
 - Preview: `impression preview docs/examples/csg/intersection_example.py`
 
 ```python
-from impression.modeling import boolean_intersection, make_box, make_sphere
+from impression.modeling import boolean_intersection, make_box_mesh, make_sphere_mesh
 
 def build():
-    box = make_box(size=(2, 2, 2))
-    sphere = make_sphere(radius=1.2)
+    box = make_box_mesh(size=(2, 2, 2))
+    sphere = make_sphere_mesh(radius=1.2)
     return boolean_intersection([box, sphere])
 ```
 

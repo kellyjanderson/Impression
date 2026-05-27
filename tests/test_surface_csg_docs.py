@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from impression.modeling import inventory_legacy_primitive_mesh_assumptions
+
 
 def test_csg_docs_explain_surface_migration_posture(project_root: Path) -> None:
     doc = (project_root / "docs" / "modeling" / "csg.md").read_text()
@@ -36,3 +38,30 @@ def test_tutorials_keep_mesh_boolean_lane_explicit_while_surface_lane_migrates(p
     serious_modeling = (project_root / "docs" / "tutorials" / "serious-modeling.md").read_text()
     assert "surfaced CSG lane" in getting_started
     assert "executable mesh boolean lane" in serious_modeling
+
+
+def test_mesh_compatibility_docs_and_examples_use_explicit_mesh_inputs(project_root: Path) -> None:
+    paths = (
+        project_root / "README.md",
+        project_root / "docs" / "modeling" / "csg.md",
+        project_root / "docs" / "examples" / "csg" / "union_example.py",
+        project_root / "docs" / "examples" / "csg" / "difference_example.py",
+        project_root / "docs" / "examples" / "csg" / "intersection_example.py",
+        project_root / "docs" / "examples" / "csg" / "union_meshes_example.py",
+        project_root / "docs" / "examples" / "csg" / "teeth_union_example.py",
+        project_root / "docs" / "examples" / "csg" / "tooth_union_example.py",
+        project_root / "docs" / "examples" / "csg" / "tooth_example.py",
+        project_root / "docs" / "examples" / "csg" / "tooth_parts_example.py",
+    )
+    report = inventory_legacy_primitive_mesh_assumptions(
+        {str(path.relative_to(project_root)): path.read_text(encoding="utf-8") for path in paths}
+    )
+    csg_doc = (project_root / "docs" / "modeling" / "csg.md").read_text(encoding="utf-8")
+    union_meshes_example = (project_root / "docs" / "examples" / "csg" / "union_meshes_example.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert report.stale_findings == ()
+    assert "not treat public `make_*` primitives as mesh constructors" in csg_doc
+    assert "make_box_mesh" in union_meshes_example
+    assert "make_cylinder_mesh" in union_meshes_example
