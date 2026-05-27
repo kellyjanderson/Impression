@@ -50,6 +50,23 @@ The audit looked for:
 - `Monitor`: architecture has downstream specs or process coverage; keep visible
   but it is not a current manifest blocker.
 
+## Manifest Coverage Review
+
+- [x] Added the missing manifest to
+  [Surface Body Completion Architecture](surface-body-completion-architecture.md),
+  the new umbrella document that owns the newly discovered completion work.
+- [x] Reviewed existing manifests in
+  [Full Surface Patch Family Architecture](full-surface-patch-family-architecture.md),
+  [.impress Surface-Native File Format Architecture](impress-surface-native-file-format-architecture.md),
+  [Loft Topology Point Correspondence Architecture](loft-topology-point-correspondence-architecture.md),
+  [Mesh Execution To Tessellation Boundary Architecture](mesh-execution-tessellation-boundary-architecture.md),
+  and [SurfaceBody CSG Architecture](surfacebody-csg-architecture.md).
+- [x] Confirmed the reviewed manifests have no remaining candidate scored
+  `25+` after the current split pass.
+- [x] Left index, tracker, and already-covered sibling architecture documents
+  without duplicate manifests where their new work is owned by the umbrella or
+  component manifest listed above.
+
 ## Priority 0: Surface Body Completion Architecture Needed
 
 These items capture the new surface-body completion standard. They supersede
@@ -58,8 +75,9 @@ complete.
 
 ### Surface Body Completion Program
 
-- Status: `Needs Manifest`
+- Status: `Manifest Assessed`
 - Architecture: [Surface Body Completion Architecture](surface-body-completion-architecture.md)
+- [x] Specification manifest added, critically reviewed, rescored, and split.
 
 Architecture-defined work:
 
@@ -107,11 +125,12 @@ Open architecture decisions:
 
 Manifest notes:
 
-- This should become the next specification-manifest pass.
-- The manifest should not bundle "complete surface body" into one large spec.
-- Expected spec branches include patch-family promotion, CSG completion, loft
-  ambiguity execution gate, seam/continuity promotion, `.impress` completion,
-  primitive/feature integration, and verification evidence.
+- [x] Manifest added to the owning architecture document.
+- [x] Broad completion work split into patch-family promotion, CSG completion,
+  loft ambiguity gates, seam/continuity promotion, `.impress` whole-store
+  gates, primitive/feature integration, and verification evidence.
+- [x] Manifest reviewed through repeated rescore/split passes with no remaining
+  candidate at `25+`.
 
 ### Authored Loft Ambiguity Contract Refresh
 
@@ -534,6 +553,8 @@ When a new architecture document is added or materially updated:
 
 ## Change History
 
+- 2026-05-27: Marked the surface-body completion program as manifest assessed
+  after adding and splitting the owning specification manifest.
 - 2026-05-26: Moved assessed specification manifests out of this tracker and
   into the owning architecture documents. The tracker remains an index and
   status rollup.
