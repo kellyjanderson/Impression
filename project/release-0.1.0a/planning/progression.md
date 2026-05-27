@@ -501,5 +501,5 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 283: Loft Ambiguity Negative Diagnostic Fixtures (v1.0)](../specifications/surface-283-loft-ambiguity-negative-diagnostic-fixtures-v1_0.md)
 - [x] [Surface Spec 284: Seam Continuity Negative Diagnostic Fixtures (v1.0)](../specifications/surface-284-seam-continuity-negative-diagnostic-fixtures-v1_0.md)
 - [x] [Surface Spec 285: Legacy Primitive Mesh Assumption Inventory (v1.0)](../specifications/surface-285-legacy-primitive-mesh-assumption-inventory-v1_0.md)
-- [ ] [Surface Spec 286: Preview And Reference Tests Explicit Tessellation Rewrite (v1.0)](../specifications/surface-286-preview-and-reference-tests-explicit-tessellation-rewrite-v1_0.md)
+- [x] [Surface Spec 286: Preview And Reference Tests Explicit Tessellation Rewrite (v1.0)](../specifications/surface-286-preview-and-reference-tests-explicit-tessellation-rewrite-v1_0.md)
 - [ ] [Surface Spec 287: Mesh Compatibility API Documentation And Example Rewrite (v1.0)](../specifications/surface-287-mesh-compatibility-api-documentation-and-example-rewrite-v1_0.md)

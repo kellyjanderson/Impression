@@ -12,6 +12,7 @@ from impression.modeling import (
     Loft,
     as_section,
     handoff_hinge_surface,
+    inventory_legacy_primitive_mesh_assumptions,
     make_bistable_hinge,
     make_box,
     make_living_hinge,
@@ -97,12 +98,21 @@ from tests.reference_images import (
     write_surface_consumer_collection_stl,
 )
 
+PREVIEW_AND_REFERENCE_FILES = (
+    Path(__file__).resolve().with_name("test_preview_isolation.py"),
+    Path(__file__).resolve(),
+)
+
 SYMBOL_FONT_PATH = (
     Path(__file__).resolve().parents[1]
     / "assets"
     / "fonts"
     / "NotoSansSymbols2-Regular.ttf"
 )
+
+
+def _tessellate_reference_mesh(body):
+    return tessellate_surface_body(body).mesh
 
 
 def _require_text_cv_font() -> Path:
@@ -1034,8 +1044,8 @@ def test_handedness_anchor_contract_detects_space_drift() -> None:
 def test_handedness_classifier_detects_same_and_mirrored_witness(tmp_path: Path) -> None:
     mesh = combine_meshes(
         [
-            make_box(size=(1.2, 0.4, 1.0), center=(0.0, 0.0, 0.0)),
-            make_box(size=(0.3, 0.4, 0.3), center=(0.75, 0.0, 0.55)),
+            _tessellate_reference_mesh(make_box(size=(1.2, 0.4, 1.0), center=(0.0, 0.0, 0.0))),
+            _tessellate_reference_mesh(make_box(size=(0.3, 0.4, 0.3), center=(0.75, 0.0, 0.55))),
         ]
     )
     bundle = render_canonical_object_view_bundle(mesh, tmp_path / "expected", stem="arrow")
@@ -1051,6 +1061,16 @@ def test_handedness_classifier_detects_same_and_mirrored_witness(tmp_path: Path)
     assert same.witness_adequate
     assert same.result_class == "same_handedness"
     assert mirrored.result_class == "mirrored"
+
+
+def test_preview_and_reference_files_have_no_stale_public_primitive_mesh_assumptions() -> None:
+    report = inventory_legacy_primitive_mesh_assumptions(
+        {str(path.relative_to(Path(__file__).resolve().parents[1])): path.read_text(encoding="utf-8")
+         for path in PREVIEW_AND_REFERENCE_FILES}
+    )
+
+    assert report.stale_findings == ()
+    assert report.passed is True
 
 
 def test_handedness_classifier_returns_unknown_for_symmetric_witness(tmp_path: Path) -> None:
