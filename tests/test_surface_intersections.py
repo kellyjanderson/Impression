@@ -19,6 +19,8 @@ from impression.modeling import (
     SurfaceIntersectionSolverRegistryRecord,
     SurfaceIntersectionSupportDiagnostic,
     SurfaceIntersectionTolerancePolicy,
+    SurfaceSplineSplineResidualReport,
+    SurfaceSplineSplineSolverIterationRecord,
     assert_surface_intersection_solver_registry_complete,
     build_surface_intersection_solver_registry,
     classify_surface_intersection_degeneracy,
@@ -26,6 +28,7 @@ from impression.modeling import (
     make_surface_intersection_request,
     normalize_surface_intersection_result,
     solve_analytic_spline_surface_intersection,
+    solve_spline_spline_surface_intersection,
 )
 
 
@@ -245,4 +248,55 @@ def test_analytic_spline_solver_refuses_non_analytic_spline_pairs() -> None:
     assert result.classification == "unsupported"
     assert report.converged is False
     assert all(isinstance(diagnostic, SurfaceIntersectionSupportDiagnostic) for diagnostic in report.diagnostics)
+    assert report.diagnostics[0].code == "unsupported-family-pair"
+
+
+def test_spline_spline_solver_intersects_bspline_nurbs_with_declared_tolerance() -> None:
+    first = BSplineSurfacePatch(family="bspline")
+    second = NURBSSurfacePatch(family="nurbs")
+    request = make_surface_intersection_request(first, second, consumer="csg")
+
+    result, report = solve_spline_spline_surface_intersection(request, sample_count=5)
+
+    assert result.supported is True
+    assert result.classification == "curves"
+    assert result.curves[0].first_parameters
+    assert result.curves[0].second_parameters
+    assert isinstance(report, SurfaceSplineSplineResidualReport)
+    assert report.converged is True
+    assert all(isinstance(iteration, SurfaceSplineSplineSolverIterationRecord) for iteration in report.iterations)
+    assert report.iterations[0].accepted_pair_count >= 2
+
+
+def test_spline_spline_solver_reports_overlap_degeneracy_for_identical_surfaces() -> None:
+    request = make_surface_intersection_request(
+        BSplineSurfacePatch(family="bspline"),
+        BSplineSurfacePatch(family="bspline"),
+        consumer="seam",
+    )
+
+    result, report = solve_spline_spline_surface_intersection(request, sample_count=3)
+
+    assert report.converged is True
+    assert result.quality in {"within-tolerance", "degenerate"}
+    assert result.curves
+    assert result.max_residual == pytest.approx(0.0)
+
+
+def test_spline_spline_solver_refuses_non_convergent_spline_pair() -> None:
+    first = BSplineSurfacePatch(family="bspline")
+    second = BSplineSurfacePatch(
+        family="bspline",
+        control_net=[
+            [(10.0, 0.0, 0.0), (10.0, 1.0, 0.0)],
+            [(11.0, 0.0, 0.0), (11.0, 1.0, 0.0)],
+        ],
+    )
+    request = make_surface_intersection_request(first, second, consumer="loft")
+
+    result, report = solve_spline_spline_surface_intersection(request, sample_count=5)
+
+    assert result.supported is False
+    assert result.classification == "unsupported"
+    assert report.converged is False
     assert report.diagnostics[0].code == "unsupported-family-pair"

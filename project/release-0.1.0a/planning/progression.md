@@ -486,7 +486,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 268: Intersection Request And Solver Registry (v1.0)](../specifications/surface-268-intersection-request-and-solver-registry-v1_0.md)
 - [x] [Surface Spec 269: Intersection Curve Result And Degeneracy Records (v1.0)](../specifications/surface-269-intersection-curve-result-and-degeneracy-records-v1_0.md)
 - [x] [Surface Spec 270: Analytic To Spline Surface Intersection Solvers (v1.0)](../specifications/surface-270-analytic-to-spline-surface-intersection-solvers-v1_0.md)
-- [ ] [Surface Spec 271: Spline To Spline Surface Intersection Solvers (v1.0)](../specifications/surface-271-spline-to-spline-surface-intersection-solvers-v1_0.md)
+- [x] [Surface Spec 271: Spline To Spline Surface Intersection Solvers (v1.0)](../specifications/surface-271-spline-to-spline-surface-intersection-solvers-v1_0.md)
 - [ ] [Surface Spec 272: Subdivision Surface Intersection Adapter (v1.0)](../specifications/surface-272-subdivision-surface-intersection-adapter-v1_0.md)
 - [ ] [Surface Spec 273: Implicit Intersection Safety And Budget Policy (v1.0)](../specifications/surface-273-implicit-intersection-safety-and-budget-policy-v1_0.md)
 - [ ] [Surface Spec 274: Bounded Implicit Contour Extraction Adapter (v1.0)](../specifications/surface-274-bounded-implicit-contour-extraction-adapter-v1_0.md)
