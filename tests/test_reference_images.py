@@ -44,6 +44,8 @@ from tests.reference_images import (
     CvFixtureContract,
     DiagnosticPanelContract,
     DiagnosticSnapshotKeyPolicy,
+    ExpectedDiagnosticKeyRecord,
+    NegativeDiagnosticFixtureRecord,
     assess_cv_result,
     canonical_object_view_camera_contracts,
     classify_reference_fixture_pair_promotion_gate,
@@ -67,6 +69,8 @@ from tests.reference_images import (
     initial_text_cv_scope_support,
     HandednessSpaceAnchorContract,
     compare_diagnostic_snapshots,
+    compare_negative_diagnostic_fixture_snapshot,
+    evaluate_negative_diagnostic_fixture_matrix,
     normalize_diagnostic_snapshot,
     planar_loop_bounds,
     reference_artifact_state,
@@ -465,6 +469,84 @@ def test_diagnostic_snapshot_comparator_uses_stable_payload_ordering() -> None:
     assert comparison.matches is False
     assert comparison.drift_kind == "changed"
     assert "diagnostic/order" in comparison.message
+
+
+def test_negative_diagnostic_fixture_matrix_reports_domain_and_key_coverage() -> None:
+    impress_snapshot = normalize_diagnostic_snapshot(
+        {"code": "unsafe-payload", "message": "refused"},
+        fixture_id="impress/unsafe",
+    )
+    csg_snapshot = normalize_diagnostic_snapshot(
+        {"code": "unsupported-family-pair", "family_pair": ("implicit", "mesh")},
+        fixture_id="csg/unsupported",
+    )
+    fixtures = (
+        NegativeDiagnosticFixtureRecord(
+            fixture_id="impress/unsafe",
+            domain=".impress",
+            expected_keys=(ExpectedDiagnosticKeyRecord(("code",), "unsafe-payload"),),
+            expected_snapshot=impress_snapshot,
+        ),
+        NegativeDiagnosticFixtureRecord(
+            fixture_id="csg/unsupported",
+            domain="csg",
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("code",), "unsupported-family-pair"),
+                ExpectedDiagnosticKeyRecord(("family_pair",)),
+            ),
+            expected_snapshot=csg_snapshot,
+        ),
+    )
+
+    report = evaluate_negative_diagnostic_fixture_matrix(fixtures, required_domains=(".impress", "csg"))
+
+    assert report.passed is True
+    assert {coverage.domain: coverage.fixture_count for coverage in report.domain_coverage} == {
+        ".impress": 1,
+        "csg": 1,
+    }
+    assert report.diagnostics == ()
+
+
+def test_negative_diagnostic_fixture_matrix_reports_missing_domain_and_key() -> None:
+    snapshot = normalize_diagnostic_snapshot(
+        {"code": "unsafe-payload"},
+        fixture_id="impress/unsafe",
+    )
+    fixtures = (
+        NegativeDiagnosticFixtureRecord(
+            fixture_id="impress/unsafe",
+            domain=".impress",
+            expected_keys=(ExpectedDiagnosticKeyRecord(("message",)),),
+            expected_snapshot=snapshot,
+        ),
+    )
+
+    report = evaluate_negative_diagnostic_fixture_matrix(fixtures, required_domains=(".impress", "csg"))
+
+    assert report.passed is False
+    assert {diagnostic.code for diagnostic in report.diagnostics} == {"missing-domain", "missing-diagnostic-key"}
+    assert any(diagnostic.domain == "csg" for diagnostic in report.diagnostics)
+    assert any(diagnostic.fixture_id == "impress/unsafe" for diagnostic in report.diagnostics)
+
+
+def test_negative_diagnostic_fixture_snapshot_comparison_uses_normalized_snapshots() -> None:
+    expected = normalize_diagnostic_snapshot(
+        {"code": "unsafe-payload", "path": "/tmp/a/payload.impress"},
+        fixture_id="impress/unsafe",
+    )
+    actual = normalize_diagnostic_snapshot(
+        {"path": "/private/tmp/b/payload.impress", "code": "unsafe-payload"},
+        fixture_id="impress/unsafe",
+    )
+    fixture = NegativeDiagnosticFixtureRecord(
+        fixture_id="impress/unsafe",
+        domain=".impress",
+        expected_keys=(ExpectedDiagnosticKeyRecord(("code",), "unsafe-payload"),),
+        expected_snapshot=expected,
+    )
+
+    assert compare_negative_diagnostic_fixture_snapshot(fixture, actual).matches is True
 
 
 def test_reference_fixture_pair_fails_for_partial_existing_group(tmp_path: Path) -> None:
