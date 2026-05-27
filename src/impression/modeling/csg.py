@@ -608,6 +608,58 @@ class SurfaceBooleanTrimmedPatchFragment:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGFragmentProvenanceRecord:
+    """Provenance for one assembled CSG fragment."""
+
+    source_patch: SurfaceBooleanPatchRef
+    result_shell_index: int
+    result_patch_index: int
+    cut_curve_ids: tuple[str, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cut_curve_ids": self.cut_curve_ids,
+            "result_patch_index": self.result_patch_index,
+            "result_shell_index": self.result_shell_index,
+            "source_patch": {
+                "operand_index": self.source_patch.operand_index,
+                "patch_index": self.source_patch.patch_index,
+            },
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGShellAssemblyRecord:
+    """Provisional CSG shell assembly result before seam rebuild and validity cleanup."""
+
+    operation: SurfaceBooleanOperation
+    classification: SurfaceBooleanClassification
+    shells: tuple[SurfaceShell, ...] = ()
+    provenance: tuple[SurfaceCSGFragmentProvenanceRecord, ...] = ()
+    diagnostics: tuple[str, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return not self.diagnostics
+
+    def to_body(self, *, metadata: dict[str, object] | None = None) -> SurfaceBody | None:
+        if self.classification == "empty":
+            return None
+        if not self.supported:
+            raise SurfaceBooleanEligibilityError("; ".join(self.diagnostics))
+        return make_surface_body(self.shells, metadata=metadata)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "classification": self.classification,
+            "diagnostics": self.diagnostics,
+            "operation": self.operation,
+            "provenance": [record.canonical_payload() for record in self.provenance],
+            "shell_count": len(self.shells),
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceBooleanIntersectionStage:
     """Deterministic surfaced intersection/classification stage output."""
 
@@ -3175,6 +3227,64 @@ def surface_boolean_overlap_fragments(operands: SurfaceBooleanOperands) -> tuple
             fragments,
             key=lambda fragment: (fragment.source_patch.operand_index, fragment.source_patch.patch_index),
         )
+    )
+
+
+def assemble_surface_csg_shells_from_fragments(
+    operation: SurfaceBooleanOperation,
+    fragments: Sequence[SurfaceBooleanTrimmedPatchFragment],
+    *,
+    multi_shell: bool = False,
+) -> SurfaceCSGShellAssemblyRecord:
+    """Assemble selected CSG fragments into provisional result shells."""
+
+    if not fragments:
+        return SurfaceCSGShellAssemblyRecord(operation=operation, classification="empty")
+    sorted_fragments = tuple(
+        sorted(
+            fragments,
+            key=lambda fragment: (fragment.source_patch.operand_index, fragment.source_patch.patch_index),
+        )
+    )
+    if multi_shell:
+        shells = tuple(
+            make_surface_shell(
+                (fragment.patch,),
+                connected=True,
+                metadata={"kernel": {"source_patch": fragment.source_patch}},
+            )
+            for fragment in sorted_fragments
+        )
+        provenance = tuple(
+            SurfaceCSGFragmentProvenanceRecord(
+                source_patch=fragment.source_patch,
+                result_shell_index=index,
+                result_patch_index=0,
+                cut_curve_ids=fragment.cut_curve_ids,
+            )
+            for index, fragment in enumerate(sorted_fragments)
+        )
+    else:
+        shell = make_surface_shell(
+            tuple(fragment.patch for fragment in sorted_fragments),
+            connected=True,
+            metadata={"kernel": {"primitive_family": "csg_fragment_assembly", "boolean_operation": operation}},
+        )
+        shells = (shell,)
+        provenance = tuple(
+            SurfaceCSGFragmentProvenanceRecord(
+                source_patch=fragment.source_patch,
+                result_shell_index=0,
+                result_patch_index=index,
+                cut_curve_ids=fragment.cut_curve_ids,
+            )
+            for index, fragment in enumerate(sorted_fragments)
+        )
+    return SurfaceCSGShellAssemblyRecord(
+        operation=operation,
+        classification="closed",
+        shells=shells,
+        provenance=provenance,
     )
 
 
