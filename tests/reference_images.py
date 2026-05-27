@@ -162,6 +162,54 @@ class DiagnosticSnapshotComparison:
 
 
 @dataclass(frozen=True)
+class ExpectedDiagnosticKeyRecord:
+    key_path: tuple[str, ...]
+    expected_value: object | None = None
+
+    def __post_init__(self) -> None:
+        _validate_unique_nonempty_strings("key_path", self.key_path)
+
+
+@dataclass(frozen=True)
+class NegativeDiagnosticFixtureRecord:
+    fixture_id: str
+    domain: str
+    expected_keys: tuple[ExpectedDiagnosticKeyRecord, ...]
+    expected_snapshot: DiagnosticSnapshotRecord | None = None
+
+    def __post_init__(self) -> None:
+        if not self.fixture_id.strip():
+            raise ValueError("NegativeDiagnosticFixtureRecord.fixture_id must be non-empty.")
+        if not self.domain.strip():
+            raise ValueError("NegativeDiagnosticFixtureRecord.domain must be non-empty.")
+        if not self.expected_keys:
+            raise ValueError("NegativeDiagnosticFixtureRecord.expected_keys must be non-empty.")
+
+
+@dataclass(frozen=True)
+class NegativeDiagnosticDomainCoverageRecord:
+    domain: str
+    fixture_count: int
+    covered: bool
+
+
+@dataclass(frozen=True)
+class NegativeDiagnosticFixtureMatrixDiagnostic:
+    code: Literal["missing-domain", "missing-diagnostic-key", "snapshot-drift"]
+    fixture_id: str
+    domain: str
+    message: str
+
+
+@dataclass(frozen=True)
+class NegativeDiagnosticFixtureMatrixReport:
+    passed: bool
+    fixtures: tuple[NegativeDiagnosticFixtureRecord, ...]
+    domain_coverage: tuple[NegativeDiagnosticDomainCoverageRecord, ...]
+    diagnostics: tuple[NegativeDiagnosticFixtureMatrixDiagnostic, ...]
+
+
+@dataclass(frozen=True)
 class CvFixtureContract:
     fixture_id: str
     lane: str
@@ -828,6 +876,96 @@ def compare_diagnostic_snapshots(
         actual=actual,
         message=f"Diagnostic snapshot drift for {actual.fixture_id}.",
     )
+
+
+def _snapshot_value_at(payload: dict[str, object], key_path: tuple[str, ...]) -> object:
+    current: object = payload
+    for key in key_path:
+        if not isinstance(current, dict) or key not in current:
+            raise KeyError(".".join(key_path))
+        current = current[key]
+    return current
+
+
+def evaluate_negative_diagnostic_fixture_matrix(
+    fixtures: Sequence[NegativeDiagnosticFixtureRecord],
+    *,
+    required_domains: Sequence[str],
+) -> NegativeDiagnosticFixtureMatrixReport:
+    """Evaluate domain coverage and expected-key coverage for negative diagnostics."""
+
+    fixture_records = tuple(fixtures)
+    domains = tuple(str(domain).strip() for domain in required_domains)
+    _validate_unique_nonempty_strings("required_domains", domains)
+    diagnostics: list[NegativeDiagnosticFixtureMatrixDiagnostic] = []
+    by_domain = {domain: tuple(record for record in fixture_records if record.domain == domain) for domain in domains}
+    coverage: list[NegativeDiagnosticDomainCoverageRecord] = []
+    for domain in domains:
+        domain_fixtures = by_domain[domain]
+        coverage.append(
+            NegativeDiagnosticDomainCoverageRecord(
+                domain=domain,
+                fixture_count=len(domain_fixtures),
+                covered=bool(domain_fixtures),
+            )
+        )
+        if not domain_fixtures:
+            diagnostics.append(
+                NegativeDiagnosticFixtureMatrixDiagnostic(
+                    code="missing-domain",
+                    fixture_id="",
+                    domain=domain,
+                    message=f"Negative diagnostic fixture matrix has no fixture for domain '{domain}'.",
+                )
+            )
+    for fixture in fixture_records:
+        if fixture.expected_snapshot is None:
+            continue
+        for expected_key in fixture.expected_keys:
+            try:
+                observed = _snapshot_value_at(fixture.expected_snapshot.payload, expected_key.key_path)
+            except KeyError:
+                diagnostics.append(
+                    NegativeDiagnosticFixtureMatrixDiagnostic(
+                        code="missing-diagnostic-key",
+                        fixture_id=fixture.fixture_id,
+                        domain=fixture.domain,
+                        message=(
+                            f"Negative diagnostic fixture '{fixture.fixture_id}' is missing "
+                            f"expected key '{'.'.join(expected_key.key_path)}'."
+                        ),
+                    )
+                )
+                continue
+            if expected_key.expected_value is not None and observed != expected_key.expected_value:
+                diagnostics.append(
+                    NegativeDiagnosticFixtureMatrixDiagnostic(
+                        code="missing-diagnostic-key",
+                        fixture_id=fixture.fixture_id,
+                        domain=fixture.domain,
+                        message=(
+                            f"Negative diagnostic fixture '{fixture.fixture_id}' expected "
+                            f"'{'.'.join(expected_key.key_path)}' to equal {expected_key.expected_value!r}."
+                        ),
+                    )
+                )
+    return NegativeDiagnosticFixtureMatrixReport(
+        passed=not diagnostics,
+        fixtures=fixture_records,
+        domain_coverage=tuple(coverage),
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def compare_negative_diagnostic_fixture_snapshot(
+    fixture: NegativeDiagnosticFixtureRecord,
+    actual_snapshot: DiagnosticSnapshotRecord,
+) -> DiagnosticSnapshotComparison:
+    """Compare a domain-owned negative diagnostic fixture against its expected snapshot."""
+
+    if fixture.expected_snapshot is None:
+        raise ValueError("Negative diagnostic fixture has no expected snapshot to compare.")
+    return compare_diagnostic_snapshots(fixture.expected_snapshot, actual_snapshot)
 
 
 def reference_fixture_pair_failures(
