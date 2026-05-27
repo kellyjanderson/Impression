@@ -25,6 +25,9 @@ from impression.modeling import (
     SurfaceImplicitContourRecord,
     SurfaceImplicitIntersectionBudget,
     SurfaceImplicitIntersectionSafetyDecision,
+    SurfaceImplicitNonConvergenceDiagnostic,
+    SurfaceImplicitResidualReport,
+    SurfaceImplicitResultClassificationRecord,
     SurfaceSplineSplineResidualReport,
     SurfaceSplineSplineSolverIterationRecord,
     SurfaceSubdivisionIntersectionAdapterReport,
@@ -32,10 +35,13 @@ from impression.modeling import (
     SurfaceSubdivisionRefinedContourRecord,
     SubdivisionSurfacePatch,
     assert_surface_intersection_solver_registry_complete,
+    assemble_implicit_intersection_result,
     build_surface_intersection_solver_registry,
+    build_implicit_non_convergence_diagnostic,
     check_implicit_intersection_budget,
     check_implicit_intersection_safety,
     check_subdivision_intersection_budget,
+    classify_implicit_intersection_residuals,
     classify_surface_intersection_degeneracy,
     lookup_surface_intersection_solver,
     make_surface_intersection_request,
@@ -518,3 +524,66 @@ def test_implicit_contour_adapter_refuses_non_implicit_dispatch() -> None:
     assert result.supported is False
     assert trace.converged is False
     assert trace.diagnostics[0].code == "unsupported-family-pair"
+
+
+def test_implicit_residual_classifier_accepts_declared_tolerance_trace() -> None:
+    implicit = ImplicitSurfacePatch(family="implicit", field=make_implicit_field_node("sphere", parameters={"radius": 1.0}))
+    plane = PlanarSurfacePatch(
+        family="planar",
+        origin=(0.0, 0.0, 0.0),
+        u_axis=(0.0, 1.0, 0.0),
+        v_axis=(0.0, 0.0, 1.0),
+    )
+    request = make_surface_intersection_request(implicit, plane)
+    _result, trace = solve_implicit_surface_intersection_adapter(request, sample_count=3)
+
+    classification = classify_implicit_intersection_residuals(trace)
+    assembled, assembled_classification = assemble_implicit_intersection_result(request, trace)
+
+    assert isinstance(classification, SurfaceImplicitResultClassificationRecord)
+    assert isinstance(classification.residual_report, SurfaceImplicitResidualReport)
+    assert classification.classification == "declared-tolerance"
+    assert classification.result_quality == "within-tolerance"
+    assert classification.residual_report.within_tolerance is True
+    assert assembled.supported is True
+    assert assembled.curves[0].kind == "implicit-contour"
+    assert assembled_classification == classification
+
+
+def test_implicit_residual_classifier_reports_budget_refusal_as_non_convergence_reason() -> None:
+    implicit = ImplicitSurfacePatch(family="implicit")
+    plane = PlanarSurfacePatch(family="planar")
+    request = make_surface_intersection_request(implicit, plane)
+    _result, trace = solve_implicit_surface_intersection_adapter(
+        request,
+        budget=SurfaceImplicitIntersectionBudget(max_cells=4, max_depth=4, max_iterations=4),
+        sample_count=3,
+    )
+
+    diagnostic = build_implicit_non_convergence_diagnostic(trace)
+    classification = classify_implicit_intersection_residuals(trace)
+    assembled, _assembled_classification = assemble_implicit_intersection_result(request, trace)
+
+    assert isinstance(diagnostic, SurfaceImplicitNonConvergenceDiagnostic)
+    assert diagnostic.reason == "budget-exhausted"
+    assert classification.classification == "refused"
+    assert classification.residual_report.non_convergence[0].reason == "budget-exhausted"
+    assert assembled.supported is False
+    assert assembled.classification == "unsupported"
+
+
+def test_implicit_residual_classifier_reports_residual_failure_for_empty_approved_trace() -> None:
+    implicit = ImplicitSurfacePatch(family="implicit")
+    plane = PlanarSurfacePatch(family="planar")
+    request = make_surface_intersection_request(implicit, plane)
+    safety_decision = check_implicit_intersection_safety(request)
+    trace = SurfaceImplicitContourExtractionTrace(
+        solver_id="implicit-contour-declared-tolerance",
+        safety_decision=safety_decision,
+    )
+
+    classification = classify_implicit_intersection_residuals(trace)
+
+    assert classification.classification == "non-convergent"
+    assert classification.residual_report.within_tolerance is False
+    assert classification.residual_report.non_convergence[0].reason == "residual-failure"
