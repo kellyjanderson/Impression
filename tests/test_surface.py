@@ -8,6 +8,8 @@ import impression.modeling.csg as csg_module
 from impression.mesh import Mesh
 from impression.modeling import (
     PrimitiveCSGRouteRecord,
+    PrimitivePatchProducerSelectionRecord,
+    UnsupportedPrimitiveProducerDiagnostic,
     make_box,
     make_box_mesh,
     make_cone,
@@ -28,6 +30,9 @@ from impression.modeling import (
     make_torus,
     make_torus_mesh,
     primitive_csg_route_inventory,
+    primitive_patch_producer_selection_inventory,
+    select_primitive_patch_producer,
+    unsupported_primitive_producer_diagnostic,
 )
 from impression.modeling._surface_primitives import (
     make_surface_box,
@@ -47,6 +52,7 @@ from impression.modeling import (
     PATCH_FAMILY_PROMOTION_CRITERIA,
     REQUIRED_V1_PATCH_FAMILIES,
     SURFACE_BODY_COMPLETION_TRACKS,
+    SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS,
     SUPPORTED_SURFACE_PATCH_FAMILIES,
     SURFACE_SPEC_66_RETIREMENT_NOTE,
     AdapterLossiness,
@@ -59,6 +65,9 @@ from impression.modeling import (
     compare_tessellation_modes,
     DisplacementSurfacePatch,
     export_tessellation_request,
+    feature_surface_handoff_diagnostic,
+    FeatureSurfaceHandoffDiagnostic,
+    FeatureSurfaceHandoffRecord,
     flatten_surface_scene,
     handoff_surface_scene,
     HeightmapSurfacePatch,
@@ -91,6 +100,8 @@ from impression.modeling import (
     SurfaceBoundaryDescriptor,
     SurfaceBoundaryRef,
     SurfaceBodyCompletionEvidenceRecord,
+    SurfaceReferenceEvidenceMatrixReport,
+    SurfaceReferenceFixtureRequirementRecord,
     SurfaceComposition,
     SurfaceCompositionError,
     SurfaceCompositionTraversalRecord,
@@ -141,6 +152,7 @@ from impression.modeling import (
     build_surface_unsupported_continuity_diagnostic,
     classify_surface_seam_continuity,
     evaluate_surface_body_completion_gate,
+    evaluate_surface_body_completion_reference_evidence_matrix,
     evaluate_implicit_field,
     evaluate_implicit_field_domain,
     extract_surface_boundary_descriptor,
@@ -158,12 +170,14 @@ from impression.modeling import (
     surface_boolean_family_eligibility,
     surface_boolean_family_pair_support,
     surface_boolean_result,
+    surface_body_completion_reference_evidence_matrix,
     surface_continuity_support,
     surface_csg_analytic_primitive_pair_support,
     surface_csg_completion_support_matrix,
     surface_csg_refusal_record,
     surface_composition_to_consumer_collection,
     surface_group,
+    validate_feature_surface_handoff,
     validate_implicit_field_security,
     validate_surface_seam_participation,
     validate_tessellation_helper_boundary_input,
@@ -756,6 +770,49 @@ def test_surface_body_completion_capability_evidence_is_implementation_backed() 
     assert evidence
     assert all(record.source == "implementation" for record in evidence)
     assert any(record.track == "patch-family" and record.spec == "patch-family:planar" for record in evidence)
+
+
+def test_surface_body_completion_reference_evidence_matrix_requires_promoted_artifacts() -> None:
+    requirements = surface_body_completion_reference_evidence_matrix()
+    evidence = tuple(
+        SurfaceBodyCompletionEvidenceRecord(
+            track=requirement.track,
+            state="verified",
+            spec=f"{requirement.track}:{evidence_type}",
+            implementation_owner="tests/test_surface.py",
+            evidence_type=evidence_type,
+        )
+        for requirement in requirements
+        for evidence_type in requirement.required_evidence_types
+    )
+
+    report = evaluate_surface_body_completion_reference_evidence_matrix(evidence)
+
+    assert SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS == requirements
+    assert all(isinstance(requirement, SurfaceReferenceFixtureRequirementRecord) for requirement in requirements)
+    assert isinstance(report, SurfaceReferenceEvidenceMatrixReport)
+    assert report.passed is True
+    assert report.diagnostics == ()
+
+
+def test_surface_body_completion_reference_evidence_matrix_rejects_missing_and_dirty_artifacts() -> None:
+    dirty = SurfaceBodyCompletionEvidenceRecord(
+        track="primitive",
+        state="verified",
+        spec="dirty:primitive-reference",
+        implementation_owner="project/reference-artifacts/dirty",
+        evidence_type="tessellation-artifact",
+        source="dirty-artifact",
+    )
+
+    report = evaluate_surface_body_completion_reference_evidence_matrix((dirty,))
+
+    assert report.passed is False
+    assert any(diagnostic.code == "dirty-artifact-not-promoted" for diagnostic in report.diagnostics)
+    assert any(
+        diagnostic.code == "missing-reference-evidence" and diagnostic.track == ".impress"
+        for diagnostic in report.diagnostics
+    )
 
 
 def test_patch_family_promotion_readiness_audits_each_criterion_separately() -> None:
@@ -2077,6 +2134,35 @@ def test_surface_primitive_family_appropriateness_matrix_stays_exact_and_native(
     assert displacement_patch.family == "displacement"
 
 
+def test_public_primitive_patch_producer_selection_is_explicit_and_surface_native() -> None:
+    inventory = primitive_patch_producer_selection_inventory()
+    by_caller = {record.caller_id: record for record in inventory}
+
+    assert all(isinstance(record, PrimitivePatchProducerSelectionRecord) for record in inventory)
+    assert set(by_caller) == {record.caller_id for record in primitive_csg_route_inventory()}
+    assert select_primitive_patch_producer("primitive.make_sphere").selected_patch_families == ("revolution",)
+    assert select_primitive_patch_producer("primitive.make_box").mesh_substitution_allowed is False
+
+    result = make_box(size=(1.0, 1.0, 1.0))
+    assert isinstance(result, SurfaceBody)
+    assert {patch.family for patch in result.iter_patches()} == {"planar"}
+    with pytest.raises(ValueError, match="Unsupported primitive surface producer"):
+        select_primitive_patch_producer("primitive.make_unknown")
+
+
+def test_unsupported_primitive_producer_diagnostic_is_explicit() -> None:
+    diagnostic = unsupported_primitive_producer_diagnostic(
+        "primitive.make_unknown",
+        requested_backend="surface",
+        reason="no surface constructor is registered",
+    )
+
+    assert isinstance(diagnostic, UnsupportedPrimitiveProducerDiagnostic)
+    assert diagnostic.primitive == "unknown"
+    assert "no surface constructor" in diagnostic.message
+    assert diagnostic.canonical_payload()["requested_backend"] == "surface"
+
+
 def test_planar_patch_tessellates_to_mesh_from_domain_or_trim() -> None:
     plain_patch = PlanarSurfacePatch(family="planar")
     plain_mesh = tessellate_surface_patch(plain_patch)
@@ -2413,6 +2499,26 @@ def test_surface_scene_handoff_preserves_order_without_tessellating() -> None:
     assert flattened.items[0].metadata["label"] == "A"
     assert flattened.items[1].metadata["label"] == "B"
     assert np.allclose(flattened.items[1].body.bounds_estimate(), (6.0, 7.0, 0.0, 1.0, 0.0, 0.0))
+
+
+def test_feature_surface_handoff_validator_accepts_surface_truth_only() -> None:
+    body = make_surface_body([make_surface_shell([PlanarSurfacePatch(family="planar")])])
+    collection = make_surface_consumer_collection([body], source_prefix="feature")
+
+    body_record = validate_feature_surface_handoff("feature.body", body)
+    collection_record = validate_feature_surface_handoff("feature.collection", collection)
+    diagnostic = feature_surface_handoff_diagnostic("feature.mesh", make_box_mesh())
+
+    assert isinstance(body_record, FeatureSurfaceHandoffRecord)
+    assert body_record.output_type == "SurfaceBody"
+    assert body_record.body_identities == (body.stable_identity,)
+    assert collection_record.output_type == "SurfaceConsumerCollection"
+    assert collection_record.body_identities == (body.stable_identity,)
+    assert isinstance(diagnostic, FeatureSurfaceHandoffDiagnostic)
+    assert diagnostic.explicit_mesh_api_required is True
+    assert "SurfaceBody, SurfaceConsumerCollection" in diagnostic.message
+    with pytest.raises(TypeError, match="explicitly mesh-named API"):
+        validate_feature_surface_handoff("feature.mesh", make_box_mesh())
 
 
 def test_surface_composition_public_type_groups_surface_bodies_without_tessellating() -> None:

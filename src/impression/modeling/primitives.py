@@ -32,6 +32,53 @@ class PrimitiveCSGRouteRecord:
         }
 
 
+@dataclass(frozen=True)
+class PrimitivePatchProducerSelectionRecord:
+    """Surface-native patch producer chosen for a public primitive call."""
+
+    caller_id: str
+    primitive: str
+    selected_patch_families: tuple[str, ...]
+    surface_constructor: str
+    exact_surface_truth: bool = True
+    mesh_substitution_allowed: bool = False
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "caller_id": self.caller_id,
+            "exact_surface_truth": self.exact_surface_truth,
+            "mesh_substitution_allowed": self.mesh_substitution_allowed,
+            "primitive": self.primitive,
+            "selected_patch_families": self.selected_patch_families,
+            "surface_constructor": self.surface_constructor,
+        }
+
+
+@dataclass(frozen=True)
+class UnsupportedPrimitiveProducerDiagnostic:
+    """Explicit diagnostic for a primitive request that cannot produce surface truth."""
+
+    caller_id: str
+    primitive: str
+    requested_backend: str
+    reason: str
+
+    @property
+    def message(self) -> str:
+        return (
+            f"{self.caller_id} cannot produce surface truth for primitive {self.primitive!r}: "
+            f"{self.reason}"
+        )
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "caller_id": self.caller_id,
+            "primitive": self.primitive,
+            "reason": self.reason,
+            "requested_backend": self.requested_backend,
+        }
+
+
 PRIMITIVE_CSG_ROUTE_INVENTORY: tuple[PrimitiveCSGRouteRecord, ...] = (
     PrimitiveCSGRouteRecord("primitive.make_box", "make_box", "make_box_mesh"),
     PrimitiveCSGRouteRecord("primitive.make_cylinder", "make_cylinder", "make_cylinder_mesh"),
@@ -43,12 +90,58 @@ PRIMITIVE_CSG_ROUTE_INVENTORY: tuple[PrimitiveCSGRouteRecord, ...] = (
     PrimitiveCSGRouteRecord("primitive.make_cone", "make_cone", "make_cone_mesh"),
     PrimitiveCSGRouteRecord("primitive.make_prism", "make_prism", "make_prism_mesh"),
 )
+PRIMITIVE_PATCH_PRODUCER_SELECTIONS: tuple[PrimitivePatchProducerSelectionRecord, ...] = (
+    PrimitivePatchProducerSelectionRecord("primitive.make_box", "box", ("planar",), "make_surface_box"),
+    PrimitivePatchProducerSelectionRecord("primitive.make_cylinder", "cylinder", ("planar", "revolution"), "make_surface_cylinder"),
+    PrimitivePatchProducerSelectionRecord("primitive.make_ngon", "ngon", ("planar", "ruled"), "make_surface_ngon"),
+    PrimitivePatchProducerSelectionRecord("primitive.make_polyhedron", "polyhedron", ("planar",), "make_surface_polyhedron"),
+    PrimitivePatchProducerSelectionRecord("primitive.make_nhedron", "nhedron", ("planar",), "make_surface_nhedron"),
+    PrimitivePatchProducerSelectionRecord("primitive.make_sphere", "sphere", ("revolution",), "make_surface_sphere"),
+    PrimitivePatchProducerSelectionRecord("primitive.make_torus", "torus", ("revolution",), "make_surface_torus"),
+    PrimitivePatchProducerSelectionRecord("primitive.make_cone", "cone", ("planar", "revolution"), "make_surface_cone"),
+    PrimitivePatchProducerSelectionRecord("primitive.make_prism", "prism", ("planar", "ruled"), "make_surface_prism"),
+)
+_PRIMITIVE_PATCH_PRODUCER_SELECTION_BY_CALLER = {
+    record.caller_id: record for record in PRIMITIVE_PATCH_PRODUCER_SELECTIONS
+}
 
 
 def primitive_csg_route_inventory() -> tuple[PrimitiveCSGRouteRecord, ...]:
     """Return primitive authored routes guarded against hidden mesh fallback."""
 
     return PRIMITIVE_CSG_ROUTE_INVENTORY
+
+
+def primitive_patch_producer_selection_inventory() -> tuple[PrimitivePatchProducerSelectionRecord, ...]:
+    """Return deterministic surface patch family selections for public primitives."""
+
+    return PRIMITIVE_PATCH_PRODUCER_SELECTIONS
+
+
+def select_primitive_patch_producer(caller_id: str) -> PrimitivePatchProducerSelectionRecord:
+    """Return the surface-native producer selection for a primitive caller."""
+
+    try:
+        return _PRIMITIVE_PATCH_PRODUCER_SELECTION_BY_CALLER[caller_id]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported primitive surface producer caller_id {caller_id!r}.") from exc
+
+
+def unsupported_primitive_producer_diagnostic(
+    caller_id: str,
+    *,
+    requested_backend: str,
+    reason: str,
+) -> UnsupportedPrimitiveProducerDiagnostic:
+    """Build an explicit unsupported producer diagnostic without falling back to mesh."""
+
+    primitive = caller_id.rsplit(".", maxsplit=1)[-1].removeprefix("make_")
+    return UnsupportedPrimitiveProducerDiagnostic(
+        caller_id=caller_id,
+        primitive=primitive,
+        requested_backend=requested_backend,
+        reason=reason,
+    )
 
 
 def _ensure_backend(backend: Backend) -> None:
@@ -66,8 +159,30 @@ def _surface_metadata(*, color: Sequence[float] | str | None) -> dict[str, objec
 
 def _surface_primitive_result(caller_id: str, result: SurfaceBody) -> SurfaceBody:
     from .csg import assert_no_hidden_surface_csg_mesh_fallback
+    from .surface import SurfaceBody
 
-    return cast("SurfaceBody", assert_no_hidden_surface_csg_mesh_fallback(caller_id, result))
+    selection = select_primitive_patch_producer(caller_id)
+    checked = assert_no_hidden_surface_csg_mesh_fallback(caller_id, result)
+    if not isinstance(checked, SurfaceBody):
+        diagnostic = unsupported_primitive_producer_diagnostic(
+            caller_id,
+            requested_backend="surface",
+            reason=f"producer returned {type(checked).__name__}, expected SurfaceBody",
+        )
+        raise TypeError(diagnostic.message)
+    emitted_families = {patch.family for patch in checked.iter_patches()}
+    expected_families = set(selection.selected_patch_families)
+    if not emitted_families <= expected_families:
+        diagnostic = unsupported_primitive_producer_diagnostic(
+            caller_id,
+            requested_backend="surface",
+            reason=(
+                f"producer emitted patch families {sorted(emitted_families)} outside "
+                f"selected families {sorted(expected_families)}"
+            ),
+        )
+        raise ValueError(diagnostic.message)
+    return cast("SurfaceBody", checked)
 
 
 def make_box(

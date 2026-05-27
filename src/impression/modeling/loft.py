@@ -25,7 +25,7 @@ from .surface import (
     make_surface_shell,
 )
 from .surface_spline import build_loft_control_net
-from .tessellation import SurfaceConsumerCollection, make_surface_consumer_collection
+from .tessellation import SurfaceConsumerCollection, make_surface_consumer_collection, validate_feature_surface_handoff
 from .topology import (
     loops_resampled as _loops_resampled,
     profile_loops as _profile_loops,
@@ -3576,11 +3576,13 @@ def _loft_surface_consumer_handoff(
     collection_metadata = {"producer": "loft", "executor": "surface"}
     if metadata:
         collection_metadata.update(dict(metadata))
-    return make_surface_consumer_collection(
+    collection = make_surface_consumer_collection(
         [body],
         source_prefix=source_prefix,
         metadata=collection_metadata,
     )
+    validate_feature_surface_handoff("loft.surface_consumer_handoff", collection)
+    return collection
 
 
 def _loft_planar_patch_from_station_loops(

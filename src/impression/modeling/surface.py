@@ -108,6 +108,34 @@ class SurfaceBodyCompletionReport:
 
 
 @dataclass(frozen=True)
+class SurfaceReferenceFixtureRequirementRecord:
+    """Reference-evidence requirement for one promoted model-outputting track."""
+
+    track: str
+    required_evidence_types: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        track = str(self.track).strip()
+        evidence_types = tuple(str(value).strip() for value in self.required_evidence_types)
+        if not track:
+            raise ValueError("SurfaceReferenceFixtureRequirementRecord.track must be non-empty.")
+        if not evidence_types or not all(evidence_types):
+            raise ValueError("SurfaceReferenceFixtureRequirementRecord.required_evidence_types must be non-empty.")
+        object.__setattr__(self, "track", track)
+        object.__setattr__(self, "required_evidence_types", evidence_types)
+
+
+@dataclass(frozen=True)
+class SurfaceReferenceEvidenceMatrixReport:
+    """Pass/fail report for reference artifact and negative diagnostic evidence."""
+
+    passed: bool
+    requirements: tuple[SurfaceReferenceFixtureRequirementRecord, ...]
+    evidence: tuple[SurfaceBodyCompletionEvidenceRecord, ...]
+    diagnostics: tuple[SurfaceBodyCompletionDiagnostic, ...]
+
+
+@dataclass(frozen=True)
 class SurfaceContinuityRequest:
     """Authored continuity request kept separate from observed continuity."""
 
@@ -194,6 +222,15 @@ SURFACE_BODY_COMPLETION_TRACKS: tuple[str, ...] = (
     "primitive",
     "feature",
     "verification",
+)
+SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS: tuple[SurfaceReferenceFixtureRequirementRecord, ...] = (
+    SurfaceReferenceFixtureRequirementRecord("patch-family", ("unit-test", ".impress-roundtrip", "reference-artifact")),
+    SurfaceReferenceFixtureRequirementRecord("csg", ("unit-test", "refusal-diagnostic")),
+    SurfaceReferenceFixtureRequirementRecord("loft", ("unit-test", "refusal-diagnostic", "reference-artifact")),
+    SurfaceReferenceFixtureRequirementRecord(".impress", ("unit-test", ".impress-roundtrip", "refusal-diagnostic")),
+    SurfaceReferenceFixtureRequirementRecord("primitive", ("unit-test", "tessellation-artifact")),
+    SurfaceReferenceFixtureRequirementRecord("feature", ("unit-test", "handoff-diagnostic")),
+    SurfaceReferenceFixtureRequirementRecord("verification", ("unit-test", "reference-artifact")),
 )
 PATCH_FAMILY_PROMOTION_CRITERIA: tuple[str, ...] = (
     "record",
@@ -642,6 +679,63 @@ def evaluate_surface_body_completion_gate(
 
     return SurfaceBodyCompletionReport(
         passed=not diagnostics,
+        evidence=evidence_records,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def surface_body_completion_reference_evidence_matrix() -> tuple[SurfaceReferenceFixtureRequirementRecord, ...]:
+    """Return the required positive and negative evidence matrix for promoted surface output."""
+
+    return SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS
+
+
+def evaluate_surface_body_completion_reference_evidence_matrix(
+    evidence: Iterable[SurfaceBodyCompletionEvidenceRecord],
+    *,
+    requirements: Iterable[SurfaceReferenceFixtureRequirementRecord] = SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS,
+) -> SurfaceReferenceEvidenceMatrixReport:
+    """Fail completion when required reference artifacts or diagnostics are missing."""
+
+    evidence_records = tuple(evidence)
+    requirement_records = tuple(requirements)
+    diagnostics: list[SurfaceBodyCompletionDiagnostic] = []
+    by_track_type: set[tuple[str, str]] = {
+        (record.track, record.evidence_type)
+        for record in evidence_records
+        if record.state in {"implemented", "verified", "retired"} and record.source != "dirty-artifact"
+    }
+    for requirement in requirement_records:
+        for evidence_type in requirement.required_evidence_types:
+            if (requirement.track, evidence_type) not in by_track_type:
+                diagnostics.append(
+                    SurfaceBodyCompletionDiagnostic(
+                        track=requirement.track,
+                        code="missing-reference-evidence",
+                        spec="Surface Spec 254",
+                        implementation_owner="release verification",
+                        evidence_type=evidence_type,
+                        message=(
+                            f"Track '{requirement.track}' is missing promoted reference evidence "
+                            f"of type '{evidence_type}'."
+                        ),
+                    )
+                )
+    for record in evidence_records:
+        if record.source == "dirty-artifact":
+            diagnostics.append(
+                SurfaceBodyCompletionDiagnostic(
+                    track=record.track,
+                    code="dirty-artifact-not-promoted",
+                    spec=record.spec,
+                    implementation_owner=record.implementation_owner,
+                    evidence_type=record.evidence_type,
+                    message="Dirty generated artifacts do not satisfy promoted baseline evidence.",
+                )
+            )
+    return SurfaceReferenceEvidenceMatrixReport(
+        passed=not diagnostics,
+        requirements=requirement_records,
         evidence=evidence_records,
         diagnostics=tuple(diagnostics),
     )
@@ -3522,6 +3616,8 @@ __all__ = [
     "SurfaceBodyCompletionDiagnostic",
     "SurfaceBodyCompletionEvidenceRecord",
     "SurfaceBodyCompletionReport",
+    "SurfaceReferenceEvidenceMatrixReport",
+    "SurfaceReferenceFixtureRequirementRecord",
     "SurfaceContinuityRequest",
     "SurfaceContinuitySupportRecord",
     "SurfaceUnsupportedContinuityDiagnostic",
@@ -3531,6 +3627,7 @@ __all__ = [
     "PATCH_FAMILY_PROMOTION_CRITERIA",
     "REQUIRED_V1_PATCH_FAMILIES",
     "SURFACE_BODY_COMPLETION_TRACKS",
+    "SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS",
     "SUPPORTED_SEAM_CONTINUITY_CLASSES",
     "SUPPORTED_SURFACE_PATCH_FAMILIES",
     "SURFACE_SPEC_66_RETIREMENT_NOTE",
@@ -3541,9 +3638,11 @@ __all__ = [
     "assess_patch_family_availability_promotion",
     "build_surface_unsupported_continuity_diagnostic",
     "evaluate_surface_body_completion_gate",
+    "evaluate_surface_body_completion_reference_evidence_matrix",
     "make_surface_body_completion_evidence_from_capabilities",
     "run_patch_family_availability_promotion_pass",
     "surface_continuity_support",
+    "surface_body_completion_reference_evidence_matrix",
     "validate_patch_family_availability_gate",
     "IMPLICIT_FIELD_NODE_KINDS",
     "ParameterDomain",
