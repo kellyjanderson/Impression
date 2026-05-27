@@ -88,6 +88,35 @@ class ReferenceFixturePairState:
 
 
 @dataclass(frozen=True)
+class ReferenceFixtureContractVersionRecord:
+    fixture_id: str
+    contract_version: str
+
+    def __post_init__(self) -> None:
+        if not self.fixture_id.strip():
+            raise ValueError("ReferenceFixtureContractVersionRecord.fixture_id must be non-empty.")
+        if not self.contract_version.strip():
+            raise ValueError("ReferenceFixtureContractVersionRecord.contract_version must be non-empty.")
+
+
+@dataclass(frozen=True)
+class ReferencePromotionDiagnostic:
+    code: Literal["missing-artifact", "dirty-artifact", "partial-fixture", "invalidated-contract"]
+    fixture_id: str
+    artifact_kind: ReferenceArtifactKind | Literal["fixture"]
+    message: str
+
+
+@dataclass(frozen=True)
+class ReferenceArtifactPromotionGateReport:
+    fixture_id: str
+    promoted: bool
+    state: ReferenceFixturePairState
+    contract: ReferenceFixtureContractVersionRecord
+    diagnostics: tuple[ReferencePromotionDiagnostic, ...]
+
+
+@dataclass(frozen=True)
 class CvFixtureContract:
     fixture_id: str
     lane: str
@@ -574,6 +603,33 @@ def reference_artifact_state(
     )
 
 
+def reference_artifact_contract_version_path(state: ReferenceArtifactState) -> Path:
+    return state.clean_path.with_suffix(state.clean_path.suffix + ".contract")
+
+
+def write_reference_artifact_contract_version(
+    state: ReferenceArtifactState,
+    contract: ReferenceFixtureContractVersionRecord,
+) -> Path:
+    path = reference_artifact_contract_version_path(state)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{contract.fixture_id}\n{contract.contract_version}\n", encoding="utf-8")
+    return path
+
+
+def reference_artifact_contract_version_matches(
+    state: ReferenceArtifactState,
+    contract: ReferenceFixtureContractVersionRecord,
+) -> bool:
+    if state.selected_tier != "clean":
+        return False
+    path = reference_artifact_contract_version_path(state)
+    if not path.exists():
+        return False
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return lines[:2] == [contract.fixture_id, contract.contract_version]
+
+
 def reference_fixture_pair_state(
     *,
     reference_image_root: Path,
@@ -583,6 +639,68 @@ def reference_fixture_pair_state(
     return ReferenceFixturePairState(
         image=reference_artifact_state(reference_image_root, name, kind="image"),
         stl=reference_artifact_state(reference_stl_root, name, kind="stl"),
+    )
+
+
+def classify_reference_fixture_pair_promotion_gate(
+    *,
+    reference_image_root: Path,
+    reference_stl_root: Path,
+    name: str,
+    contract_version: str = "v1",
+) -> ReferenceArtifactPromotionGateReport:
+    """Classify whether a reference fixture pair is promoted clean evidence."""
+
+    state = reference_fixture_pair_state(
+        reference_image_root=reference_image_root,
+        reference_stl_root=reference_stl_root,
+        name=name,
+    )
+    contract = ReferenceFixtureContractVersionRecord(fixture_id=name, contract_version=contract_version)
+    diagnostics: list[ReferencePromotionDiagnostic] = []
+    if state.has_partial_group:
+        diagnostics.append(
+            ReferencePromotionDiagnostic(
+                code="partial-fixture",
+                fixture_id=name,
+                artifact_kind="fixture",
+                message=f"{name} has a partial reference fixture group.",
+            )
+        )
+    for artifact_kind, artifact_state in (("image", state.image), ("stl", state.stl)):
+        if artifact_state.selected_tier == "missing":
+            diagnostics.append(
+                ReferencePromotionDiagnostic(
+                    code="missing-artifact",
+                    fixture_id=name,
+                    artifact_kind=artifact_kind,
+                    message=f"{name} is missing a promoted {artifact_kind} reference artifact.",
+                )
+            )
+        elif artifact_state.selected_tier == "dirty":
+            diagnostics.append(
+                ReferencePromotionDiagnostic(
+                    code="dirty-artifact",
+                    fixture_id=name,
+                    artifact_kind=artifact_kind,
+                    message=f"{name} has only a dirty {artifact_kind} reference artifact.",
+                )
+            )
+        elif not reference_artifact_contract_version_matches(artifact_state, contract):
+            diagnostics.append(
+                ReferencePromotionDiagnostic(
+                    code="invalidated-contract",
+                    fixture_id=name,
+                    artifact_kind=artifact_kind,
+                    message=f"{name} promoted {artifact_kind} reference artifact has no matching contract version.",
+                )
+            )
+    return ReferenceArtifactPromotionGateReport(
+        fixture_id=name,
+        promoted=not diagnostics,
+        state=state,
+        contract=contract,
+        diagnostics=tuple(diagnostics),
     )
 
 
