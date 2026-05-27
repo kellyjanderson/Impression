@@ -63,46 +63,46 @@ complete.
 
 Architecture-defined work:
 
-- promote every authored patch family from `planned` to verified `available`
+- [ ] promote every authored patch family from `planned` to verified `available`
   where it belongs in the surface-body kernel
-- make B-spline, NURBS, sweep, subdivision, implicit, heightmap, and
+- [ ] make B-spline, NURBS, sweep, subdivision, implicit, heightmap, and
   displacement first-class surface-body citizens across storage, evaluation,
   seams, tessellation, `.impress`, and diagnostics
-- expand surface CSG from bounded planar/box execution to broad analytic and
+- [ ] expand surface CSG from bounded planar/box execution to broad analytic and
   higher-order surface-body boolean coverage
-- build exact or declared-tolerance CSG intersection, trim graph, fragment
+- [ ] build exact or declared-tolerance CSG intersection, trim graph, fragment
   classification, shell assembly, cap construction, seam rebuild, validity, and
   provenance for supported family pairs
-- define remaining CSG solver boundaries as explicit refusal records, not as
+- [ ] define remaining CSG solver boundaries as explicit refusal records, not as
   mesh fallback or vague "not implemented" strings
-- make authored topology rails the primary loft correspondence mechanism
-- continue loft planning after ambiguities are found so all ambiguity and
+- [ ] make authored topology rails the primary loft correspondence mechanism
+- [ ] continue loft planning after ambiguities are found so all ambiguity and
   invalid-input records are reported together
-- refuse loft execution for any plan carrying unresolved ambiguity records
-- provide exact ambiguity locators: topology, station, interval, entity,
+- [ ] refuse loft execution for any plan carrying unresolved ambiguity records
+- [ ] provide exact ambiguity locators: topology, station, interval, entity,
   relationship group, candidate lifecycle, and suggested authored rail
-- promote seam and continuity support beyond the current C0/G0 baseline with
+- [ ] promote seam and continuity support beyond the current C0/G0 baseline with
   structured diagnostics for unsupported continuity classes
-- complete `.impress` persistence for the full authored surface-body store,
+- [ ] complete `.impress` persistence for the full authored surface-body store,
   including all promoted patch families, trims, seams, adjacency, metadata,
   identities, topology rails, and operation provenance
-- ensure primitives and Impression-owned feature builders select appropriate
+- [ ] ensure primitives and Impression-owned feature builders select appropriate
   patch families and return surface truth
-- keep mesh output only at tessellation, preview, export, analysis, or explicit
+- [ ] keep mesh output only at tessellation, preview, export, analysis, or explicit
   compatibility boundaries
-- add reference artifact and round-trip evidence for every promoted
+- [ ] add reference artifact and round-trip evidence for every promoted
   model-outputting capability
 
 Open architecture decisions:
 
-- what exact threshold promotes a family from `planned` to `available`
-- which CSG family pairs must be exact for the completion claim and which may
+- [ ] what exact threshold promotes a family from `planned` to `available`
+- [ ] which CSG family pairs must be exact for the completion claim and which may
   be declared-tolerance or explicitly unsupported
-- whether implicit, heightmap, and displacement booleans are kernel operations,
+- [ ] whether implicit, heightmap, and displacement booleans are kernel operations,
   bounded adapters, or explicit non-CSG families
-- how `.impress` versions family payloads independently without fragmenting the
+- [ ] how `.impress` versions family payloads independently without fragmenting the
   document root
-- how much automatic loft ambiguity resolution is permitted when authored rails
+- [ ] how much automatic loft ambiguity resolution is permitted when authored rails
   are missing but the deterministic answer is obvious
 
 Manifest notes:
@@ -131,12 +131,12 @@ Issue:
 
 Required work:
 
-- ensure loft architecture consistently states authored rails and named
+- [ ] ensure loft architecture consistently states authored rails and named
   topology entities are primary
-- ensure ambiguity records include exact "what and where" locators
-- ensure planners accumulate all ambiguities before returning
-- ensure executors refuse unresolved ambiguity records
-- remove any implication that automatic ambiguity resolution is required for
+- [ ] ensure ambiguity records include exact "what and where" locators
+- [ ] ensure planners accumulate all ambiguities before returning
+- [ ] ensure executors refuse unresolved ambiguity records
+- [ ] remove any implication that automatic ambiguity resolution is required for
   completion
 
 ## Priority 1: Manifest Promoted To Final Specs
@@ -153,22 +153,22 @@ now have one final specification document for each manifest candidate.
 
 Architecture-defined work:
 
-- `.impress` document root and `SurfaceBodyStore` record
-- surface payload encoder for bodies, shells, patches, trims, seams, and
+- [ ] `.impress` document root and `SurfaceBodyStore` record
+- [ ] surface payload encoder for bodies, shells, patches, trims, seams, and
   adjacency
-- surface payload decoder and constructor validation
-- deterministic JSON writer and reader API
-- round-trip identity and metadata preservation tests
-- invalid-file refusal diagnostics
-- industry interchange adapter boundary that explicitly excludes STEP/IGES from
+- [ ] surface payload decoder and constructor validation
+- [ ] deterministic JSON writer and reader API
+- [ ] round-trip identity and metadata preservation tests
+- [ ] invalid-file refusal diagnostics
+- [ ] industry interchange adapter boundary that explicitly excludes STEP/IGES from
   V1 unless separately planned
 
 Open architecture decisions that must be resolved before final specs:
 
-- single-body versus multi-body default file semantics
-- whether stored stable identities are required or optional
-- document units policy
-- whether topology rails belong in V1 `.impress` or in a later modeling document
+- [ ] single-body versus multi-body default file semantics
+- [ ] whether stored stable identities are required or optional
+- [ ] document units policy
+- [ ] whether topology rails belong in V1 `.impress` or in a later modeling document
   layer
 
 Manifest notes:
@@ -189,27 +189,27 @@ Manifest notes:
 
 Architecture-defined work:
 
-- full patch-family scope and implementation matrix
-- B-spline surface patch record and evaluation
-- NURBS surface patch record and rational evaluation
-- sweep surface patch record and frame transport
-- subdivision surface patch record and Catmull-Clark evaluation
-- implicit surface patch record and declarative field model
-- cross-family tessellation adapters
-- cross-family seam and boundary participation
-- `.impress` payload support for all patch families
-- family-aware boolean eligibility and refusal diagnostics
-- migration spec replacing deferred-family constants with a capability matrix
+- [ ] full patch-family scope and implementation matrix
+- [ ] B-spline surface patch record and evaluation
+- [ ] NURBS surface patch record and rational evaluation
+- [ ] sweep surface patch record and frame transport
+- [ ] subdivision surface patch record and Catmull-Clark evaluation
+- [ ] implicit surface patch record and declarative field model
+- [ ] cross-family tessellation adapters
+- [ ] cross-family seam and boundary participation
+- [ ] `.impress` payload support for all patch families
+- [ ] family-aware boolean eligibility and refusal diagnostics
+- [ ] migration spec replacing deferred-family constants with a capability matrix
 
 Open architecture decisions that must be resolved before final specs:
 
-- whether B-spline and NURBS are separate classes or one shared rational-capable
+- [ ] whether B-spline and NURBS are separate classes or one shared rational-capable
   implementation over common basis infrastructure
-- sweep payload shape: 2D topology, 3D curves, or both
-- subdivision V1 limit evaluation versus finite-level deterministic evaluation
-- allowed declarative implicit field nodes
-- exact boolean support threshold for declaring a family complete
-- whether `.impress` versions all family payloads together or independently
+- [ ] sweep payload shape: 2D topology, 3D curves, or both
+- [ ] subdivision V1 limit evaluation versus finite-level deterministic evaluation
+- [ ] allowed declarative implicit field nodes
+- [ ] exact boolean support threshold for declaring a family complete
+- [ ] whether `.impress` versions all family payloads together or independently
 
 Manifest notes:
 
@@ -229,38 +229,38 @@ Manifest notes:
 
 Architecture-defined work:
 
-- mesh execution inventory and classification
-- loft mesh executor boundary migration
-- primitive surface defaults and primitive mesh path excision
-- text and drafting surface defaults
-- heightmap native surface representation
-- hinge surface assemblies as canonical modeled output
-- surface transform and composition layer replacing `MeshGroup` as authored
+- [ ] mesh execution inventory and classification
+- [ ] loft mesh executor boundary migration
+- [ ] primitive surface defaults and primitive mesh path excision
+- [ ] text and drafting surface defaults
+- [ ] heightmap native surface representation
+- [ ] hinge surface assemblies as canonical modeled output
+- [ ] surface transform and composition layer replacing `MeshGroup` as authored
   composition
-- mesh utility quarantine
-- no-hidden-mesh-fallback enforcement
+- [ ] mesh utility quarantine
+- [ ] no-hidden-mesh-fallback enforcement
 
 Primitive-specific work called out by architecture:
 
-- `make_box` must default to `make_surface_box`
-- `make_cylinder` must default to `make_surface_cylinder`
-- `make_ngon` must default to `make_surface_ngon`
-- `make_polyhedron` must default to `make_surface_polyhedron`
-- `make_nhedron` must remain a surface-safe compatibility alias
-- `make_sphere` must default to `make_surface_sphere`
-- `make_torus` must default to `make_surface_torus`
-- `make_cone` must default to `make_surface_cone`
-- `make_prism` must default to `make_surface_prism`
+- [ ] `make_box` must default to `make_surface_box`
+- [ ] `make_cylinder` must default to `make_surface_cylinder`
+- [ ] `make_ngon` must default to `make_surface_ngon`
+- [ ] `make_polyhedron` must default to `make_surface_polyhedron`
+- [ ] `make_nhedron` must remain a surface-safe compatibility alias
+- [ ] `make_sphere` must default to `make_surface_sphere`
+- [ ] `make_torus` must default to `make_surface_torus`
+- [ ] `make_cone` must default to `make_surface_cone`
+- [ ] `make_prism` must default to `make_surface_prism`
 
 Private primitive mesh helpers requiring deletion, quarantine, or tessellation
 relocation:
 
-- `_orient_mesh(...)`
-- `_box_mesh(...)`
-- `_sphere_mesh(...)`
-- `_torus_mesh(...)`
-- `_circular_frustum_mesh(...)`
-- `_rectangular_frustum_mesh(...)`
+- [ ] `_orient_mesh(...)`
+- [ ] `_box_mesh(...)`
+- [ ] `_sphere_mesh(...)`
+- [ ] `_torus_mesh(...)`
+- [ ] `_circular_frustum_mesh(...)`
+- [ ] `_rectangular_frustum_mesh(...)`
 
 Manifest notes:
 
@@ -296,10 +296,10 @@ Issue:
 
 Required work:
 
-- revise or replace Loft Spec 60
-- make `LoftPlan -> SurfaceBody` the canonical executor contract
-- ensure mesh face emission is tessellation/debug/compatibility only
-- add tests proving surface loft does not fall back to mesh
+- [ ] revise or replace Loft Spec 60
+- [ ] make `LoftPlan -> SurfaceBody` the canonical executor contract
+- [ ] ensure mesh face emission is tessellation/debug/compatibility only
+- [ ] add tests proving surface loft does not fall back to mesh
 
 ### Deferred Patch Family Specs
 
@@ -317,9 +317,9 @@ Issue:
 
 Required work:
 
-- replace deferred-family language with a capability and implementation matrix
-- define every patch family as first-class, even when staged
-- require explicit unsupported-operation diagnostics without treating the family
+- [ ] replace deferred-family language with a capability and implementation matrix
+- [ ] define every patch family as first-class, even when staged
+- [ ] require explicit unsupported-operation diagnostics without treating the family
   as excluded
 
 ### Surface API Mesh Defaults
@@ -343,10 +343,10 @@ Issue:
 
 Required work:
 
-- audit older specs for compatibility language that still allows mesh-primary
+- [ ] audit older specs for compatibility language that still allows mesh-primary
   authored modeling
-- add explicit no-hidden-fallback acceptance criteria
-- ensure primitive-by-primitive excision is represented in final specs
+- [ ] add explicit no-hidden-fallback acceptance criteria
+- [ ] ensure primitive-by-primitive excision is represented in final specs
 
 ## Priority 3: Specified, Needs Implementation
 
@@ -365,13 +365,13 @@ have landed.
 
 Remaining architecture work to implement:
 
-- canonical surface boolean operand preparation
-- intersection and classification
-- operand fragment graph
-- result topology reconstruction
-- validity and bounded healing gate
-- metadata and provenance propagation
-- explicit unsupported result behavior without mesh fallback
+- [ ] canonical surface boolean operand preparation
+- [ ] intersection and classification
+- [ ] operand fragment graph
+- [ ] result topology reconstruction
+- [ ] validity and bounded healing gate
+- [ ] metadata and provenance propagation
+- [ ] explicit unsupported result behavior without mesh fallback
 
 ### Surface-Native Capability Replacements
 
@@ -382,11 +382,11 @@ Remaining architecture work to implement:
 
 Remaining architecture work to implement:
 
-- surface-native drafting
-- surface-native text
-- surface-body booleans
-- surface-native hinges
-- surface-native heightfields and displacement
+- [ ] surface-native drafting
+- [ ] surface-native text
+- [ ] surface-body booleans
+- [ ] surface-native hinges
+- [ ] surface-native heightfields and displacement
 
 This area overlaps with the mesh-boundary branch and should be reconciled before
 implementation sequencing is refreshed.
@@ -400,11 +400,11 @@ implementation sequencing is refreshed.
 
 Remaining architecture work to implement:
 
-- retained mesh capability matrix
-- mesh analysis contract
-- mesh repair contract
-- standalone mesh utility contract
-- clear separation between retained mesh tools and deleted mesh modeling paths
+- [ ] retained mesh capability matrix
+- [ ] mesh analysis contract
+- [ ] mesh repair contract
+- [ ] standalone mesh utility contract
+- [ ] clear separation between retained mesh tools and deleted mesh modeling paths
 
 ### SurfaceBody Seam And Adjacency
 
@@ -416,11 +416,11 @@ Remaining architecture work to implement:
 
 Remaining architecture work to implement:
 
-- explicit seam identity
-- patch-boundary use records
-- shell adjacency view
-- seam-first tessellation for watertight output
-- transform and cache identity interactions
+- [ ] explicit seam identity
+- [ ] patch-boundary use records
+- [ ] shell adjacency view
+- [ ] seam-first tessellation for watertight output
+- [ ] transform and cache identity interactions
 
 ### Testing, Reference Artifacts, And Computer Vision Verification
 
@@ -435,10 +435,10 @@ Remaining architecture work to implement:
 
 Remaining architecture work to implement:
 
-- reference artifact baseline lifecycle
-- grouped model output completeness rules
-- deterministic render products
-- CV text, slice, object-view, handedness, and diagnostic lanes
+- [ ] reference artifact baseline lifecycle
+- [ ] grouped model output completeness rules
+- [ ] deterministic render products
+- [ ] CV text, slice, object-view, handedness, and diagnostic lanes
 
 ### Next-Generation Loft Architecture
 
@@ -457,19 +457,19 @@ Remaining architecture work to implement:
 
 Remaining architecture work to implement:
 
-- placed topology state and directional correspondence
-- evolution plan and transition operator family
-- ambiguity and constraint request records
-- tolerance and degeneracy policy
-- many-to-many decomposition
-- topology path, segment, landmark, and lifecycle records
-- correspondence-preserving resampling
-- generated shape default rails
-- surface executor consumption
+- [ ] placed topology state and directional correspondence
+- [ ] evolution plan and transition operator family
+- [ ] ambiguity and constraint request records
+- [ ] tolerance and degeneracy policy
+- [ ] many-to-many decomposition
+- [ ] topology path, segment, landmark, and lifecycle records
+- [ ] correspondence-preserving resampling
+- [ ] generated shape default rails
+- [ ] surface executor consumption
 
 Reconciliation required:
 
-- mesh executor consumption must be revised as noted in Priority 2.
+- [ ] mesh executor consumption must be revised as noted in Priority 2.
 
 ## Monitor
 
