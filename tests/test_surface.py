@@ -7,9 +7,14 @@ import impression.modeling as modeling
 import impression.modeling.csg as csg_module
 from impression.mesh import Mesh
 from impression.modeling import (
+    LegacyPrimitiveMeshAssumptionClassificationRecord,
+    LegacyPrimitiveMeshAssumptionFindingRecord,
+    LegacyPrimitiveMeshAssumptionInventoryReport,
     PrimitiveCSGRouteRecord,
     PrimitivePatchProducerSelectionRecord,
     UnsupportedPrimitiveProducerDiagnostic,
+    classify_legacy_primitive_mesh_assumption,
+    inventory_legacy_primitive_mesh_assumptions,
     make_box,
     make_box_mesh,
     make_cone,
@@ -31,6 +36,7 @@ from impression.modeling import (
     make_torus_mesh,
     primitive_csg_route_inventory,
     primitive_patch_producer_selection_inventory,
+    scan_legacy_primitive_mesh_assumptions,
     select_primitive_patch_producer,
     unsupported_primitive_producer_diagnostic,
 )
@@ -761,6 +767,63 @@ def test_primitive_csg_route_inventory_covers_surface_defaults_and_mesh_compatib
     }
     assert all(payload["csg_gate"] == "assert_no_hidden_surface_csg_mesh_fallback" for payload in payloads)
     assert all(str(record.explicit_mesh_constructor).endswith("_mesh") for record in inventory)
+
+
+def test_legacy_primitive_mesh_assumption_inventory_classifies_stale_and_accepted_sites(tmp_path) -> None:
+    sources = {
+        "tests/stale_preview.py": "\n".join(
+            [
+                "mesh_to_pyvista(make_box(size=(1, 1, 1)))",
+                "body = make_cylinder(radius=1.0, height=2.0)",
+                "count = body.n_faces",
+            ]
+        ),
+        "tests/accepted_preview.py": "\n".join(
+            [
+                "mesh = make_box_mesh(size=(1, 1, 1))",
+                "preview = mesh_to_pyvista(tessellate_surface_body(make_sphere(radius=1.0)).mesh)",
+                "assert make_torus(major_radius=1.0, minor_radius=0.2).patch_count > 0",
+            ]
+        ),
+    }
+
+    report = inventory_legacy_primitive_mesh_assumptions(sources)
+
+    assert isinstance(report, LegacyPrimitiveMeshAssumptionInventoryReport)
+    assert report.passed is False
+    assert len(report.findings) == 5
+    assert len(report.stale_findings) == 2
+    assert all(isinstance(finding, LegacyPrimitiveMeshAssumptionFindingRecord) for finding in report.findings)
+    assert {finding.primitive_constructor for finding in report.stale_findings} == {"make_box", "make_cylinder"}
+    assert {finding.classification.classification for finding in report.findings} == {
+        "obsolete mesh-primary test",
+        "explicit mesh compatibility consumer",
+        "tessellation-boundary consumer",
+        "surface-native consumer",
+    }
+    assert all("tessellate_surface_body" in finding.classification.rewrite_rule for finding in report.stale_findings)
+    payload = report.canonical_payload()
+    assert payload["stale_count"] == 2
+    assert payload["finding_count"] == 5
+
+    fixture = tmp_path / "inventory_fixture.py"
+    fixture.write_text("mesh_to_pyvista(make_prism(height=1.0))\n", encoding="utf-8")
+    scanned = scan_legacy_primitive_mesh_assumptions(tmp_path)
+    assert len(scanned.stale_findings) == 1
+    assert scanned.stale_findings[0].path == "inventory_fixture.py"
+
+
+def test_legacy_primitive_mesh_assumption_classifier_rejects_unknown_primitives() -> None:
+    classification = classify_legacy_primitive_mesh_assumption(
+        "mesh_from_surface_body(make_box(size=(1, 1, 1)))",
+        "make_box",
+    )
+
+    assert isinstance(classification, LegacyPrimitiveMeshAssumptionClassificationRecord)
+    assert classification.classification == "tessellation-boundary consumer"
+    assert classification.stale_assumption is False
+    with pytest.raises(ValueError, match="Unsupported primitive constructor"):
+        classify_legacy_primitive_mesh_assumption("mesh_to_pyvista(make_widget())", "make_widget")
 
 
 def test_private_surface_builders_do_not_leak_through_public_modeling_namespace() -> None:
