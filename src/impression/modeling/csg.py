@@ -700,6 +700,50 @@ class SurfaceCSGSeamRebuildRecord:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGValidityDiagnostic:
+    """Diagnostic emitted by the final CSG validity/provenance gate."""
+
+    code: Literal["invalid-shell", "non-closed-result", "healing-failed"]
+    message: str
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGProvenanceMetadataRecord:
+    """Deterministic CSG operation provenance attached to accepted results."""
+
+    operation: SurfaceBooleanOperation
+    operand_ids: tuple[str, ...]
+    backend: str = "surface"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "backend": self.backend,
+            "operand_ids": self.operand_ids,
+            "operation": self.operation,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGValidityGateRecord:
+    """Final CSG acceptance gate output."""
+
+    status: SurfaceBooleanStatus
+    body: SurfaceBody | None = None
+    diagnostics: tuple[SurfaceCSGValidityDiagnostic, ...] = ()
+    provenance: SurfaceCSGProvenanceMetadataRecord | None = None
+
+    @property
+    def accepted(self) -> bool:
+        return self.status == "succeeded" and self.body is not None and not self.diagnostics
+
+
+@dataclass(frozen=True)
 class SurfaceBooleanIntersectionStage:
     """Deterministic surfaced intersection/classification stage output."""
 
@@ -2031,11 +2075,10 @@ def _bounds_center(bounds: tuple[float, float, float, float, float, float]) -> t
 
 
 def _surface_boolean_provenance_payload(operands: SurfaceBooleanOperands) -> dict[str, object]:
-    return {
-        "backend": "surface",
-        "operation": operands.operation,
-        "operand_ids": operands.body_ids,
-    }
+    return SurfaceCSGProvenanceMetadataRecord(
+        operation=operands.operation,
+        operand_ids=operands.body_ids,
+    ).canonical_payload()
 
 
 def _surface_boolean_result_metadata(operands: SurfaceBooleanOperands) -> dict[str, object]:
@@ -2181,6 +2224,54 @@ def _surface_boolean_cleanup_body(body: SurfaceBody) -> SurfaceBody:
     return make_surface_body(cleaned_shells, metadata=body.metadata)
 
 
+def finalize_surface_csg_validity_gate(
+    operation: SurfaceBooleanOperation,
+    operands: SurfaceBooleanOperands,
+    body: SurfaceBody,
+) -> SurfaceCSGValidityGateRecord:
+    """Apply bounded cleanup, validate, and finalize provenance for a CSG body."""
+
+    provenance = SurfaceCSGProvenanceMetadataRecord(
+        operation=operation,
+        operand_ids=operands.body_ids,
+    )
+    cleaned_body = _surface_boolean_cleanup_body(body)
+    diagnostics: list[SurfaceCSGValidityDiagnostic] = []
+
+    for shell in cleaned_body.iter_shells(world=True):
+        invalid_reason = _surface_boolean_shell_invalid_reason(shell)
+        if invalid_reason is not None:
+            diagnostics.append(
+                SurfaceCSGValidityDiagnostic(
+                    code="invalid-shell",
+                    message=invalid_reason,
+                )
+            )
+
+    if not diagnostics:
+        classification = _classify_surface_body(cleaned_body)
+        if classification != "closed":
+            diagnostics.append(
+                SurfaceCSGValidityDiagnostic(
+                    code="non-closed-result",
+                    message="Surface boolean validity gate rejected a non-closed reconstructed result.",
+                )
+            )
+
+    if diagnostics:
+        return SurfaceCSGValidityGateRecord(
+            status="invalid",
+            diagnostics=tuple(diagnostics),
+            provenance=provenance,
+        )
+
+    return SurfaceCSGValidityGateRecord(
+        status="succeeded",
+        body=cleaned_body,
+        provenance=provenance,
+    )
+
+
 def _surface_boolean_shell_invalid_reason(
     shell,
     *,
@@ -2230,31 +2321,20 @@ def _surface_boolean_finalize_body_result(
     operands: SurfaceBooleanOperands,
     body: SurfaceBody,
 ) -> SurfaceBooleanResult:
-    cleaned_body = _surface_boolean_cleanup_body(body)
-    for shell in cleaned_body.iter_shells(world=True):
-        invalid_reason = _surface_boolean_shell_invalid_reason(shell)
-        if invalid_reason is not None:
-            return SurfaceBooleanResult(
-                operation=operation,
-                operands=operands,
-                status="invalid",
-                failure_reason=invalid_reason,
-            )
-
-    classification = _classify_surface_body(cleaned_body)
-    if classification != "closed":
+    gate = finalize_surface_csg_validity_gate(operation, operands, body)
+    if not gate.accepted:
         return SurfaceBooleanResult(
             operation=operation,
             operands=operands,
             status="invalid",
-            failure_reason="Surface boolean validity gate rejected a non-closed reconstructed result.",
+            failure_reason="; ".join(diagnostic.message for diagnostic in gate.diagnostics),
         )
     return SurfaceBooleanResult(
         operation=operation,
         operands=operands,
         status="succeeded",
-        body=cleaned_body,
-        classification=classification,
+        body=gate.body,
+        classification="closed",
     )
 
 
