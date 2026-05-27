@@ -21,14 +21,20 @@ from impression.modeling import (
     SurfaceIntersectionTolerancePolicy,
     SurfaceSplineSplineResidualReport,
     SurfaceSplineSplineSolverIterationRecord,
+    SurfaceSubdivisionIntersectionAdapterReport,
+    SurfaceSubdivisionIntersectionBudget,
+    SurfaceSubdivisionRefinedContourRecord,
+    SubdivisionSurfacePatch,
     assert_surface_intersection_solver_registry_complete,
     build_surface_intersection_solver_registry,
+    check_subdivision_intersection_budget,
     classify_surface_intersection_degeneracy,
     lookup_surface_intersection_solver,
     make_surface_intersection_request,
     normalize_surface_intersection_result,
     solve_analytic_spline_surface_intersection,
     solve_spline_spline_surface_intersection,
+    solve_subdivision_surface_intersection_adapter,
 )
 
 
@@ -57,8 +63,10 @@ def test_surface_intersection_solver_registry_covers_promoted_family_pairs() -> 
 
     assert ("planar", "planar") in registry
     assert ("bspline", "planar") in registry
+    assert ("planar", "subdivision") in registry
     assert registry[("planar", "planar")].supported is True
     assert registry[("bspline", "planar")].support_state == "declared-tolerance"
+    assert registry[("planar", "subdivision")].support_state == "adapter"
     assert assert_surface_intersection_solver_registry_complete(registry) is registry
 
 
@@ -298,5 +306,68 @@ def test_spline_spline_solver_refuses_non_convergent_spline_pair() -> None:
 
     assert result.supported is False
     assert result.classification == "unsupported"
+    assert report.converged is False
+    assert report.diagnostics[0].code == "unsupported-family-pair"
+
+
+def test_subdivision_intersection_adapter_intersects_planar_surface_with_declared_tolerance() -> None:
+    subdivision = SubdivisionSurfacePatch(family="subdivision", subdivision_level=1)
+    plane = PlanarSurfacePatch(family="planar")
+    request = make_surface_intersection_request(subdivision, plane, consumer="csg")
+
+    result, report = solve_subdivision_surface_intersection_adapter(request, sample_count=3)
+
+    assert result.supported is True
+    assert result.classification == "curves"
+    assert result.curves[0].kind == "sampled"
+    assert isinstance(report, SurfaceSubdivisionIntersectionAdapterReport)
+    assert report.converged is True
+    assert isinstance(report.contours[0], SurfaceSubdivisionRefinedContourRecord)
+    assert report.contours[0].refinement_level == 1
+    assert report.contours[0].sample_count == 9
+    assert report.contours[0].max_residual == pytest.approx(0.0)
+
+
+def test_subdivision_intersection_budget_checker_reports_sample_and_refinement_exhaustion() -> None:
+    request = make_surface_intersection_request(
+        SubdivisionSurfacePatch(family="subdivision", subdivision_level=3),
+        PlanarSurfacePatch(family="planar"),
+        consumer="seam",
+    )
+    budget = SurfaceSubdivisionIntersectionBudget(max_refinement_level=1, max_sample_count=4, max_contour_count=1)
+
+    diagnostics = check_subdivision_intersection_budget(request, budget=budget, sample_count=3, contour_count=2)
+
+    assert {diagnostic.code for diagnostic in diagnostics} == {"budget-exhausted"}
+    assert len(diagnostics) == 3
+    assert "sample budget exhausted" in diagnostics[0].message
+    assert "contour budget exhausted" in diagnostics[1].message
+    assert "refinement budget exhausted" in diagnostics[2].message
+
+
+def test_subdivision_intersection_adapter_refuses_when_budget_exhausts() -> None:
+    request = make_surface_intersection_request(
+        SubdivisionSurfacePatch(family="subdivision"),
+        PlanarSurfacePatch(family="planar"),
+    )
+    budget = SurfaceSubdivisionIntersectionBudget(max_refinement_level=2, max_sample_count=4)
+
+    result, report = solve_subdivision_surface_intersection_adapter(request, budget=budget, sample_count=3)
+
+    assert result.supported is False
+    assert result.classification == "unsupported"
+    assert report.converged is False
+    assert report.diagnostics[0].code == "budget-exhausted"
+
+
+def test_subdivision_intersection_adapter_refuses_non_subdivision_dispatch() -> None:
+    request = make_surface_intersection_request(
+        PlanarSurfacePatch(family="planar"),
+        PlanarSurfacePatch(family="planar"),
+    )
+
+    result, report = solve_subdivision_surface_intersection_adapter(request)
+
+    assert result.supported is False
     assert report.converged is False
     assert report.diagnostics[0].code == "unsupported-family-pair"

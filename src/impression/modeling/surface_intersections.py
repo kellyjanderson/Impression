@@ -12,6 +12,7 @@ from .surface import (
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
+    SubdivisionSurfacePatch,
     SurfacePatch,
 )
 
@@ -145,7 +146,12 @@ class SurfaceIntersectionSolverRegistryRecord:
 class SurfaceIntersectionSupportDiagnostic:
     """Diagnostic for unsupported or unknown intersection solver dispatch."""
 
-    code: Literal["unsupported-family-pair", "missing-registry-entry", "unknown-registry-entry"]
+    code: Literal[
+        "unsupported-family-pair",
+        "missing-registry-entry",
+        "unknown-registry-entry",
+        "budget-exhausted",
+    ]
     message: str
     family_pair: tuple[str, str]
     consumer: str = "surface-intersections"
@@ -256,6 +262,102 @@ class SurfaceSplineSplineResidualReport:
             "converged": self.converged,
             "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
             "iterations": [iteration.canonical_payload() for iteration in self.iterations],
+            "solver_id": self.solver_id,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSubdivisionIntersectionBudget:
+    """Bounded refinement and contour budget for subdivision intersection adapters."""
+
+    max_refinement_level: int = 2
+    max_sample_count: int = 81
+    max_contour_count: int = 8
+
+    def __post_init__(self) -> None:
+        max_refinement_level = int(self.max_refinement_level)
+        max_sample_count = int(self.max_sample_count)
+        max_contour_count = int(self.max_contour_count)
+        if max_refinement_level < 0:
+            raise ValueError("SurfaceSubdivisionIntersectionBudget.max_refinement_level must be non-negative.")
+        if max_sample_count <= 0:
+            raise ValueError("SurfaceSubdivisionIntersectionBudget.max_sample_count must be positive.")
+        if max_contour_count <= 0:
+            raise ValueError("SurfaceSubdivisionIntersectionBudget.max_contour_count must be positive.")
+        object.__setattr__(self, "max_refinement_level", max_refinement_level)
+        object.__setattr__(self, "max_sample_count", max_sample_count)
+        object.__setattr__(self, "max_contour_count", max_contour_count)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "max_contour_count": self.max_contour_count,
+            "max_refinement_level": self.max_refinement_level,
+            "max_sample_count": self.max_sample_count,
+        }
+
+
+DEFAULT_SURFACE_SUBDIVISION_INTERSECTION_BUDGET = SurfaceSubdivisionIntersectionBudget()
+
+
+@dataclass(frozen=True)
+class SurfaceSubdivisionRefinedContourRecord:
+    """Subdivision adapter contour witness produced from refined surface evaluation."""
+
+    contour_id: str
+    refinement_level: int
+    curve: SurfaceIntersectionCurveRecord
+    sample_count: int
+    max_residual: float
+
+    def __post_init__(self) -> None:
+        contour_id = str(self.contour_id).strip()
+        refinement_level = int(self.refinement_level)
+        sample_count = int(self.sample_count)
+        max_residual = float(self.max_residual)
+        if not contour_id:
+            raise ValueError("SurfaceSubdivisionRefinedContourRecord.contour_id must be non-empty.")
+        if refinement_level < 0:
+            raise ValueError("SurfaceSubdivisionRefinedContourRecord.refinement_level must be non-negative.")
+        if not isinstance(self.curve, SurfaceIntersectionCurveRecord):
+            raise TypeError("SurfaceSubdivisionRefinedContourRecord.curve must be a SurfaceIntersectionCurveRecord.")
+        if sample_count <= 0:
+            raise ValueError("SurfaceSubdivisionRefinedContourRecord.sample_count must be positive.")
+        if not np.isfinite(max_residual) or max_residual < 0.0:
+            raise ValueError("SurfaceSubdivisionRefinedContourRecord.max_residual must be finite and non-negative.")
+        object.__setattr__(self, "contour_id", contour_id)
+        object.__setattr__(self, "refinement_level", refinement_level)
+        object.__setattr__(self, "sample_count", sample_count)
+        object.__setattr__(self, "max_residual", max_residual)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "contour_id": self.contour_id,
+            "curve": self.curve.canonical_payload(),
+            "max_residual": self.max_residual,
+            "refinement_level": self.refinement_level,
+            "sample_count": self.sample_count,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSubdivisionIntersectionAdapterReport:
+    """Report for bounded subdivision intersection adapter execution."""
+
+    solver_id: str
+    budget: SurfaceSubdivisionIntersectionBudget
+    contours: tuple[SurfaceSubdivisionRefinedContourRecord, ...] = ()
+    diagnostics: tuple[SurfaceIntersectionSupportDiagnostic, ...] = ()
+
+    @property
+    def converged(self) -> bool:
+        return bool(self.contours) and not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "budget": self.budget.canonical_payload(),
+            "contours": [contour.canonical_payload() for contour in self.contours],
+            "converged": self.converged,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
             "solver_id": self.solver_id,
         }
 
@@ -519,6 +621,10 @@ def _surface_intersection_is_spline_family(patch: SurfacePatch) -> bool:
     return isinstance(patch, (BSplineSurfacePatch, NURBSSurfacePatch))
 
 
+def _surface_intersection_is_subdivision_family(patch: SurfacePatch) -> bool:
+    return isinstance(patch, SubdivisionSurfacePatch)
+
+
 def _surface_intersection_is_analytic_family(patch: SurfacePatch) -> bool:
     return isinstance(patch, (PlanarSurfacePatch, RuledSurfacePatch, RevolutionSurfacePatch))
 
@@ -680,6 +786,13 @@ def _sample_spline_surface_points(
     patch: SurfacePatch,
     sample_count: int,
 ) -> tuple[tuple[tuple[float, float, float], tuple[float, float]], ...]:
+    return _sample_surface_points(patch, sample_count)
+
+
+def _sample_surface_points(
+    patch: SurfacePatch,
+    sample_count: int,
+) -> tuple[tuple[tuple[float, float, float], tuple[float, float]], ...]:
     u0, u1 = patch.domain.u_range
     v0, v1 = patch.domain.v_range
     return tuple(
@@ -689,6 +802,186 @@ def _sample_spline_surface_points(
         )
         for u in np.linspace(u0, u1, sample_count)
         for v in np.linspace(v0, v1, sample_count)
+    )
+
+
+def check_subdivision_intersection_budget(
+    request: SurfaceIntersectionRequest,
+    *,
+    budget: SurfaceSubdivisionIntersectionBudget = DEFAULT_SURFACE_SUBDIVISION_INTERSECTION_BUDGET,
+    sample_count: int,
+    contour_count: int = 1,
+) -> tuple[SurfaceIntersectionSupportDiagnostic, ...]:
+    """Return deterministic diagnostics when a subdivision adapter would exceed budget."""
+
+    diagnostics: list[SurfaceIntersectionSupportDiagnostic] = []
+    if sample_count * sample_count > budget.max_sample_count:
+        diagnostics.append(
+            SurfaceIntersectionSupportDiagnostic(
+                code="budget-exhausted",
+                consumer=request.consumer,
+                family_pair=request.normalized_family_pair,
+                message=(
+                    "subdivision intersection adapter sample budget exhausted: "
+                    f"{sample_count * sample_count} samples exceeds {budget.max_sample_count}"
+                ),
+            )
+        )
+    if contour_count > budget.max_contour_count:
+        diagnostics.append(
+            SurfaceIntersectionSupportDiagnostic(
+                code="budget-exhausted",
+                consumer=request.consumer,
+                family_pair=request.normalized_family_pair,
+                message=(
+                    "subdivision intersection adapter contour budget exhausted: "
+                    f"{contour_count} contours exceeds {budget.max_contour_count}"
+                ),
+            )
+        )
+    for patch in (request.first_patch, request.second_patch):
+        if isinstance(patch, SubdivisionSurfacePatch) and patch.subdivision_level > budget.max_refinement_level:
+            diagnostics.append(
+                SurfaceIntersectionSupportDiagnostic(
+                    code="budget-exhausted",
+                    consumer=request.consumer,
+                    family_pair=request.normalized_family_pair,
+                    message=(
+                        "subdivision intersection adapter refinement budget exhausted: "
+                        f"level {patch.subdivision_level} exceeds {budget.max_refinement_level}"
+                    ),
+                )
+            )
+    return tuple(diagnostics)
+
+
+def solve_subdivision_surface_intersection_adapter(
+    request: SurfaceIntersectionRequest,
+    *,
+    budget: SurfaceSubdivisionIntersectionBudget = DEFAULT_SURFACE_SUBDIVISION_INTERSECTION_BUDGET,
+    sample_count: int | None = None,
+) -> tuple[SurfaceIntersectionResultRecord, SurfaceSubdivisionIntersectionAdapterReport]:
+    """Intersect subdivision pairs through bounded surface-native evaluation records."""
+
+    dispatch = lookup_surface_intersection_solver(request)
+    if not dispatch.supported or dispatch.solver is None or dispatch.solver.solver_id != "subdivision-adapter-declared-tolerance":
+        diagnostic = SurfaceIntersectionSupportDiagnostic(
+            code="unsupported-family-pair",
+            consumer=request.consumer,
+            family_pair=request.normalized_family_pair,
+            message="subdivision intersection adapter requires an adapter-supported subdivision registry dispatch",
+        )
+        return (
+            normalize_surface_intersection_result(request, quality="unsupported"),
+            SurfaceSubdivisionIntersectionAdapterReport(
+                solver_id="subdivision-adapter-declared-tolerance",
+                budget=budget,
+                diagnostics=(diagnostic,),
+            ),
+        )
+    if not (_surface_intersection_is_subdivision_family(request.first_patch) or _surface_intersection_is_subdivision_family(request.second_patch)):
+        diagnostic = SurfaceIntersectionSupportDiagnostic(
+            code="unsupported-family-pair",
+            consumer=request.consumer,
+            family_pair=request.normalized_family_pair,
+            message="subdivision intersection adapter requires at least one subdivision surface",
+        )
+        return (
+            normalize_surface_intersection_result(request, quality="unsupported"),
+            SurfaceSubdivisionIntersectionAdapterReport(
+                solver_id=dispatch.solver.solver_id,
+                budget=budget,
+                diagnostics=(diagnostic,),
+            ),
+        )
+
+    if sample_count is None:
+        sample_count = max(3, min(9, int(np.floor(np.sqrt(budget.max_sample_count)))))
+    sample_count = max(3, int(sample_count))
+    budget_diagnostics = check_subdivision_intersection_budget(
+        request,
+        budget=budget,
+        sample_count=sample_count,
+        contour_count=1,
+    )
+    if budget_diagnostics:
+        return (
+            normalize_surface_intersection_result(request, quality="unsupported"),
+            SurfaceSubdivisionIntersectionAdapterReport(
+                solver_id=dispatch.solver.solver_id,
+                budget=budget,
+                diagnostics=budget_diagnostics,
+            ),
+        )
+
+    first_samples = _sample_surface_points(request.first_patch, sample_count)
+    second_samples = _sample_surface_points(request.second_patch, sample_count)
+    threshold = max(request.tolerance_policy.position_tolerance * 10.0, request.tolerance_policy.degeneracy_tolerance)
+    accepted: list[tuple[tuple[float, float, float], tuple[float, float], tuple[float, float], float]] = []
+    for first_point, first_uv in first_samples:
+        first_array = np.asarray(first_point, dtype=float)
+        nearest_point, nearest_uv = min(
+            second_samples,
+            key=lambda sample: float(np.linalg.norm(first_array - np.asarray(sample[0], dtype=float))),
+        )
+        residual = float(np.linalg.norm(first_array - np.asarray(nearest_point, dtype=float)))
+        if residual <= threshold:
+            midpoint = tuple(float(component) for component in ((first_array + np.asarray(nearest_point, dtype=float)) * 0.5))
+            accepted.append((midpoint, first_uv, nearest_uv, residual))
+
+    accepted = sorted(set(accepted), key=lambda item: (item[1], item[2], item[0]))
+    max_residual = max((item[3] for item in accepted), default=float("inf"))
+    if len(accepted) < 2 or max_residual > threshold:
+        diagnostic = SurfaceIntersectionSupportDiagnostic(
+            code="unsupported-family-pair",
+            consumer=request.consumer,
+            family_pair=request.normalized_family_pair,
+            message="subdivision intersection adapter did not converge within declared tolerance sampling budget",
+        )
+        return (
+            normalize_surface_intersection_result(
+                request,
+                max_residual=max_residual if np.isfinite(max_residual) else 0.0,
+                quality="unsupported",
+            ),
+            SurfaceSubdivisionIntersectionAdapterReport(
+                solver_id=dispatch.solver.solver_id,
+                budget=budget,
+                diagnostics=(diagnostic,),
+            ),
+        )
+
+    curve = SurfaceIntersectionCurveRecord(
+        curve_id="subdivision-adapter-contour-0",
+        kind="sampled",
+        points_3d=tuple(item[0] for item in accepted),
+        first_parameters=tuple(item[1] for item in accepted),
+        second_parameters=tuple(item[2] for item in accepted),
+    )
+    refinement_level = max(
+        (patch.subdivision_level for patch in (request.first_patch, request.second_patch) if isinstance(patch, SubdivisionSurfacePatch)),
+        default=0,
+    )
+    contour = SurfaceSubdivisionRefinedContourRecord(
+        contour_id="subdivision-adapter-contour-0",
+        refinement_level=refinement_level,
+        curve=curve,
+        sample_count=sample_count * sample_count,
+        max_residual=max_residual,
+    )
+    result = normalize_surface_intersection_result(
+        request,
+        curves=(curve,),
+        max_residual=max_residual,
+        quality="within-tolerance",
+    )
+    return (
+        result,
+        SurfaceSubdivisionIntersectionAdapterReport(
+            solver_id=dispatch.solver.solver_id,
+            budget=budget,
+            contours=(contour,),
+        ),
     )
 
 
@@ -814,6 +1107,10 @@ def _default_surface_intersection_solver_records() -> tuple[SurfaceIntersectionS
         ("nurbs", "revolution"): "analytic-spline-declared-tolerance",
         ("nurbs", "ruled"): "analytic-spline-declared-tolerance",
     }
+    adapter_pairs = {
+        tuple(sorted((family, "subdivision"))): "subdivision-adapter-declared-tolerance"
+        for family in _promoted_surface_family_names()
+    }
     records: list[SurfaceIntersectionSolverRegistryRecord] = []
     families = _promoted_surface_family_names()
     for index, first_family in enumerate(families):
@@ -821,6 +1118,7 @@ def _default_surface_intersection_solver_records() -> tuple[SurfaceIntersectionS
             pair = tuple(sorted((first_family, second_family)))
             solver_id = exact_pairs.get(pair)
             declared_solver_id = declared_tolerance_pairs.get(pair)
+            adapter_solver_id = adapter_pairs.get(pair)
             if solver_id is None:
                 if declared_solver_id is not None:
                     records.append(
@@ -829,6 +1127,17 @@ def _default_surface_intersection_solver_records() -> tuple[SurfaceIntersectionS
                             second_family=pair[1],
                             solver_id=declared_solver_id,
                             support_state="declared-tolerance",
+                            operations=("classification", "csg", "seam"),
+                        )
+                    )
+                    continue
+                if adapter_solver_id is not None:
+                    records.append(
+                        SurfaceIntersectionSolverRegistryRecord(
+                            first_family=pair[0],
+                            second_family=pair[1],
+                            solver_id=adapter_solver_id,
+                            support_state="adapter",
                             operations=("classification", "csg", "seam"),
                         )
                     )
@@ -962,6 +1271,7 @@ def lookup_surface_intersection_solver(
 
 __all__ = [
     "DEFAULT_SURFACE_INTERSECTION_TOLERANCE_POLICY",
+    "DEFAULT_SURFACE_SUBDIVISION_INTERSECTION_BUDGET",
     "SURFACE_INTERSECTION_SOLVER_REGISTRY",
     "SurfaceAnalyticSplineResidualReport",
     "SurfaceAnalyticSplineSolverIterationRecord",
@@ -977,12 +1287,17 @@ __all__ = [
     "SurfaceIntersectionTolerancePolicy",
     "SurfaceSplineSplineResidualReport",
     "SurfaceSplineSplineSolverIterationRecord",
+    "SurfaceSubdivisionIntersectionAdapterReport",
+    "SurfaceSubdivisionIntersectionBudget",
+    "SurfaceSubdivisionRefinedContourRecord",
     "assert_surface_intersection_solver_registry_complete",
     "build_surface_intersection_solver_registry",
+    "check_subdivision_intersection_budget",
     "classify_surface_intersection_degeneracy",
     "lookup_surface_intersection_solver",
     "make_surface_intersection_request",
     "normalize_surface_intersection_result",
     "solve_analytic_spline_surface_intersection",
     "solve_spline_spline_surface_intersection",
+    "solve_subdivision_surface_intersection_adapter",
 ]
