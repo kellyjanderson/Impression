@@ -976,6 +976,63 @@ class SurfaceCSGValidityGateRecord:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGPostReconstructionValidityDiagnostic:
+    """Diagnostic emitted while handing reconstructed CSG shells to validity gates."""
+
+    code: Literal["invalid-assembly", "seam-rebuild-failed", "validity-gate-rejected"]
+    message: str
+    result_shell_index: int | None = None
+    underlying_code: str | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "result_shell_index": self.result_shell_index,
+            "underlying_code": self.underlying_code,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGValidityHandoffRecord:
+    """Post-assembly handoff from durable CSG shell candidates to final validity."""
+
+    operation: SurfaceBooleanOperation
+    classification: SurfaceBooleanClassification
+    status: SurfaceBooleanStatus
+    assembly: SurfaceCSGShellAssemblyRecord
+    body: SurfaceBody | None = None
+    seam_rebuilds: tuple[SurfaceCSGSeamRebuildRecord, ...] = ()
+    validity_gate: SurfaceCSGValidityGateRecord | None = None
+    diagnostics: tuple[SurfaceCSGPostReconstructionValidityDiagnostic, ...] = ()
+
+    @property
+    def accepted(self) -> bool:
+        if self.classification == "empty":
+            return self.status == "succeeded" and not self.diagnostics
+        return self.status == "succeeded" and self.body is not None and not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "accepted": self.accepted,
+            "assembly": self.assembly.canonical_payload(),
+            "body_id": None if self.body is None else self.body.stable_identity,
+            "classification": self.classification,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "operation": self.operation,
+            "seam_rebuilds": [record.canonical_payload() for record in self.seam_rebuilds],
+            "status": self.status,
+            "validity_gate": None
+            if self.validity_gate is None
+            else {
+                "accepted": self.validity_gate.accepted,
+                "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.validity_gate.diagnostics],
+                "status": self.validity_gate.status,
+            },
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceBooleanIntersectionStage:
     """Deterministic surfaced intersection/classification stage output."""
 
@@ -3206,6 +3263,119 @@ def finalize_surface_csg_validity_gate(
         status="succeeded",
         body=cleaned_body,
         provenance=provenance,
+    )
+
+
+def validate_surface_csg_result_handoff(
+    assembly: SurfaceCSGShellAssemblyRecord,
+    operands: SurfaceBooleanOperands,
+    *,
+    metadata: dict[str, object] | None = None,
+) -> SurfaceCSGValidityHandoffRecord:
+    """Validate a reconstructed CSG body candidate through seam rebuild and validity gates."""
+
+    diagnostics: list[SurfaceCSGPostReconstructionValidityDiagnostic] = []
+    if assembly.operation != operands.operation:
+        diagnostics.append(
+            SurfaceCSGPostReconstructionValidityDiagnostic(
+                code="invalid-assembly",
+                message=(
+                    f"Surface CSG validity handoff received {assembly.operation!r} assembly "
+                    f"for {operands.operation!r} operands."
+                ),
+            )
+        )
+    if not assembly.supported:
+        diagnostics.extend(
+            SurfaceCSGPostReconstructionValidityDiagnostic(
+                code="invalid-assembly",
+                message=diagnostic.message,
+                underlying_code=diagnostic.code,
+            )
+            for diagnostic in assembly.diagnostics
+        )
+    if diagnostics:
+        return SurfaceCSGValidityHandoffRecord(
+            operation=operands.operation,
+            classification=assembly.classification,
+            status="invalid",
+            assembly=assembly,
+            diagnostics=tuple(diagnostics),
+        )
+    if assembly.classification == "empty":
+        return SurfaceCSGValidityHandoffRecord(
+            operation=operands.operation,
+            classification="empty",
+            status="succeeded",
+            assembly=assembly,
+        )
+
+    body_metadata = metadata if metadata is not None else _surface_boolean_result_metadata(operands)
+    try:
+        candidate = assembly.to_body(metadata=body_metadata)
+    except SurfaceBooleanEligibilityError as exc:
+        diagnostics.append(
+            SurfaceCSGPostReconstructionValidityDiagnostic(
+                code="invalid-assembly",
+                message=str(exc),
+            )
+        )
+        return SurfaceCSGValidityHandoffRecord(
+            operation=operands.operation,
+            classification=assembly.classification,
+            status="invalid",
+            assembly=assembly,
+            diagnostics=tuple(diagnostics),
+        )
+    if candidate is None:
+        return SurfaceCSGValidityHandoffRecord(
+            operation=operands.operation,
+            classification="empty",
+            status="succeeded",
+            assembly=assembly,
+        )
+
+    seam_rebuilds = tuple(rebuild_surface_csg_shell_seams(shell) for shell in candidate.iter_shells(world=True))
+    for shell_index, rebuild in enumerate(seam_rebuilds):
+        diagnostics.extend(
+            SurfaceCSGPostReconstructionValidityDiagnostic(
+                code="seam-rebuild-failed",
+                message=message,
+                result_shell_index=shell_index,
+            )
+            for message in rebuild.diagnostics
+        )
+
+    gate = finalize_surface_csg_validity_gate(operands.operation, operands, candidate)
+    if not gate.accepted:
+        diagnostics.extend(
+            SurfaceCSGPostReconstructionValidityDiagnostic(
+                code="validity-gate-rejected",
+                message=diagnostic.message,
+                underlying_code=diagnostic.code,
+            )
+            for diagnostic in gate.diagnostics
+        )
+
+    if diagnostics:
+        return SurfaceCSGValidityHandoffRecord(
+            operation=operands.operation,
+            classification=assembly.classification,
+            status="invalid",
+            assembly=assembly,
+            seam_rebuilds=seam_rebuilds,
+            validity_gate=gate,
+            diagnostics=tuple(diagnostics),
+        )
+
+    return SurfaceCSGValidityHandoffRecord(
+        operation=operands.operation,
+        classification=assembly.classification,
+        status="succeeded",
+        assembly=assembly,
+        body=gate.body,
+        seam_rebuilds=seam_rebuilds,
+        validity_gate=gate,
     )
 
 

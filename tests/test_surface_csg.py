@@ -54,6 +54,7 @@ from impression.modeling import (
     SurfaceCSGPatchLocalCurveMappingResult,
     SurfaceCSGPlanarRelationDiagnostic,
     SurfaceCSGPlanDiagnostic,
+    SurfaceCSGPostReconstructionValidityDiagnostic,
     SurfaceCSGProvenanceMetadataRecord,
     SurfaceCSGReconstructionDiagnostic,
     SurfaceCSGRevolutionIntersectionRecord,
@@ -67,6 +68,7 @@ from impression.modeling import (
     SurfaceCSGUnsupportedCapDiagnostic,
     SurfaceCSGValidityDiagnostic,
     SurfaceCSGValidityGateRecord,
+    SurfaceCSGValidityHandoffRecord,
     SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX,
     SURFACE_BOOLEAN_OPERATIONS,
     SURFACE_CSG_SOLVER_REGISTRY,
@@ -119,6 +121,7 @@ from impression.modeling import (
     surface_csg_selection_is_empty,
     validate_surface_csg_curve,
     validate_surface_csg_patch_local_curve_domain,
+    validate_surface_csg_result_handoff,
 )
 from impression.modeling.surface import PATCH_FAMILY_CAPABILITY_MATRIX
 
@@ -605,6 +608,65 @@ def test_surface_csg_validity_gate_rejects_open_shell_with_diagnostics() -> None
     assert all(isinstance(diagnostic, SurfaceCSGValidityDiagnostic) for diagnostic in gate.diagnostics)
     assert gate.diagnostics[0].code == "invalid-shell"
     assert "missing seam coverage" in gate.diagnostics[0].message
+
+
+def test_surface_csg_validity_handoff_accepts_assembled_closed_shell_candidate() -> None:
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0), backend="surface")
+    operands = prepare_surface_boolean_operands("union", [left, right])
+    assembly = SurfaceCSGShellAssemblyRecord(
+        operation="union",
+        classification="closed",
+        shells=(left.iter_shells(world=True)[0],),
+    )
+
+    handoff = validate_surface_csg_result_handoff(assembly, operands)
+
+    assert isinstance(handoff, SurfaceCSGValidityHandoffRecord)
+    assert handoff.accepted is True
+    assert handoff.status == "succeeded"
+    assert handoff.body is not None
+    assert handoff.validity_gate is not None
+    assert handoff.validity_gate.accepted is True
+    assert all(isinstance(record, SurfaceCSGSeamRebuildRecord) for record in handoff.seam_rebuilds)
+    assert handoff.diagnostics == ()
+    assert handoff.canonical_payload()["accepted"] is True
+
+
+def test_surface_csg_validity_handoff_preserves_empty_success_without_body() -> None:
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0), backend="surface")
+    operands = prepare_surface_boolean_operands("intersection", [left, right])
+    assembly = SurfaceCSGShellAssemblyRecord(operation="intersection", classification="empty")
+
+    handoff = validate_surface_csg_result_handoff(assembly, operands)
+
+    assert handoff.accepted is True
+    assert handoff.classification == "empty"
+    assert handoff.body is None
+    assert handoff.validity_gate is None
+
+
+def test_surface_csg_validity_handoff_reports_invalid_reconstructed_shells() -> None:
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
+    operands = prepare_surface_boolean_difference_operands(left, [right])
+    graph = build_surface_csg_fragment_graph(plan_surface_csg_operation("difference", (left, right)))
+    caps = build_surface_csg_cap_patches(graph)
+    boundaries = build_surface_csg_cut_boundary_trims(graph, caps)
+    assembly = assemble_surface_csg_result_shells(graph, caps, boundaries)
+
+    handoff = validate_surface_csg_result_handoff(assembly, operands)
+
+    assert handoff.accepted is False
+    assert handoff.status == "invalid"
+    assert handoff.body is None
+    assert handoff.validity_gate is not None
+    assert all(isinstance(diagnostic, SurfaceCSGPostReconstructionValidityDiagnostic) for diagnostic in handoff.diagnostics)
+    assert {diagnostic.code for diagnostic in handoff.diagnostics} >= {
+        "seam-rebuild-failed",
+        "validity-gate-rejected",
+    }
 
 
 def test_planar_linear_analytic_intersection_emits_exact_line_record() -> None:
