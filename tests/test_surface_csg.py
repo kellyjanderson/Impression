@@ -11,7 +11,13 @@ from tests.csg_reference_fixtures import (
     build_csg_union_box_post_fixture,
     surface_body_section_loops,
 )
-from tests.reference_images import compare_planar_loop_silhouettes
+from tests.reference_images import (
+    ExpectedDiagnosticKeyRecord,
+    NegativeDiagnosticFixtureRecord,
+    compare_planar_loop_silhouettes,
+    evaluate_negative_diagnostic_fixture_matrix,
+    normalize_diagnostic_snapshot,
+)
 from impression.modeling import (
     BooleanOperationError,
     PlanarSurfacePatch,
@@ -130,6 +136,20 @@ from impression.modeling import (
     validate_surface_csg_result_handoff,
 )
 from impression.modeling.surface import PATCH_FAMILY_CAPABILITY_MATRIX
+
+
+def _csg_negative_fixture(
+    fixture_id: str,
+    diagnostic: object,
+    *,
+    expected_keys: tuple[ExpectedDiagnosticKeyRecord, ...],
+) -> NegativeDiagnosticFixtureRecord:
+    return NegativeDiagnosticFixtureRecord(
+        fixture_id=fixture_id,
+        domain="csg",
+        expected_keys=expected_keys,
+        expected_snapshot=normalize_diagnostic_snapshot(diagnostic, fixture_id=fixture_id),
+    )
 
 
 def test_surface_csg_curve_primitives_have_deterministic_payload_keys_and_digests() -> None:
@@ -480,6 +500,89 @@ def test_surface_csg_operation_plan_dispatches_family_pairs_and_refuses_unsuppor
     assert unsupported.diagnostics[0].code == "unsupported-family-pair"
     assert "planar/revolution" in unsupported.diagnostics[0].message
     assert unsupported.canonical_payload()["executable"] is False
+
+
+def test_surface_csg_negative_diagnostic_fixtures_feed_matrix() -> None:
+    invalid_plan = plan_surface_csg_operation("union", (object(), object()))
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_sphere(radius=0.5, backend="surface")
+    operands = prepare_surface_boolean_operands("union", (left, right))
+    broken_matrix = dict(SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX)
+    broken_matrix[("union", "planar", "revolution")] = SurfaceBooleanFamilyPairSupport(
+        operation="union",
+        left_family="planar",
+        right_family="revolution",
+        supported=False,
+        phase="intersection-kernel",
+        support_state="not-yet-implemented",
+        required_future_capability="fixture exact planar/revolution solver",
+    )
+    unsupported_plan = plan_prepared_surface_csg_operation(
+        operands,
+        registry=assert_surface_csg_solver_registry_complete(build_surface_csg_solver_registry(broken_matrix)),
+    )
+    non_executable_graph = build_surface_csg_fragment_graph(invalid_plan)
+    cap_plan = SurfaceCSGOperationPlan(
+        operation="difference",
+        operands=SurfaceBooleanOperands(operation="difference", bodies=(left, right)),
+    )
+    cap_graph = SurfaceCSGFragmentGraphRecord(
+        operation="difference",
+        plan=cap_plan,
+        classification_edges=(
+            SurfaceCSGFragmentClassificationEdgeRecord(
+                patch=SurfaceBooleanPatchRef(1, 0),
+                relation="inside",
+                role="cut_cap",
+                cut_curve_ids=("cut-revolution",),
+            ),
+        ),
+    )
+    unsupported_caps = build_surface_csg_cap_patches(cap_graph)
+    fixtures = (
+        _csg_negative_fixture(
+            "csg/invalid-operands",
+            invalid_plan.diagnostics[0],
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("code",), "invalid-operand"),
+                ExpectedDiagnosticKeyRecord(("operation",), "union"),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+        _csg_negative_fixture(
+            "csg/unsupported-family-pair",
+            unsupported_plan.diagnostics[0],
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("code",), "unsupported-family-pair"),
+                ExpectedDiagnosticKeyRecord(("operation",), "union"),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+        _csg_negative_fixture(
+            "csg/non-executable-fragment-graph",
+            non_executable_graph.diagnostics[0],
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("code",), "non-executable-plan"),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+        _csg_negative_fixture(
+            "csg/unsupported-cap-family",
+            unsupported_caps.diagnostics[0],
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("code",), "unsupported-cap-family"),
+                ExpectedDiagnosticKeyRecord(("cap_family",), "revolution"),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+    )
+
+    report = evaluate_negative_diagnostic_fixture_matrix(fixtures, required_domains=("csg",))
+
+    assert report.passed is True
+    assert report.domain_coverage[0].fixture_count == 4
+    assert all(fixture.expected_snapshot is not None for fixture in fixtures)
+    assert "planar/revolution" in unsupported_plan.diagnostics[0].message
 
 
 def test_surface_csg_feature_gate_reports_supported_and_unsupported_without_mesh_fallback() -> None:
