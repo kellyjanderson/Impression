@@ -113,6 +113,9 @@ from impression.modeling import (
     SurfaceBoundaryDerivativeDiagnostic,
     SurfaceBoundaryDerivativeSample,
     SurfaceBoundaryDerivativeSummary,
+    SurfaceContinuityResidualMetrics,
+    SurfaceObservedContinuityClassRecord,
+    SurfaceHigherOrderContinuityValidationReport,
     SurfaceConsumerCollection,
     SurfaceCollectionTessellationResult,
     SurfaceFamilyTessellationAdapter,
@@ -161,6 +164,9 @@ from impression.modeling import (
     evaluate_surface_body_completion_gate,
     evaluate_surface_body_completion_reference_evidence_matrix,
     evaluate_surface_boundary_derivatives,
+    compute_surface_continuity_residual_metrics,
+    classify_surface_continuity_residuals,
+    validate_higher_order_surface_continuity,
     evaluate_implicit_field,
     evaluate_implicit_field_domain,
     extract_surface_boundary_descriptor,
@@ -2024,6 +2030,71 @@ def test_surface_boundary_derivative_evaluator_reports_unsupported_implicit_fami
     assert summary.samples == ()
     assert all(isinstance(diagnostic, SurfaceBoundaryDerivativeDiagnostic) for diagnostic in summary.diagnostics)
     assert summary.diagnostics[0].code == "unsupported-family"
+
+
+def test_higher_order_continuity_residual_validation_accepts_c1_planar_seam() -> None:
+    first_patch = PlanarSurfacePatch(family="planar")
+    second_patch = PlanarSurfacePatch(family="planar", origin=(1.0, 0.0, 0.0))
+    seam = SurfaceSeam("c1", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")), continuity="C1")
+    constraint = normalize_surface_seam_continuity_constraint(seam)
+    first = evaluate_surface_boundary_derivatives(first_patch, "right", patch_index=0, sample_count=3)
+    second = evaluate_surface_boundary_derivatives(second_patch, "left", patch_index=1, sample_count=3)
+
+    report = validate_higher_order_surface_continuity(constraint, first, second)
+
+    assert isinstance(report, SurfaceHigherOrderContinuityValidationReport)
+    assert report.passed is True
+    assert isinstance(report.residuals, SurfaceContinuityResidualMetrics)
+    assert isinstance(report.observed, SurfaceObservedContinuityClassRecord)
+    assert report.observed.passed_requested is True
+    assert "C1" in report.observed.observed_classes
+    assert report.residuals.max_position_delta == pytest.approx(0.0)
+    assert report.canonical_payload()["passed"] is True
+
+
+def test_higher_order_continuity_residual_validation_fails_without_downgrading_request() -> None:
+    first_patch = PlanarSurfacePatch(family="planar")
+    second_patch = PlanarSurfacePatch(
+        family="planar",
+        origin=(1.0, 0.0, 0.0),
+        u_axis=(1.0, 0.0, 0.0),
+        v_axis=(0.0, 1.0, 0.25),
+    )
+    seam = SurfaceSeam("g1", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")), continuity="G1")
+    constraint = normalize_surface_seam_continuity_constraint(seam)
+    first = evaluate_surface_boundary_derivatives(first_patch, "right", patch_index=0, sample_count=3)
+    second = evaluate_surface_boundary_derivatives(second_patch, "left", patch_index=1, sample_count=3)
+
+    report = validate_higher_order_surface_continuity(constraint, first, second)
+
+    assert report.passed is False
+    assert report.observed is not None
+    assert report.observed.requested == "G1"
+    assert report.observed.passed_requested is False
+    assert "G1" not in report.observed.observed_classes
+    assert report.residuals is not None
+    assert report.residuals.max_normal_delta > constraint.tolerance_policy.tangent_tolerance
+
+
+def test_higher_order_continuity_residual_classifier_reports_observed_classes() -> None:
+    residuals = SurfaceContinuityResidualMetrics(
+        max_position_delta=0.0,
+        max_tangent_delta=0.0,
+        max_normal_delta=0.0,
+        max_second_derivative_delta=0.0,
+        sample_count=2,
+    )
+    policy = SurfaceContinuityTolerancePolicy()
+
+    observed = classify_surface_continuity_residuals("G2", residuals, policy)
+
+    assert observed.passed_requested is True
+    assert observed.observed_classes == ("C0", "G0", "G1", "C1", "G2", "C2")
+    with pytest.raises(ValueError, match="at least one paired sample"):
+        compute_surface_continuity_residual_metrics(
+            SurfaceBoundaryDerivativeSummary(family="planar", boundary_id="left"),
+            SurfaceBoundaryDerivativeSummary(family="planar", boundary_id="right"),
+        )
 
 
 def test_subdivision_boundary_descriptor_records_approximation_and_implicit_seams_refuse() -> None:
