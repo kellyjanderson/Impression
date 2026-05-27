@@ -116,6 +116,9 @@ from impression.modeling import (
     SurfaceContinuityResidualMetrics,
     SurfaceObservedContinuityClassRecord,
     SurfaceHigherOrderContinuityValidationReport,
+    SurfaceContinuitySeamParameterLocator,
+    SurfaceContinuityViolationRecord,
+    SurfaceContinuityViolationDiagnostics,
     SurfaceConsumerCollection,
     SurfaceCollectionTessellationResult,
     SurfaceFamilyTessellationAdapter,
@@ -167,6 +170,8 @@ from impression.modeling import (
     compute_surface_continuity_residual_metrics,
     classify_surface_continuity_residuals,
     validate_higher_order_surface_continuity,
+    build_surface_continuity_violation_locators,
+    format_surface_continuity_violation_diagnostic,
     evaluate_implicit_field,
     evaluate_implicit_field_domain,
     extract_surface_boundary_descriptor,
@@ -2095,6 +2100,51 @@ def test_higher_order_continuity_residual_classifier_reports_observed_classes() 
             SurfaceBoundaryDerivativeSummary(family="planar", boundary_id="left"),
             SurfaceBoundaryDerivativeSummary(family="planar", boundary_id="right"),
         )
+
+
+def test_higher_order_continuity_violation_locators_name_parameter_hotspots() -> None:
+    first_patch = PlanarSurfacePatch(family="planar")
+    second_patch = PlanarSurfacePatch(
+        family="planar",
+        origin=(1.0, 0.0, 0.0),
+        u_axis=(1.0, 0.0, 0.0),
+        v_axis=(0.0, 1.0, 0.25),
+    )
+    seam = SurfaceSeam("g1", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")), continuity="G1")
+    constraint = normalize_surface_seam_continuity_constraint(seam)
+    first = evaluate_surface_boundary_derivatives(first_patch, "right", patch_index=0, sample_count=3)
+    second = evaluate_surface_boundary_derivatives(second_patch, "left", patch_index=1, sample_count=3)
+    report = validate_higher_order_surface_continuity(constraint, first, second)
+
+    diagnostics = build_surface_continuity_violation_locators(report, first, second)
+
+    assert isinstance(diagnostics, SurfaceContinuityViolationDiagnostics)
+    assert diagnostics.has_violations is True
+    assert all(isinstance(violation, SurfaceContinuityViolationRecord) for violation in diagnostics.violations)
+    normal = next(violation for violation in diagnostics.violations if violation.residual_kind == "normal")
+    assert isinstance(normal.locator, SurfaceContinuitySeamParameterLocator)
+    assert normal.locator.seam_id == "g1"
+    assert normal.locator.first_boundary == SurfaceBoundaryRef(0, "right")
+    assert normal.locator.second_boundary == SurfaceBoundaryRef(1, "left")
+    assert "failed requested G1 normal residual" in normal.message
+    assert format_surface_continuity_violation_diagnostic(normal) == normal.message
+    assert diagnostics.canonical_payload()["has_violations"] is True
+
+
+def test_higher_order_continuity_violation_locators_are_empty_for_passing_report() -> None:
+    first_patch = PlanarSurfacePatch(family="planar")
+    second_patch = PlanarSurfacePatch(family="planar", origin=(1.0, 0.0, 0.0))
+    seam = SurfaceSeam("c1", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")), continuity="C1")
+    constraint = normalize_surface_seam_continuity_constraint(seam)
+    first = evaluate_surface_boundary_derivatives(first_patch, "right", patch_index=0, sample_count=3)
+    second = evaluate_surface_boundary_derivatives(second_patch, "left", patch_index=1, sample_count=3)
+    report = validate_higher_order_surface_continuity(constraint, first, second)
+
+    diagnostics = build_surface_continuity_violation_locators(report, first, second)
+
+    assert report.passed is True
+    assert diagnostics.has_violations is False
+    assert diagnostics.violations == ()
 
 
 def test_subdivision_boundary_descriptor_records_approximation_and_implicit_seams_refuse() -> None:

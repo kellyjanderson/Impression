@@ -3260,6 +3260,73 @@ class SurfaceHigherOrderContinuityValidationReport:
 
 
 @dataclass(frozen=True)
+class SurfaceContinuitySeamParameterLocator:
+    """Parameter-space location for a higher-order continuity violation."""
+
+    seam_id: str
+    first_boundary: SurfaceBoundaryRef
+    second_boundary: SurfaceBoundaryRef
+    first_parameter: tuple[float, float]
+    second_parameter: tuple[float, float]
+    sample_index: int
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "first_boundary": self.first_boundary.canonical_payload(),
+            "first_parameter": self.first_parameter,
+            "sample_index": self.sample_index,
+            "seam_id": self.seam_id,
+            "second_boundary": self.second_boundary.canonical_payload(),
+            "second_parameter": self.second_parameter,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceContinuityViolationRecord:
+    """Localized failed residual diagnostic for an authored continuity request."""
+
+    seam_id: str
+    requested: str
+    residual_kind: Literal["position", "tangent", "normal", "curvature", "invalid-report"]
+    residual_value: float
+    tolerance: float
+    locator: SurfaceContinuitySeamParameterLocator | None = None
+    message: str = ""
+    fix_hint: str = ""
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "fix_hint": self.fix_hint,
+            "locator": None if self.locator is None else self.locator.canonical_payload(),
+            "message": self.message,
+            "requested": self.requested,
+            "residual_kind": self.residual_kind,
+            "residual_value": self.residual_value,
+            "seam_id": self.seam_id,
+            "tolerance": self.tolerance,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceContinuityViolationDiagnostics:
+    """Localized diagnostics generated from a failed continuity validation report."""
+
+    seam_id: str
+    violations: tuple[SurfaceContinuityViolationRecord, ...] = ()
+
+    @property
+    def has_violations(self) -> bool:
+        return bool(self.violations)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "has_violations": self.has_violations,
+            "seam_id": self.seam_id,
+            "violations": [violation.canonical_payload() for violation in self.violations],
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceContinuityMetadata:
     """Continuity classification and diagnostics for a seam validation pass."""
 
@@ -3682,6 +3749,139 @@ def validate_higher_order_surface_continuity(
         constraint=constraint,
         residuals=residuals,
         observed=observed,
+    )
+
+
+def _surface_continuity_residual_hotspot(
+    first: SurfaceBoundaryDerivativeSummary,
+    second: SurfaceBoundaryDerivativeSummary,
+    *,
+    residual_kind: Literal["position", "tangent", "normal", "curvature"],
+) -> tuple[int, float]:
+    sample_count = min(len(first.samples), len(second.samples))
+    if sample_count == 0:
+        return (0, 0.0)
+    values: list[tuple[int, float]] = []
+    for index, (first_sample, second_sample) in enumerate(
+        zip(first.samples[:sample_count], second.samples[:sample_count], strict=True)
+    ):
+        if residual_kind == "position":
+            value = float(np.linalg.norm(np.asarray(first_sample.point) - np.asarray(second_sample.point)))
+        elif residual_kind == "tangent":
+            value = _unit_vector_delta(first_sample.tangent, second_sample.tangent)
+        elif residual_kind == "normal":
+            value = _unit_vector_delta(first_sample.normal, second_sample.normal)
+        else:
+            first_second = np.asarray(first_sample.second_u or (0.0, 0.0, 0.0)) + np.asarray(
+                first_sample.second_v or (0.0, 0.0, 0.0)
+            )
+            second_second = np.asarray(second_sample.second_u or (0.0, 0.0, 0.0)) + np.asarray(
+                second_sample.second_v or (0.0, 0.0, 0.0)
+            )
+            value = float(np.linalg.norm(first_second - second_second))
+        values.append((index, value))
+    return max(values, key=lambda item: (item[1], -item[0]))
+
+
+def _surface_continuity_locator(
+    constraint: SurfaceSeamContinuityConstraint,
+    first: SurfaceBoundaryDerivativeSummary,
+    second: SurfaceBoundaryDerivativeSummary,
+    sample_index: int,
+) -> SurfaceContinuitySeamParameterLocator | None:
+    if len(constraint.boundary_uses) != 2 or not first.samples or not second.samples:
+        return None
+    index = min(sample_index, len(first.samples) - 1, len(second.samples) - 1)
+    return SurfaceContinuitySeamParameterLocator(
+        seam_id=constraint.seam_id,
+        first_boundary=constraint.boundary_uses[0].boundary,
+        second_boundary=constraint.boundary_uses[1].boundary,
+        first_parameter=first.samples[index].parameter,
+        second_parameter=second.samples[index].parameter,
+        sample_index=index,
+    )
+
+
+def format_surface_continuity_violation_diagnostic(violation: SurfaceContinuityViolationRecord) -> str:
+    """Format a deterministic user-facing continuity violation diagnostic."""
+
+    location = "" if violation.locator is None else f" at sample {violation.locator.sample_index}"
+    return (
+        f"Seam {violation.seam_id!r} failed requested {violation.requested} {violation.residual_kind} "
+        f"residual{location}: {violation.residual_value:.6g} > {violation.tolerance:.6g}. "
+        f"{violation.fix_hint}"
+    ).strip()
+
+
+def build_surface_continuity_violation_locators(
+    report: SurfaceHigherOrderContinuityValidationReport,
+    first: SurfaceBoundaryDerivativeSummary,
+    second: SurfaceBoundaryDerivativeSummary,
+) -> SurfaceContinuityViolationDiagnostics:
+    """Convert a failed higher-order continuity report into localized diagnostics."""
+
+    if report.passed:
+        return SurfaceContinuityViolationDiagnostics(seam_id=report.constraint.seam_id)
+    violations: list[SurfaceContinuityViolationRecord] = []
+    policy = report.constraint.tolerance_policy
+    if report.residuals is None:
+        violations.append(
+            SurfaceContinuityViolationRecord(
+                seam_id=report.constraint.seam_id,
+                requested=report.constraint.requested,
+                residual_kind="invalid-report",
+                residual_value=0.0,
+                tolerance=0.0,
+                message="Continuity validation did not produce residual metrics.",
+                fix_hint="Resolve upstream boundary derivative diagnostics before enforcing continuity.",
+            )
+        )
+        return SurfaceContinuityViolationDiagnostics(seam_id=report.constraint.seam_id, violations=tuple(violations))
+
+    residual_checks: tuple[tuple[Literal["position", "tangent", "normal", "curvature"], float, float, str], ...] = (
+        (
+            "position",
+            report.residuals.max_position_delta,
+            policy.position_tolerance,
+            "Align authored seam boundary positions or relax position tolerance.",
+        ),
+        (
+            "tangent",
+            report.residuals.max_tangent_delta,
+            policy.tangent_tolerance,
+            "Align boundary tangent directions for C-continuity requests.",
+        ),
+        (
+            "normal",
+            report.residuals.max_normal_delta,
+            policy.tangent_tolerance,
+            "Align tangent-plane normals for G-continuity requests.",
+        ),
+        (
+            "curvature",
+            report.residuals.max_second_derivative_delta,
+            policy.curvature_tolerance,
+            "Adjust curvature controls or relax curvature tolerance.",
+        ),
+    )
+    for kind, value, tolerance, hint in residual_checks:
+        if value <= tolerance:
+            continue
+        sample_index, hotspot_value = _surface_continuity_residual_hotspot(first, second, residual_kind=kind)
+        locator = _surface_continuity_locator(report.constraint, first, second, sample_index)
+        violation = SurfaceContinuityViolationRecord(
+            seam_id=report.constraint.seam_id,
+            requested=report.constraint.requested,
+            residual_kind=kind,
+            residual_value=hotspot_value,
+            tolerance=tolerance,
+            locator=locator,
+            fix_hint=hint,
+        )
+        violations.append(replace(violation, message=format_surface_continuity_violation_diagnostic(violation)))
+    return SurfaceContinuityViolationDiagnostics(
+        seam_id=report.constraint.seam_id,
+        violations=tuple(violations),
     )
 
 
@@ -4222,6 +4422,9 @@ __all__ = [
     "SurfaceContinuityResidualMetrics",
     "SurfaceObservedContinuityClassRecord",
     "SurfaceHigherOrderContinuityValidationReport",
+    "SurfaceContinuitySeamParameterLocator",
+    "SurfaceContinuityViolationRecord",
+    "SurfaceContinuityViolationDiagnostics",
     "PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS",
     "PATCH_FAMILY_CAPABILITY_MATRIX",
     "PATCH_FAMILY_FEATURE_COVERAGE",
@@ -4287,6 +4490,8 @@ __all__ = [
     "compute_surface_continuity_residual_metrics",
     "classify_surface_continuity_residuals",
     "validate_higher_order_surface_continuity",
+    "build_surface_continuity_violation_locators",
+    "format_surface_continuity_violation_diagnostic",
     "surface_adjacency_from_seams",
     "validate_surface_seam_participation",
     "SurfaceShell",
