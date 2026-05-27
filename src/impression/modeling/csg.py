@@ -44,6 +44,7 @@ SurfaceCSGToleranceDiagnosticCode = Literal[
     "outside-domain",
 ]
 SurfaceCSGPlanarRelation = Literal["crossing", "parallel", "coincident", "disjoint", "touching", "unsupported-linear"]
+SurfaceCSGCallerCategory = Literal["public-api", "primitive", "feature", "compatibility"]
 
 
 class BooleanOperationError(RuntimeError):
@@ -63,6 +64,52 @@ class SurfaceBooleanExecutionUnavailableError(BooleanOperationError):
         super().__init__(
             f"Surface boolean {operation} execution is not implemented yet after canonical input preparation."
         )
+
+
+@dataclass(frozen=True)
+class SurfaceCSGCallerInventoryRecord:
+    """One known authored route that depends on surface CSG readiness."""
+
+    caller_id: str
+    module: str
+    category: SurfaceCSGCallerCategory
+    operation: SurfaceBooleanOperation | None
+    surface_route: str
+    mesh_route: str | None = None
+    explicit_mesh_route: bool = False
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "caller_id": self.caller_id,
+            "category": self.category,
+            "explicit_mesh_route": self.explicit_mesh_route,
+            "mesh_route": self.mesh_route,
+            "module": self.module,
+            "operation": self.operation,
+            "surface_route": self.surface_route,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGFeatureGateDiagnostic:
+    """Shared diagnostic for primitive and feature surface CSG readiness."""
+
+    caller_id: str
+    operation: SurfaceBooleanOperation
+    supported: bool
+    reason: str
+    operand_ids: tuple[str, ...] = ()
+    boundary: str = "surface-boolean"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary": self.boundary,
+            "caller_id": self.caller_id,
+            "operand_ids": self.operand_ids,
+            "operation": self.operation,
+            "reason": self.reason,
+            "supported": self.supported,
+        }
 
 
 @dataclass(frozen=True)
@@ -2042,6 +2089,131 @@ def surface_boolean_family_eligibility(operands: SurfaceBooleanOperands) -> Surf
     )
 
 
+SURFACE_CSG_CALLER_INVENTORY: tuple[SurfaceCSGCallerInventoryRecord, ...] = (
+    SurfaceCSGCallerInventoryRecord(
+        caller_id="csg.boolean_union",
+        module="impression.modeling.csg",
+        category="public-api",
+        operation="union",
+        surface_route="surface_boolean_result",
+        mesh_route="_apply_boolean",
+        explicit_mesh_route=True,
+    ),
+    SurfaceCSGCallerInventoryRecord(
+        caller_id="csg.boolean_difference",
+        module="impression.modeling.csg",
+        category="public-api",
+        operation="difference",
+        surface_route="surface_boolean_result",
+        mesh_route="_apply_boolean",
+        explicit_mesh_route=True,
+    ),
+    SurfaceCSGCallerInventoryRecord(
+        caller_id="csg.boolean_intersection",
+        module="impression.modeling.csg",
+        category="public-api",
+        operation="intersection",
+        surface_route="surface_boolean_result",
+        mesh_route="_apply_boolean",
+        explicit_mesh_route=True,
+    ),
+    SurfaceCSGCallerInventoryRecord(
+        caller_id="threading.lower_thread_surface_assembly",
+        module="impression.modeling.threading",
+        category="feature",
+        operation="difference",
+        surface_route="lower_thread_surface_assembly",
+        mesh_route="make_thread_mesh_compatibility_result",
+        explicit_mesh_route=True,
+    ),
+    SurfaceCSGCallerInventoryRecord(
+        caller_id="hinges.make_traditional_hinge_pair",
+        module="impression.modeling.hinges",
+        category="feature",
+        operation="union",
+        surface_route="make_traditional_hinge_pair",
+        mesh_route="_call_with_legacy_mesh_primitives",
+        explicit_mesh_route=True,
+    ),
+    SurfaceCSGCallerInventoryRecord(
+        caller_id="primitive.boolean_dependent_surface_builders",
+        module="impression.modeling.primitives",
+        category="primitive",
+        operation=None,
+        surface_route="surface primitive constructors",
+        mesh_route="explicit backend='mesh' primitive constructors",
+        explicit_mesh_route=True,
+    ),
+)
+
+
+def surface_csg_caller_inventory() -> tuple[SurfaceCSGCallerInventoryRecord, ...]:
+    """Return the durable inventory of authored routes that depend on CSG readiness."""
+
+    return SURFACE_CSG_CALLER_INVENTORY
+
+
+def surface_csg_feature_gate(
+    caller_id: str,
+    operation: SurfaceBooleanOperation,
+    bodies: Iterable[object],
+) -> SurfaceCSGFeatureGateDiagnostic:
+    """Return the shared CSG readiness diagnostic for a primitive or feature caller."""
+
+    body_tuple = tuple(bodies)
+    if any(not isinstance(body, SurfaceBody) for body in body_tuple):
+        return SurfaceCSGFeatureGateDiagnostic(
+            caller_id=caller_id,
+            operation=operation,
+            supported=False,
+            reason="Surface CSG requires SurfaceBody operands; no mesh fallback was attempted.",
+        )
+    if operation in {"union", "intersection"} and len(body_tuple) < 2:
+        return SurfaceCSGFeatureGateDiagnostic(
+            caller_id=caller_id,
+            operation=operation,
+            supported=False,
+            operand_ids=tuple(body.stable_identity for body in body_tuple),
+            reason=f"Surface boolean {operation} requires at least two SurfaceBody operands.",
+        )
+    if operation == "difference" and len(body_tuple) < 2:
+        return SurfaceCSGFeatureGateDiagnostic(
+            caller_id=caller_id,
+            operation=operation,
+            supported=False,
+            operand_ids=tuple(body.stable_identity for body in body_tuple),
+            reason="Surface boolean difference requires a base and at least one cutter SurfaceBody.",
+        )
+
+    operands = SurfaceBooleanOperands(operation=operation, bodies=body_tuple)
+    eligibility = surface_boolean_family_eligibility(operands)
+    if not eligibility.supported:
+        return SurfaceCSGFeatureGateDiagnostic(
+            caller_id=caller_id,
+            operation=operation,
+            supported=False,
+            operand_ids=operands.body_ids,
+            reason=eligibility.failure_reason or "Surface boolean family gate rejected the request.",
+        )
+    return SurfaceCSGFeatureGateDiagnostic(
+        caller_id=caller_id,
+        operation=operation,
+        supported=True,
+        operand_ids=operands.body_ids,
+        reason="Surface boolean request passed the shared CSG readiness gate.",
+    )
+
+
+def assert_no_hidden_surface_csg_mesh_fallback(caller_id: str, result: object) -> object:
+    """Reject hidden mesh results from authored surface CSG routes."""
+
+    if isinstance(result, (Mesh, MeshGroup)):
+        raise BooleanOperationError(
+            f"{caller_id} produced a mesh result across the surface CSG route; explicit mesh compatibility is required."
+        )
+    return result
+
+
 def _contains_bounds(
     container: tuple[float, float, float, float, float, float],
     candidate: tuple[float, float, float, float, float, float],
@@ -3684,18 +3856,20 @@ def _raise_surface_boolean_execution_unavailable(operands: SurfaceBooleanOperand
 def _surface_boolean_result_after_family_gate(
     operation: SurfaceBooleanOperation,
     bodies: tuple[object, ...],
+    *,
+    caller_id: str,
 ) -> SurfaceBooleanResult | None:
     if any(not isinstance(body, SurfaceBody) for body in bodies):
         return None
     raw_operands = SurfaceBooleanOperands(operation=operation, bodies=bodies)
-    eligibility = surface_boolean_family_eligibility(raw_operands)
-    if eligibility.supported:
+    gate = surface_csg_feature_gate(caller_id, operation, bodies)
+    if gate.supported:
         return None
     return SurfaceBooleanResult(
         operation=operation,
         operands=raw_operands,
         status="unsupported",
-        failure_reason=eligibility.failure_reason,
+        failure_reason=gate.reason,
     )
 
 
@@ -3709,11 +3883,14 @@ def boolean_union(
         raise ValueError("tolerance must be positive.")
     if backend == "surface":
         bodies = tuple(meshes)
-        gated = _surface_boolean_result_after_family_gate("union", bodies)  # type: ignore[arg-type]
+        gated = _surface_boolean_result_after_family_gate("union", bodies, caller_id="csg.boolean_union")  # type: ignore[arg-type]
         if gated is not None:
             return gated
         operands = prepare_surface_boolean_operands("union", bodies)  # type: ignore[arg-type]
-        return surface_boolean_result("union", operands)
+        return assert_no_hidden_surface_csg_mesh_fallback(
+            "csg.boolean_union",
+            surface_boolean_result("union", operands),
+        )
     warn_mesh_primary_api(
         "boolean_union",
         replacement="SurfaceBody boolean operations once the surface-first CSG path lands",
@@ -3732,11 +3909,18 @@ def boolean_difference(
         raise ValueError("tolerance must be positive.")
     if backend == "surface":
         cutter_tuple = tuple(cutters)
-        gated = _surface_boolean_result_after_family_gate("difference", (base, *cutter_tuple))  # type: ignore[arg-type]
+        gated = _surface_boolean_result_after_family_gate(
+            "difference",
+            (base, *cutter_tuple),
+            caller_id="csg.boolean_difference",
+        )  # type: ignore[arg-type]
         if gated is not None:
             return gated
         operands = prepare_surface_boolean_difference_operands(base, cutter_tuple)  # type: ignore[arg-type]
-        return surface_boolean_result("difference", operands)
+        return assert_no_hidden_surface_csg_mesh_fallback(
+            "csg.boolean_difference",
+            surface_boolean_result("difference", operands),
+        )
     warn_mesh_primary_api(
         "boolean_difference",
         replacement="SurfaceBody boolean operations once the surface-first CSG path lands",
@@ -3759,11 +3943,18 @@ def boolean_intersection(
         raise ValueError("tolerance must be positive.")
     if backend == "surface":
         bodies = tuple(meshes)
-        gated = _surface_boolean_result_after_family_gate("intersection", bodies)  # type: ignore[arg-type]
+        gated = _surface_boolean_result_after_family_gate(
+            "intersection",
+            bodies,
+            caller_id="csg.boolean_intersection",
+        )  # type: ignore[arg-type]
         if gated is not None:
             return gated
         operands = prepare_surface_boolean_operands("intersection", bodies)  # type: ignore[arg-type]
-        return surface_boolean_result("intersection", operands)
+        return assert_no_hidden_surface_csg_mesh_fallback(
+            "csg.boolean_intersection",
+            surface_boolean_result("intersection", operands),
+        )
     warn_mesh_primary_api(
         "boolean_intersection",
         replacement="SurfaceBody boolean operations once the surface-first CSG path lands",

@@ -27,10 +27,12 @@ from impression.modeling import (
     SurfaceCSGAnalyticIntersectionRecord,
     SurfaceCSGArrangementDiagnostic,
     SurfaceCSGBoundaryUseProvenanceRecord,
+    SurfaceCSGCallerInventoryRecord,
     SurfaceCSGConicDiagnostic,
     SurfaceCSGCutCapRequirementRecord,
     SurfaceCSGCurvePrimitive,
     SurfaceCSGCurveMappingDiagnostic,
+    SurfaceCSGFeatureGateDiagnostic,
     SurfaceCSGFragmentClassificationDiagnostic,
     SurfaceCSGFragmentClassificationRecord,
     SurfaceCSGFragmentProvenanceRecord,
@@ -50,6 +52,7 @@ from impression.modeling import (
     SurfaceCSGValidityGateRecord,
     SurfaceShell,
     TrimLoop,
+    assert_no_hidden_surface_csg_mesh_fallback,
     boolean_difference,
     boolean_intersection,
     boolean_union,
@@ -73,9 +76,11 @@ from impression.modeling import (
     prepare_surface_boolean_operands,
     rebuild_surface_csg_shell_seams,
     sort_surface_csg_curves,
+    surface_csg_caller_inventory,
     surface_csg_curve_digest,
     surface_csg_curve_key,
     surface_csg_curves_equal,
+    surface_csg_feature_gate,
     surface_boolean_overlap_fragments,
     surface_boolean_intersection_stage,
     surface_boolean_result,
@@ -340,6 +345,46 @@ def test_surface_csg_operation_selection_reports_empty_result() -> None:
 
     assert surface_csg_selection_is_empty(discarded) is True
     assert discarded[0].survives is False
+
+
+def test_surface_csg_caller_inventory_names_surface_and_explicit_mesh_routes() -> None:
+    inventory = surface_csg_caller_inventory()
+    ids = {record.caller_id for record in inventory}
+
+    assert all(isinstance(record, SurfaceCSGCallerInventoryRecord) for record in inventory)
+    assert {
+        "csg.boolean_union",
+        "csg.boolean_difference",
+        "csg.boolean_intersection",
+        "threading.lower_thread_surface_assembly",
+        "hinges.make_traditional_hinge_pair",
+        "primitive.boolean_dependent_surface_builders",
+    }.issubset(ids)
+    assert all(record.surface_route for record in inventory)
+    assert all(record.explicit_mesh_route for record in inventory if record.mesh_route is not None)
+    assert all("caller_id" in record.canonical_payload() for record in inventory)
+
+
+def test_surface_csg_feature_gate_reports_supported_and_unsupported_without_mesh_fallback() -> None:
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_box(size=(1.0, 1.0, 1.0), center=(1.25, 0.0, 0.0), backend="surface")
+
+    supported = surface_csg_feature_gate("fixture.boolean_union", "union", (left, right))
+    unsupported = surface_csg_feature_gate("fixture.boolean_union", "union", (left, object()))
+
+    assert isinstance(supported, SurfaceCSGFeatureGateDiagnostic)
+    assert supported.supported is True
+    assert supported.operand_ids == (left.stable_identity, right.stable_identity)
+    assert supported.canonical_payload()["boundary"] == "surface-boolean"
+    assert unsupported.supported is False
+    assert "no mesh fallback" in unsupported.reason
+
+
+def test_surface_csg_no_hidden_mesh_fallback_assertion_rejects_mesh_results() -> None:
+    mesh = make_box(size=(1.0, 1.0, 1.0), backend="mesh")
+
+    with pytest.raises(BooleanOperationError, match="explicit mesh compatibility"):
+        assert_no_hidden_surface_csg_mesh_fallback("fixture.boolean_union", mesh)
 
 
 def test_surface_csg_shell_assembly_builds_single_shell_with_provenance() -> None:
