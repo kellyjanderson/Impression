@@ -1033,6 +1033,99 @@ class SurfaceCSGValidityHandoffRecord:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGOperandOrderingNormalizationRecord:
+    """Deterministic operand ordering witness for CSG provenance maps."""
+
+    operation: SurfaceBooleanOperation
+    operand_ids: tuple[str, ...]
+    normalized_operand_ids: tuple[str, ...]
+    normalized_to_original_indices: tuple[int, ...]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "normalized_operand_ids": self.normalized_operand_ids,
+            "normalized_to_original_indices": self.normalized_to_original_indices,
+            "operand_ids": self.operand_ids,
+            "operation": self.operation,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGProvenanceDiagnostic:
+    """Diagnostic emitted while building result provenance maps."""
+
+    code: Literal["invalid-assembly", "missing-result-patch", "missing-boundary-attachment"]
+    message: str
+    result_shell_index: int | None = None
+    result_patch_index: int | None = None
+    source_patch: SurfaceBooleanPatchRef | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "result_patch_index": self.result_patch_index,
+            "result_shell_index": self.result_shell_index,
+            "source_patch": None
+            if self.source_patch is None
+            else {
+                "operand_index": self.source_patch.operand_index,
+                "patch_index": self.source_patch.patch_index,
+            },
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGResultPatchProvenanceRecord:
+    """Stable provenance for one patch in a reconstructed CSG result shell."""
+
+    result_shell_index: int
+    result_patch_index: int
+    source_patch: SurfaceBooleanPatchRef
+    source_role: Literal["surviving-fragment", "generated-cap"]
+    cut_curve_ids: tuple[str, ...] = ()
+    cap_payload_index: int | None = None
+    boundary_attachment_index: int | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary_attachment_index": self.boundary_attachment_index,
+            "cap_payload_index": self.cap_payload_index,
+            "cut_curve_ids": self.cut_curve_ids,
+            "result_patch_index": self.result_patch_index,
+            "result_shell_index": self.result_shell_index,
+            "source_patch": {
+                "operand_index": self.source_patch.operand_index,
+                "patch_index": self.source_patch.patch_index,
+            },
+            "source_role": self.source_role,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGResultProvenanceMap:
+    """Complete traceability map for a CSG result candidate."""
+
+    operation: SurfaceBooleanOperation
+    operand_ordering: SurfaceCSGOperandOrderingNormalizationRecord
+    result_patches: tuple[SurfaceCSGResultPatchProvenanceRecord, ...] = ()
+    diagnostics: tuple[SurfaceCSGProvenanceDiagnostic, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "operand_ordering": self.operand_ordering.canonical_payload(),
+            "operation": self.operation,
+            "result_patches": [record.canonical_payload() for record in self.result_patches],
+            "supported": self.supported,
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceBooleanIntersectionStage:
     """Deterministic surfaced intersection/classification stage output."""
 
@@ -3376,6 +3469,167 @@ def validate_surface_csg_result_handoff(
         body=gate.body,
         seam_rebuilds=seam_rebuilds,
         validity_gate=gate,
+    )
+
+
+def normalize_surface_csg_operand_ordering(
+    operation: SurfaceBooleanOperation,
+    operands: SurfaceBooleanOperands,
+) -> SurfaceCSGOperandOrderingNormalizationRecord:
+    """Return deterministic operand ordering for provenance comparison."""
+
+    operand_ids = operands.body_ids
+    if operation in {"union", "intersection"}:
+        normalized_pairs = tuple(sorted(enumerate(operand_ids), key=lambda item: (item[1], item[0])))
+    else:
+        normalized_pairs = tuple(enumerate(operand_ids))
+    return SurfaceCSGOperandOrderingNormalizationRecord(
+        operation=operation,
+        operand_ids=operand_ids,
+        normalized_operand_ids=tuple(body_id for _index, body_id in normalized_pairs),
+        normalized_to_original_indices=tuple(index for index, _body_id in normalized_pairs),
+    )
+
+
+def _surface_csg_cap_payload_lookup(
+    cap_construction: SurfaceCSGCapConstructionRecord | None,
+) -> dict[tuple[SurfaceBooleanPatchRef, tuple[str, ...]], int]:
+    if cap_construction is None:
+        return {}
+    return {
+        (payload.source_patch, tuple(sorted(payload.cut_curve_ids))): index
+        for index, payload in enumerate(cap_construction.cap_payloads)
+    }
+
+
+def _surface_csg_boundary_attachment_lookup(
+    cut_boundary: SurfaceCSGCutBoundaryRecord | None,
+) -> dict[int, int]:
+    if cut_boundary is None:
+        return {}
+    return {
+        attachment.cap_payload_index: index
+        for index, attachment in enumerate(cut_boundary.trim_attachments)
+    }
+
+
+def _surface_csg_result_patch_role(
+    assembly: SurfaceCSGShellAssemblyRecord,
+    provenance: SurfaceCSGFragmentProvenanceRecord,
+    cap_lookup: Mapping[tuple[SurfaceBooleanPatchRef, tuple[str, ...]], int],
+) -> Literal["surviving-fragment", "generated-cap"]:
+    cap_key = (provenance.source_patch, tuple(sorted(provenance.cut_curve_ids)))
+    if cap_key in cap_lookup:
+        try:
+            patch = assembly.shells[provenance.result_shell_index].patches[provenance.result_patch_index]
+            if patch.kernel_metadata().get("generated_role") == "csg_generated_cap":
+                return "generated-cap"
+        except (AttributeError, IndexError):
+            return "generated-cap"
+    return "surviving-fragment"
+
+
+def build_surface_csg_result_provenance_map(
+    assembly: SurfaceCSGShellAssemblyRecord,
+    operands: SurfaceBooleanOperands,
+    *,
+    graph: SurfaceCSGFragmentGraphRecord | None = None,
+    cap_construction: SurfaceCSGCapConstructionRecord | None = None,
+    cut_boundary: SurfaceCSGCutBoundaryRecord | None = None,
+) -> SurfaceCSGResultProvenanceMap:
+    """Build stable operand, fragment, cap, and boundary provenance for a CSG result."""
+
+    ordering = normalize_surface_csg_operand_ordering(operands.operation, operands)
+    diagnostics: list[SurfaceCSGProvenanceDiagnostic] = []
+    if assembly.operation != operands.operation:
+        diagnostics.append(
+            SurfaceCSGProvenanceDiagnostic(
+                code="invalid-assembly",
+                message=(
+                    f"Surface CSG provenance map received {assembly.operation!r} assembly "
+                    f"for {operands.operation!r} operands."
+                ),
+            )
+        )
+    if not assembly.supported:
+        diagnostics.extend(
+            SurfaceCSGProvenanceDiagnostic(
+                code="invalid-assembly",
+                message=diagnostic.message,
+                source_patch=diagnostic.source_patch,
+            )
+            for diagnostic in assembly.diagnostics
+        )
+    if graph is not None and graph.plan.operands is not None and graph.plan.operands.body_ids != operands.body_ids:
+        diagnostics.append(
+            SurfaceCSGProvenanceDiagnostic(
+                code="invalid-assembly",
+                message="Surface CSG provenance map received fragment graph for different operands.",
+            )
+        )
+
+    cap_lookup = _surface_csg_cap_payload_lookup(cap_construction)
+    boundary_lookup = _surface_csg_boundary_attachment_lookup(cut_boundary)
+    records: list[SurfaceCSGResultPatchProvenanceRecord] = []
+    for provenance in sorted(
+        assembly.provenance,
+        key=lambda record: (
+            record.result_shell_index,
+            record.result_patch_index,
+            _surface_csg_patch_ref_sort_key(record.source_patch),
+            record.cut_curve_ids,
+        ),
+    ):
+        try:
+            assembly.shells[provenance.result_shell_index].patches[provenance.result_patch_index]
+        except IndexError:
+            diagnostics.append(
+                SurfaceCSGProvenanceDiagnostic(
+                    code="missing-result-patch",
+                    message=(
+                        "Surface CSG provenance map references a result patch outside "
+                        f"shell {provenance.result_shell_index}."
+                    ),
+                    result_shell_index=provenance.result_shell_index,
+                    result_patch_index=provenance.result_patch_index,
+                    source_patch=provenance.source_patch,
+                )
+            )
+            continue
+        role = _surface_csg_result_patch_role(assembly, provenance, cap_lookup)
+        cap_payload_index = None
+        boundary_attachment_index = None
+        if role == "generated-cap":
+            cap_payload_index = cap_lookup.get((provenance.source_patch, tuple(sorted(provenance.cut_curve_ids))))
+            if cap_payload_index is not None:
+                boundary_attachment_index = boundary_lookup.get(cap_payload_index)
+            if boundary_attachment_index is None:
+                diagnostics.append(
+                    SurfaceCSGProvenanceDiagnostic(
+                        code="missing-boundary-attachment",
+                        message="Generated CSG cap provenance is missing a cut-boundary attachment.",
+                        result_shell_index=provenance.result_shell_index,
+                        result_patch_index=provenance.result_patch_index,
+                        source_patch=provenance.source_patch,
+                    )
+                )
+        records.append(
+            SurfaceCSGResultPatchProvenanceRecord(
+                result_shell_index=provenance.result_shell_index,
+                result_patch_index=provenance.result_patch_index,
+                source_patch=provenance.source_patch,
+                source_role=role,
+                cut_curve_ids=provenance.cut_curve_ids,
+                cap_payload_index=cap_payload_index,
+                boundary_attachment_index=boundary_attachment_index,
+            )
+        )
+
+    return SurfaceCSGResultProvenanceMap(
+        operation=operands.operation,
+        operand_ordering=ordering,
+        result_patches=tuple(records),
+        diagnostics=tuple(diagnostics),
     )
 
 

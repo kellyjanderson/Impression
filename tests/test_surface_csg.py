@@ -45,6 +45,7 @@ from impression.modeling import (
     SurfaceCSGFragmentProvenanceRecord,
     SurfaceCSGGeneratedCapPatchPayloadRecord,
     SurfaceCSGOperationPlan,
+    SurfaceCSGOperandOrderingNormalizationRecord,
     SurfaceCSGSolverRegistryDiagnostic,
     SurfaceCSGSolverRegistryRecord,
     SurfaceCSGOperationSelectionRecord,
@@ -56,7 +57,10 @@ from impression.modeling import (
     SurfaceCSGPlanDiagnostic,
     SurfaceCSGPostReconstructionValidityDiagnostic,
     SurfaceCSGProvenanceMetadataRecord,
+    SurfaceCSGProvenanceDiagnostic,
     SurfaceCSGReconstructionDiagnostic,
+    SurfaceCSGResultPatchProvenanceRecord,
+    SurfaceCSGResultProvenanceMap,
     SurfaceCSGRevolutionIntersectionRecord,
     SurfaceCSGShellAssemblyRecord,
     SurfaceCSGShellOrderingRecord,
@@ -86,6 +90,7 @@ from impression.modeling import (
     build_surface_csg_cut_boundary_trims,
     build_surface_csg_fragment_graph,
     build_surface_csg_patch_arrangement,
+    build_surface_csg_result_provenance_map,
     classify_surface_csg_fragment_against_body,
     classify_surface_csg_point_against_bounds,
     intersect_axis_compatible_revolution_pair,
@@ -100,6 +105,7 @@ from impression.modeling import (
     make_sphere,
     make_surface_body,
     make_surface_shell,
+    normalize_surface_csg_operand_ordering,
     plan_prepared_surface_csg_operation,
     plan_surface_csg_operation,
     prepare_surface_boolean_difference_operands,
@@ -667,6 +673,94 @@ def test_surface_csg_validity_handoff_reports_invalid_reconstructed_shells() -> 
         "seam-rebuild-failed",
         "validity-gate-rejected",
     }
+
+
+def test_surface_csg_operand_ordering_normalizer_sorts_commutative_operations_only() -> None:
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0), backend="surface")
+    union_operands = prepare_surface_boolean_operands("union", [right, left])
+    difference_operands = prepare_surface_boolean_difference_operands(right, [left])
+
+    union_order = normalize_surface_csg_operand_ordering("union", union_operands)
+    difference_order = normalize_surface_csg_operand_ordering("difference", difference_operands)
+
+    assert isinstance(union_order, SurfaceCSGOperandOrderingNormalizationRecord)
+    assert union_order.normalized_operand_ids == tuple(sorted(union_operands.body_ids))
+    assert difference_order.normalized_operand_ids == difference_operands.body_ids
+    assert difference_order.normalized_to_original_indices == (0, 1)
+
+
+def test_surface_csg_result_provenance_map_tracks_fragments_caps_and_boundaries() -> None:
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
+    operands = prepare_surface_boolean_difference_operands(left, [right])
+    graph = build_surface_csg_fragment_graph(plan_surface_csg_operation("difference", (left, right)))
+    caps = build_surface_csg_cap_patches(graph)
+    boundaries = build_surface_csg_cut_boundary_trims(graph, caps)
+    assembly = assemble_surface_csg_result_shells(graph, caps, boundaries)
+
+    provenance = build_surface_csg_result_provenance_map(
+        assembly,
+        operands,
+        graph=graph,
+        cap_construction=caps,
+        cut_boundary=boundaries,
+    )
+
+    assert isinstance(provenance, SurfaceCSGResultProvenanceMap)
+    assert provenance.supported is True
+    assert provenance.diagnostics == ()
+    assert all(isinstance(record, SurfaceCSGResultPatchProvenanceRecord) for record in provenance.result_patches)
+    assert {record.source_role for record in provenance.result_patches} == {"surviving-fragment", "generated-cap"}
+    cap_records = [record for record in provenance.result_patches if record.source_role == "generated-cap"]
+    assert cap_records
+    assert all(record.cap_payload_index is not None for record in cap_records)
+    assert all(record.boundary_attachment_index is not None for record in cap_records)
+    assert provenance.canonical_payload()["supported"] is True
+
+
+def test_surface_csg_result_provenance_map_reports_missing_generated_boundary_attachment() -> None:
+    source_patch = SurfaceBooleanPatchRef(1, 0)
+    assembly = SurfaceCSGShellAssemblyRecord(
+        operation="difference",
+        classification="closed",
+        shells=(
+            make_surface_shell(
+                (
+                    replace(
+                        PlanarSurfacePatch(family="planar"),
+                        metadata={"kernel": {"generated_role": "csg_generated_cap"}},
+                    ),
+                )
+            ),
+        ),
+        provenance=(
+            SurfaceCSGFragmentProvenanceRecord(
+                source_patch=source_patch,
+                result_shell_index=0,
+                result_patch_index=0,
+                cut_curve_ids=("cut-a",),
+            ),
+        ),
+    )
+    operands = prepare_surface_boolean_difference_operands(make_box(backend="surface"), [make_box(backend="surface")])
+    caps = SurfaceCSGCapConstructionRecord(
+        operation="difference",
+        cap_payloads=(
+            SurfaceCSGGeneratedCapPatchPayloadRecord(
+                source_patch=source_patch,
+                cap_family="planar",
+                patch=PlanarSurfacePatch(family="planar"),
+                cut_curve_ids=("cut-a",),
+            ),
+        ),
+    )
+
+    provenance = build_surface_csg_result_provenance_map(assembly, operands, cap_construction=caps)
+
+    assert provenance.supported is False
+    assert all(isinstance(diagnostic, SurfaceCSGProvenanceDiagnostic) for diagnostic in provenance.diagnostics)
+    assert provenance.diagnostics[0].code == "missing-boundary-attachment"
 
 
 def test_planar_linear_analytic_intersection_emits_exact_line_record() -> None:
