@@ -990,7 +990,8 @@ Required split plan before promotion:
 | Correspondence-Preserving Resampling Contract | Correspondence-Preserving Resampling And Executor Consumption | Review for split |
 | Mesh Executor Correspondence Consumption | Correspondence-Preserving Resampling And Executor Consumption | Small |
 | Surface Executor Correspondence Consumption | Correspondence-Preserving Resampling And Executor Consumption | Small |
-| Topology Builder Core API | User-Facing Topology Helpers | Review for split |
+| Topology Point Builder API | User-Facing Topology Helpers | Review for split |
+| Topology Segment Builder API | User-Facing Topology Helpers | Review for split |
 | Topology Lifecycle Builder API | User-Facing Topology Helpers | Review for split |
 | Generated Shape Default Rails | User-Facing Topology Helpers | Small |
 
@@ -1028,7 +1029,8 @@ must not be promoted directly.
 | Correspondence-Preserving Resampling Contract | 18.5 | Review for split; planner sample contract | `src/impression/modeling/loft.py` |
 | Mesh Executor Correspondence Consumption | 12.5 | Small | `src/impression/modeling/loft.py` |
 | Surface Executor Correspondence Consumption | 12.5 | Small | `src/impression/modeling/loft.py` |
-| Topology Builder Core API | 24 | Review for split; cohesive builder core | `src/impression/modeling/topology.py` |
+| Topology Point Builder API | 19 | Review for split; cohesive point authoring API | `src/impression/modeling/topology.py` |
+| Topology Segment Builder API | 22 | Review for split; cohesive segment authoring API | `src/impression/modeling/topology.py` |
 | Topology Lifecycle Builder API | 21 | Review for split; cohesive lifecycle helpers | `src/impression/modeling/topology.py` |
 | Generated Shape Default Rails | 20.5 | Review for split; cohesive generated-rail contract | `src/impression/modeling/topology.py` |
 
@@ -2018,26 +2020,24 @@ Readiness blockers:
 Split decision:
 - Small.
 
-### Candidate Spec: Topology Builder Core API
+### Candidate Spec: Topology Point Builder API
 
 Discovery purpose:
-- Define the lightweight user-facing builder methods for ordinary points and
-  curve segments, excluding lifecycle-specific birth/death helpers.
+- Define lightweight user-facing builder methods for ordinary topology points,
+  anchors, stable names, and correspondence ids.
 
 Responsibilities:
 - Functions/methods:
-  - `TopologyPath.closed`
   - `path.point`
-  - `path.segment`
-  - builder validation
+  - point builder validation
 - Data structures/models:
-  - topology builder state
+  - topology point builder state
 - Dependencies/services:
   - topology path core records
-  - segment and landmark identity records
+  - landmark identity records
 - Returns/outputs/signals:
-  - topology path records
-  - builder validation errors
+  - topology point records
+  - point validation errors
 - UI surfaces/components:
   - public modeling API builder
 - UI fields/elements:
@@ -2045,9 +2045,8 @@ Responsibilities:
   - `id`
   - `correspond`
   - `anchor`
-  - `points`
 - Reusable code plan:
-  - Existing code reused as-is: topology path records, landmark records
+  - Existing code reused as-is: topology path records and landmark records
   - Additions to existing reusable library/module: `impression.modeling.topology`
   - New reusable library/module to create: none
 - Database queries/tables/migrations:
@@ -2059,7 +2058,7 @@ Responsibilities:
 - Security/privacy-sensitive behavior:
   - none
 - Performance-sensitive behavior:
-  - builder validation avoids hidden expensive correspondence solving
+  - point validation avoids hidden expensive correspondence solving
 - Cross-screen reusable behavior:
   - not applicable
 
@@ -2070,24 +2069,120 @@ Project readiness fields:
   - `correspond=` is a helper alias for `correspondence_id`; omitted ids derive
     from stable names with provenance
 - Test strategy:
-  - public API unit tests, docs snippets, point/segment builder tests, and
-    validation error tests
+  - point builder API tests, docs snippets, and validation error tests
 - Data ownership:
-  - builder creates topology records; planner owns later correspondence
-    decisions
+  - builder creates point records; planner owns later correspondence decisions
 - Routes:
-  - builder calls -> topology records -> section -> loft planner
+  - point builder calls -> topology records -> section -> loft planner
 - Reuse/extraction decision:
-  - add builder helpers to topology module as thin wrappers over records
+  - add point helpers to topology module as thin wrappers over records
 - UI field/control inventory:
-  - builder arguments: `name`, `id`, `correspond`, `anchor`, `points`, `curve`,
-    `landmarks`
+  - builder arguments: `name`, `id`, `correspond`, `anchor`
 
 Open questions / nuance discovered:
-- No unresolved architecture questions remain.
+- Point builder scope should not include segment curve validation.
 
 Score:
-- Functions/methods: 4 x 2 = 8
+- Functions/methods: 2 x 2 = 4
+- Data structures/models: 1 x 1 = 1
+- Dependencies/services: 2 x 1 = 2
+- Returns/outputs/signals: 2 x 1 = 2
+- UI surfaces/components: 1 x 2 = 2
+- UI fields/elements: 4 x 1 = 4
+- Existing reusable code reused as-is: 2 x 0.5 = 1
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Destructive/write behavior: 0 x 3 = 0
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 0 x 2 = 0
+- Total: 19
+
+Readiness blockers:
+- [x] Missing implementation owner/module.
+- [x] Missing reuse/extraction decision.
+- [x] Missing library/module boundary where adding or creating reusable code.
+- [x] Missing UI field/control inventory where applicable.
+- [x] Missing chosen defaults / parameters.
+- [x] Missing test strategy.
+- [x] Unclear data ownership.
+- [x] Missing GUI/concurrency route where applicable.
+- [x] Missing performance bound/index plan where applicable.
+- [x] Missing privacy/logging rule where applicable.
+
+Split decision:
+- Review for split. Cohesion reason: this is one point-authoring API surface
+  after segment authoring was split out.
+
+### Candidate Spec: Topology Segment Builder API
+
+Discovery purpose:
+- Define lightweight user-facing builder methods for topology segments, segment
+  point arrays, curve references, and closed-path construction.
+
+Responsibilities:
+- Functions/methods:
+  - `TopologyPath.closed`
+  - `path.segment`
+  - segment builder validation
+- Data structures/models:
+  - topology segment builder state
+- Dependencies/services:
+  - topology path core records
+  - segment identity records
+- Returns/outputs/signals:
+  - topology segment records
+  - segment validation errors
+- UI surfaces/components:
+  - public modeling API builder
+- UI fields/elements:
+  - `name`
+  - `id`
+  - `points`
+  - `curve`
+  - `landmarks`
+- Reusable code plan:
+  - Existing code reused as-is: topology path records and segment records
+  - Additions to existing reusable library/module: `impression.modeling.topology`
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - none
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - segment validation avoids hidden expensive correspondence solving
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - `src/impression/modeling/topology.py`
+- Chosen defaults / parameters:
+  - segment order is authored order; path start remains the default anchor
+- Test strategy:
+  - segment builder API tests, closed path tests, docs snippets, and validation
+    error tests
+- Data ownership:
+  - builder creates segment records; planner owns later correspondence decisions
+- Routes:
+  - segment builder calls -> topology records -> section -> loft planner
+- Reuse/extraction decision:
+  - add segment helpers to topology module as thin wrappers over records
+- UI field/control inventory:
+  - builder arguments: `name`, `id`, `points`, `curve`, `landmarks`
+
+Open questions / nuance discovered:
+- Segment builder scope should not include lifecycle birth/death helpers.
+
+Score:
+- Functions/methods: 3 x 2 = 6
 - Data structures/models: 1 x 1 = 1
 - Dependencies/services: 2 x 1 = 2
 - Returns/outputs/signals: 2 x 1 = 2
@@ -2103,7 +2198,7 @@ Score:
 - Performance-sensitive behavior: 1 x 2 = 2
 - Cross-screen reusable behavior: 0 x 2 = 0
 - Readiness blockers: 0 x 2 = 0
-- Total: 24
+- Total: 22
 
 Readiness blockers:
 - [x] Missing implementation owner/module.
@@ -2118,9 +2213,8 @@ Readiness blockers:
 - [x] Missing privacy/logging rule where applicable.
 
 Split decision:
-- Review for split.
-- Cohesion reason: point and segment builder methods share one public authoring
-  state and compile to the same topology path record family.
+- Review for split. Cohesion reason: this is one segment-authoring API surface
+  after point authoring and lifecycle helpers were split out.
 
 ### Candidate Spec: Topology Lifecycle Builder API
 
@@ -2825,6 +2919,9 @@ Split decision:
 
 ## Change History
 
+- 2026-05-27: Critically reviewed active manifest candidates beyond score
+  thresholds and split the topology builder core API into point and segment
+  builder specs.
 - 2026-05-25: Added authored-model scope and user-defined rail policy: array
   starts, path starts, named topology entities, and explicit correspondence ids
   should drive correspondence before automatic ambiguity solving.

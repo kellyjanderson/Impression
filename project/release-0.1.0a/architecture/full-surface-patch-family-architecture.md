@@ -2329,27 +2329,25 @@ Readiness blockers:
 Split decision:
 - Review for split. Cohesion reason: this candidate now owns one family payload group.
 
-### Candidate Spec: `.impress` Implicit Patch Payload Security
+### Candidate Spec: `.impress` Implicit Patch Payload Codec
 
 Discovery purpose:
-- Define `.impress` serialization and refusal rules for implicit patch payloads.
+- Define safe `.impress` encoding and decoding for declarative implicit patch
+  payloads, excluding malicious/executable refusal fixtures.
 
 Responsibilities:
 - Functions/methods:
   - implicit payload encoder
   - implicit payload decoder
-  - executable-payload refusal
 - Data structures/models:
   - implicit payload
   - allow-listed field node
-  - security diagnostic
 - Dependencies/services:
   - `.impress` codec
   - implicit field validator
 - Returns/outputs/signals:
   - encoded implicit payload
   - decoded implicit patch
-  - unsafe payload refusal
 - UI surfaces/components:
   - not applicable
 - UI fields/elements:
@@ -2365,7 +2363,8 @@ Responsibilities:
 - Destructive/write behavior:
   - reads/writes `.impress` files
 - Security/privacy-sensitive behavior:
-  - rejects executable code, dynamic imports, and unknown field nodes
+  - declarative allow-listing is required but hostile refusal fixtures are split
+    out
 - Performance-sensitive behavior:
   - validation bounds field tree size
 - Cross-screen reusable behavior:
@@ -2377,9 +2376,10 @@ Project readiness fields:
 - Chosen defaults / parameters:
   - implicit payloads are declarative allow-listed data only
 - Test strategy:
-  - tests for safe round-trip and unsafe payload refusal
+  - safe implicit payload round-trip and field-node allow-list tests
 - Data ownership:
-  - `.impress` payload owns serialized field data; evaluator owns runtime interpretation
+  - `.impress` payload owns serialized field data; evaluator owns runtime
+    interpretation
 - Routes:
   - file codec to implicit field validator
 - Reuse/extraction decision:
@@ -2388,13 +2388,13 @@ Project readiness fields:
   - not applicable
 
 Open questions / nuance discovered:
-- This must not wait until after general implicit evaluation, because serialization security is part of the payload contract.
+- Runtime implicit evaluation remains separate from persistence payload shape.
 
 Score:
-- Functions/methods: 3 x 2 = 6
-- Data structures/models: 3 x 1 = 3
+- Functions/methods: 2 x 2 = 4
+- Data structures/models: 2 x 1 = 2
 - Dependencies/services: 2 x 1 = 2
-- Returns/outputs/signals: 3 x 1 = 3
+- Returns/outputs/signals: 2 x 1 = 2
 - Existing reusable code reused as-is: 1 x 0.5 = 0.5
 - Adding code to an existing library/module: 1 x 1 = 1
 - Creating a new reusable library/module: 0 x 3 = 0
@@ -2407,7 +2407,7 @@ Score:
 - Async/concurrency behavior: 0 x 3 = 0
 - Cross-screen reusable behavior: 0 x 2 = 0
 - Readiness blockers: 0 x 2 = 0
-- Total: 23.5
+- Total: 19.5
 
 Readiness blockers:
 - [x] Missing implementation owner/module.
@@ -2422,7 +2422,106 @@ Readiness blockers:
 - [x] Missing privacy/logging rule where applicable.
 
 Split decision:
-- Review for split. Cohesion reason: implicit serialization security is one payload boundary.
+- Review for split. Cohesion reason: this is one safe declarative payload codec
+  after hostile refusal fixtures were split out.
+
+### Candidate Spec: `.impress` Implicit Payload Security Refusal Fixtures
+
+Discovery purpose:
+- Define refusal diagnostics and tests for executable code, dynamic imports,
+  unknown field nodes, and over-budget implicit payloads in `.impress`.
+
+Responsibilities:
+- Functions/methods:
+  - executable-payload refusal
+  - unknown-node refusal
+  - field-tree budget refusal
+- Data structures/models:
+  - security diagnostic
+  - unsafe implicit payload fixture
+- Dependencies/services:
+  - `.impress` reader
+  - implicit field validator
+- Returns/outputs/signals:
+  - unsafe payload refusal
+  - deterministic security diagnostic
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: implicit field validator once implemented
+  - Additions to existing reusable library/module: `.impress` refusal fixture
+    suite
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - reads invalid `.impress` fixture files
+- Security/privacy-sensitive behavior:
+  - rejects executable code, dynamic imports, unknown field nodes, and
+    over-budget field trees
+- Performance-sensitive behavior:
+  - refusal path bounds field tree size before evaluation
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - future `.impress` reader and implicit payload tests
+- Chosen defaults / parameters:
+  - unsafe implicit payloads refuse before runtime evaluation
+- Test strategy:
+  - executable-code, dynamic-import, unknown-node, and over-budget fixture tests
+- Data ownership:
+  - reader owns security diagnostics; evaluator never sees unsafe payloads
+- Routes:
+  - file reader to implicit field validator to refusal diagnostic
+- Reuse/extraction decision:
+  - reuse reader/load-result refusal contract
+- UI field/control inventory:
+  - not applicable
+
+Open questions / nuance discovered:
+- This split keeps security refusal visible enough to block unsafe codec
+  implementations.
+
+Score:
+- Functions/methods: 3 x 2 = 6
+- Data structures/models: 2 x 1 = 2
+- Dependencies/services: 2 x 1 = 2
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 1 x 3 = 3
+- Security/privacy-sensitive behavior: 1 x 3 = 3
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 0 x 2 = 0
+- Total: 21.5
+
+Readiness blockers:
+- [x] Missing implementation owner/module.
+- [x] Missing reuse/extraction decision.
+- [x] Missing library/module boundary where adding or creating reusable code.
+- [x] Missing UI field/control inventory where applicable.
+- [x] Missing chosen defaults / parameters.
+- [x] Missing test strategy.
+- [x] Unclear data ownership.
+- [x] Missing GUI/concurrency route where applicable.
+- [x] Missing performance bound/index plan where applicable.
+- [x] Missing privacy/logging rule where applicable.
+
+Split decision:
+- Review for split. Cohesion reason: this is one security refusal fixture suite
+  after safe payload codec work was split out.
 
 ## Open Decisions
 
@@ -2439,6 +2538,8 @@ Split decision:
 
 ## Change History
 
+- 2026-05-27: Critically reviewed the manifest beyond score thresholds and
+  split implicit patch payload persistence from unsafe payload refusal fixtures.
 - 2026-05-27: Removed external fastener-profile modeling as an
   Impression-owned primary producer and kept feature producer examples limited
   to Impression-owned features.

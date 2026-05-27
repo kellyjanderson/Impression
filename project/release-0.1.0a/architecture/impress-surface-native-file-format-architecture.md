@@ -856,33 +856,31 @@ Readiness blockers:
 Split decision:
 - Review for split. Cohesion reason: body and shell codec are one container-level codec boundary.
 
-### Candidate Spec: `.impress` Patch Payload Codec
+### Candidate Spec: `.impress` Base Patch Payload Codec
 
 Discovery purpose:
-- Define patch payload encoding/decoding for base patch fields and family dispatch.
+- Define encoding/decoding for base patch fields shared by every surface patch
+  family, excluding family dispatch and constructor validation.
 
 Responsibilities:
 - Functions/methods:
-  - encode patch
-  - decode patch
-  - patch constructor validation bridge
+  - encode base patch fields
+  - decode base patch fields
 - Data structures/models:
-  - patch payload
-  - family dispatch record
+  - base patch payload
+  - patch identity payload
 - Dependencies/services:
   - surface model
-  - patch family modules
   - `.impress` root
 - Returns/outputs/signals:
-  - encoded patch payload
-  - decoded patch object
-  - patch diagnostic
+  - encoded base patch payload
+  - decoded base patch field bundle
 - UI surfaces/components:
   - not applicable
 - UI fields/elements:
   - not applicable
 - Reusable code plan:
-  - Existing code reused as-is: surface patch constructors
+  - Existing code reused as-is: surface patch base fields
   - Additions to existing reusable library/module: `.impress` codec
   - New reusable library/module to create: none
 - Database queries/tables/migrations:
@@ -890,11 +888,11 @@ Responsibilities:
 - Async/concurrency behavior:
   - none
 - Destructive/write behavior:
-  - writes or changes only the scoped artifact described by this spec
+  - writes `.impress` patch payloads
 - Security/privacy-sensitive behavior:
-  - none unless explicitly named in this candidate
+  - none
 - Performance-sensitive behavior:
-  - bounded to the scoped artifact described by this spec
+  - bounded to patch field size
 - Cross-screen reusable behavior:
   - not applicable
 
@@ -902,31 +900,31 @@ Project readiness fields:
 - Implementation owner/module:
   - future `.impress` codec module
 - Chosen defaults / parameters:
-  - decode validates through public patch constructors
+  - all family codecs consume the same base patch field bundle
 - Test strategy:
-  - patch round-trip and invalid family tests
+  - base patch round-trip and missing-field tests
 - Data ownership:
-  - codec owns serialized form; patch constructors own invariants
+  - codec owns serialized base fields; patch constructors own invariants
 - Routes:
-  - save/load to patch codec
+  - save/load to base patch codec
 - Reuse/extraction decision:
-  - add to `.impress` codec module
+  - add shared base patch helpers to `.impress` codec module
 - UI field/control inventory:
   - not applicable
 
 Open questions / nuance discovered:
-- Advanced family payload details remain in family-specific payload specs.
+- Family-specific payload details remain in family payload specs and dispatch.
 
 Score:
-- Functions/methods: 3 x 2 = 6
+- Functions/methods: 2 x 2 = 4
 - Data structures/models: 2 x 1 = 2
-- Dependencies/services: 3 x 1 = 3
-- Returns/outputs/signals: 3 x 1 = 3
+- Dependencies/services: 2 x 1 = 2
+- Returns/outputs/signals: 2 x 1 = 2
 - Existing reusable code reused as-is: 1 x 0.5 = 0.5
 - Adding code to an existing library/module: 1 x 1 = 1
 - Creating a new reusable library/module: 0 x 3 = 0
 - Destructive/write behavior: 1 x 3 = 3
-- Security/privacy-sensitive behavior: 1 x 3 = 3
+- Security/privacy-sensitive behavior: 0 x 3 = 0
 - Performance-sensitive behavior: 1 x 2 = 2
 - UI surfaces/components: 0 x 2 = 0
 - UI fields/elements: 0 x 1 = 0
@@ -934,7 +932,7 @@ Score:
 - Async/concurrency behavior: 0 x 3 = 0
 - Cross-screen reusable behavior: 0 x 2 = 0
 - Readiness blockers: 0 x 2 = 0
-- Total: 23.5
+- Total: 16.5
 
 Readiness blockers:
 - [x] Missing implementation owner/module.
@@ -949,7 +947,107 @@ Readiness blockers:
 - [x] Missing privacy/logging rule where applicable.
 
 Split decision:
-- Review for split. Cohesion reason: patch payload dispatch and validation are one codec boundary.
+- Review for split. Cohesion reason: this is one shared base payload codec
+  after family dispatch and constructor validation were split out.
+
+### Candidate Spec: `.impress` Patch Family Dispatch And Validation
+
+Discovery purpose:
+- Define patch-family dispatch, decoded payload routing, and constructor
+  validation diagnostics for `.impress` patch loading.
+
+Responsibilities:
+- Functions/methods:
+  - patch family dispatcher
+  - patch constructor validation bridge
+  - invalid family diagnostic builder
+- Data structures/models:
+  - family dispatch record
+  - patch diagnostic
+- Dependencies/services:
+  - patch family modules
+  - base patch payload codec
+  - `.impress` reader
+- Returns/outputs/signals:
+  - decoded patch object
+  - invalid family diagnostic
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: surface patch constructors
+  - Additions to existing reusable library/module: `.impress` codec
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - none
+- Security/privacy-sensitive behavior:
+  - refuses unknown or unsafe family payloads
+- Performance-sensitive behavior:
+  - dispatch bounded by allow-listed family registry
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - future `.impress` codec module
+- Chosen defaults / parameters:
+  - decode validates through public patch constructors and refuses unknown
+    families
+- Test strategy:
+  - invalid family, invalid constructor payload, and family dispatch tests
+- Data ownership:
+  - family dispatcher owns serialized-to-runtime routing; patch constructors own
+    invariants
+- Routes:
+  - reader to family dispatcher to patch constructor
+- Reuse/extraction decision:
+  - add dispatch registry to `.impress` codec module
+- UI field/control inventory:
+  - not applicable
+
+Open questions / nuance discovered:
+- Security-sensitive implicit family details remain in the implicit payload
+  security spec.
+
+Score:
+- Functions/methods: 3 x 2 = 6
+- Data structures/models: 2 x 1 = 2
+- Dependencies/services: 3 x 1 = 3
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 0 x 3 = 0
+- Security/privacy-sensitive behavior: 1 x 3 = 3
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 0 x 2 = 0
+- Total: 19.5
+
+Readiness blockers:
+- [x] Missing implementation owner/module.
+- [x] Missing reuse/extraction decision.
+- [x] Missing library/module boundary where adding or creating reusable code.
+- [x] Missing UI field/control inventory where applicable.
+- [x] Missing chosen defaults / parameters.
+- [x] Missing test strategy.
+- [x] Unclear data ownership.
+- [x] Missing GUI/concurrency route where applicable.
+- [x] Missing performance bound/index plan where applicable.
+- [x] Missing privacy/logging rule where applicable.
+
+Split decision:
+- Review for split. Cohesion reason: dispatch and constructor validation are
+  one load-time routing/refusal boundary.
 
 ### Candidate Spec: `.impress` Trim Payload Codec
 
@@ -1719,6 +1817,9 @@ Split decision:
 
 ## Change History
 
+- 2026-05-27: Critically reviewed the manifest beyond score thresholds and
+  split base patch payload codec work from patch-family dispatch and constructor
+  validation.
 - 2026-05-26: Further split high-scoring manifest entries where review exposed hidden schema, codec, trim, seam, and adjacency boundaries.
 - 2026-05-26: Split all manifest candidates that scored 25+ into smaller assessed candidates for spec promotion.
 - 2026-05-26: Replaced the lightweight specification list with a

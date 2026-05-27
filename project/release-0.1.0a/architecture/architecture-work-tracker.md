@@ -63,6 +63,9 @@ The audit looked for:
   and [SurfaceBody CSG Architecture](surfacebody-csg-architecture.md).
 - [x] Confirmed the reviewed manifests have no remaining candidate scored
   `25+` after the current split pass.
+- [x] Performed an additional critical review beyond score thresholds and split
+  underdefined candidates in topology builder APIs, `.impress` patch payload
+  dispatch, implicit payload security, and primitive/feature producer selection.
 - [x] Left index, tracker, and already-covered sibling architecture documents
   without duplicate manifests where their new work is owned by the umbrella or
   component manifest listed above.
@@ -553,6 +556,9 @@ When a new architecture document is added or materially updated:
 
 ## Change History
 
+- 2026-05-27: Recorded the extra critical manifest review that split
+  underdefined candidates even though no candidate exceeded the mandatory split
+  threshold.
 - 2026-05-27: Marked the surface-body completion program as manifest assessed
   after adding and splitting the owning specification manifest.
 - 2026-05-26: Moved assessed specification manifests out of this tracker and
