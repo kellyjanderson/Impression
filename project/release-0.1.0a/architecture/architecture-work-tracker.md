@@ -78,7 +78,7 @@ complete.
 
 ### Surface Body Depth Completion Architecture
 
-- Status: `Manifest Assessed`
+- Status: `Specifications Written`
 - Architecture:
   - [Higher-Order Surface CSG Solver Architecture](higher-order-surface-csg-solver-architecture.md)
   - [Exact Surface Intersection Kernel Architecture](exact-surface-intersection-kernel-architecture.md)
@@ -89,6 +89,7 @@ complete.
 - [x] Specification manifests added using the manifest template shape and
   scoring policy.
 - [x] Architecture index updated.
+- [x] Final implementation specifications created for all 33 reviewed manifest candidates.
 
 Architecture-defined work:
 
