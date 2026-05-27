@@ -1380,12 +1380,68 @@ class PlannedRegionPair:
 
 
 @dataclass(frozen=True)
+class LoftSuggestedAuthoredRail:
+    """Non-mutating advice for resolving an authored topology ambiguity."""
+
+    rail_kind: str
+    topology_ref: str
+    entity_ref: str
+    suggestion: str
+
+    def canonical_payload(self) -> dict[str, str]:
+        return {
+            "rail_kind": self.rail_kind,
+            "topology_ref": self.topology_ref,
+            "entity_ref": self.entity_ref,
+            "suggestion": self.suggestion,
+        }
+
+
+@dataclass(frozen=True)
+class LoftAmbiguityLocator:
+    """Exact authored-topology location for an unresolved loft ambiguity."""
+
+    topology_ref: str
+    station_interval: tuple[int, int]
+    station_index: int
+    entity_ref: str
+    relationship_group: str
+    candidate_lifecycle: str
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "topology_ref": self.topology_ref,
+            "station_interval": self.station_interval,
+            "station_index": self.station_index,
+            "entity_ref": self.entity_ref,
+            "relationship_group": self.relationship_group,
+            "candidate_lifecycle": self.candidate_lifecycle,
+        }
+
+
+@dataclass(frozen=True)
 class LoftAmbiguityRecord:
     interval: tuple[int, int]
     topology_state_index: int
     ambiguous_region_indices: tuple[int, ...]
     ambiguity_class: str
     relationship_group: str | None = None
+    locator: LoftAmbiguityLocator | None = None
+    suggested_rails: tuple[LoftSuggestedAuthoredRail, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "suggested_rails", tuple(self.suggested_rails))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "interval": self.interval,
+            "topology_state_index": self.topology_state_index,
+            "ambiguous_region_indices": self.ambiguous_region_indices,
+            "ambiguity_class": self.ambiguity_class,
+            "relationship_group": self.relationship_group,
+            "locator": None if self.locator is None else self.locator.canonical_payload(),
+            "suggested_rails": [rail.canonical_payload() for rail in self.suggested_rails],
+        }
 
 
 @dataclass(frozen=True)
@@ -1427,6 +1483,25 @@ class LoftAmbiguityReport:
 
 
 @dataclass(frozen=True)
+class LoftPlanExecutabilityStatus:
+    """Executable/not-executable status derived from unresolved ambiguity records."""
+
+    executable: bool
+    unresolved_ambiguities: tuple[LoftAmbiguityRecord, ...] = ()
+    invalid_inputs: tuple[str, ...] = ()
+
+    @property
+    def diagnostic(self) -> str:
+        if self.executable:
+            return "Loft plan is executable."
+        return (
+            "Loft plan is not executable: "
+            f"{len(self.unresolved_ambiguities)} unresolved ambiguity record(s), "
+            f"{len(self.invalid_inputs)} invalid input record(s)."
+        )
+
+
+@dataclass(frozen=True)
 class LoftManyToManyCandidateSet:
     prev_region_indices: tuple[int, ...]
     curr_region_indices: tuple[int, ...]
@@ -1455,6 +1530,132 @@ class LoftPlanningBlockedError(ValueError):
         super().__init__(message)
         self.ambiguity_record = ambiguity_record
         self.constraint_request = constraint_request
+
+
+def _fallback_ambiguity_record(index: int) -> LoftAmbiguityRecord:
+    interval = (index, index + 1)
+    return build_loft_ambiguity_record(
+        interval=interval,
+        ambiguity_class="unknown",
+        ambiguous_region_indices=(),
+        relationship_group="unknown",
+        entity_ref=f"metadata.ambiguity_failed_intervals_count[{index}]",
+        candidate_lifecycle="unresolved",
+        suggested_rail_text="Add authored topology rails for the unresolved loft ambiguity.",
+    )
+
+
+def build_loft_ambiguity_record(
+    *,
+    interval: tuple[int, int],
+    ambiguity_class: str,
+    ambiguous_region_indices: tuple[int, ...],
+    relationship_group: str | None,
+    entity_ref: str,
+    candidate_lifecycle: str,
+    topology_ref: str = "topology",
+    suggested_rail_text: str = "Add named correspondence rails for this topology relationship.",
+) -> LoftAmbiguityRecord:
+    """Build an unresolved ambiguity record with complete locator diagnostics."""
+
+    group = relationship_group or "unspecified"
+    locator = LoftAmbiguityLocator(
+        topology_ref=topology_ref,
+        station_interval=interval,
+        station_index=interval[1],
+        entity_ref=entity_ref,
+        relationship_group=group,
+        candidate_lifecycle=candidate_lifecycle,
+    )
+    suggested_rail = LoftSuggestedAuthoredRail(
+        rail_kind="correspondence",
+        topology_ref=topology_ref,
+        entity_ref=entity_ref,
+        suggestion=suggested_rail_text,
+    )
+    return LoftAmbiguityRecord(
+        interval=interval,
+        topology_state_index=interval[1],
+        ambiguous_region_indices=ambiguous_region_indices,
+        ambiguity_class=ambiguity_class,
+        relationship_group=group,
+        locator=locator,
+        suggested_rails=(suggested_rail,),
+    )
+
+
+def _coerce_loft_ambiguity_records(value: object) -> tuple[LoftAmbiguityRecord, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return ()
+    records: list[LoftAmbiguityRecord] = []
+    for item in value:
+        if isinstance(item, LoftAmbiguityRecord):
+            records.append(item)
+        elif isinstance(item, dict):
+            records.append(_decode_loft_ambiguity_record_payload(item))
+    return tuple(records)
+
+
+def _decode_loft_ambiguity_record_payload(payload: dict[str, object]) -> LoftAmbiguityRecord:
+    locator_payload = payload.get("locator")
+    locator = None
+    if isinstance(locator_payload, dict):
+        interval = tuple(locator_payload.get("station_interval", (0, 1)))  # type: ignore[arg-type]
+        locator = LoftAmbiguityLocator(
+            topology_ref=str(locator_payload.get("topology_ref", "topology")),
+            station_interval=(int(interval[0]), int(interval[1])),
+            station_index=int(locator_payload.get("station_index", interval[1])),
+            entity_ref=str(locator_payload.get("entity_ref", "unknown")),
+            relationship_group=str(locator_payload.get("relationship_group", "unspecified")),
+            candidate_lifecycle=str(locator_payload.get("candidate_lifecycle", "unresolved")),
+        )
+    rails_payload = payload.get("suggested_rails", ())
+    suggested_rails: list[LoftSuggestedAuthoredRail] = []
+    if isinstance(rails_payload, Sequence) and not isinstance(rails_payload, (str, bytes)):
+        for rail_payload in rails_payload:
+            if isinstance(rail_payload, dict):
+                suggested_rails.append(
+                    LoftSuggestedAuthoredRail(
+                        rail_kind=str(rail_payload.get("rail_kind", "correspondence")),
+                        topology_ref=str(rail_payload.get("topology_ref", "topology")),
+                        entity_ref=str(rail_payload.get("entity_ref", "unknown")),
+                        suggestion=str(rail_payload.get("suggestion", "Add authored topology rails.")),
+                    )
+                )
+    interval_payload = tuple(payload.get("interval", (0, 1)))  # type: ignore[arg-type]
+    return LoftAmbiguityRecord(
+        interval=(int(interval_payload[0]), int(interval_payload[1])),
+        topology_state_index=int(payload.get("topology_state_index", interval_payload[1])),
+        ambiguous_region_indices=tuple(int(value) for value in payload.get("ambiguous_region_indices", ())),  # type: ignore[arg-type]
+        ambiguity_class=str(payload.get("ambiguity_class", "unknown")),
+        relationship_group=None if payload.get("relationship_group") is None else str(payload.get("relationship_group")),
+        locator=locator,
+        suggested_rails=tuple(suggested_rails),
+    )
+
+
+def validate_loft_ambiguity_locators(records: Iterable[LoftAmbiguityRecord]) -> tuple[LoftAmbiguityRecord, ...]:
+    """Require every unresolved ambiguity record to carry exact locator fields."""
+
+    normalized = tuple(records)
+    for record in normalized:
+        locator = record.locator
+        if locator is None:
+            raise ValueError("Loft ambiguity diagnostic is missing locator.")
+        if not all(
+            (
+                locator.topology_ref,
+                locator.entity_ref,
+                locator.relationship_group,
+                locator.candidate_lifecycle,
+            )
+        ):
+            raise ValueError("Loft ambiguity locator fields must be non-empty.")
+        if not record.suggested_rails:
+            raise ValueError("Loft ambiguity diagnostic is missing suggested authored rails.")
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -1854,17 +2055,43 @@ class LoftPlan:
 
     @property
     def is_executable(self) -> bool:
-        return int(self.metadata.get("ambiguity_failed_intervals_count", 0)) == 0
+        return self.executability_status.executable
 
     @property
     def blocking_status(self) -> str:
         return "none" if self.is_executable else "constraint_required"
 
-    def require_executable(self) -> None:
-        if not self.is_executable:
-            raise ValueError(
-                "Loft plan is not executable: unresolved ambiguity or blocking planner state remains."
+    @property
+    def unresolved_ambiguities(self) -> tuple[LoftAmbiguityRecord, ...]:
+        return _coerce_loft_ambiguity_records(self.metadata.get("unresolved_ambiguities", ()))
+
+    @property
+    def invalid_input_records(self) -> tuple[str, ...]:
+        values = self.metadata.get("invalid_input_records", ())
+        if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+            return ()
+        return tuple(str(value) for value in values)
+
+    @property
+    def executability_status(self) -> LoftPlanExecutabilityStatus:
+        unresolved = self.unresolved_ambiguities
+        failed_count = int(self.metadata.get("ambiguity_failed_intervals_count", 0))
+        if failed_count > len(unresolved):
+            unresolved = unresolved + tuple(
+                _fallback_ambiguity_record(index)
+                for index in range(len(unresolved), failed_count)
             )
+        invalid_inputs = self.invalid_input_records
+        return LoftPlanExecutabilityStatus(
+            executable=not unresolved and not invalid_inputs,
+            unresolved_ambiguities=unresolved,
+            invalid_inputs=invalid_inputs,
+        )
+
+    def require_executable(self) -> None:
+        status = self.executability_status
+        if not status.executable:
+            raise ValueError(status.diagnostic)
 
 
 def loft_profiles(
@@ -3060,6 +3287,7 @@ def _loft_execute_plan_surface(
     """
 
     _validate_loft_plan(plan)
+    plan.require_executable()
 
     patches: list[object] = []
     seams: list[SurfaceSeam] = []
@@ -3592,12 +3820,18 @@ def _raise_structured_ambiguity_error(
     relationship_group: str | None = None,
     detail: str,
 ) -> None:
-    ambiguity_record = LoftAmbiguityRecord(
+    entity_ref = (
+        f"interval:{interval[0]}->{interval[1]}:"
+        f"regions:{','.join(str(index) for index in ambiguous_region_indices) or 'unknown'}"
+    )
+    ambiguity_record = build_loft_ambiguity_record(
         interval=interval,
-        topology_state_index=interval[1],
         ambiguous_region_indices=ambiguous_region_indices,
         ambiguity_class=ambiguity_class,
         relationship_group=relationship_group,
+        entity_ref=entity_ref,
+        candidate_lifecycle=tie_break_stage,
+        suggested_rail_text="Add predecessor/successor correspondence ids for this ambiguous topology interval.",
     )
     constraint_request = LoftConstraintRequest(
         interval=interval,
@@ -4013,6 +4247,13 @@ def _validate_loft_plan(plan: LoftPlan) -> None:
         raise ValueError(
             "Invalid loft plan metadata: ambiguity_failed_intervals_count must be >= 0."
         )
+    unresolved_records = plan.unresolved_ambiguities
+    if unresolved_records:
+        validate_loft_ambiguity_locators(unresolved_records)
+    if int(plan.metadata["ambiguity_failed_intervals_count"]) > 0 and not unresolved_records:
+        # Older plans may only carry the count. Execution still refuses through
+        # fallback records, but fresh ambiguity diagnostics must carry locators.
+        pass
     if float(plan.metadata["probabilistic_selected_confidence"]) < 0.0:
         raise ValueError(
             "Invalid loft plan metadata: probabilistic_selected_confidence must be >= 0."
@@ -6864,6 +7105,10 @@ __all__ = [
     "SampleCorrespondenceRecord",
     "SurfaceSampleEmissionDiagnostic",
     "SyntheticSupportReference",
+    "LoftAmbiguityLocator",
+    "LoftAmbiguityRecord",
+    "LoftPlanExecutabilityStatus",
+    "LoftSuggestedAuthoredRail",
     "LoftPlan",
     "LoftDebugMeshResult",
     "accept_or_refuse_inferred_correspondence",
@@ -6874,6 +7119,7 @@ __all__ = [
     "emit_surface_patches_from_sample_correspondence",
     "insert_synthetic_support_reference",
     "classify_loft_patch_family",
+    "build_loft_ambiguity_record",
     "loft_patch_family_selection_records",
     "locate_parent_span",
     "project_point_to_span",
@@ -6889,6 +7135,7 @@ __all__ = [
     "validate_loft_sweep_intent",
     "validate_mesh_executor_correspondence_input",
     "validate_rail_priority",
+    "validate_loft_ambiguity_locators",
     "validate_sample_correspondence",
     "validate_surface_executor_correspondence_input",
     "loft_profiles",

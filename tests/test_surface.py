@@ -95,16 +95,20 @@ from impression.modeling import (
     SurfaceCompositionError,
     SurfaceCompositionTraversalRecord,
     SurfaceContinuityMetadata,
+    SurfaceContinuityRequest,
+    SurfaceContinuitySupportRecord,
     SurfaceConsumerCollection,
     SurfaceCollectionTessellationResult,
     SurfaceFamilyTessellationAdapter,
     SurfaceFamilyTessellationAdapterCoverageRecord,
     SURFACE_FAMILY_TESSELLATION_ADAPTERS,
+    SUPPORTED_SEAM_CONTINUITY_CLASSES,
     SurfaceBooleanFamilyEligibilityResult,
     SurfaceBooleanFamilyPairSupport,
     SurfaceBooleanOperands,
     SurfaceBooleanSupportState,
     SurfaceBooleanUnsupportedFamilyDiagnostic,
+    SurfaceUnsupportedContinuityDiagnostic,
     SurfaceCSGHigherOrderRefusalDiagnostic,
     SurfaceCSGHigherOrderSupportRecord,
     SurfaceCSGPrimitiveAnalyticPairRecord,
@@ -134,6 +138,7 @@ from impression.modeling import (
     assert_surface_family_tessellation_adapter_coverage,
     audit_all_patch_family_promotion_readiness,
     audit_patch_family_promotion_readiness,
+    build_surface_unsupported_continuity_diagnostic,
     classify_surface_seam_continuity,
     evaluate_surface_body_completion_gate,
     evaluate_implicit_field,
@@ -153,6 +158,7 @@ from impression.modeling import (
     surface_boolean_family_eligibility,
     surface_boolean_family_pair_support,
     surface_boolean_result,
+    surface_continuity_support,
     surface_csg_analytic_primitive_pair_support,
     surface_csg_completion_support_matrix,
     surface_csg_refusal_record,
@@ -1818,6 +1824,30 @@ def test_cross_family_seam_validation_reports_unsupported_continuity_request() -
     assert result.compatible is False
     assert result.continuity.classified == "incompatible"
     assert any("unsupported continuity request" in diagnostic for diagnostic in result.diagnostics)
+
+
+def test_surface_continuity_support_records_supported_and_future_classes() -> None:
+    supported = surface_continuity_support(SurfaceContinuityRequest("G0", source="loft"))
+    future = surface_continuity_support("G1")
+
+    assert SUPPORTED_SEAM_CONTINUITY_CLASSES == ("C0", "G0")
+    assert isinstance(supported, SurfaceContinuitySupportRecord)
+    assert supported.supported is True
+    assert supported.support_state == "supported"
+    assert future.supported is False
+    assert future.support_state == "not-yet-implemented"
+    assert "supported classes are C0, G0" in future.diagnostic
+
+
+def test_surface_unsupported_continuity_diagnostic_is_structured() -> None:
+    diagnostic = build_surface_unsupported_continuity_diagnostic("C2")
+
+    assert isinstance(diagnostic, SurfaceUnsupportedContinuityDiagnostic)
+    assert diagnostic.requested == "C2"
+    assert diagnostic.supported_classes == ("C0", "G0")
+    assert "unsupported continuity request" in diagnostic.message
+    with pytest.raises(ValueError, match="Supported seam continuity requests"):
+        build_surface_unsupported_continuity_diagnostic("C0")
 
 
 def test_subdivision_boundary_descriptor_records_approximation_and_implicit_seams_refuse() -> None:

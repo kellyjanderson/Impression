@@ -108,6 +108,43 @@ class SurfaceBodyCompletionReport:
 
 
 @dataclass(frozen=True)
+class SurfaceContinuityRequest:
+    """Authored continuity request kept separate from observed continuity."""
+
+    requested: str = "C0"
+    source: str = "authored"
+
+    def __post_init__(self) -> None:
+        requested = str(self.requested).strip()
+        source = str(self.source).strip()
+        if not requested:
+            raise ValueError("SurfaceContinuityRequest.requested must be non-empty.")
+        if not source:
+            raise ValueError("SurfaceContinuityRequest.source must be non-empty.")
+        object.__setattr__(self, "requested", requested)
+        object.__setattr__(self, "source", source)
+
+
+@dataclass(frozen=True)
+class SurfaceContinuitySupportRecord:
+    """Support verdict for an authored seam continuity request."""
+
+    requested: str
+    supported: bool
+    support_state: Literal["supported", "unsupported", "not-yet-implemented"]
+    diagnostic: str = ""
+
+
+@dataclass(frozen=True)
+class SurfaceUnsupportedContinuityDiagnostic:
+    """Structured diagnostic for unsupported seam continuity classes."""
+
+    requested: str
+    supported_classes: tuple[str, ...]
+    message: str
+
+
+@dataclass(frozen=True)
 class PatchFamilyPromotionGapRecord:
     """One missing or unsupported promotion criterion for a patch family."""
 
@@ -169,6 +206,7 @@ PATCH_FAMILY_PROMOTION_CRITERIA: tuple[str, ...] = (
     "loft",
     "diagnostics",
 )
+SUPPORTED_SEAM_CONTINUITY_CLASSES: tuple[str, ...] = ("C0", "G0")
 _PATCH_FAMILY_PROMOTION_OPERATION_ALIASES: dict[str, tuple[str, ...]] = {
     "record": (
         "surface-store",
@@ -3129,8 +3167,9 @@ def validate_surface_seam_participation(
             diagnostics.append(f"boundary positions differ by {position_delta:.6g}, tolerance {tolerance:.6g}")
     exact_comparison = first_descriptor.exact and second_descriptor.exact
     requested = seam.continuity
-    if requested not in {"C0", "G0"}:
-        diagnostics.append(f"unsupported continuity request {requested!r}; only C0/G0 are classified")
+    support = surface_continuity_support(requested)
+    if not support.supported:
+        diagnostics.append(support.diagnostic)
         compatible = False
     classified = "C0" if compatible else "incompatible"
     continuity = SurfaceContinuityMetadata(requested, classified, tolerance, exact_comparison, tuple(diagnostics))
@@ -3155,6 +3194,45 @@ def surface_adjacency_from_seams(shell: "SurfaceShell") -> tuple[SurfaceAdjacenc
     for seam in shell.seams:
         updates.extend(_seam_adjacency_updates(seam))
     return tuple(updates)
+
+
+def surface_continuity_support(request: SurfaceContinuityRequest | str) -> SurfaceContinuitySupportRecord:
+    """Return the support verdict for an authored continuity request."""
+
+    normalized = request if isinstance(request, SurfaceContinuityRequest) else SurfaceContinuityRequest(str(request))
+    if normalized.requested in SUPPORTED_SEAM_CONTINUITY_CLASSES:
+        return SurfaceContinuitySupportRecord(
+            requested=normalized.requested,
+            supported=True,
+            support_state="supported",
+        )
+    state: Literal["unsupported", "not-yet-implemented"] = (
+        "not-yet-implemented" if normalized.requested in {"C1", "G1", "C2", "G2"} else "unsupported"
+    )
+    return SurfaceContinuitySupportRecord(
+        requested=normalized.requested,
+        supported=False,
+        support_state=state,
+        diagnostic=(
+            f"unsupported continuity request {normalized.requested!r}; "
+            f"supported classes are {', '.join(SUPPORTED_SEAM_CONTINUITY_CLASSES)}"
+        ),
+    )
+
+
+def build_surface_unsupported_continuity_diagnostic(
+    request: SurfaceContinuityRequest | str,
+) -> SurfaceUnsupportedContinuityDiagnostic:
+    """Build a structured diagnostic for unsupported seam continuity requests."""
+
+    support = surface_continuity_support(request)
+    if support.supported:
+        raise ValueError("Supported seam continuity requests do not need unsupported diagnostics.")
+    return SurfaceUnsupportedContinuityDiagnostic(
+        requested=support.requested,
+        supported_classes=SUPPORTED_SEAM_CONTINUITY_CLASSES,
+        message=support.diagnostic,
+    )
 
 
 @dataclass(frozen=True)
@@ -3444,12 +3522,16 @@ __all__ = [
     "SurfaceBodyCompletionDiagnostic",
     "SurfaceBodyCompletionEvidenceRecord",
     "SurfaceBodyCompletionReport",
+    "SurfaceContinuityRequest",
+    "SurfaceContinuitySupportRecord",
+    "SurfaceUnsupportedContinuityDiagnostic",
     "PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS",
     "PATCH_FAMILY_CAPABILITY_MATRIX",
     "PATCH_FAMILY_FEATURE_COVERAGE",
     "PATCH_FAMILY_PROMOTION_CRITERIA",
     "REQUIRED_V1_PATCH_FAMILIES",
     "SURFACE_BODY_COMPLETION_TRACKS",
+    "SUPPORTED_SEAM_CONTINUITY_CLASSES",
     "SUPPORTED_SURFACE_PATCH_FAMILIES",
     "SURFACE_SPEC_66_RETIREMENT_NOTE",
     "assert_patch_family_capability_matrix",
@@ -3457,9 +3539,11 @@ __all__ = [
     "audit_all_patch_family_promotion_readiness",
     "audit_patch_family_promotion_readiness",
     "assess_patch_family_availability_promotion",
+    "build_surface_unsupported_continuity_diagnostic",
     "evaluate_surface_body_completion_gate",
     "make_surface_body_completion_evidence_from_capabilities",
     "run_patch_family_availability_promotion_pass",
+    "surface_continuity_support",
     "validate_patch_family_availability_gate",
     "IMPLICIT_FIELD_NODE_KINDS",
     "ParameterDomain",
