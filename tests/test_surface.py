@@ -77,6 +77,20 @@ def _mesh_boundary_negative_fixture(
         expected_keys=expected_keys,
         expected_snapshot=snapshot,
     )
+
+
+def _seam_continuity_negative_fixture(
+    fixture_id: str,
+    diagnostic: object,
+    *,
+    expected_keys: tuple[ExpectedDiagnosticKeyRecord, ...],
+) -> NegativeDiagnosticFixtureRecord:
+    return NegativeDiagnosticFixtureRecord(
+        fixture_id=fixture_id,
+        domain="seam-continuity",
+        expected_keys=expected_keys,
+        expected_snapshot=normalize_diagnostic_snapshot(diagnostic, fixture_id=fixture_id),
+    )
 from impression.modeling._surface_ops import make_surface_linear_extrude, make_surface_rotate_extrude
 from impression.modeling import (
     PATCH_FAMILY_CAPABILITY_MATRIX,
@@ -2210,6 +2224,86 @@ def test_higher_order_continuity_violation_locators_name_parameter_hotspots() ->
     assert "failed requested G1 normal residual" in normal.message
     assert format_surface_continuity_violation_diagnostic(normal) == normal.message
     assert diagnostics.canonical_payload()["has_violations"] is True
+
+
+def test_seam_continuity_negative_diagnostic_fixtures_feed_matrix() -> None:
+    unsupported = build_surface_unsupported_continuity_diagnostic("C2")
+    invalid_constraint = SurfaceSeamContinuityConstraint(
+        seam_id="bad",
+        requested="H1",
+        boundary_uses=(
+            SurfaceSeamBoundaryUseRef("bad", SurfaceBoundaryRef(0, "right"), role="first"),
+            SurfaceSeamBoundaryUseRef("bad", SurfaceBoundaryRef(0, "right"), role="second"),
+        ),
+    )
+    invalid_constraint_diagnostics = validate_surface_seam_continuity_constraint(invalid_constraint)
+    first_patch = PlanarSurfacePatch(family="planar")
+    second_patch = PlanarSurfacePatch(
+        family="planar",
+        origin=(1.0, 0.0, 0.0),
+        u_axis=(1.0, 0.0, 0.0),
+        v_axis=(0.0, 1.0, 0.25),
+    )
+    seam = SurfaceSeam("g1", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")), continuity="G1")
+    constraint = normalize_surface_seam_continuity_constraint(seam)
+    first = evaluate_surface_boundary_derivatives(first_patch, "right", patch_index=0, sample_count=3)
+    second = evaluate_surface_boundary_derivatives(second_patch, "left", patch_index=1, sample_count=3)
+    report = validate_higher_order_surface_continuity(constraint, first, second)
+    locator_diagnostics = build_surface_continuity_violation_locators(report, first, second)
+    normal_violation = next(
+        violation for violation in locator_diagnostics.violations if violation.residual_kind == "normal"
+    )
+
+    fixtures = (
+        _seam_continuity_negative_fixture(
+            "seam-continuity/unsupported-request",
+            {
+                "message": unsupported.message,
+                "requested": unsupported.requested,
+                "supported_classes": unsupported.supported_classes,
+            },
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("requested",), "C2"),
+                ExpectedDiagnosticKeyRecord(("supported_classes",), ("C0", "G0")),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+        _seam_continuity_negative_fixture(
+            "seam-continuity/invalid-constraint",
+            invalid_constraint_diagnostics[0],
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("code",), "invalid-continuity"),
+                ExpectedDiagnosticKeyRecord(("seam_id",), "bad"),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+        _seam_continuity_negative_fixture(
+            "seam-continuity/failed-residual-locator",
+            {
+                "locator": normal_violation.locator.canonical_payload(),
+                "observed": report.observed.canonical_payload() if report.observed is not None else None,
+                "requested": normal_violation.requested,
+                "residual_kind": normal_violation.residual_kind,
+                "residual_value": normal_violation.residual_value,
+                "seam_id": normal_violation.seam_id,
+                "tolerance": normal_violation.tolerance,
+            },
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("requested",), "G1"),
+                ExpectedDiagnosticKeyRecord(("residual_kind",), "normal"),
+                ExpectedDiagnosticKeyRecord(("locator", "seam_id"), "g1"),
+                ExpectedDiagnosticKeyRecord(("locator", "first_boundary", "boundary_id"), "right"),
+                ExpectedDiagnosticKeyRecord(("locator", "second_boundary", "boundary_id"), "left"),
+                ExpectedDiagnosticKeyRecord(("observed", "passed_requested"), False),
+            ),
+        ),
+    )
+
+    matrix = evaluate_negative_diagnostic_fixture_matrix(fixtures, required_domains=("seam-continuity",))
+
+    assert matrix.passed is True
+    assert not matrix.diagnostics
+    assert matrix.domain_coverage[0].fixture_count == 3
 
 
 def test_higher_order_continuity_violation_locators_are_empty_for_passing_report() -> None:
