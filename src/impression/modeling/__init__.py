@@ -13,6 +13,7 @@ from .transform import (
     rotate_euler,
 )
 from .primitives import (
+    PrimitiveCSGRouteRecord,
     make_box,
     make_box_mesh,
     make_cone,
@@ -31,6 +32,7 @@ from .primitives import (
     make_sphere_mesh,
     make_torus,
     make_torus_mesh,
+    primitive_csg_route_inventory,
 )
 from .drawing2d import (
     Arc2D,
@@ -536,6 +538,7 @@ from .threading import (
 __all__ = [
     "make_box",
     "make_box_mesh",
+    "PrimitiveCSGRouteRecord",
     "make_cylinder",
     "make_cylinder_mesh",
     "make_cone",
@@ -552,6 +555,7 @@ __all__ = [
     "make_sphere_mesh",
     "make_torus",
     "make_torus_mesh",
+    "primitive_csg_route_inventory",
     "Arc2D",
     "Bezier2D",
     "Line2D",
