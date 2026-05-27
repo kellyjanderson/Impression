@@ -451,6 +451,6 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 234: CSG Shell Assembly From Fragments (v1.0)](../specifications/surface-234-csg-shell-assembly-from-fragments-v1_0.md)
 - [x] [Surface Spec 235: CSG Seam And Adjacency Rebuild (v1.0)](../specifications/surface-235-csg-seam-and-adjacency-rebuild-v1_0.md)
 - [x] [Surface Spec 236: CSG Validity, Healing, And Provenance Gate (v1.0)](../specifications/surface-236-csg-validity-healing-and-provenance-gate-v1_0.md)
-- [ ] [Surface Spec 237: CSG Primitive Caller Inventory And Gate Helper (v1.0)](../specifications/surface-237-csg-primitive-caller-inventory-and-gate-helper-v1_0.md)
+- [x] [Surface Spec 237: CSG Primitive Caller Inventory And Gate Helper (v1.0)](../specifications/surface-237-csg-primitive-caller-inventory-and-gate-helper-v1_0.md)
 - [ ] [Surface Spec 238: CSG Primitive Migration (v1.0)](../specifications/surface-238-csg-primitive-migration-v1_0.md)
 - [ ] [Surface Spec 239: CSG Feature Builder Boolean Migration (v1.0)](../specifications/surface-239-csg-feature-builder-boolean-migration-v1_0.md)
