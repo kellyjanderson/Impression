@@ -45,6 +45,7 @@ from tests.reference_images import (
     DiagnosticPanelContract,
     assess_cv_result,
     canonical_object_view_camera_contracts,
+    classify_reference_fixture_pair_promotion_gate,
     classify_handedness_from_silhouettes,
     clean_reference_path,
     clean_reference_stl_path,
@@ -66,7 +67,9 @@ from tests.reference_images import (
     HandednessSpaceAnchorContract,
     planar_loop_bounds,
     reference_artifact_state,
+    reference_artifact_contract_version_path,
     reference_fixture_pair_state,
+    write_reference_artifact_contract_version,
     required_reference_fixture_pair_failures,
     render_canonical_object_view_bundle,
     render_mesh_image_with_camera_contract,
@@ -337,6 +340,82 @@ def test_reference_fixture_pair_prefers_clean_baselines(tmp_path: Path) -> None:
 
     assert image_reference == clean_image
     assert stl_reference == clean_stl
+
+
+def test_reference_fixture_pair_promotion_gate_accepts_clean_contract_version(tmp_path: Path) -> None:
+    reference_image_root = tmp_path / "reference-images"
+    reference_stl_root = tmp_path / "reference-stl"
+    name = "demo/fixture"
+    _write_small_image(clean_reference_path(reference_image_root, name), color=(40, 50, 60))
+    _write_text_fixture(clean_reference_stl_path(reference_stl_root, name), "solid clean\nendsolid clean\n")
+    image_state = reference_artifact_state(reference_image_root, name, kind="image")
+    stl_state = reference_artifact_state(reference_stl_root, name, kind="stl")
+    write_reference_artifact_contract_version(
+        image_state,
+        classify_reference_fixture_pair_promotion_gate(
+            reference_image_root=reference_image_root,
+            reference_stl_root=reference_stl_root,
+            name=name,
+        ).contract,
+    )
+    write_reference_artifact_contract_version(
+        stl_state,
+        classify_reference_fixture_pair_promotion_gate(
+            reference_image_root=reference_image_root,
+            reference_stl_root=reference_stl_root,
+            name=name,
+        ).contract,
+    )
+
+    report = classify_reference_fixture_pair_promotion_gate(
+        reference_image_root=reference_image_root,
+        reference_stl_root=reference_stl_root,
+        name=name,
+    )
+
+    assert report.promoted is True
+    assert report.diagnostics == ()
+    assert reference_artifact_contract_version_path(image_state).exists()
+
+
+def test_reference_fixture_pair_promotion_gate_rejects_dirty_missing_partial_and_invalidated_contracts(tmp_path: Path) -> None:
+    reference_image_root = tmp_path / "reference-images"
+    reference_stl_root = tmp_path / "reference-stl"
+    dirty_name = "demo/dirty"
+    partial_name = "demo/partial"
+    invalid_name = "demo/invalid"
+    _write_small_image(dirty_reference_path(reference_image_root, dirty_name), color=(10, 20, 30))
+    _write_text_fixture(dirty_reference_stl_path(reference_stl_root, dirty_name), "solid dirty\nendsolid dirty\n")
+    _write_small_image(clean_reference_path(reference_image_root, partial_name), color=(40, 50, 60))
+    _write_small_image(clean_reference_path(reference_image_root, invalid_name), color=(70, 80, 90))
+    _write_text_fixture(clean_reference_stl_path(reference_stl_root, invalid_name), "solid invalid\nendsolid invalid\n")
+
+    dirty_report = classify_reference_fixture_pair_promotion_gate(
+        reference_image_root=reference_image_root,
+        reference_stl_root=reference_stl_root,
+        name=dirty_name,
+    )
+    missing_report = classify_reference_fixture_pair_promotion_gate(
+        reference_image_root=reference_image_root,
+        reference_stl_root=reference_stl_root,
+        name="demo/missing",
+    )
+    partial_report = classify_reference_fixture_pair_promotion_gate(
+        reference_image_root=reference_image_root,
+        reference_stl_root=reference_stl_root,
+        name=partial_name,
+    )
+    invalid_report = classify_reference_fixture_pair_promotion_gate(
+        reference_image_root=reference_image_root,
+        reference_stl_root=reference_stl_root,
+        name=invalid_name,
+    )
+
+    assert dirty_report.promoted is False
+    assert {diagnostic.code for diagnostic in dirty_report.diagnostics} == {"dirty-artifact"}
+    assert {diagnostic.code for diagnostic in missing_report.diagnostics} == {"missing-artifact"}
+    assert any(diagnostic.code == "partial-fixture" for diagnostic in partial_report.diagnostics)
+    assert {diagnostic.code for diagnostic in invalid_report.diagnostics} == {"invalidated-contract"}
 
 
 def test_reference_fixture_pair_fails_for_partial_existing_group(tmp_path: Path) -> None:
