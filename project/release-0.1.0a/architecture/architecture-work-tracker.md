@@ -78,9 +78,10 @@ complete.
 
 ### Surface Body Completion Program
 
-- Status: `Manifest Assessed`
+- Status: `Manifest Promoted`
 - Architecture: [Surface Body Completion Architecture](surface-body-completion-architecture.md)
 - [x] Specification manifest added, critically reviewed, rescored, and split.
+- [x] Final specifications created for every current manifest candidate.
 
 Architecture-defined work:
 
@@ -134,6 +135,9 @@ Manifest notes:
   gates, primitive/feature integration, and verification evidence.
 - [x] Manifest reviewed through repeated rescore/split passes with no remaining
   candidate at `25+`.
+- [x] Final specification leaves added to
+  [Specifications README](../specifications/README.md) and
+  [Progression](../planning/progression.md).
 
 ### Authored Loft Ambiguity Contract Refresh
 
@@ -556,6 +560,8 @@ When a new architecture document is added or materially updated:
 
 ## Change History
 
+- 2026-05-27: Promoted the surface-body completion manifest and late split
+  candidates into final specification leaves and added them to progression.
 - 2026-05-27: Recorded the extra critical manifest review that split
   underdefined candidates even though no candidate exceeded the mandatory split
   threshold.

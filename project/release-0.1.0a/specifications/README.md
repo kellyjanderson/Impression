@@ -332,3 +332,26 @@
 - [Surface Spec 239: CSG Feature Builder Boolean Migration (v1.0)](surface-239-csg-feature-builder-boolean-migration-v1_0.md)
 - [Surface Spec 224: Loft Public Surface API Default (v1.0)](surface-224-loft-public-surface-api-default-v1_0.md)
 - [Surface Spec 225: Loft Reference QA Role Boundary (v1.0)](surface-225-loft-reference-qa-role-boundary-v1_0.md)
+
+### Additional Manifest Splits
+- [Impress Spec 14: .impress Base Patch Payload Codec (v1.0)](impress-14-impress-base-patch-payload-codec-v1_0.md)
+- [Impress Spec 15: .impress Patch Family Dispatch And Validation (v1.0)](impress-15-impress-patch-family-dispatch-and-validation-v1_0.md)
+- [Loft Spec 65: Topology Point Builder API (v1.0)](loft-65-topology-point-builder-api-v1_0.md)
+- [Loft Spec 66: Topology Segment Builder API (v1.0)](loft-66-topology-segment-builder-api-v1_0.md)
+- [Surface Spec 240: .impress Implicit Patch Payload Codec (v1.0)](surface-240-impress-implicit-patch-payload-codec-v1_0.md)
+- [Surface Spec 241: .impress Implicit Payload Security Refusal Fixtures (v1.0)](surface-241-impress-implicit-payload-security-refusal-fixtures-v1_0.md)
+
+### Surface Body Completion Architecture
+- [Surface Spec 242: Surface Body Completion Capability And Evidence Gate (v1.0)](surface-242-surface-body-completion-capability-and-evidence-gate-v1_0.md)
+- [Surface Spec 243: Patch Family Promotion Readiness Audit (v1.0)](surface-243-patch-family-promotion-readiness-audit-v1_0.md)
+- [Surface Spec 244: CSG Completion Support Matrix And Refusal Records (v1.0)](surface-244-csg-completion-support-matrix-and-refusal-records-v1_0.md)
+- [Surface Spec 245: Analytic CSG Expansion For Primitive Surface Families (v1.0)](surface-245-analytic-csg-expansion-for-primitive-surface-families-v1_0.md)
+- [Surface Spec 246: Higher-Order And Sampled CSG Policy Boundary (v1.0)](surface-246-higher-order-and-sampled-csg-policy-boundary-v1_0.md)
+- [Surface Spec 247: Loft Ambiguity Accumulation And Execution Refusal Gate (v1.0)](surface-247-loft-ambiguity-accumulation-and-execution-refusal-gate-v1_0.md)
+- [Surface Spec 248: Loft Ambiguity Locator Diagnostics (v1.0)](surface-248-loft-ambiguity-locator-diagnostics-v1_0.md)
+- [Surface Spec 249: Seam Continuity Promotion And Diagnostics (v1.0)](surface-249-seam-continuity-promotion-and-diagnostics-v1_0.md)
+- [Surface Spec 250: .impress Whole-Store Fixture Coverage Gate (v1.0)](surface-250-impress-whole-store-fixture-coverage-gate-v1_0.md)
+- [Surface Spec 251: .impress Unsafe Payload Refusal And Determinism Gate (v1.0)](surface-251-impress-unsafe-payload-refusal-and-determinism-gate-v1_0.md)
+- [Surface Spec 252: Primitive Patch Producer Selection (v1.0)](surface-252-primitive-patch-producer-selection-v1_0.md)
+- [Surface Spec 253: Feature Builder Patch Producer Handoff (v1.0)](surface-253-feature-builder-patch-producer-handoff-v1_0.md)
+- [Surface Spec 254: Surface Body Completion Reference Evidence Matrix (v1.0)](surface-254-surface-body-completion-reference-evidence-matrix-v1_0.md)
