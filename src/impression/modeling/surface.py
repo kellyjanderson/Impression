@@ -3201,6 +3201,65 @@ class SurfaceBoundaryDerivativeSummary:
 
 
 @dataclass(frozen=True)
+class SurfaceContinuityResidualMetrics:
+    """Residual metrics computed between two sampled seam boundaries."""
+
+    max_position_delta: float
+    max_tangent_delta: float
+    max_normal_delta: float
+    max_second_derivative_delta: float
+    sample_count: int
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "max_normal_delta": self.max_normal_delta,
+            "max_position_delta": self.max_position_delta,
+            "max_second_derivative_delta": self.max_second_derivative_delta,
+            "max_tangent_delta": self.max_tangent_delta,
+            "sample_count": self.sample_count,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceObservedContinuityClassRecord:
+    """Observed continuity classes derived from residual metrics."""
+
+    requested: str
+    observed_classes: tuple[str, ...]
+    passed_requested: bool
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "observed_classes": self.observed_classes,
+            "passed_requested": self.passed_requested,
+            "requested": self.requested,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceHigherOrderContinuityValidationReport:
+    """Pass/fail report for authored higher-order continuity constraints."""
+
+    constraint: SurfaceSeamContinuityConstraint
+    residuals: SurfaceContinuityResidualMetrics | None
+    observed: SurfaceObservedContinuityClassRecord | None
+    diagnostics: tuple[SurfaceContinuityConstraintDiagnostic, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return self.observed is not None and self.observed.passed_requested and not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "constraint": self.constraint.canonical_payload(),
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "observed": None if self.observed is None else self.observed.canonical_payload(),
+            "passed": self.passed,
+            "residuals": None if self.residuals is None else self.residuals.canonical_payload(),
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceContinuityMetadata:
     """Continuity classification and diagnostics for a seam validation pass."""
 
@@ -3503,6 +3562,126 @@ def evaluate_surface_boundary_derivatives(
         samples=tuple(samples),
         diagnostics=tuple(diagnostics),
         residual_metadata=residual_metadata,
+    )
+
+
+def _unit_vector_delta(first: Sequence[float], second: Sequence[float]) -> float:
+    first_array = _normalize_axis(first, name="first")
+    second_array = _normalize_axis(second, name="second")
+    return float(np.linalg.norm(first_array - second_array))
+
+
+def compute_surface_continuity_residual_metrics(
+    first: SurfaceBoundaryDerivativeSummary,
+    second: SurfaceBoundaryDerivativeSummary,
+) -> SurfaceContinuityResidualMetrics:
+    """Compute max residuals between two boundary derivative summaries."""
+
+    sample_count = min(len(first.samples), len(second.samples))
+    if sample_count == 0:
+        raise ValueError("Surface continuity residual metrics require at least one paired sample.")
+    position_deltas: list[float] = []
+    tangent_deltas: list[float] = []
+    normal_deltas: list[float] = []
+    second_deltas: list[float] = []
+    for first_sample, second_sample in zip(first.samples[:sample_count], second.samples[:sample_count], strict=True):
+        position_deltas.append(float(np.linalg.norm(np.asarray(first_sample.point) - np.asarray(second_sample.point))))
+        tangent_deltas.append(_unit_vector_delta(first_sample.tangent, second_sample.tangent))
+        normal_deltas.append(_unit_vector_delta(first_sample.normal, second_sample.normal))
+        first_second = np.asarray(first_sample.second_u or (0.0, 0.0, 0.0)) + np.asarray(
+            first_sample.second_v or (0.0, 0.0, 0.0)
+        )
+        second_second = np.asarray(second_sample.second_u or (0.0, 0.0, 0.0)) + np.asarray(
+            second_sample.second_v or (0.0, 0.0, 0.0)
+        )
+        second_deltas.append(float(np.linalg.norm(first_second - second_second)))
+    return SurfaceContinuityResidualMetrics(
+        max_position_delta=max(position_deltas),
+        max_tangent_delta=max(tangent_deltas),
+        max_normal_delta=max(normal_deltas),
+        max_second_derivative_delta=max(second_deltas),
+        sample_count=sample_count,
+    )
+
+
+def classify_surface_continuity_residuals(
+    requested: str,
+    residuals: SurfaceContinuityResidualMetrics,
+    tolerance_policy: SurfaceContinuityTolerancePolicy,
+) -> SurfaceObservedContinuityClassRecord:
+    """Classify residual metrics without downgrading the requested class."""
+
+    requested = str(requested).strip().upper()
+    observed: list[str] = []
+    position_ok = residuals.max_position_delta <= tolerance_policy.position_tolerance
+    tangent_ok = residuals.max_tangent_delta <= tolerance_policy.tangent_tolerance
+    normal_ok = residuals.max_normal_delta <= tolerance_policy.tangent_tolerance
+    curvature_ok = residuals.max_second_derivative_delta <= tolerance_policy.curvature_tolerance
+    if position_ok:
+        observed.extend(("C0", "G0"))
+    if position_ok and normal_ok:
+        observed.append("G1")
+    if position_ok and tangent_ok:
+        observed.append("C1")
+    if position_ok and normal_ok and curvature_ok:
+        observed.append("G2")
+    if position_ok and tangent_ok and curvature_ok:
+        observed.append("C2")
+    return SurfaceObservedContinuityClassRecord(
+        requested=requested,
+        observed_classes=tuple(observed),
+        passed_requested=requested in observed,
+    )
+
+
+def validate_higher_order_surface_continuity(
+    constraint: SurfaceSeamContinuityConstraint,
+    first: SurfaceBoundaryDerivativeSummary,
+    second: SurfaceBoundaryDerivativeSummary,
+) -> SurfaceHigherOrderContinuityValidationReport:
+    """Validate authored C/G continuity from boundary derivative residuals."""
+
+    diagnostics = list(validate_surface_seam_continuity_constraint(constraint))
+    for summary in (first, second):
+        diagnostics.extend(
+            SurfaceContinuityConstraintDiagnostic(
+                code="invalid-continuity",
+                seam_id=constraint.seam_id,
+                message=diagnostic.message,
+            )
+            for diagnostic in summary.diagnostics
+        )
+    if diagnostics:
+        return SurfaceHigherOrderContinuityValidationReport(
+            constraint=constraint,
+            residuals=None,
+            observed=None,
+            diagnostics=tuple(diagnostics),
+        )
+    try:
+        residuals = compute_surface_continuity_residual_metrics(first, second)
+    except ValueError as exc:
+        return SurfaceHigherOrderContinuityValidationReport(
+            constraint=constraint,
+            residuals=None,
+            observed=None,
+            diagnostics=(
+                SurfaceContinuityConstraintDiagnostic(
+                    code="invalid-boundary-count",
+                    seam_id=constraint.seam_id,
+                    message=str(exc),
+                ),
+            ),
+        )
+    observed = classify_surface_continuity_residuals(
+        constraint.requested,
+        residuals,
+        constraint.tolerance_policy,
+    )
+    return SurfaceHigherOrderContinuityValidationReport(
+        constraint=constraint,
+        residuals=residuals,
+        observed=observed,
     )
 
 
@@ -4040,6 +4219,9 @@ __all__ = [
     "SurfaceBoundaryDerivativeDiagnostic",
     "SurfaceBoundaryDerivativeSample",
     "SurfaceBoundaryDerivativeSummary",
+    "SurfaceContinuityResidualMetrics",
+    "SurfaceObservedContinuityClassRecord",
+    "SurfaceHigherOrderContinuityValidationReport",
     "PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS",
     "PATCH_FAMILY_CAPABILITY_MATRIX",
     "PATCH_FAMILY_FEATURE_COVERAGE",
@@ -4102,6 +4284,9 @@ __all__ = [
     "classify_surface_seam_continuity",
     "extract_surface_boundary_descriptor",
     "evaluate_surface_boundary_derivatives",
+    "compute_surface_continuity_residual_metrics",
+    "classify_surface_continuity_residuals",
+    "validate_higher_order_surface_continuity",
     "surface_adjacency_from_seams",
     "validate_surface_seam_participation",
     "SurfaceShell",
