@@ -8,6 +8,12 @@ from impression.modeling.loft import (
     resolve_point_birth_death_events,
 )
 from impression.modeling.topology import TopologyPath
+from tests.reference_images import (
+    ExpectedDiagnosticKeyRecord,
+    NegativeDiagnosticFixtureRecord,
+    evaluate_negative_diagnostic_fixture_matrix,
+    normalize_diagnostic_snapshot,
+)
 
 
 def _path(points: tuple[tuple[str, tuple[float, float], str], ...]) -> TopologyPath:
@@ -126,3 +132,44 @@ def test_explicit_correspondence_conflict_refuses_lifecycle_resolution() -> None
 
     assert resolution.accepted is False
     assert resolution.refusals[0].reason == "explicit_correspondence_conflict"
+
+
+def test_loft_point_lifecycle_negative_diagnostic_fixture_feeds_matrix() -> None:
+    source = _path((("a", (0.0, 0.0), "a"), ("b", (1.0, 0.0), "b"), ("c", (0.0, 1.0), "c")))
+    target = _path(
+        (
+            ("a", (0.0, 0.0), "a"),
+            ("conflict", (0.5, 0.0), "a"),
+            ("b", (1.0, 0.0), "b"),
+            ("c", (0.0, 1.0), "c"),
+        )
+    )
+
+    resolution = resolve_point_birth_death_events(
+        {"source": source, "target": target},
+        resolve_authored_rails(source, target),
+        None,
+    )
+    refusal = resolution.refusals[0]
+    fixture = NegativeDiagnosticFixtureRecord(
+        fixture_id="loft/point-lifecycle-correspondence-conflict",
+        domain="loft",
+        expected_keys=(
+            ExpectedDiagnosticKeyRecord(("reason",), "explicit_correspondence_conflict"),
+            ExpectedDiagnosticKeyRecord(("point_ref",), "c"),
+            ExpectedDiagnosticKeyRecord(("required_rail_hint",)),
+        ),
+        expected_snapshot=normalize_diagnostic_snapshot(
+            {
+                "reason": refusal.reason,
+                "point_ref": refusal.point_ref,
+                "required_rail_hint": refusal.required_rail_hint,
+            },
+            fixture_id="loft/point-lifecycle-correspondence-conflict",
+        ),
+    )
+
+    report = evaluate_negative_diagnostic_fixture_matrix((fixture,), required_domains=("loft",))
+
+    assert report.passed is True
+    assert "duplicate explicit correspondence" in refusal.required_rail_hint
