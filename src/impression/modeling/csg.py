@@ -804,6 +804,61 @@ class SurfaceCSGFragmentProvenanceRecord:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGReconstructionDiagnostic:
+    """Diagnostic emitted while converting transient CSG records into durable shells."""
+
+    code: Literal[
+        "invalid-fragment-graph",
+        "invalid-cut-boundary",
+        "missing-source-patch",
+        "missing-cap-payload",
+        "empty-shell",
+        "assembly-error",
+    ]
+    message: str
+    source_patch: SurfaceBooleanPatchRef | None = None
+    cap_payload_index: int | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "cap_payload_index": self.cap_payload_index,
+            "code": self.code,
+            "message": self.message,
+            "source_patch": None,
+        }
+        if self.source_patch is not None:
+            payload["source_patch"] = {
+                "operand_index": self.source_patch.operand_index,
+                "patch_index": self.source_patch.patch_index,
+            }
+        return payload
+
+
+@dataclass(frozen=True)
+class SurfaceCSGShellOrderingRecord:
+    """Stable shell ordering witness for a reconstructed CSG result."""
+
+    result_shell_index: int
+    patch_count: int
+    source_patches: tuple[SurfaceBooleanPatchRef, ...]
+    sort_key: tuple[object, ...]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "patch_count": self.patch_count,
+            "result_shell_index": self.result_shell_index,
+            "sort_key": self.sort_key,
+            "source_patches": tuple(
+                {
+                    "operand_index": patch.operand_index,
+                    "patch_index": patch.patch_index,
+                }
+                for patch in self.source_patches
+            ),
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceCSGShellAssemblyRecord:
     """Provisional CSG shell assembly result before seam rebuild and validity cleanup."""
 
@@ -811,25 +866,27 @@ class SurfaceCSGShellAssemblyRecord:
     classification: SurfaceBooleanClassification
     shells: tuple[SurfaceShell, ...] = ()
     provenance: tuple[SurfaceCSGFragmentProvenanceRecord, ...] = ()
-    diagnostics: tuple[str, ...] = ()
+    shell_ordering: tuple[SurfaceCSGShellOrderingRecord, ...] = ()
+    diagnostics: tuple[SurfaceCSGReconstructionDiagnostic, ...] = ()
 
     @property
     def supported(self) -> bool:
         return not self.diagnostics
 
     def to_body(self, *, metadata: dict[str, object] | None = None) -> SurfaceBody | None:
+        if not self.supported:
+            raise SurfaceBooleanEligibilityError("; ".join(diagnostic.message for diagnostic in self.diagnostics))
         if self.classification == "empty":
             return None
-        if not self.supported:
-            raise SurfaceBooleanEligibilityError("; ".join(self.diagnostics))
         return make_surface_body(self.shells, metadata=metadata)
 
     def canonical_payload(self) -> dict[str, object]:
         return {
             "classification": self.classification,
-            "diagnostics": self.diagnostics,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
             "operation": self.operation,
             "provenance": [record.canonical_payload() for record in self.provenance],
+            "shell_ordering": [record.canonical_payload() for record in self.shell_ordering],
             "shell_count": len(self.shells),
         }
 
@@ -4260,6 +4317,67 @@ def surface_boolean_overlap_fragments(operands: SurfaceBooleanOperands) -> tuple
     )
 
 
+def _surface_csg_patch_ref_sort_key(patch_ref: SurfaceBooleanPatchRef) -> tuple[int, int]:
+    return (int(patch_ref.operand_index), int(patch_ref.patch_index))
+
+
+def _surface_csg_shell_sort_key(
+    patches_with_sources: Sequence[tuple[object, SurfaceBooleanPatchRef, tuple[str, ...]]],
+) -> tuple[object, ...]:
+    if not patches_with_sources:
+        return ("empty",)
+    return (
+        len(patches_with_sources),
+        tuple(_surface_csg_patch_ref_sort_key(source) for _patch, source, _cut_ids in patches_with_sources),
+        tuple(getattr(patch, "family", patch.__class__.__name__) for patch, _source, _cut_ids in patches_with_sources),
+    )
+
+
+def _surface_csg_kernel_patch_source(source_patch: SurfaceBooleanPatchRef, *, role: str) -> dict[str, object]:
+    return {
+        "generated_role": role,
+        "source_operand_index": source_patch.operand_index,
+        "source_patch_index": source_patch.patch_index,
+    }
+
+
+def _surface_csg_patch_with_kernel_source(
+    patch: object,
+    *,
+    source_patch: SurfaceBooleanPatchRef,
+    role: str,
+    cut_curve_ids: Sequence[str] = (),
+):
+    if not hasattr(patch, "metadata"):
+        return patch
+    metadata = dict(getattr(patch, "metadata"))
+    kernel = dict(patch.kernel_metadata())  # type: ignore[attr-defined]
+    consumer = dict(patch.consumer_metadata())  # type: ignore[attr-defined]
+    kernel.update(_surface_csg_kernel_patch_source(source_patch, role=role))
+    if cut_curve_ids:
+        kernel["cut_curve_ids"] = tuple(sorted(cut_curve_ids))
+    metadata["kernel"] = kernel
+    if consumer:
+        metadata["consumer"] = consumer
+    try:
+        return replace(patch, metadata=metadata)
+    except TypeError:
+        return patch
+
+
+def _surface_csg_shell_ordering_record(
+    *,
+    result_shell_index: int,
+    patches_with_sources: Sequence[tuple[object, SurfaceBooleanPatchRef, tuple[str, ...]]],
+) -> SurfaceCSGShellOrderingRecord:
+    return SurfaceCSGShellOrderingRecord(
+        result_shell_index=result_shell_index,
+        patch_count=len(patches_with_sources),
+        source_patches=tuple(source for _patch, source, _cut_ids in patches_with_sources),
+        sort_key=_surface_csg_shell_sort_key(patches_with_sources),
+    )
+
+
 def assemble_surface_csg_shells_from_fragments(
     operation: SurfaceBooleanOperation,
     fragments: Sequence[SurfaceBooleanTrimmedPatchFragment],
@@ -4273,7 +4391,7 @@ def assemble_surface_csg_shells_from_fragments(
     sorted_fragments = tuple(
         sorted(
             fragments,
-            key=lambda fragment: (fragment.source_patch.operand_index, fragment.source_patch.patch_index),
+            key=lambda fragment: _surface_csg_patch_ref_sort_key(fragment.source_patch),
         )
     )
     if multi_shell:
@@ -4285,6 +4403,13 @@ def assemble_surface_csg_shells_from_fragments(
             )
             for fragment in sorted_fragments
         )
+        shell_ordering = tuple(
+            _surface_csg_shell_ordering_record(
+                result_shell_index=index,
+                patches_with_sources=((fragment.patch, fragment.source_patch, fragment.cut_curve_ids),),
+            )
+            for index, fragment in enumerate(sorted_fragments)
+        )
         provenance = tuple(
             SurfaceCSGFragmentProvenanceRecord(
                 source_patch=fragment.source_patch,
@@ -4295,12 +4420,22 @@ def assemble_surface_csg_shells_from_fragments(
             for index, fragment in enumerate(sorted_fragments)
         )
     else:
+        patches_with_sources = tuple(
+            (fragment.patch, fragment.source_patch, fragment.cut_curve_ids)
+            for fragment in sorted_fragments
+        )
         shell = make_surface_shell(
             tuple(fragment.patch for fragment in sorted_fragments),
             connected=True,
             metadata={"kernel": {"primitive_family": "csg_fragment_assembly", "boolean_operation": operation}},
         )
         shells = (shell,)
+        shell_ordering = (
+            _surface_csg_shell_ordering_record(
+                result_shell_index=0,
+                patches_with_sources=patches_with_sources,
+            ),
+        )
         provenance = tuple(
             SurfaceCSGFragmentProvenanceRecord(
                 source_patch=fragment.source_patch,
@@ -4315,6 +4450,205 @@ def assemble_surface_csg_shells_from_fragments(
         classification="closed",
         shells=shells,
         provenance=provenance,
+        shell_ordering=shell_ordering,
+    )
+
+
+def assemble_surface_csg_result_shells(
+    graph: SurfaceCSGFragmentGraphRecord,
+    cap_construction: SurfaceCSGCapConstructionRecord,
+    cut_boundary: SurfaceCSGCutBoundaryRecord,
+    *,
+    multi_shell: bool = False,
+) -> SurfaceCSGShellAssemblyRecord:
+    """Assemble surviving fragments and generated caps into durable result shells."""
+
+    diagnostics: list[SurfaceCSGReconstructionDiagnostic] = []
+    if not graph.supported or graph.plan.operands is None:
+        diagnostics.append(
+            SurfaceCSGReconstructionDiagnostic(
+                code="invalid-fragment-graph",
+                message="Surface CSG result shell assembly requires a supported fragment graph.",
+            )
+        )
+        return SurfaceCSGShellAssemblyRecord(
+            operation=graph.operation,
+            classification="empty",
+            diagnostics=tuple(diagnostics),
+        )
+    if not cap_construction.supported:
+        diagnostics.extend(
+            SurfaceCSGReconstructionDiagnostic(
+                code="missing-cap-payload",
+                message=diagnostic.message,
+                source_patch=diagnostic.patch,
+            )
+            for diagnostic in cap_construction.diagnostics
+        )
+    if not cut_boundary.supported:
+        diagnostics.extend(
+            SurfaceCSGReconstructionDiagnostic(
+                code="invalid-cut-boundary",
+                message=diagnostic.message,
+                source_patch=diagnostic.source_patch,
+                cap_payload_index=diagnostic.cap_payload_index,
+            )
+            for diagnostic in cut_boundary.diagnostics
+        )
+    if diagnostics:
+        return SurfaceCSGShellAssemblyRecord(
+            operation=graph.operation,
+            classification="empty",
+            diagnostics=tuple(diagnostics),
+        )
+
+    patches_with_sources: list[tuple[object, SurfaceBooleanPatchRef, tuple[str, ...]]] = []
+    for edge in graph.classification_edges:
+        if edge.role != "survive":
+            continue
+        source_patch = _surface_csg_patch_for_ref(graph.plan.operands, edge.patch)
+        if source_patch is None:
+            diagnostics.append(
+                SurfaceCSGReconstructionDiagnostic(
+                    code="missing-source-patch",
+                    source_patch=edge.patch,
+                    message=(
+                        "Surface CSG result shell assembly could not resolve surviving "
+                        f"operand {edge.patch.operand_index} patch {edge.patch.patch_index}."
+                    ),
+                )
+            )
+            continue
+        patches_with_sources.append(
+            (
+                _surface_csg_patch_with_kernel_source(
+                    source_patch,
+                    source_patch=edge.patch,
+                    role="csg_surviving_fragment",
+                    cut_curve_ids=edge.cut_curve_ids,
+                ),
+                edge.patch,
+                tuple(sorted(edge.cut_curve_ids)),
+            )
+        )
+
+    attachments_by_payload = {attachment.cap_payload_index: attachment for attachment in cut_boundary.trim_attachments}
+    for cap_index, payload in enumerate(cap_construction.cap_payloads):
+        attachment = attachments_by_payload.get(cap_index)
+        if attachment is None:
+            diagnostics.append(
+                SurfaceCSGReconstructionDiagnostic(
+                    code="missing-cap-payload",
+                    source_patch=payload.source_patch,
+                    cap_payload_index=cap_index,
+                    message=f"Surface CSG result shell assembly is missing cut-boundary attachment {cap_index}.",
+                )
+            )
+            continue
+        cap_patch = replace(
+            payload.patch,
+            trim_loops=(attachment.trim_loop,),
+        )
+        patches_with_sources.append(
+            (
+                _surface_csg_patch_with_kernel_source(
+                    cap_patch,
+                    source_patch=payload.source_patch,
+                    role="csg_generated_cap",
+                    cut_curve_ids=payload.cut_curve_ids,
+                ),
+                payload.source_patch,
+                tuple(sorted(payload.cut_curve_ids)),
+            )
+        )
+
+    if diagnostics:
+        return SurfaceCSGShellAssemblyRecord(
+            operation=graph.operation,
+            classification="empty",
+            diagnostics=tuple(diagnostics),
+        )
+    if not patches_with_sources:
+        return SurfaceCSGShellAssemblyRecord(operation=graph.operation, classification="empty")
+
+    ordered = tuple(sorted(patches_with_sources, key=lambda item: (*_surface_csg_patch_ref_sort_key(item[1]), item[2])))
+    if multi_shell:
+        shell_groups = tuple((item,) for item in ordered)
+    else:
+        shell_groups = (ordered,)
+
+    sorted_shell_groups = tuple(sorted(shell_groups, key=_surface_csg_shell_sort_key))
+    shells: list[SurfaceShell] = []
+    ordering: list[SurfaceCSGShellOrderingRecord] = []
+    provenance: list[SurfaceCSGFragmentProvenanceRecord] = []
+    for shell_index, shell_group in enumerate(sorted_shell_groups):
+        if not shell_group:
+            diagnostics.append(
+                SurfaceCSGReconstructionDiagnostic(
+                    code="empty-shell",
+                    message=f"Surface CSG result shell assembly produced empty shell {shell_index}.",
+                )
+            )
+            continue
+        shell_metadata = {
+            "kernel": {
+                "primitive_family": "csg_result_shell_assembly",
+                "boolean_operation": graph.operation,
+                "result_shell_index": shell_index,
+                "source_patches": tuple(
+                    {
+                        "operand_index": source.operand_index,
+                        "patch_index": source.patch_index,
+                    }
+                    for _patch, source, _cut_ids in shell_group
+                ),
+            }
+        }
+        try:
+            shell = make_surface_shell(
+                tuple(patch for patch, _source, _cut_ids in shell_group),
+                connected=True,
+                metadata=shell_metadata,
+            )
+        except (TypeError, ValueError) as exc:
+            diagnostics.append(
+                SurfaceCSGReconstructionDiagnostic(
+                    code="assembly-error",
+                    message=f"Surface CSG result shell assembly failed to create shell {shell_index}: {exc}",
+                )
+            )
+            continue
+        shells.append(shell)
+        ordering.append(
+            _surface_csg_shell_ordering_record(
+                result_shell_index=shell_index,
+                patches_with_sources=shell_group,
+            )
+        )
+        provenance.extend(
+            SurfaceCSGFragmentProvenanceRecord(
+                source_patch=source,
+                result_shell_index=shell_index,
+                result_patch_index=patch_index,
+                cut_curve_ids=cut_ids,
+            )
+            for patch_index, (_patch, source, cut_ids) in enumerate(shell_group)
+        )
+
+    if diagnostics:
+        return SurfaceCSGShellAssemblyRecord(
+            operation=graph.operation,
+            classification="empty",
+            diagnostics=tuple(diagnostics),
+        )
+    if not shells:
+        return SurfaceCSGShellAssemblyRecord(operation=graph.operation, classification="empty")
+    return SurfaceCSGShellAssemblyRecord(
+        operation=graph.operation,
+        classification="closed",
+        shells=tuple(shells),
+        provenance=tuple(provenance),
+        shell_ordering=tuple(ordering),
     )
 
 

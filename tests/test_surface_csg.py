@@ -55,8 +55,10 @@ from impression.modeling import (
     SurfaceCSGPlanarRelationDiagnostic,
     SurfaceCSGPlanDiagnostic,
     SurfaceCSGProvenanceMetadataRecord,
+    SurfaceCSGReconstructionDiagnostic,
     SurfaceCSGRevolutionIntersectionRecord,
     SurfaceCSGShellAssemblyRecord,
+    SurfaceCSGShellOrderingRecord,
     SurfaceCSGSeamRebuildRecord,
     SurfaceCSGSplitTrimLoopRecord,
     SurfaceCSGToleranceDiagnostic,
@@ -76,6 +78,7 @@ from impression.modeling import (
     boolean_intersection,
     boolean_union,
     build_surface_csg_solver_registry,
+    assemble_surface_csg_result_shells,
     assemble_surface_csg_shells_from_fragments,
     build_surface_csg_cap_patches,
     build_surface_csg_cut_boundary_trims,
@@ -1358,6 +1361,85 @@ def test_surface_csg_cut_boundary_trims_report_open_generated_cap_boundaries() -
     assert all(isinstance(diagnostic, SurfaceCSGBoundaryExposureDiagnostic) for diagnostic in boundaries.diagnostics)
     assert boundaries.diagnostics[0].code == "open-boundary"
     assert boundaries.trim_attachments[0].exposure == "open"
+
+
+def test_surface_csg_result_shell_assembly_builds_body_candidate_from_graph_and_caps() -> None:
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
+    graph = build_surface_csg_fragment_graph(plan_surface_csg_operation("difference", (left, right)))
+    caps = build_surface_csg_cap_patches(graph)
+    boundaries = build_surface_csg_cut_boundary_trims(graph, caps)
+
+    assembly = assemble_surface_csg_result_shells(graph, caps, boundaries)
+
+    assert isinstance(assembly, SurfaceCSGShellAssemblyRecord)
+    assert assembly.supported is True
+    assert assembly.diagnostics == ()
+    assert assembly.classification == "closed"
+    assert len(assembly.shells) == 1
+    assert all(isinstance(record, SurfaceCSGShellOrderingRecord) for record in assembly.shell_ordering)
+    assert len(assembly.provenance) == assembly.shells[0].patch_count
+    assert any(
+        patch.kernel_metadata().get("generated_role") == "csg_generated_cap"
+        for patch in assembly.shells[0].iter_patches(world=True)
+    )
+    body = assembly.to_body(metadata={"kernel": {"boolean_operation": "difference"}})
+    assert isinstance(body, SurfaceBody)
+    assert body.patch_count == assembly.shells[0].patch_count
+    assert assembly.canonical_payload()["shell_ordering"][0]["result_shell_index"] == 0
+
+
+def test_surface_csg_result_shell_assembly_reports_cut_boundary_diagnostics() -> None:
+    patch_ref = SurfaceBooleanPatchRef(0, 0)
+    payload = SurfaceCSGGeneratedCapPatchPayloadRecord(
+        source_patch=patch_ref,
+        cap_family="planar",
+        patch=PlanarSurfacePatch(family="planar"),
+        cut_curve_ids=(),
+    )
+    plan = SurfaceCSGOperationPlan(
+        operation="difference",
+        operands=SurfaceBooleanOperands(
+            operation="difference",
+            bodies=(make_box(backend="surface"), make_box(backend="surface")),
+        ),
+    )
+    graph = SurfaceCSGFragmentGraphRecord(
+        operation="difference",
+        plan=plan,
+        classification_edges=(
+            SurfaceCSGFragmentClassificationEdgeRecord(
+                patch=patch_ref,
+                relation="inside",
+                role="cut_cap",
+            ),
+        ),
+    )
+    caps = SurfaceCSGCapConstructionRecord(operation="difference", cap_payloads=(payload,))
+    boundaries = build_surface_csg_cut_boundary_trims(graph, caps)
+
+    assembly = assemble_surface_csg_result_shells(graph, caps, boundaries)
+
+    assert assembly.supported is False
+    assert all(isinstance(diagnostic, SurfaceCSGReconstructionDiagnostic) for diagnostic in assembly.diagnostics)
+    assert assembly.diagnostics[0].code == "invalid-cut-boundary"
+    with pytest.raises(BooleanOperationError, match="Generated CSG cap payload"):
+        assembly.to_body()
+
+
+def test_surface_csg_result_shell_assembly_can_emit_stably_ordered_multi_shells() -> None:
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
+    graph = build_surface_csg_fragment_graph(plan_surface_csg_operation("union", (left, right)))
+    caps = build_surface_csg_cap_patches(graph)
+    boundaries = build_surface_csg_cut_boundary_trims(graph, caps)
+
+    assembly = assemble_surface_csg_result_shells(graph, caps, boundaries, multi_shell=True)
+
+    assert assembly.supported is True
+    assert len(assembly.shells) > 1
+    assert tuple(record.result_shell_index for record in assembly.shell_ordering) == tuple(range(len(assembly.shells)))
+    assert tuple(record.patch_count for record in assembly.shell_ordering) == (1,) * len(assembly.shells)
 
 
 def test_surface_boolean_intersection_stage_emits_operation_aware_split_records() -> None:
