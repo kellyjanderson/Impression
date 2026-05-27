@@ -53,6 +53,8 @@ from impression.modeling import (
     REQUIRED_V1_PATCH_FAMILIES,
     SURFACE_BODY_COMPLETION_TRACKS,
     SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS,
+    SURFACE_REFERENCE_ARTIFACT_CLASSES,
+    SURFACE_REFERENCE_FIXTURE_CONTRACTS,
     SUPPORTED_SURFACE_PATCH_FAMILIES,
     SURFACE_SPEC_66_RETIREMENT_NOTE,
     AdapterLossiness,
@@ -100,7 +102,9 @@ from impression.modeling import (
     SurfaceBoundaryDescriptor,
     SurfaceBoundaryRef,
     SurfaceBodyCompletionEvidenceRecord,
+    SurfaceReferenceArtifactClassRecord,
     SurfaceReferenceEvidenceMatrixReport,
+    SurfaceReferenceFixtureContractRecord,
     SurfaceReferenceFixtureRequirementRecord,
     SurfaceComposition,
     SurfaceCompositionError,
@@ -163,6 +167,7 @@ from impression.modeling import (
     assert_implicit_tessellation_sampling_safety,
     assert_subdivision_tessellation_approximation,
     assert_surface_family_tessellation_adapter_coverage,
+    assert_surface_reference_requirement_matrix_covers_capabilities,
     audit_all_patch_family_promotion_readiness,
     audit_patch_family_promotion_readiness,
     build_surface_unsupported_continuity_diagnostic,
@@ -181,6 +186,7 @@ from impression.modeling import (
     evaluate_implicit_field_domain,
     extract_surface_boundary_descriptor,
     inspect_surface_family_tessellation_adapter_coverage,
+    load_surface_reference_requirement_matrix,
     make_surface_body_completion_evidence_from_capabilities,
     make_surface_body,
     make_surface_shell,
@@ -196,6 +202,8 @@ from impression.modeling import (
     surface_boolean_family_pair_support,
     surface_boolean_result,
     surface_body_completion_reference_evidence_matrix,
+    surface_reference_artifact_classes,
+    surface_reference_fixture_contracts,
     surface_continuity_support,
     surface_csg_analytic_primitive_pair_support,
     surface_csg_completion_support_matrix,
@@ -819,6 +827,42 @@ def test_surface_body_completion_reference_evidence_matrix_requires_promoted_art
     assert isinstance(report, SurfaceReferenceEvidenceMatrixReport)
     assert report.passed is True
     assert report.diagnostics == ()
+
+
+def test_surface_reference_requirement_matrix_loads_artifact_classes_and_fixture_contracts() -> None:
+    requirements = load_surface_reference_requirement_matrix()
+    artifact_classes = surface_reference_artifact_classes()
+    fixture_contracts = surface_reference_fixture_contracts()
+
+    assert requirements == SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS
+    assert artifact_classes == SURFACE_REFERENCE_ARTIFACT_CLASSES
+    assert fixture_contracts == SURFACE_REFERENCE_FIXTURE_CONTRACTS
+    assert all(isinstance(record, SurfaceReferenceArtifactClassRecord) for record in artifact_classes)
+    assert all(isinstance(record, SurfaceReferenceFixtureContractRecord) for record in fixture_contracts)
+    assert {record.artifact_class for record in artifact_classes} >= {
+        ".impress-roundtrip",
+        "reference-artifact",
+        "refusal-diagnostic",
+        "tessellation-artifact",
+    }
+    assert {contract.track for contract in fixture_contracts} == set(SURFACE_BODY_COMPLETION_TRACKS)
+
+
+def test_surface_reference_requirement_matrix_coverage_assertion_reports_missing_and_duplicate_tracks() -> None:
+    requirements = load_surface_reference_requirement_matrix()
+
+    assert assert_surface_reference_requirement_matrix_covers_capabilities(requirements) == requirements
+
+    broken = (
+        SurfaceReferenceFixtureRequirementRecord("patch-family", ("unit-test",)),
+        SurfaceReferenceFixtureRequirementRecord("patch-family", ("reference-artifact",)),
+        SurfaceReferenceFixtureRequirementRecord("unknown-track", ("unit-test",)),
+    )
+
+    with pytest.raises(AssertionError, match="missing reference requirement tracks"):
+        assert_surface_reference_requirement_matrix_covers_capabilities(broken)
+    with pytest.raises(AssertionError, match="duplicate reference requirement tracks"):
+        assert_surface_reference_requirement_matrix_covers_capabilities(broken, tracks=("patch-family", "unknown-track"))
 
 
 def test_surface_body_completion_reference_evidence_matrix_rejects_missing_and_dirty_artifacts() -> None:
