@@ -126,6 +126,56 @@ class SurfaceReferenceFixtureRequirementRecord:
 
 
 @dataclass(frozen=True)
+class SurfaceReferenceArtifactClassRecord:
+    """Durable artifact class required by model-output reference evidence."""
+
+    artifact_class: str
+    required_keys: tuple[str, ...]
+    promoted_root: str
+    dirty_root: str
+
+    def __post_init__(self) -> None:
+        artifact_class = str(self.artifact_class).strip()
+        required_keys = tuple(str(value).strip() for value in self.required_keys)
+        promoted_root = str(self.promoted_root).strip()
+        dirty_root = str(self.dirty_root).strip()
+        if not artifact_class:
+            raise ValueError("SurfaceReferenceArtifactClassRecord.artifact_class must be non-empty.")
+        if not required_keys or not all(required_keys):
+            raise ValueError("SurfaceReferenceArtifactClassRecord.required_keys must be non-empty.")
+        if not promoted_root or not dirty_root:
+            raise ValueError("SurfaceReferenceArtifactClassRecord roots must be non-empty.")
+        object.__setattr__(self, "artifact_class", artifact_class)
+        object.__setattr__(self, "required_keys", required_keys)
+        object.__setattr__(self, "promoted_root", promoted_root)
+        object.__setattr__(self, "dirty_root", dirty_root)
+
+
+@dataclass(frozen=True)
+class SurfaceReferenceFixtureContractRecord:
+    """Fixture contract connecting a capability track to artifact classes."""
+
+    fixture_id: str
+    track: str
+    artifact_classes: tuple[str, ...]
+    contract_version: str = "v1"
+
+    def __post_init__(self) -> None:
+        fixture_id = str(self.fixture_id).strip()
+        track = str(self.track).strip()
+        artifact_classes = tuple(str(value).strip() for value in self.artifact_classes)
+        contract_version = str(self.contract_version).strip()
+        if not fixture_id or not track or not contract_version:
+            raise ValueError("SurfaceReferenceFixtureContractRecord fixture_id, track, and contract_version must be non-empty.")
+        if not artifact_classes or not all(artifact_classes):
+            raise ValueError("SurfaceReferenceFixtureContractRecord.artifact_classes must be non-empty.")
+        object.__setattr__(self, "fixture_id", fixture_id)
+        object.__setattr__(self, "track", track)
+        object.__setattr__(self, "artifact_classes", artifact_classes)
+        object.__setattr__(self, "contract_version", contract_version)
+
+
+@dataclass(frozen=True)
 class SurfaceReferenceEvidenceMatrixReport:
     """Pass/fail report for reference artifact and negative diagnostic evidence."""
 
@@ -409,6 +459,40 @@ SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS: tuple[SurfaceReferenceFixtureRequi
     SurfaceReferenceFixtureRequirementRecord("primitive", ("unit-test", "tessellation-artifact")),
     SurfaceReferenceFixtureRequirementRecord("feature", ("unit-test", "handoff-diagnostic")),
     SurfaceReferenceFixtureRequirementRecord("verification", ("unit-test", "reference-artifact")),
+)
+SURFACE_REFERENCE_ARTIFACT_CLASSES: tuple[SurfaceReferenceArtifactClassRecord, ...] = (
+    SurfaceReferenceArtifactClassRecord(
+        artifact_class="reference-artifact",
+        required_keys=("expected", "actual", "diff"),
+        promoted_root="project/reference-artifacts",
+        dirty_root="project/reference-artifacts/dirty",
+    ),
+    SurfaceReferenceArtifactClassRecord(
+        artifact_class="tessellation-artifact",
+        required_keys=("mesh", "metadata"),
+        promoted_root="project/reference-artifacts/stl",
+        dirty_root="project/reference-artifacts/dirty/stl",
+    ),
+    SurfaceReferenceArtifactClassRecord(
+        artifact_class="refusal-diagnostic",
+        required_keys=("diagnostic",),
+        promoted_root="project/reference-artifacts/diagnostics",
+        dirty_root="project/reference-artifacts/dirty/diagnostics",
+    ),
+    SurfaceReferenceArtifactClassRecord(
+        artifact_class=".impress-roundtrip",
+        required_keys=("source", "decoded", "canonical"),
+        promoted_root="project/reference-artifacts/impress",
+        dirty_root="project/reference-artifacts/dirty/impress",
+    ),
+)
+SURFACE_REFERENCE_FIXTURE_CONTRACTS: tuple[SurfaceReferenceFixtureContractRecord, ...] = tuple(
+    SurfaceReferenceFixtureContractRecord(
+        fixture_id=f"surface-{requirement.track}",
+        track=requirement.track,
+        artifact_classes=requirement.required_evidence_types,
+    )
+    for requirement in SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS
 )
 PATCH_FAMILY_PROMOTION_CRITERIA: tuple[str, ...] = (
     "record",
@@ -866,6 +950,49 @@ def surface_body_completion_reference_evidence_matrix() -> tuple[SurfaceReferenc
     """Return the required positive and negative evidence matrix for promoted surface output."""
 
     return SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS
+
+
+def load_surface_reference_requirement_matrix() -> tuple[SurfaceReferenceFixtureRequirementRecord, ...]:
+    """Load the durable surface reference requirement matrix."""
+
+    return surface_body_completion_reference_evidence_matrix()
+
+
+def surface_reference_artifact_classes() -> tuple[SurfaceReferenceArtifactClassRecord, ...]:
+    """Return artifact class contracts used by promoted surface reference evidence."""
+
+    return SURFACE_REFERENCE_ARTIFACT_CLASSES
+
+
+def surface_reference_fixture_contracts() -> tuple[SurfaceReferenceFixtureContractRecord, ...]:
+    """Return fixture contracts derived from the surface reference requirement matrix."""
+
+    return SURFACE_REFERENCE_FIXTURE_CONTRACTS
+
+
+def assert_surface_reference_requirement_matrix_covers_capabilities(
+    requirements: Iterable[SurfaceReferenceFixtureRequirementRecord] = SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS,
+    *,
+    tracks: Iterable[str] = SURFACE_BODY_COMPLETION_TRACKS,
+) -> tuple[SurfaceReferenceFixtureRequirementRecord, ...]:
+    """Assert the reference requirement matrix covers each model-outputting track once."""
+
+    requirement_records = tuple(requirements)
+    expected_tracks = tuple(str(track).strip() for track in tracks)
+    actual_tracks = tuple(record.track for record in requirement_records)
+    missing = sorted(set(expected_tracks) - set(actual_tracks))
+    unknown = sorted(set(actual_tracks) - set(expected_tracks))
+    duplicates = sorted(track for track in set(actual_tracks) if actual_tracks.count(track) > 1)
+    if missing or unknown or duplicates:
+        messages = []
+        if missing:
+            messages.append(f"missing reference requirement tracks: {missing!r}")
+        if unknown:
+            messages.append(f"unknown reference requirement tracks: {unknown!r}")
+        if duplicates:
+            messages.append(f"duplicate reference requirement tracks: {duplicates!r}")
+        raise AssertionError("; ".join(messages))
+    return requirement_records
 
 
 def evaluate_surface_body_completion_reference_evidence_matrix(
@@ -4551,7 +4678,9 @@ __all__ = [
     "SurfaceBodyCompletionDiagnostic",
     "SurfaceBodyCompletionEvidenceRecord",
     "SurfaceBodyCompletionReport",
+    "SurfaceReferenceArtifactClassRecord",
     "SurfaceReferenceEvidenceMatrixReport",
+    "SurfaceReferenceFixtureContractRecord",
     "SurfaceReferenceFixtureRequirementRecord",
     "SurfaceContinuityRequest",
     "SurfaceContinuitySupportRecord",
@@ -4579,6 +4708,8 @@ __all__ = [
     "REQUIRED_V1_PATCH_FAMILIES",
     "SURFACE_BODY_COMPLETION_TRACKS",
     "SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS",
+    "SURFACE_REFERENCE_ARTIFACT_CLASSES",
+    "SURFACE_REFERENCE_FIXTURE_CONTRACTS",
     "SUPPORTED_SEAM_CONTINUITY_CLASSES",
     "SUPPORTED_SURFACE_PATCH_FAMILIES",
     "SURFACE_SPEC_66_RETIREMENT_NOTE",
@@ -4593,11 +4724,15 @@ __all__ = [
     "validate_surface_continuity_enforcement_result",
     "evaluate_surface_body_completion_gate",
     "evaluate_surface_body_completion_reference_evidence_matrix",
+    "assert_surface_reference_requirement_matrix_covers_capabilities",
+    "load_surface_reference_requirement_matrix",
     "make_surface_body_completion_evidence_from_capabilities",
     "run_patch_family_availability_promotion_pass",
     "surface_continuity_support",
     "validate_surface_seam_continuity_constraint",
     "surface_body_completion_reference_evidence_matrix",
+    "surface_reference_artifact_classes",
+    "surface_reference_fixture_contracts",
     "validate_patch_family_availability_gate",
     "IMPLICIT_FIELD_NODE_KINDS",
     "ParameterDomain",

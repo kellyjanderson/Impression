@@ -491,7 +491,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 273: Implicit Intersection Safety And Budget Policy (v1.0)](../specifications/surface-273-implicit-intersection-safety-and-budget-policy-v1_0.md)
 - [x] [Surface Spec 274: Bounded Implicit Contour Extraction Adapter (v1.0)](../specifications/surface-274-bounded-implicit-contour-extraction-adapter-v1_0.md)
 - [x] [Surface Spec 275: Implicit Intersection Residual And Result Classification (v1.0)](../specifications/surface-275-implicit-intersection-residual-and-result-classification-v1_0.md)
-- [ ] [Surface Spec 276: Surface Reference Requirement Matrix (v1.0)](../specifications/surface-276-surface-reference-requirement-matrix-v1_0.md)
+- [x] [Surface Spec 276: Surface Reference Requirement Matrix (v1.0)](../specifications/surface-276-surface-reference-requirement-matrix-v1_0.md)
 - [ ] [Surface Spec 277: Dirty Versus Promoted Reference Artifact Gate (v1.0)](../specifications/surface-277-dirty-versus-promoted-reference-artifact-gate-v1_0.md)
 - [ ] [Surface Spec 278: Diagnostic Snapshot Normalization (v1.0)](../specifications/surface-278-diagnostic-snapshot-normalization-v1_0.md)
 - [ ] [Surface Spec 279: Negative Diagnostic Fixture Matrix Core (v1.0)](../specifications/surface-279-negative-diagnostic-fixture-matrix-core-v1_0.md)
