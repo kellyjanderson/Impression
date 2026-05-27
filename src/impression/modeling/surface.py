@@ -3126,6 +3126,81 @@ class SurfaceBoundaryDescriptor:
 
 
 @dataclass(frozen=True)
+class SurfaceBoundaryDerivativeDiagnostic:
+    """Diagnostic emitted while sampling boundary derivatives for continuity checks."""
+
+    code: Literal["unsupported-family", "evaluation-failed"]
+    message: str
+    family: str
+    boundary_id: str
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary_id": self.boundary_id,
+            "code": self.code,
+            "family": self.family,
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceBoundaryDerivativeSample:
+    """One point/derivative/normal sample on a patch boundary."""
+
+    boundary: SurfaceBoundaryRef
+    parameter: tuple[float, float]
+    point: tuple[float, float, float]
+    tangent: tuple[float, float, float]
+    du: tuple[float, float, float]
+    dv: tuple[float, float, float]
+    normal: tuple[float, float, float]
+    second_u: tuple[float, float, float] | None = None
+    second_v: tuple[float, float, float] | None = None
+    exact_first_derivative: bool = True
+    residual_metadata: dict[str, object] = field(default_factory=dict)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary": self.boundary.canonical_payload(),
+            "du": self.du,
+            "dv": self.dv,
+            "exact_first_derivative": self.exact_first_derivative,
+            "normal": self.normal,
+            "parameter": self.parameter,
+            "point": self.point,
+            "residual_metadata": self.residual_metadata,
+            "second_u": self.second_u,
+            "second_v": self.second_v,
+            "tangent": self.tangent,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceBoundaryDerivativeSummary:
+    """Boundary derivative sampling result used by higher-order continuity validation."""
+
+    family: str
+    boundary_id: str
+    samples: tuple[SurfaceBoundaryDerivativeSample, ...] = ()
+    diagnostics: tuple[SurfaceBoundaryDerivativeDiagnostic, ...] = ()
+    residual_metadata: dict[str, object] = field(default_factory=dict)
+
+    @property
+    def supported(self) -> bool:
+        return not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary_id": self.boundary_id,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "family": self.family,
+            "residual_metadata": self.residual_metadata,
+            "samples": [sample.canonical_payload() for sample in self.samples],
+            "supported": self.supported,
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceContinuityMetadata:
     """Continuity classification and diagnostics for a seam validation pass."""
 
@@ -3288,6 +3363,147 @@ def extract_surface_boundary_descriptor(
 
 def _boundary_world_samples(patch: SurfacePatch, descriptor: SurfaceBoundaryDescriptor) -> np.ndarray:
     return np.asarray([patch.point_at(float(u), float(v)) for u, v in descriptor.parameter_points], dtype=float)
+
+
+def _surface_boundary_tangent_from_derivatives(boundary_id: str, du: np.ndarray, dv: np.ndarray) -> np.ndarray:
+    boundary = boundary_id.strip().lower()
+    if boundary in {"left", "right"}:
+        tangent = dv
+    elif boundary in {"bottom", "top"}:
+        tangent = du
+    else:
+        tangent = du if np.linalg.norm(du) >= np.linalg.norm(dv) else dv
+    return _normalize_axis(tangent, name="boundary_tangent")
+
+
+def _surface_second_derivative_numeric(
+    patch: SurfacePatch,
+    u: float,
+    v: float,
+    *,
+    axis: Literal["u", "v"],
+    step: float,
+) -> np.ndarray:
+    u0, u1 = patch.domain.u_range
+    v0, v1 = patch.domain.v_range
+    if axis == "u":
+        low = max(u0, u - step)
+        high = min(u1, u + step)
+        if high == low:
+            return np.zeros(3, dtype=float)
+        du_low, _dv_low = patch.derivatives_at(low, v)
+        du_high, _dv_high = patch.derivatives_at(high, v)
+        return (np.asarray(du_high, dtype=float) - np.asarray(du_low, dtype=float)) / float(high - low)
+    low = max(v0, v - step)
+    high = min(v1, v + step)
+    if high == low:
+        return np.zeros(3, dtype=float)
+    _du_low, dv_low = patch.derivatives_at(u, low)
+    _du_high, dv_high = patch.derivatives_at(u, high)
+    return (np.asarray(dv_high, dtype=float) - np.asarray(dv_low, dtype=float)) / float(high - low)
+
+
+def evaluate_surface_boundary_derivatives(
+    patch: SurfacePatch,
+    boundary_id: str,
+    *,
+    patch_index: int = 0,
+    sample_count: int = 5,
+    second_derivative_step: float = 1e-4,
+) -> SurfaceBoundaryDerivativeSummary:
+    """Evaluate first derivatives, normals, and numeric second derivatives along a boundary."""
+
+    boundary_id = str(boundary_id).strip()
+    diagnostics: list[SurfaceBoundaryDerivativeDiagnostic] = []
+    if isinstance(patch, ImplicitSurfacePatch):
+        return SurfaceBoundaryDerivativeSummary(
+            family=patch.family,
+            boundary_id=boundary_id,
+            diagnostics=(
+                SurfaceBoundaryDerivativeDiagnostic(
+                    code="unsupported-family",
+                    family=patch.family,
+                    boundary_id=boundary_id,
+                    message="ImplicitSurfacePatch has no canonical parametric boundary derivatives.",
+                ),
+            ),
+        )
+    try:
+        descriptor = extract_surface_boundary_descriptor(patch, boundary_id, sample_count=sample_count)
+    except ValueError as exc:
+        return SurfaceBoundaryDerivativeSummary(
+            family=patch.family,
+            boundary_id=boundary_id,
+            diagnostics=(
+                SurfaceBoundaryDerivativeDiagnostic(
+                    code="evaluation-failed",
+                    family=patch.family,
+                    boundary_id=boundary_id,
+                    message=str(exc),
+                ),
+            ),
+        )
+
+    samples: list[SurfaceBoundaryDerivativeSample] = []
+    residual_metadata = {
+        "second_derivative_method": "finite-difference",
+        "second_derivative_step": float(second_derivative_step),
+        "boundary_descriptor_exact": descriptor.exact,
+    }
+    boundary_ref = SurfaceBoundaryRef(patch_index, boundary_id)
+    for u, v in descriptor.parameter_points:
+        try:
+            du, dv = patch.derivatives_at(float(u), float(v))
+            normal = patch.normal_at(float(u), float(v))
+            tangent = _surface_boundary_tangent_from_derivatives(boundary_id, du, dv)
+            second_u = _surface_second_derivative_numeric(
+                patch,
+                float(u),
+                float(v),
+                axis="u",
+                step=second_derivative_step,
+            )
+            second_v = _surface_second_derivative_numeric(
+                patch,
+                float(u),
+                float(v),
+                axis="v",
+                step=second_derivative_step,
+            )
+            point = patch.point_at(float(u), float(v))
+        except (NotImplementedError, ValueError) as exc:
+            diagnostics.append(
+                SurfaceBoundaryDerivativeDiagnostic(
+                    code="evaluation-failed",
+                    family=patch.family,
+                    boundary_id=boundary_id,
+                    message=str(exc),
+                )
+            )
+            continue
+        samples.append(
+            SurfaceBoundaryDerivativeSample(
+                boundary=boundary_ref,
+                parameter=(float(u), float(v)),
+                point=tuple(float(component) for component in point),
+                tangent=tuple(float(component) for component in tangent),
+                du=tuple(float(component) for component in du),
+                dv=tuple(float(component) for component in dv),
+                normal=tuple(float(component) for component in normal),
+                second_u=tuple(float(component) for component in second_u),
+                second_v=tuple(float(component) for component in second_v),
+                exact_first_derivative=descriptor.exact,
+                residual_metadata=residual_metadata,
+            )
+        )
+
+    return SurfaceBoundaryDerivativeSummary(
+        family=patch.family,
+        boundary_id=boundary_id,
+        samples=tuple(samples),
+        diagnostics=tuple(diagnostics),
+        residual_metadata=residual_metadata,
+    )
 
 
 def _seam_adjacency_updates(seam: SurfaceSeam) -> tuple[SurfaceAdjacencyRecord, ...]:
@@ -3821,6 +4037,9 @@ __all__ = [
     "SurfaceSeamBoundaryUseRef",
     "SurfaceContinuityConstraintDiagnostic",
     "SurfaceSeamContinuityConstraint",
+    "SurfaceBoundaryDerivativeDiagnostic",
+    "SurfaceBoundaryDerivativeSample",
+    "SurfaceBoundaryDerivativeSummary",
     "PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS",
     "PATCH_FAMILY_CAPABILITY_MATRIX",
     "PATCH_FAMILY_FEATURE_COVERAGE",
@@ -3882,6 +4101,7 @@ __all__ = [
     "refine_subdivision_control_cage",
     "classify_surface_seam_continuity",
     "extract_surface_boundary_descriptor",
+    "evaluate_surface_boundary_derivatives",
     "surface_adjacency_from_seams",
     "validate_surface_seam_participation",
     "SurfaceShell",
