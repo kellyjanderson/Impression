@@ -172,6 +172,261 @@ class SurfaceIntersectionSolverDispatchRecord:
         }
 
 
+@dataclass(frozen=True)
+class SurfaceIntersectionCurveRecord:
+    """One normalized intersection curve or sampled curve segment."""
+
+    curve_id: str
+    kind: Literal["line", "arc", "spline", "sampled", "implicit-contour"]
+    points_3d: tuple[tuple[float, float, float], ...]
+    first_parameters: tuple[tuple[float, float], ...] = ()
+    second_parameters: tuple[tuple[float, float], ...] = ()
+
+    def __post_init__(self) -> None:
+        curve_id = str(self.curve_id).strip()
+        kind = str(self.kind).strip()
+        if not curve_id:
+            raise ValueError("SurfaceIntersectionCurveRecord.curve_id must be non-empty.")
+        if kind not in {"line", "arc", "spline", "sampled", "implicit-contour"}:
+            raise ValueError("SurfaceIntersectionCurveRecord.kind is invalid.")
+        points = tuple(_normalize_point3(point, name="points_3d") for point in self.points_3d)
+        first_parameters = tuple(_normalize_point2(point, name="first_parameters") for point in self.first_parameters)
+        second_parameters = tuple(_normalize_point2(point, name="second_parameters") for point in self.second_parameters)
+        if len(points) < 2:
+            raise ValueError("SurfaceIntersectionCurveRecord requires at least two 3D points.")
+        if first_parameters and len(first_parameters) != len(points):
+            raise ValueError("SurfaceIntersectionCurveRecord first_parameters must match points_3d length.")
+        if second_parameters and len(second_parameters) != len(points):
+            raise ValueError("SurfaceIntersectionCurveRecord second_parameters must match points_3d length.")
+        object.__setattr__(self, "curve_id", curve_id)
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "points_3d", points)
+        object.__setattr__(self, "first_parameters", first_parameters)
+        object.__setattr__(self, "second_parameters", second_parameters)
+
+    @property
+    def length_estimate(self) -> float:
+        return _polyline_length(self.points_3d)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "curve_id": self.curve_id,
+            "first_parameters": self.first_parameters,
+            "kind": self.kind,
+            "length_estimate": self.length_estimate,
+            "points_3d": self.points_3d,
+            "second_parameters": self.second_parameters,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceIntersectionOverlapRegionRecord:
+    """Parametric overlap region produced by coincident or tangent surface intersections."""
+
+    region_id: str
+    first_loop_uv: tuple[tuple[float, float], ...]
+    second_loop_uv: tuple[tuple[float, float], ...]
+    boundary_curve_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        region_id = str(self.region_id).strip()
+        if not region_id:
+            raise ValueError("SurfaceIntersectionOverlapRegionRecord.region_id must be non-empty.")
+        first_loop = tuple(_normalize_point2(point, name="first_loop_uv") for point in self.first_loop_uv)
+        second_loop = tuple(_normalize_point2(point, name="second_loop_uv") for point in self.second_loop_uv)
+        if len(first_loop) < 3 or len(second_loop) < 3:
+            raise ValueError("SurfaceIntersectionOverlapRegionRecord loops must contain at least three points.")
+        object.__setattr__(self, "region_id", region_id)
+        object.__setattr__(self, "first_loop_uv", first_loop)
+        object.__setattr__(self, "second_loop_uv", second_loop)
+        object.__setattr__(self, "boundary_curve_ids", tuple(sorted(str(item) for item in self.boundary_curve_ids)))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary_curve_ids": self.boundary_curve_ids,
+            "first_loop_uv": self.first_loop_uv,
+            "region_id": self.region_id,
+            "second_loop_uv": self.second_loop_uv,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceIntersectionDegeneracyRecord:
+    """Classified degeneracy or quality issue for an intersection result."""
+
+    code: Literal["none", "tangent", "point-contact", "overlap", "short-curve", "high-residual"]
+    message: str
+    curve_id: str | None = None
+    residual: float | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "curve_id": self.curve_id,
+            "message": self.message,
+            "residual": self.residual,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceIntersectionResultRecord:
+    """Common normalized result for all surface-surface intersection solvers."""
+
+    request: SurfaceIntersectionRequest
+    classification: Literal["empty", "curves", "points", "overlap", "degenerate", "unsupported"]
+    curves: tuple[SurfaceIntersectionCurveRecord, ...] = ()
+    points: tuple[tuple[float, float, float], ...] = ()
+    overlap_regions: tuple[SurfaceIntersectionOverlapRegionRecord, ...] = ()
+    degeneracies: tuple[SurfaceIntersectionDegeneracyRecord, ...] = ()
+    max_residual: float = 0.0
+    quality: Literal["exact", "within-tolerance", "degenerate", "unsupported"] = "exact"
+
+    @property
+    def supported(self) -> bool:
+        return self.classification != "unsupported" and self.quality != "unsupported"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "classification": self.classification,
+            "curves": [curve.canonical_payload() for curve in self.curves],
+            "degeneracies": [record.canonical_payload() for record in self.degeneracies],
+            "max_residual": self.max_residual,
+            "overlap_regions": [region.canonical_payload() for region in self.overlap_regions],
+            "points": self.points,
+            "quality": self.quality,
+            "request": self.request.canonical_payload(),
+            "supported": self.supported,
+        }
+
+
+def _normalize_point2(value: Sequence[float], *, name: str) -> tuple[float, float]:
+    array = np.asarray(value, dtype=float)
+    if array.shape != (2,) or not np.all(np.isfinite(array)):
+        raise ValueError(f"{name} must be a finite 2D point.")
+    return (float(array[0]), float(array[1]))
+
+
+def _normalize_point3(value: Sequence[float], *, name: str) -> tuple[float, float, float]:
+    array = np.asarray(value, dtype=float)
+    if array.shape != (3,) or not np.all(np.isfinite(array)):
+        raise ValueError(f"{name} must be a finite 3D point.")
+    return (float(array[0]), float(array[1]), float(array[2]))
+
+
+def _polyline_length(points: Sequence[Sequence[float]]) -> float:
+    if len(points) < 2:
+        return 0.0
+    array = np.asarray(points, dtype=float)
+    return float(np.sum(np.linalg.norm(np.diff(array, axis=0), axis=1)))
+
+
+def classify_surface_intersection_degeneracy(
+    result: SurfaceIntersectionResultRecord,
+    *,
+    tolerance_policy: SurfaceIntersectionTolerancePolicy | None = None,
+) -> tuple[SurfaceIntersectionDegeneracyRecord, ...]:
+    """Classify degeneracy records from normalized intersection result geometry."""
+
+    policy = DEFAULT_SURFACE_INTERSECTION_TOLERANCE_POLICY if tolerance_policy is None else tolerance_policy
+    degeneracies = list(result.degeneracies)
+    if result.overlap_regions:
+        degeneracies.append(
+            SurfaceIntersectionDegeneracyRecord(
+                code="overlap",
+                message="Surface intersection produced one or more overlap regions.",
+            )
+        )
+    if result.points and not result.curves and not result.overlap_regions:
+        degeneracies.append(
+            SurfaceIntersectionDegeneracyRecord(
+                code="point-contact",
+                message="Surface intersection produced isolated point contact.",
+            )
+        )
+    for curve in result.curves:
+        if curve.length_estimate <= policy.degeneracy_tolerance:
+            degeneracies.append(
+                SurfaceIntersectionDegeneracyRecord(
+                    code="short-curve",
+                    curve_id=curve.curve_id,
+                    message="Surface intersection curve is shorter than degeneracy tolerance.",
+                )
+            )
+    if result.max_residual > policy.position_tolerance:
+        degeneracies.append(
+            SurfaceIntersectionDegeneracyRecord(
+                code="high-residual",
+                message="Surface intersection residual exceeds position tolerance.",
+                residual=result.max_residual,
+            )
+        )
+    seen: set[tuple[object, ...]] = set()
+    unique: list[SurfaceIntersectionDegeneracyRecord] = []
+    for record in degeneracies:
+        key = (record.code, record.curve_id, record.residual, record.message)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(record)
+    return tuple(unique)
+
+
+def normalize_surface_intersection_result(
+    request: SurfaceIntersectionRequest,
+    *,
+    curves: Sequence[SurfaceIntersectionCurveRecord] = (),
+    points: Sequence[Sequence[float]] = (),
+    overlap_regions: Sequence[SurfaceIntersectionOverlapRegionRecord] = (),
+    max_residual: float = 0.0,
+    quality: Literal["exact", "within-tolerance", "degenerate", "unsupported"] = "exact",
+    degeneracies: Sequence[SurfaceIntersectionDegeneracyRecord] = (),
+) -> SurfaceIntersectionResultRecord:
+    """Normalize solver output into a deterministic surface intersection result record."""
+
+    normalized_curves = tuple(sorted(curves, key=lambda curve: curve.curve_id))
+    normalized_points = tuple(sorted(_normalize_point3(point, name="points") for point in points))
+    normalized_regions = tuple(sorted(overlap_regions, key=lambda region: region.region_id))
+    residual = float(max_residual)
+    if not np.isfinite(residual) or residual < 0.0:
+        raise ValueError("normalize_surface_intersection_result max_residual must be finite and non-negative.")
+    if quality not in {"exact", "within-tolerance", "degenerate", "unsupported"}:
+        raise ValueError("normalize_surface_intersection_result quality is invalid.")
+    if quality == "unsupported":
+        classification: Literal["empty", "curves", "points", "overlap", "degenerate", "unsupported"] = "unsupported"
+    elif normalized_regions:
+        classification = "overlap"
+    elif normalized_curves:
+        classification = "curves"
+    elif normalized_points:
+        classification = "points"
+    else:
+        classification = "empty"
+    base = SurfaceIntersectionResultRecord(
+        request=request,
+        classification=classification,
+        curves=normalized_curves,
+        points=normalized_points,
+        overlap_regions=normalized_regions,
+        degeneracies=tuple(degeneracies),
+        max_residual=residual,
+        quality=quality,
+    )
+    classified_degeneracies = classify_surface_intersection_degeneracy(base)
+    if classified_degeneracies and classification != "unsupported":
+        classification = "degenerate" if not normalized_curves and not normalized_regions else classification
+        quality = "degenerate" if quality == "exact" else quality
+    return SurfaceIntersectionResultRecord(
+        request=request,
+        classification=classification,
+        curves=normalized_curves,
+        points=normalized_points,
+        overlap_regions=normalized_regions,
+        degeneracies=classified_degeneracies,
+        max_residual=residual,
+        quality=quality,
+    )
+
+
 def _promoted_surface_family_names() -> tuple[str, ...]:
     return tuple(sorted(PATCH_FAMILY_CAPABILITY_MATRIX))
 
@@ -320,7 +575,11 @@ def lookup_surface_intersection_solver(
 __all__ = [
     "DEFAULT_SURFACE_INTERSECTION_TOLERANCE_POLICY",
     "SURFACE_INTERSECTION_SOLVER_REGISTRY",
+    "SurfaceIntersectionCurveRecord",
+    "SurfaceIntersectionDegeneracyRecord",
+    "SurfaceIntersectionOverlapRegionRecord",
     "SurfaceIntersectionRequest",
+    "SurfaceIntersectionResultRecord",
     "SurfaceIntersectionSolverDispatchRecord",
     "SurfaceIntersectionSolverRegistryRecord",
     "SurfaceIntersectionSupportDiagnostic",
@@ -328,6 +587,8 @@ __all__ = [
     "SurfaceIntersectionTolerancePolicy",
     "assert_surface_intersection_solver_registry_complete",
     "build_surface_intersection_solver_registry",
+    "classify_surface_intersection_degeneracy",
     "lookup_surface_intersection_solver",
     "make_surface_intersection_request",
+    "normalize_surface_intersection_result",
 ]

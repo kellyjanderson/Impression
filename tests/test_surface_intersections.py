@@ -6,15 +6,21 @@ from impression.modeling import (
     BSplineSurfacePatch,
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
+    SurfaceIntersectionCurveRecord,
+    SurfaceIntersectionDegeneracyRecord,
+    SurfaceIntersectionOverlapRegionRecord,
     SurfaceIntersectionRequest,
+    SurfaceIntersectionResultRecord,
     SurfaceIntersectionSolverDispatchRecord,
     SurfaceIntersectionSolverRegistryRecord,
     SurfaceIntersectionSupportDiagnostic,
     SurfaceIntersectionTolerancePolicy,
     assert_surface_intersection_solver_registry_complete,
     build_surface_intersection_solver_registry,
+    classify_surface_intersection_degeneracy,
     lookup_surface_intersection_solver,
     make_surface_intersection_request,
+    normalize_surface_intersection_result,
 )
 
 
@@ -96,3 +102,75 @@ def test_surface_intersection_registry_assertion_reports_missing_and_unknown_pai
 
     with pytest.raises(AssertionError, match="missing surface intersection registry entries"):
         assert_surface_intersection_solver_registry_complete(broken)
+
+
+def test_surface_intersection_result_normalizes_curves_points_and_quality() -> None:
+    request = make_surface_intersection_request(
+        PlanarSurfacePatch(family="planar"),
+        PlanarSurfacePatch(family="planar"),
+    )
+    curve = SurfaceIntersectionCurveRecord(
+        curve_id="curve-b",
+        kind="line",
+        points_3d=((1.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+        first_parameters=((1.0, 0.0), (0.0, 0.0)),
+        second_parameters=((1.0, 0.0), (0.0, 0.0)),
+    )
+
+    result = normalize_surface_intersection_result(
+        request,
+        curves=(curve,),
+        points=((0.25, 0.0, 0.0),),
+        max_residual=1e-10,
+        quality="within-tolerance",
+    )
+
+    assert isinstance(result, SurfaceIntersectionResultRecord)
+    assert result.classification == "curves"
+    assert result.quality == "within-tolerance"
+    assert result.curves[0].length_estimate == pytest.approx(1.0)
+    assert result.points == ((0.25, 0.0, 0.0),)
+    assert result.degeneracies == ()
+    assert result.canonical_payload()["supported"] is True
+
+
+def test_surface_intersection_result_records_overlap_and_point_contact_degeneracy() -> None:
+    request = make_surface_intersection_request(
+        PlanarSurfacePatch(family="planar"),
+        PlanarSurfacePatch(family="planar"),
+    )
+    overlap = SurfaceIntersectionOverlapRegionRecord(
+        region_id="overlap-a",
+        first_loop_uv=((0.0, 0.0), (1.0, 0.0), (1.0, 1.0)),
+        second_loop_uv=((0.0, 0.0), (1.0, 0.0), (1.0, 1.0)),
+        boundary_curve_ids=("b", "a"),
+    )
+    point_contact = normalize_surface_intersection_result(request, points=((0.0, 0.0, 0.0),))
+
+    overlap_result = normalize_surface_intersection_result(request, overlap_regions=(overlap,))
+
+    assert overlap_result.classification == "overlap"
+    assert overlap_result.quality == "degenerate"
+    assert overlap_result.overlap_regions[0].boundary_curve_ids == ("a", "b")
+    assert {record.code for record in overlap_result.degeneracies} == {"overlap"}
+    assert point_contact.classification == "degenerate"
+    assert {record.code for record in point_contact.degeneracies} == {"point-contact"}
+
+
+def test_surface_intersection_degeneracy_classifier_reports_short_curve_and_high_residual() -> None:
+    request = make_surface_intersection_request(
+        PlanarSurfacePatch(family="planar"),
+        PlanarSurfacePatch(family="planar"),
+    )
+    curve = SurfaceIntersectionCurveRecord(
+        curve_id="short",
+        kind="sampled",
+        points_3d=((0.0, 0.0, 0.0), (1e-12, 0.0, 0.0)),
+    )
+    result = normalize_surface_intersection_result(request, curves=(curve,), max_residual=1e-3)
+
+    assert result.classification == "curves"
+    assert result.quality == "degenerate"
+    assert all(isinstance(record, SurfaceIntersectionDegeneracyRecord) for record in result.degeneracies)
+    assert {record.code for record in result.degeneracies} == {"short-curve", "high-residual"}
+    assert classify_surface_intersection_degeneracy(result) == result.degeneracies
