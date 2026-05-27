@@ -72,46 +72,136 @@ class ThreadMeshCompatibilityResult:
         }
 
 
+def thread_feature_csg_dependencies():
+    from .csg import SurfaceCSGFeatureDependencyRecord
+
+    return (
+        SurfaceCSGFeatureDependencyRecord(
+            caller_id="threading.make_external_thread",
+            module="impression.modeling.threading",
+            operation=None,
+            surface_builder="make_external_thread",
+            explicit_mesh_route="make_thread_mesh_compatibility_result",
+        ),
+        SurfaceCSGFeatureDependencyRecord(
+            caller_id="threading.make_internal_thread",
+            module="impression.modeling.threading",
+            operation=None,
+            surface_builder="make_internal_thread",
+            explicit_mesh_route="make_thread_mesh_compatibility_result",
+        ),
+        SurfaceCSGFeatureDependencyRecord(
+            caller_id="threading.make_threaded_rod",
+            module="impression.modeling.threading",
+            operation=None,
+            surface_builder="make_threaded_rod",
+            explicit_mesh_route="make_thread_mesh_compatibility_result",
+        ),
+        SurfaceCSGFeatureDependencyRecord(
+            caller_id="threading.make_tapped_hole_cutter",
+            module="impression.modeling.threading",
+            operation=None,
+            surface_builder="make_tapped_hole_cutter",
+            explicit_mesh_route="make_thread_mesh_compatibility_result",
+        ),
+        SurfaceCSGFeatureDependencyRecord(
+            caller_id="threading.make_hex_nut",
+            module="impression.modeling.threading",
+            operation="difference",
+            surface_builder="make_hex_nut",
+            explicit_mesh_route="backend='mesh'",
+        ),
+        SurfaceCSGFeatureDependencyRecord(
+            caller_id="threading.make_round_nut",
+            module="impression.modeling.threading",
+            operation="difference",
+            surface_builder="make_round_nut",
+            explicit_mesh_route="backend='mesh'",
+        ),
+        SurfaceCSGFeatureDependencyRecord(
+            caller_id="threading.make_runout_relief",
+            module="impression.modeling.threading",
+            operation=None,
+            surface_builder="make_runout_relief",
+            explicit_mesh_route="backend='mesh'",
+        ),
+        SurfaceCSGFeatureDependencyRecord(
+            caller_id="threading.lower_thread_surface_assembly",
+            module="impression.modeling.threading",
+            operation="difference",
+            surface_builder="lower_thread_surface_assembly",
+            explicit_mesh_route="make_thread_mesh_compatibility_result",
+        ),
+    )
+
+
+def _thread_surface_result(caller_id: str, result):
+    from .csg import assert_no_hidden_surface_csg_mesh_fallback
+
+    return assert_no_hidden_surface_csg_mesh_fallback(caller_id, result)
+
+
 def make_external_thread(spec, *args, backend="surface", **kwargs):
     if backend == "mesh":
         return _call_with_legacy_mesh_primitives(_extension.make_external_thread, spec, *args, backend=backend, **kwargs)
-    return _extension.make_external_thread(spec, *args, backend=backend, **kwargs)
+    return _thread_surface_result(
+        "threading.make_external_thread",
+        _extension.make_external_thread(spec, *args, backend=backend, **kwargs),
+    )
 
 
 def make_internal_thread(spec, *args, backend="surface", **kwargs):
     if backend == "mesh":
         return _call_with_legacy_mesh_primitives(_extension.make_internal_thread, spec, *args, backend=backend, **kwargs)
-    return _extension.make_internal_thread(spec, *args, backend=backend, **kwargs)
+    return _thread_surface_result(
+        "threading.make_internal_thread",
+        _extension.make_internal_thread(spec, *args, backend=backend, **kwargs),
+    )
 
 
 def make_threaded_rod(spec, *args, backend="surface", **kwargs):
     if backend == "mesh":
         return _call_with_legacy_mesh_primitives(_extension.make_threaded_rod, spec, *args, backend=backend, **kwargs)
-    return _extension.make_threaded_rod(spec, *args, backend=backend, **kwargs)
+    return _thread_surface_result(
+        "threading.make_threaded_rod",
+        _extension.make_threaded_rod(spec, *args, backend=backend, **kwargs),
+    )
 
 
 def make_tapped_hole_cutter(spec, *args, backend="surface", **kwargs):
     if backend == "mesh":
         return _call_with_legacy_mesh_primitives(_extension.make_tapped_hole_cutter, spec, *args, backend=backend, **kwargs)
-    return _extension.make_tapped_hole_cutter(spec, *args, backend=backend, **kwargs)
+    return _thread_surface_result(
+        "threading.make_tapped_hole_cutter",
+        _extension.make_tapped_hole_cutter(spec, *args, backend=backend, **kwargs),
+    )
 
 
 def make_hex_nut(spec, *args, backend="mesh", **kwargs):
     if backend == "mesh":
         return _call_with_legacy_mesh_primitives(_extension.make_hex_nut, spec, *args, backend=backend, **kwargs)
-    return _extension.make_hex_nut(spec, *args, backend=backend, **kwargs)
+    return _thread_surface_result(
+        "threading.make_hex_nut",
+        _extension.make_hex_nut(spec, *args, backend=backend, **kwargs),
+    )
 
 
 def make_round_nut(spec, *args, backend="mesh", **kwargs):
     if backend == "mesh":
         return _call_with_legacy_mesh_primitives(_extension.make_round_nut, spec, *args, backend=backend, **kwargs)
-    return _extension.make_round_nut(spec, *args, backend=backend, **kwargs)
+    return _thread_surface_result(
+        "threading.make_round_nut",
+        _extension.make_round_nut(spec, *args, backend=backend, **kwargs),
+    )
 
 
 def make_runout_relief(spec, *args, backend="mesh", **kwargs):
     if backend == "mesh":
         return _call_with_legacy_mesh_primitives(_extension.make_runout_relief, spec, *args, backend=backend, **kwargs)
-    return _extension.make_runout_relief(spec, *args, backend=backend, **kwargs)
+    return _thread_surface_result(
+        "threading.make_runout_relief",
+        _extension.make_runout_relief(spec, *args, backend=backend, **kwargs),
+    )
 
 
 def _call_with_legacy_mesh_primitives(fn, *args, **kwargs):
@@ -134,13 +224,25 @@ def _call_with_legacy_mesh_primitives(fn, *args, **kwargs):
 def lower_thread_surface_assembly(assembly):
     if not isinstance(assembly, _extension.ThreadSurfaceAssembly):
         raise TypeError("lower_thread_surface_assembly requires a ThreadSurfaceAssembly.")
+    lowered = tuple(lower_thread_operand_to_surface_body(operand) for operand in assembly.operands)
     if assembly.operation == "difference":
+        from .csg import surface_csg_feature_gate
+
+        gate = surface_csg_feature_gate(
+            "threading.lower_thread_surface_assembly",
+            "difference",
+            lowered,
+        )
         raise ThreadAssemblyLoweringError(
             ThreadAssemblyLoweringDiagnostic(
                 assembly_type=assembly.assembly_type,
                 operation=assembly.operation,
-                reason="Thread surface assembly requires surface boolean difference lowering.",
-                missing_dependency="surface-boolean-difference",
+                reason=(
+                    gate.reason
+                    if not gate.supported
+                    else "Thread surface assembly requires surface boolean difference lowering."
+                ),
+                missing_dependency=gate.boundary if not gate.supported else "surface-boolean-difference",
             )
         )
     if assembly.operation not in {"standalone", "union"}:
@@ -154,18 +256,33 @@ def lower_thread_surface_assembly(assembly):
 
     from .surface import make_surface_body
 
-    lowered = tuple(lower_thread_operand_to_surface_body(operand) for operand in assembly.operands)
+    if assembly.operation == "union" and len(lowered) > 1:
+        from .csg import surface_csg_feature_gate
+
+        gate = surface_csg_feature_gate("threading.lower_thread_surface_assembly", "union", lowered)
+        if not gate.supported:
+            raise ThreadAssemblyLoweringError(
+                ThreadAssemblyLoweringDiagnostic(
+                    assembly_type=assembly.assembly_type,
+                    operation=assembly.operation,
+                    reason=gate.reason,
+                    missing_dependency=gate.boundary,
+                )
+            )
     shells = tuple(shell for body in lowered for shell in body.shells)
-    return make_surface_body(
-        shells,
-        metadata={
-            "kernel": {
-                "producer": "threading",
-                "assembly_type": assembly.assembly_type,
-                "operation": assembly.operation,
-                "source_identity": assembly.stable_identity,
-            }
-        },
+    return _thread_surface_result(
+        "threading.lower_thread_surface_assembly",
+        make_surface_body(
+            shells,
+            metadata={
+                "kernel": {
+                    "producer": "threading",
+                    "assembly_type": assembly.assembly_type,
+                    "operation": assembly.operation,
+                    "source_identity": assembly.stable_identity,
+                }
+            },
+        ),
     )
 
 

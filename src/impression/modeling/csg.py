@@ -113,6 +113,26 @@ class SurfaceCSGFeatureGateDiagnostic:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGFeatureDependencyRecord:
+    """One non-primitive feature builder dependency on surface CSG policy."""
+
+    caller_id: str
+    module: str
+    operation: SurfaceBooleanOperation | None
+    surface_builder: str
+    explicit_mesh_route: str | None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "caller_id": self.caller_id,
+            "explicit_mesh_route": self.explicit_mesh_route,
+            "module": self.module,
+            "operation": self.operation,
+            "surface_builder": self.surface_builder,
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceBooleanOperands:
     """Canonical surfaced boolean operands ready for execution."""
 
