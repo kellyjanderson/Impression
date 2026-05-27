@@ -660,6 +660,46 @@ class SurfaceCSGShellAssemblyRecord:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGBoundaryUseProvenanceRecord:
+    """Provenance for one result boundary use during CSG seam rebuild."""
+
+    boundary: SurfaceBoundaryRef
+    use_count: int
+    seam_ids: tuple[str, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary": {
+                "boundary_id": self.boundary.boundary_id,
+                "patch_index": self.boundary.patch_index,
+            },
+            "seam_ids": self.seam_ids,
+            "use_count": self.use_count,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGSeamRebuildRecord:
+    """Rebuilt seam and adjacency truth for one provisional CSG shell."""
+
+    shell: SurfaceShell
+    boundary_uses: tuple[SurfaceCSGBoundaryUseProvenanceRecord, ...]
+    diagnostics: tuple[str, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary_uses": [record.canonical_payload() for record in self.boundary_uses],
+            "diagnostics": self.diagnostics,
+            "patch_count": self.shell.patch_count,
+            "seam_count": len(self.shell.seams),
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceBooleanIntersectionStage:
     """Deterministic surfaced intersection/classification stage output."""
 
@@ -2106,8 +2146,38 @@ def _surface_boolean_cleanup_shell(shell) -> object:
     )
 
 
+def rebuild_surface_csg_shell_seams(shell: SurfaceShell) -> SurfaceCSGSeamRebuildRecord:
+    """Canonicalize seam, boundary-use, and adjacency truth for a provisional CSG shell."""
+
+    rebuilt_shell = _surface_boolean_cleanup_shell(shell)
+    boundary_counts: dict[tuple[int, str], list[str]] = {}
+    from .tessellation import _patch_boundary_ids
+
+    for patch_index, patch in enumerate(rebuilt_shell.patches):
+        for boundary_id in _patch_boundary_ids(patch):
+            boundary_counts[(patch_index, boundary_id)] = []
+    for seam in rebuilt_shell.seams:
+        for boundary in seam.boundaries:
+            boundary_counts.setdefault(_surface_boolean_boundary_key(boundary), []).append(seam.seam_id)
+    boundary_uses = tuple(
+        SurfaceCSGBoundaryUseProvenanceRecord(
+            boundary=SurfaceBoundaryRef(patch_index, boundary_id),
+            use_count=len(seam_ids),
+            seam_ids=tuple(sorted(seam_ids)),
+        )
+        for (patch_index, boundary_id), seam_ids in sorted(boundary_counts.items())
+    )
+    invalid_reason = _surface_boolean_shell_invalid_reason(rebuilt_shell)
+    diagnostics = () if invalid_reason is None else (invalid_reason,)
+    return SurfaceCSGSeamRebuildRecord(
+        shell=rebuilt_shell,
+        boundary_uses=boundary_uses,
+        diagnostics=diagnostics,
+    )
+
+
 def _surface_boolean_cleanup_body(body: SurfaceBody) -> SurfaceBody:
-    cleaned_shells = tuple(_surface_boolean_cleanup_shell(shell) for shell in body.iter_shells(world=True))
+    cleaned_shells = tuple(rebuild_surface_csg_shell_seams(shell).shell for shell in body.iter_shells(world=True))
     return make_surface_body(cleaned_shells, metadata=body.metadata)
 
 
