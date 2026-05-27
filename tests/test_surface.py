@@ -103,11 +103,16 @@ from impression.modeling import (
     SurfaceBooleanFamilyEligibilityResult,
     SurfaceBooleanFamilyPairSupport,
     SurfaceBooleanOperands,
+    SurfaceBooleanSupportState,
     SurfaceBooleanUnsupportedFamilyDiagnostic,
     SurfaceCSGHigherOrderRefusalDiagnostic,
     SurfaceCSGHigherOrderSupportRecord,
+    SurfaceCSGPrimitiveAnalyticPairRecord,
     SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX,
     SURFACE_BOOLEAN_OPERATIONS,
+    ANALYTIC_SURFACE_CSG_FAMILIES,
+    HIGHER_ORDER_SURFACE_CSG_FAMILIES,
+    SAMPLED_SURFACE_CSG_FAMILIES,
     SurfaceSeamParticipationRecord,
     SurfaceSeamValidationResult,
     SubdivisionCrease,
@@ -148,6 +153,9 @@ from impression.modeling import (
     surface_boolean_family_eligibility,
     surface_boolean_family_pair_support,
     surface_boolean_result,
+    surface_csg_analytic_primitive_pair_support,
+    surface_csg_completion_support_matrix,
+    surface_csg_refusal_record,
     surface_composition_to_consumer_collection,
     surface_group,
     validate_implicit_field_security,
@@ -2204,6 +2212,7 @@ def test_surface_boolean_family_pair_matrix_declares_every_known_family_pair() -
     expected_count = len(SURFACE_BOOLEAN_OPERATIONS) * len(PATCH_FAMILY_CAPABILITY_MATRIX) ** 2
 
     assert len(SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX) == expected_count
+    assert len(surface_csg_completion_support_matrix()) == expected_count
     for operation in SURFACE_BOOLEAN_OPERATIONS:
         for left_family in PATCH_FAMILY_CAPABILITY_MATRIX:
             for right_family in PATCH_FAMILY_CAPABILITY_MATRIX:
@@ -2213,15 +2222,52 @@ def test_surface_boolean_family_pair_matrix_declares_every_known_family_pair() -
                 assert record.operation == operation
                 assert record.left_family == left_family
                 assert record.right_family == right_family
+                assert record.support_state in {"exact", "declared-tolerance", "adapter", "unsupported", "not-yet-implemented"}
                 if (
                     PATCH_FAMILY_CAPABILITY_MATRIX[left_family].support_phase == "available"
                     and PATCH_FAMILY_CAPABILITY_MATRIX[right_family].support_phase == "available"
                 ):
                     assert record.supported is True
+                    assert record.support_state == "exact"
                     assert record.required_future_capability is None
                 else:
                     assert record.supported is False
                     assert record.required_future_capability
+
+
+def test_surface_csg_refusal_record_is_structured_and_constant_time_policy() -> None:
+    diagnostic = surface_csg_refusal_record("union", "planar", "bspline")
+
+    assert isinstance(diagnostic, SurfaceBooleanUnsupportedFamilyDiagnostic)
+    payload = diagnostic.canonical_payload()
+    assert payload["operation"] == "union"
+    assert payload["left_family"] == "planar"
+    assert payload["right_family"] == "bspline"
+    assert payload["required_future_capability"]
+
+
+def test_surface_csg_analytic_primitive_pair_support_uses_declared_tolerances() -> None:
+    record = surface_csg_analytic_primitive_pair_support(
+        "intersection",
+        "planar",
+        "revolution",
+        policy={"snap_tolerance": 1e-6, "equality_tolerance": 1e-6},
+    )
+
+    assert isinstance(record, SurfaceCSGPrimitiveAnalyticPairRecord)
+    assert record.supported is True
+    assert record.support_state == "exact"
+    assert record.tolerance_policy.snap_tolerance == pytest.approx(1e-6)
+    assert record.diagnostic == ""
+
+
+def test_surface_csg_analytic_primitive_pair_refuses_higher_order_without_mesh() -> None:
+    record = surface_csg_analytic_primitive_pair_support("difference", "planar", "implicit")
+
+    assert record.supported is False
+    assert record.support_state == "unsupported"
+    assert "sampled-tessellation-boundary" in record.diagnostic
+    assert "mesh" not in record.diagnostic.lower()
 
 
 def test_surface_boolean_family_eligibility_reports_unsupported_mixed_family_without_mesh_fallback() -> None:
@@ -2250,7 +2296,7 @@ def test_surface_boolean_unsupported_family_diagnostic_builder_refuses_supported
 
 
 def test_higher_order_csg_solver_boundary_names_advanced_family_refusals() -> None:
-    advanced_families = ("bspline", "nurbs", "sweep", "subdivision", "implicit", "heightmap", "displacement", "torus")
+    advanced_families = tuple(HIGHER_ORDER_SURFACE_CSG_FAMILIES)
 
     for family in advanced_families:
         support = classify_higher_order_csg_pair("intersection", "planar", family)
@@ -2259,7 +2305,8 @@ def test_higher_order_csg_solver_boundary_names_advanced_family_refusals() -> No
         assert isinstance(support, SurfaceCSGHigherOrderSupportRecord)
         assert isinstance(diagnostic, SurfaceCSGHigherOrderRefusalDiagnostic)
         assert support.supported is False
-        assert support.solver_boundary == "higher-order-exact-solver"
+        expected_boundary = "sampled-tessellation-boundary" if family in SAMPLED_SURFACE_CSG_FAMILIES else "higher-order-exact-solver"
+        assert support.solver_boundary == expected_boundary
         assert family in diagnostic.message
         assert "requires" in diagnostic.message
 

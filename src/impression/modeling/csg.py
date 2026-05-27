@@ -36,6 +36,7 @@ SurfaceBooleanBodyRelation = Literal["disjoint", "touching", "overlap", "contain
 SurfaceBooleanPatchRelation = Literal["inside", "outside", "on"]
 SurfaceBooleanSplitRole = Literal["survive", "cut_cap", "discard"]
 SurfaceBooleanUnsupportedPhase = Literal["operand-family-eligibility", "intersection-kernel"]
+SurfaceBooleanSupportState = Literal["exact", "declared-tolerance", "adapter", "unsupported", "not-yet-implemented"]
 SurfaceCSGCurveKind = Literal["line", "arc", "conic", "sampled"]
 SurfaceCSGToleranceDiagnosticCode = Literal[
     "invalid-tolerance",
@@ -424,6 +425,7 @@ class SurfaceCSGHigherOrderSupportRecord:
     right_family: str
     supported: bool
     solver_boundary: str
+    support_state: SurfaceBooleanSupportState = "not-yet-implemented"
     required_future_capability: str | None = None
 
     def canonical_payload(self) -> dict[str, object]:
@@ -433,6 +435,7 @@ class SurfaceCSGHigherOrderSupportRecord:
             "required_future_capability": self.required_future_capability,
             "right_family": self.right_family,
             "solver_boundary": self.solver_boundary,
+            "support_state": self.support_state,
             "supported": self.supported,
         }
 
@@ -839,6 +842,7 @@ class SurfaceBooleanFamilyPairSupport:
     right_family: str
     supported: bool
     phase: SurfaceBooleanUnsupportedPhase | str
+    support_state: SurfaceBooleanSupportState = "unsupported"
     required_future_capability: str | None = None
 
     def __post_init__(self) -> None:
@@ -848,8 +852,15 @@ class SurfaceBooleanFamilyPairSupport:
         left_family = str(self.left_family).strip()
         right_family = str(self.right_family).strip()
         phase = str(self.phase).strip()
+        support_state = str(self.support_state).strip()
         if not left_family or not right_family or not phase:
             raise ValueError("SurfaceBooleanFamilyPairSupport families and phase must be non-empty.")
+        if support_state not in {"exact", "declared-tolerance", "adapter", "unsupported", "not-yet-implemented"}:
+            raise ValueError("SurfaceBooleanFamilyPairSupport.support_state is not supported.")
+        if self.supported and support_state in {"unsupported", "not-yet-implemented"}:
+            raise ValueError("Supported surface boolean family pairs require an executable support_state.")
+        if not self.supported and support_state in {"exact", "declared-tolerance", "adapter"}:
+            raise ValueError("Unsupported surface boolean family pairs may not use an executable support_state.")
         future = None if self.required_future_capability is None else str(self.required_future_capability).strip()
         if future == "":
             raise ValueError("SurfaceBooleanFamilyPairSupport.required_future_capability must be non-empty when provided.")
@@ -857,6 +868,7 @@ class SurfaceBooleanFamilyPairSupport:
         object.__setattr__(self, "left_family", left_family)
         object.__setattr__(self, "right_family", right_family)
         object.__setattr__(self, "phase", phase)
+        object.__setattr__(self, "support_state", support_state)
         object.__setattr__(self, "required_future_capability", future)
 
     def canonical_payload(self) -> dict[str, object]:
@@ -866,6 +878,7 @@ class SurfaceBooleanFamilyPairSupport:
             "right_family": self.right_family,
             "supported": self.supported,
             "phase": self.phase,
+            "support_state": self.support_state,
             "required_future_capability": self.required_future_capability,
         }
 
@@ -896,6 +909,30 @@ class SurfaceBooleanUnsupportedFamilyDiagnostic:
             "phase": self.phase,
             "required_future_capability": self.required_future_capability,
             "message": self.message,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGPrimitiveAnalyticPairRecord:
+    """Analytic primitive CSG support declaration for one operation/family pair."""
+
+    operation: SurfaceBooleanOperation
+    left_family: str
+    right_family: str
+    supported: bool
+    support_state: SurfaceBooleanSupportState
+    tolerance_policy: SurfaceCSGTolerancePolicy = DEFAULT_SURFACE_CSG_TOLERANCE_POLICY
+    diagnostic: str = ""
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "left_family": self.left_family,
+            "right_family": self.right_family,
+            "supported": self.supported,
+            "support_state": self.support_state,
+            "tolerance_policy": self.tolerance_policy.canonical_payload(),
+            "diagnostic": self.diagnostic,
         }
 
 
@@ -936,6 +973,11 @@ _SURFACE_BOOLEAN_EXECUTABLE_FAMILY_PAIRS: frozenset[tuple[str, str]] = frozenset
         if left_capability.support_phase == "available" and right_capability.support_phase == "available"
     }
 )
+ANALYTIC_SURFACE_CSG_FAMILIES: frozenset[str] = frozenset({"planar", "ruled", "revolution"})
+SAMPLED_SURFACE_CSG_FAMILIES: frozenset[str] = frozenset({"implicit", "heightmap", "displacement"})
+HIGHER_ORDER_SURFACE_CSG_FAMILIES: frozenset[str] = frozenset(
+    {"bspline", "nurbs", "sweep", "subdivision", "implicit", "heightmap", "displacement", "torus"}
+)
 
 
 def _surface_boolean_required_future_capability(
@@ -964,19 +1006,31 @@ def _surface_boolean_support_record(
     right_capability = PATCH_FAMILY_CAPABILITY_MATRIX.get(right_family)
     if supported:
         phase: SurfaceBooleanUnsupportedPhase | str = "intersection-kernel"
+        support_state: SurfaceBooleanSupportState = (
+            "exact"
+            if left_family in ANALYTIC_SURFACE_CSG_FAMILIES and right_family in ANALYTIC_SURFACE_CSG_FAMILIES
+            else "declared-tolerance"
+        )
         required_future_capability = None
     elif left_capability is None or right_capability is None:
         phase = "operand-family-eligibility"
+        support_state = "unsupported"
         required_future_capability = _surface_boolean_required_future_capability(
             operation, left_family, right_family
         )
     elif left_capability.support_phase == "planned" or right_capability.support_phase == "planned":
         phase = "operand-family-eligibility"
+        support_state = (
+            "unsupported"
+            if left_family in SAMPLED_SURFACE_CSG_FAMILIES or right_family in SAMPLED_SURFACE_CSG_FAMILIES
+            else "not-yet-implemented"
+        )
         required_future_capability = _surface_boolean_required_future_capability(
             operation, left_family, right_family
         )
     else:
         phase = "intersection-kernel"
+        support_state = "not-yet-implemented"
         required_future_capability = _surface_boolean_required_future_capability(
             operation, left_family, right_family
         )
@@ -986,6 +1040,7 @@ def _surface_boolean_support_record(
         right_family=right_family,
         supported=supported,
         phase=phase,
+        support_state=support_state,
         required_future_capability=required_future_capability,
     )
 
@@ -1982,6 +2037,7 @@ def surface_boolean_family_pair_support(
             right_family=right_family,
             supported=support.supported,
             phase=support.phase,
+            support_state=support.support_state,
             required_future_capability=support.required_future_capability,
         )
     return SurfaceBooleanFamilyPairSupport(
@@ -1990,7 +2046,61 @@ def surface_boolean_family_pair_support(
         right_family=right_family,
         supported=False,
         phase="operand-family-eligibility",
+        support_state="unsupported",
         required_future_capability=_surface_boolean_required_future_capability(operation, left_family, right_family),
+    )
+
+
+def surface_csg_completion_support_matrix() -> tuple[SurfaceBooleanFamilyPairSupport, ...]:
+    """Return the authoritative operation/family CSG support matrix."""
+
+    return tuple(
+        SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX[key]
+        for key in sorted(SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX)
+    )
+
+
+def surface_csg_refusal_record(
+    operation: SurfaceBooleanOperation,
+    left_family: str,
+    right_family: str,
+) -> SurfaceBooleanUnsupportedFamilyDiagnostic:
+    """Build the structured refusal record for an unsupported CSG family pair."""
+
+    support = surface_boolean_family_pair_support(operation, left_family, right_family)
+    return build_surface_boolean_unsupported_family_diagnostic(support)
+
+
+def surface_csg_analytic_primitive_pair_support(
+    operation: SurfaceBooleanOperation,
+    left_family: str,
+    right_family: str,
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> SurfaceCSGPrimitiveAnalyticPairRecord:
+    """Return analytic primitive-pair support without selecting a mesh substitute."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    support = surface_boolean_family_pair_support(operation, left_family, right_family)
+    analytic_pair = left_family in ANALYTIC_SURFACE_CSG_FAMILIES and right_family in ANALYTIC_SURFACE_CSG_FAMILIES
+    supported = support.supported and analytic_pair and support.support_state in {"exact", "declared-tolerance"}
+    if supported:
+        diagnostic = ""
+    elif support.supported:
+        diagnostic = (
+            f"surface boolean {operation} support for {left_family}/{right_family} is outside "
+            "the analytic primitive CSG boundary."
+        )
+    else:
+        diagnostic = surface_csg_refusal_record(operation, left_family, right_family).message
+    return SurfaceCSGPrimitiveAnalyticPairRecord(
+        operation=operation,
+        left_family=left_family,
+        right_family=right_family,
+        supported=supported,
+        support_state=support.support_state,
+        tolerance_policy=normalized_policy,
+        diagnostic=diagnostic,
     )
 
 
@@ -2002,18 +2112,7 @@ def _surface_boolean_family_pair_support(
     return surface_boolean_family_pair_support(operation, left_family, right_family)
 
 
-HIGHER_ORDER_CSG_FAMILIES: frozenset[str] = frozenset(
-    {
-        "bspline",
-        "nurbs",
-        "sweep",
-        "subdivision",
-        "implicit",
-        "heightmap",
-        "displacement",
-        "torus",
-    }
-)
+HIGHER_ORDER_CSG_FAMILIES = HIGHER_ORDER_SURFACE_CSG_FAMILIES
 
 
 def classify_higher_order_csg_pair(
@@ -2032,6 +2131,7 @@ def classify_higher_order_csg_pair(
             right_family=right_family,
             supported=pair_support.supported,
             solver_boundary="low-order-analytic",
+            support_state=pair_support.support_state,
             required_future_capability=pair_support.required_future_capability,
         )
     future = pair_support.required_future_capability or (
@@ -2042,7 +2142,12 @@ def classify_higher_order_csg_pair(
         left_family=left_family,
         right_family=right_family,
         supported=False,
-        solver_boundary="higher-order-exact-solver",
+        solver_boundary=(
+            "sampled-tessellation-boundary"
+            if left_family in SAMPLED_SURFACE_CSG_FAMILIES or right_family in SAMPLED_SURFACE_CSG_FAMILIES
+            else "higher-order-exact-solver"
+        ),
+        support_state=pair_support.support_state,
         required_future_capability=future,
     )
 
@@ -2067,7 +2172,7 @@ def build_surface_boolean_unsupported_family_diagnostic(
     if support.supported:
         raise ValueError("Supported surface boolean family pairs do not need unsupported diagnostics.")
     higher_order = classify_higher_order_csg_pair(support.operation, support.left_family, support.right_family)
-    if higher_order.solver_boundary == "higher-order-exact-solver":
+    if higher_order.solver_boundary in {"higher-order-exact-solver", "sampled-tessellation-boundary"}:
         higher_order_diagnostic = build_higher_order_csg_refusal_diagnostic(higher_order)
         return SurfaceBooleanUnsupportedFamilyDiagnostic(
             operation=support.operation,
