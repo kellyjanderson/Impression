@@ -455,8 +455,8 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 241: .impress Implicit Payload Security Refusal Fixtures (v1.0)](../specifications/surface-241-impress-implicit-payload-security-refusal-fixtures-v1_0.md)
 
 ### Surface Body Completion Architecture
-- [ ] [Surface Spec 242: Surface Body Completion Capability And Evidence Gate (v1.0)](../specifications/surface-242-surface-body-completion-capability-and-evidence-gate-v1_0.md)
-- [ ] [Surface Spec 243: Patch Family Promotion Readiness Audit (v1.0)](../specifications/surface-243-patch-family-promotion-readiness-audit-v1_0.md)
+- [x] [Surface Spec 242: Surface Body Completion Capability And Evidence Gate (v1.0)](../specifications/surface-242-surface-body-completion-capability-and-evidence-gate-v1_0.md)
+- [x] [Surface Spec 243: Patch Family Promotion Readiness Audit (v1.0)](../specifications/surface-243-patch-family-promotion-readiness-audit-v1_0.md)
 - [ ] [Surface Spec 244: CSG Completion Support Matrix And Refusal Records (v1.0)](../specifications/surface-244-csg-completion-support-matrix-and-refusal-records-v1_0.md)
 - [ ] [Surface Spec 245: Analytic CSG Expansion For Primitive Surface Families (v1.0)](../specifications/surface-245-analytic-csg-expansion-for-primitive-surface-families-v1_0.md)
 - [ ] [Surface Spec 246: Higher-Order And Sampled CSG Policy Boundary (v1.0)](../specifications/surface-246-higher-order-and-sampled-csg-policy-boundary-v1_0.md)

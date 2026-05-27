@@ -44,7 +44,9 @@ from impression.modeling._surface_ops import make_surface_linear_extrude, make_s
 from impression.modeling import (
     PATCH_FAMILY_CAPABILITY_MATRIX,
     PATCH_FAMILY_FEATURE_COVERAGE,
+    PATCH_FAMILY_PROMOTION_CRITERIA,
     REQUIRED_V1_PATCH_FAMILIES,
+    SURFACE_BODY_COMPLETION_TRACKS,
     SUPPORTED_SURFACE_PATCH_FAMILIES,
     SURFACE_SPEC_66_RETIREMENT_NOTE,
     AdapterLossiness,
@@ -88,6 +90,7 @@ from impression.modeling import (
     SurfaceBody,
     SurfaceBoundaryDescriptor,
     SurfaceBoundaryRef,
+    SurfaceBodyCompletionEvidenceRecord,
     SurfaceComposition,
     SurfaceCompositionError,
     SurfaceCompositionTraversalRecord,
@@ -124,11 +127,15 @@ from impression.modeling import (
     assert_implicit_tessellation_sampling_safety,
     assert_subdivision_tessellation_approximation,
     assert_surface_family_tessellation_adapter_coverage,
+    audit_all_patch_family_promotion_readiness,
+    audit_patch_family_promotion_readiness,
     classify_surface_seam_continuity,
+    evaluate_surface_body_completion_gate,
     evaluate_implicit_field,
     evaluate_implicit_field_domain,
     extract_surface_boundary_descriptor,
     inspect_surface_family_tessellation_adapter_coverage,
+    make_surface_body_completion_evidence_from_capabilities,
     make_surface_body,
     make_surface_shell,
     make_implicit_surface,
@@ -690,6 +697,72 @@ def test_patch_family_scope_constants_are_explicit() -> None:
         "diagnostics",
         "no-hidden-fallback",
     )
+
+
+def test_surface_body_completion_gate_requires_explicit_non_documentation_evidence() -> None:
+    evidence = (
+        SurfaceBodyCompletionEvidenceRecord(
+            track="patch-family",
+            state="verified",
+            spec="Surface Spec 242",
+            implementation_owner="src/impression/modeling/surface.py",
+            evidence_type="unit-test",
+            source="documentation",
+        ),
+    )
+
+    report = evaluate_surface_body_completion_gate(evidence)
+
+    assert report.passed is False
+    assert any(diagnostic.code == "documentation-only-evidence" for diagnostic in report.diagnostics)
+    assert any(diagnostic.track == "csg" and diagnostic.code == "missing-track-evidence" for diagnostic in report.diagnostics)
+
+
+def test_surface_body_completion_gate_passes_with_all_required_track_evidence() -> None:
+    evidence = tuple(
+        SurfaceBodyCompletionEvidenceRecord(
+            track=track,
+            state="verified",
+            spec=f"{track}:fixture",
+            implementation_owner="tests/test_surface.py",
+            evidence_type="unit-test",
+        )
+        for track in SURFACE_BODY_COMPLETION_TRACKS
+    )
+
+    report = evaluate_surface_body_completion_gate(evidence)
+
+    assert report.passed is True
+    assert report.diagnostics == ()
+
+
+def test_surface_body_completion_capability_evidence_is_implementation_backed() -> None:
+    evidence = make_surface_body_completion_evidence_from_capabilities()
+
+    assert evidence
+    assert all(record.source == "implementation" for record in evidence)
+    assert any(record.track == "patch-family" and record.spec == "patch-family:planar" for record in evidence)
+
+
+def test_patch_family_promotion_readiness_audits_each_criterion_separately() -> None:
+    records = audit_all_patch_family_promotion_readiness()
+    by_family = {record.family: record for record in records}
+
+    assert set(by_family) == set(SUPPORTED_SURFACE_PATCH_FAMILIES)
+    assert tuple(PATCH_FAMILY_PROMOTION_CRITERIA) == by_family["planar"].supported_criteria + tuple(
+        gap.criterion for gap in by_family["planar"].gaps
+    )
+    assert by_family["planar"].promotable is True
+    assert by_family["bspline"].promotable is False
+    assert {gap.criterion for gap in by_family["bspline"].gaps} >= {"csg", "loft", "diagnostics"}
+
+
+def test_patch_family_promotion_readiness_reports_missing_family_record() -> None:
+    record = audit_patch_family_promotion_readiness("torus")
+
+    assert record.promotable is False
+    assert record.gaps[0].criterion == "record"
+    assert "PATCH_FAMILY_CAPABILITY_MATRIX" in record.gaps[0].message
 
 
 def test_parameter_domain_validates_positive_spans() -> None:

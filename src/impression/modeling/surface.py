@@ -65,6 +65,70 @@ class PatchFamilyPromotionEvidenceRecord:
         return self.current_phase != self.promoted_phase and self.promoted_phase == "available"
 
 
+@dataclass(frozen=True)
+class SurfaceBodyCompletionEvidenceRecord:
+    """Release-level evidence item used by the surface body completion gate."""
+
+    track: str
+    state: Literal["specified", "implemented", "verified", "unsupported", "retired"]
+    spec: str
+    implementation_owner: str
+    evidence_type: str
+    source: str = "implementation"
+
+    def __post_init__(self) -> None:
+        for name in ("track", "spec", "implementation_owner", "evidence_type", "source"):
+            value = str(getattr(self, name)).strip()
+            if not value:
+                raise ValueError(f"SurfaceBodyCompletionEvidenceRecord.{name} must be non-empty.")
+            object.__setattr__(self, name, value)
+        if self.state not in {"specified", "implemented", "verified", "unsupported", "retired"}:
+            raise ValueError("SurfaceBodyCompletionEvidenceRecord.state is invalid.")
+
+
+@dataclass(frozen=True)
+class SurfaceBodyCompletionDiagnostic:
+    """Actionable missing evidence diagnostic for the completion gate."""
+
+    track: str
+    code: str
+    message: str
+    implementation_owner: str
+    evidence_type: str
+    spec: str = ""
+
+
+@dataclass(frozen=True)
+class SurfaceBodyCompletionReport:
+    """Pass/fail release completion report."""
+
+    passed: bool
+    evidence: tuple[SurfaceBodyCompletionEvidenceRecord, ...]
+    diagnostics: tuple[SurfaceBodyCompletionDiagnostic, ...]
+
+
+@dataclass(frozen=True)
+class PatchFamilyPromotionGapRecord:
+    """One missing or unsupported promotion criterion for a patch family."""
+
+    family: str
+    criterion: str
+    implementation_owner: str
+    evidence_type: str
+    message: str
+
+
+@dataclass(frozen=True)
+class PatchFamilyPromotionReadinessRecord:
+    """Per-family promotion verdict with criterion-level support details."""
+
+    family: str
+    current_phase: Literal["available", "planned"]
+    promotable: bool
+    supported_criteria: tuple[str, ...]
+    gaps: tuple[PatchFamilyPromotionGapRecord, ...]
+
+
 SUPPORTED_SURFACE_PATCH_FAMILIES: tuple[str, ...] = (
     "planar",
     "ruled",
@@ -85,6 +149,53 @@ PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS: tuple[str, ...] = (
     "diagnostics",
     "no-hidden-fallback",
 )
+SURFACE_BODY_COMPLETION_TRACKS: tuple[str, ...] = (
+    "patch-family",
+    "csg",
+    "loft",
+    ".impress",
+    "primitive",
+    "feature",
+    "verification",
+)
+PATCH_FAMILY_PROMOTION_CRITERIA: tuple[str, ...] = (
+    "record",
+    "evaluator",
+    "derivative",
+    "seam",
+    "tessellation",
+    ".impress",
+    "csg",
+    "loft",
+    "diagnostics",
+)
+_PATCH_FAMILY_PROMOTION_OPERATION_ALIASES: dict[str, tuple[str, ...]] = {
+    "record": (
+        "surface-store",
+        "surface-record",
+        "rational-surface-record",
+        "sweep-record",
+        "control-cage",
+        "field-node-payload",
+        "sample-grid-payload",
+        "source-surface-reference",
+    ),
+    "evaluator": (
+        "evaluation",
+        "planar-primitives",
+        "extrude",
+        "rotate-extrude",
+        "revolved-primitives",
+        "linear-bridge-surfaces",
+    ),
+    "derivative": ("evaluation", "tessellation"),
+    "seam": ("trimmed-faces", "linear-bridge-surfaces", "diagnostics"),
+    "tessellation": ("tessellation",),
+    ".impress": (".impress",),
+    "csg": ("caps", "planar-primitives", "revolved-primitives"),
+    "loft": ("loft", "linear-bridge-surfaces", "extrude", "rotate-extrude", "planar-primitives"),
+    "diagnostics": ("diagnostics", "validation-security", "no-hidden-fallback"),
+}
 PATCH_FAMILY_CAPABILITY_MATRIX: dict[str, PatchFamilyCapabilityRecord] = {
     "planar": PatchFamilyCapabilityRecord(
         family="planar",
@@ -377,6 +488,200 @@ def run_patch_family_availability_promotion_pass() -> tuple[PatchFamilyPromotion
         family for family in sorted(PATCH_FAMILY_CAPABILITY_MATRIX) if family not in SUPPORTED_SURFACE_PATCH_FAMILIES
     )
     return tuple(assess_patch_family_availability_promotion(family) for family in families)
+
+
+def make_surface_body_completion_evidence_from_capabilities() -> tuple[SurfaceBodyCompletionEvidenceRecord, ...]:
+    """Return implementation-backed release evidence derived from current capability records."""
+
+    records: list[SurfaceBodyCompletionEvidenceRecord] = []
+    for family, capability in sorted(PATCH_FAMILY_CAPABILITY_MATRIX.items()):
+        state: Literal["specified", "implemented", "verified", "unsupported", "retired"]
+        state = "verified" if validate_patch_family_availability_gate(family).available else "implemented"
+        records.append(
+            SurfaceBodyCompletionEvidenceRecord(
+                track="patch-family",
+                state=state,
+                spec=f"patch-family:{family}",
+                implementation_owner="src/impression/modeling/surface.py",
+                evidence_type="capability-matrix",
+                source="implementation",
+            )
+        )
+        if ".impress" in capability.operations:
+            records.append(
+                SurfaceBodyCompletionEvidenceRecord(
+                    track=".impress",
+                    state="verified" if state == "verified" else "implemented",
+                    spec=f".impress:{family}",
+                    implementation_owner="src/impression/io/impress.py",
+                    evidence_type="codec-coverage",
+                    source="implementation",
+                )
+            )
+        if "tessellation" in capability.operations:
+            records.append(
+                SurfaceBodyCompletionEvidenceRecord(
+                    track="verification",
+                    state="implemented",
+                    spec=f"tessellation:{family}",
+                    implementation_owner="src/impression/modeling/tessellation.py",
+                    evidence_type="test-fixture",
+                    source="implementation",
+                )
+            )
+    return tuple(records)
+
+
+def evaluate_surface_body_completion_gate(
+    evidence: Iterable[SurfaceBodyCompletionEvidenceRecord] | None = None,
+    *,
+    required_tracks: Iterable[str] = SURFACE_BODY_COMPLETION_TRACKS,
+) -> SurfaceBodyCompletionReport:
+    """Evaluate whether explicit non-documentation evidence supports completion claims."""
+
+    evidence_records = tuple(
+        make_surface_body_completion_evidence_from_capabilities() if evidence is None else tuple(evidence)
+    )
+    diagnostics: list[SurfaceBodyCompletionDiagnostic] = []
+    by_track: dict[str, list[SurfaceBodyCompletionEvidenceRecord]] = {}
+    for record in evidence_records:
+        by_track.setdefault(record.track, []).append(record)
+        if record.source in {"documentation", "progression", "architecture"}:
+            diagnostics.append(
+                SurfaceBodyCompletionDiagnostic(
+                    track=record.track,
+                    code="documentation-only-evidence",
+                    spec=record.spec,
+                    implementation_owner=record.implementation_owner,
+                    evidence_type=record.evidence_type,
+                    message=(
+                        f"Track '{record.track}' uses {record.source} evidence only; "
+                        "completion requires implementation or verification evidence."
+                    ),
+                )
+            )
+        if record.state in {"specified", "unsupported"}:
+            diagnostics.append(
+                SurfaceBodyCompletionDiagnostic(
+                    track=record.track,
+                    code="incomplete-evidence-state",
+                    spec=record.spec,
+                    implementation_owner=record.implementation_owner,
+                    evidence_type=record.evidence_type,
+                    message=(
+                        f"Track '{record.track}' evidence '{record.spec}' is {record.state}; "
+                        "required evidence must be implemented, verified, or retired."
+                    ),
+                )
+            )
+
+    for track in required_tracks:
+        track_key = str(track)
+        track_records = by_track.get(track_key, [])
+        if not track_records:
+            diagnostics.append(
+                SurfaceBodyCompletionDiagnostic(
+                    track=track_key,
+                    code="missing-track-evidence",
+                    spec="",
+                    implementation_owner="release verification",
+                    evidence_type="implementation-or-verification",
+                    message=f"Track '{track_key}' has no explicit completion evidence.",
+                )
+            )
+            continue
+        if not any(record.state in {"implemented", "verified", "retired"} for record in track_records):
+            diagnostics.append(
+                SurfaceBodyCompletionDiagnostic(
+                    track=track_key,
+                    code="missing-implemented-evidence",
+                    spec=", ".join(record.spec for record in track_records),
+                    implementation_owner=", ".join(sorted({record.implementation_owner for record in track_records})),
+                    evidence_type=", ".join(sorted({record.evidence_type for record in track_records})),
+                    message=f"Track '{track_key}' has no implemented, verified, or retired evidence.",
+                )
+            )
+
+    return SurfaceBodyCompletionReport(
+        passed=not diagnostics,
+        evidence=evidence_records,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def audit_patch_family_promotion_readiness(
+    family: str,
+    record: PatchFamilyCapabilityRecord | None = None,
+) -> PatchFamilyPromotionReadinessRecord:
+    """Audit a patch family against promotion criteria without mutating support phase."""
+
+    family_key = str(family).strip()
+    capability = record if record is not None else PATCH_FAMILY_CAPABILITY_MATRIX.get(family_key)
+    if capability is None:
+        gap = PatchFamilyPromotionGapRecord(
+            family=family_key,
+            criterion="record",
+            implementation_owner="src/impression/modeling/surface.py",
+            evidence_type="capability-matrix",
+            message=f"Patch family '{family_key}' is missing from PATCH_FAMILY_CAPABILITY_MATRIX.",
+        )
+        return PatchFamilyPromotionReadinessRecord(
+            family=family_key,
+            current_phase="planned",
+            promotable=False,
+            supported_criteria=(),
+            gaps=(gap,),
+        )
+
+    operations = set(capability.operations)
+    supported: list[str] = []
+    gaps: list[PatchFamilyPromotionGapRecord] = []
+    for criterion in PATCH_FAMILY_PROMOTION_CRITERIA:
+        aliases = _PATCH_FAMILY_PROMOTION_OPERATION_ALIASES[criterion]
+        if operations.intersection(aliases):
+            supported.append(criterion)
+            continue
+        gaps.append(
+            PatchFamilyPromotionGapRecord(
+                family=family_key,
+                criterion=criterion,
+                implementation_owner=_promotion_owner_for_criterion(criterion),
+                evidence_type=f"{criterion}-coverage",
+                message=(
+                    f"Patch family '{family_key}' lacks promotion evidence for '{criterion}'. "
+                    f"Expected one of: {', '.join(aliases)}."
+                ),
+            )
+        )
+
+    return PatchFamilyPromotionReadinessRecord(
+        family=family_key,
+        current_phase=capability.support_phase,
+        promotable=not gaps,
+        supported_criteria=tuple(supported),
+        gaps=tuple(gaps),
+    )
+
+
+def audit_all_patch_family_promotion_readiness() -> tuple[PatchFamilyPromotionReadinessRecord, ...]:
+    """Audit every supported authored patch family for promotion readiness."""
+
+    return tuple(audit_patch_family_promotion_readiness(family) for family in SUPPORTED_SURFACE_PATCH_FAMILIES)
+
+
+def _promotion_owner_for_criterion(criterion: str) -> str:
+    owners = {
+        "record": "src/impression/modeling/surface.py",
+        "evaluator": "src/impression/modeling/surface.py",
+        "derivative": "src/impression/modeling/surface.py",
+        "seam": "src/impression/modeling/surface.py",
+        "tessellation": "src/impression/modeling/tessellation.py",
+        ".impress": "src/impression/io/impress.py",
+        "csg": "src/impression/modeling/csg.py",
+        "loft": "src/impression/modeling/loft.py",
+        "diagnostics": "src/impression/modeling/surface.py",
+    }
+    return owners.get(criterion, "release verification")
 
 
 def _as_vec2(value: Sequence[float], *, name: str) -> np.ndarray:
@@ -3134,15 +3439,26 @@ __all__ = [
     "PatchFamilyAvailabilityGateRecord",
     "PatchFamilyOperationSupportRecord",
     "PatchFamilyPromotionEvidenceRecord",
+    "PatchFamilyPromotionGapRecord",
+    "PatchFamilyPromotionReadinessRecord",
+    "SurfaceBodyCompletionDiagnostic",
+    "SurfaceBodyCompletionEvidenceRecord",
+    "SurfaceBodyCompletionReport",
     "PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS",
     "PATCH_FAMILY_CAPABILITY_MATRIX",
     "PATCH_FAMILY_FEATURE_COVERAGE",
+    "PATCH_FAMILY_PROMOTION_CRITERIA",
     "REQUIRED_V1_PATCH_FAMILIES",
+    "SURFACE_BODY_COMPLETION_TRACKS",
     "SUPPORTED_SURFACE_PATCH_FAMILIES",
     "SURFACE_SPEC_66_RETIREMENT_NOTE",
     "assert_patch_family_capability_matrix",
     "assert_patch_family_operation_coverage",
+    "audit_all_patch_family_promotion_readiness",
+    "audit_patch_family_promotion_readiness",
     "assess_patch_family_availability_promotion",
+    "evaluate_surface_body_completion_gate",
+    "make_surface_body_completion_evidence_from_capabilities",
     "run_patch_family_availability_promotion_pass",
     "validate_patch_family_availability_gate",
     "IMPLICIT_FIELD_NODE_KINDS",
