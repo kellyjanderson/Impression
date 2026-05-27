@@ -547,6 +547,9 @@ Split decision:
 
 ## Change History
 
+- 2026-05-27: Ran two additional critical manifest cycles; no additional seam
+  continuity split was needed after residual validation, locator diagnostics,
+  and enforcement were reviewed again.
 - 2026-05-27: Critically reviewed, rescored, and split the specification
   manifest. Context: continuity residual validation and user-facing violation
   locators needed separate candidate specs.

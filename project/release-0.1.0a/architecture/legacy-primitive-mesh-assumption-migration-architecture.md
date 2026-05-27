@@ -370,6 +370,9 @@ Split decision:
 
 ## Change History
 
+- 2026-05-27: Ran two additional critical manifest cycles; no additional legacy
+  primitive mesh-assumption split was needed after inventory, test rewrite, and
+  documentation/example migration were reviewed again.
 - 2026-05-27: Critically reviewed and rescored the specification manifest.
   Context: the inventory, test rewrite, and documentation/example migration
   candidates remain bounded after review and did not need additional splitting.

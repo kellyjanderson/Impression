@@ -702,24 +702,21 @@ Split decision:
 - Review for split. Cohesion reason: CSG refusal fixtures are one geometry
   domain and no longer bundle loft or seam diagnostics.
 
-### Candidate Spec: Loft And Seam Negative Diagnostic Fixtures
+### Candidate Spec: Loft Ambiguity Negative Diagnostic Fixtures
 
 Discovery purpose:
-- Create negative diagnostic fixtures for unresolved loft ambiguity and
-  unsupported higher-order seam continuity.
+- Create negative diagnostic fixtures for authored loft correspondence
+  ambiguity and unresolved topology rails.
 
 Responsibilities:
 - Functions/methods:
   - loft ambiguity fixture runner
-  - seam continuity fixture runner
   - snapshot comparator integration
 - Data structures/models:
   - loft negative fixture record
-  - seam negative fixture record
   - expected diagnostic key record
 - Dependencies/services:
   - loft ambiguity refusal
-  - seam continuity refusal
   - diagnostic snapshot normalizer
 - Returns/outputs/signals:
   - diagnostic snapshot
@@ -749,21 +746,103 @@ Project readiness fields:
 - Implementation owner/module:
   - reference test helpers under `tests/`
 - Chosen defaults / parameters:
-  - loft fixtures report all ambiguities; seam fixtures pin requested and
-    observed continuity
+  - loft fixtures report all ambiguities, not first failure only
 - Test strategy:
-  - unresolved loft ambiguity and unsupported continuity snapshot tests
+  - unresolved correspondence, point birth/death, anchor conflict, and missing
+    rail snapshot tests
 - Data ownership:
-  - loft/seam fixtures own expected refusal contracts
+  - loft fixtures own expected refusal contracts
 - Routes:
-  - failing loft or seam validation to snapshot to matrix
+  - failing loft plan validation to snapshot to matrix
 - Open questions / nuance discovered:
   - loft fixtures should report all ambiguities, not first failure only
 - Readiness blockers:
   - diagnostic snapshot normalizer must exist
 
 Score:
-- Functions/methods: 3 x 2 = 6
+- Functions/methods: 2 x 2 = 4
+- Data structures/models: 2 x 1 = 2
+- Dependencies/services: 2 x 1 = 2
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 1 x 3 = 3
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 1 x 2 = 2
+- Total: 17.5
+
+Split decision:
+- Review for split. Cohesion reason: loft ambiguity fixtures are one authored
+  topology diagnostic family; seam continuity fixtures are split separately.
+
+### Candidate Spec: Seam Continuity Negative Diagnostic Fixtures
+
+Discovery purpose:
+- Create negative diagnostic fixtures for unsupported or failed higher-order
+  seam continuity requests.
+
+Responsibilities:
+- Functions/methods:
+  - seam continuity fixture runner
+  - snapshot comparator integration
+- Data structures/models:
+  - seam negative fixture record
+  - expected diagnostic key record
+  - expected continuity residual record
+- Dependencies/services:
+  - seam continuity refusal
+  - diagnostic snapshot normalizer
+  - continuity violation locators
+- Returns/outputs/signals:
+  - diagnostic snapshot
+  - diagnostic drift failure
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: current seam refusal diagnostics
+  - Additions to existing reusable library/module: seam fixture records
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - writes dirty diagnostic snapshots during bootstrap
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - bounded fixture count
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - reference test helpers under `tests/`
+- Chosen defaults / parameters:
+  - seam fixtures pin requested continuity, observed residual, and locator path
+- Test strategy:
+  - unsupported continuity, failed C1/G1, and failed C2/G2 snapshot tests
+- Data ownership:
+  - seam fixtures own expected refusal contracts
+- Routes:
+  - failing seam validation to snapshot to matrix
+- Open questions / nuance discovered:
+  - fixture snapshots must distinguish unsupported class from supported class
+    with failed residual
+- Readiness blockers:
+  - diagnostic snapshot normalizer and continuity locator specs must exist
+
+Score:
+- Functions/methods: 2 x 2 = 4
 - Data structures/models: 3 x 1 = 3
 - Dependencies/services: 3 x 1 = 3
 - Returns/outputs/signals: 2 x 1 = 2
@@ -779,14 +858,17 @@ Score:
 - Async/concurrency behavior: 0 x 3 = 0
 - Cross-screen reusable behavior: 0 x 2 = 0
 - Readiness blockers: 1 x 2 = 2
-- Total: 22.5
+- Total: 20.5
 
 Split decision:
-- Review for split. Cohesion reason: loft and seam fixtures are both authored
-  topology diagnostics. CSG and persistence fixtures are split separately.
+- Review for split. Cohesion reason: seam continuity negative fixtures are one
+  diagnostic family and no longer bundle loft ambiguity.
 
 ## Change History
 
+- 2026-05-27: Ran two additional critical manifest cycles and split loft and
+  seam negative diagnostic fixtures. Context: authored loft ambiguity and
+  higher-order seam continuity have different fixture contracts.
 - 2026-05-27: Critically reviewed, rescored, and split the specification
   manifest. Context: negative diagnostic references were under-defined until
   snapshot normalization, unsafe payloads, mesh boundary, CSG, and loft/seam

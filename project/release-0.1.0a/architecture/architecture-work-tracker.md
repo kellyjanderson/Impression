@@ -125,12 +125,18 @@ Manifest notes:
 
 - [x] Critical review, rescore, split, review, rescore pass completed across
   the five depth-completion manifests.
-- [x] Reviewed manifests now contain 27 candidate specs; no candidate in this
+- [x] Two additional review/rescore/split cycles completed after the first
+  manifest pass.
+- [x] Reviewed manifests now contain 33 candidate specs; no candidate in this
   reviewed set is scored `25+`.
 - [x] Hidden work was split out of CSG graph/reconstruction, analytic/spline
   versus spline/spline intersections, subdivision versus implicit
   intersections, continuity residual versus locator diagnostics, and negative
   diagnostic fixtures.
+- [x] Additional hidden work was split out of cap payloads versus cut-boundary
+  trims, shell assembly versus validity/provenance, implicit safety versus
+  contour extraction/result classification, and loft versus seam negative
+  fixtures.
 - [x] Every `16-24` candidate includes a split-review cohesion reason.
 - [x] Readiness blockers are carried where downstream intersection,
   derivative, reference-promotion, or artifact-policy work is prerequisite.

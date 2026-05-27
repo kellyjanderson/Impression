@@ -436,28 +436,27 @@ Split decision:
 - Review for split. Cohesion reason: this candidate now owns only the transient
   fragment graph; cap construction and durable shell reconstruction are split.
 
-### Candidate Spec: Surface CSG Cap And Cut Boundary Construction
+### Candidate Spec: Surface CSG Cap Patch Family Selection
 
 Discovery purpose:
-- Construct cap surfaces, cut-boundary trims, and exposed/open boundary records
-  from classified fragment graph cuts.
+- Select and construct generated cap patch payloads for closed CSG cut regions
+  without deriving cap truth from a tessellated mesh.
 
 Responsibilities:
 - Functions/methods:
   - cap family selector
-  - cut-boundary trim builder
-  - open/shared boundary classifier
+  - cap patch payload builder
+  - unsupported cap diagnostic builder
 - Data structures/models:
   - cap construction record
-  - cut-boundary record
-  - boundary exposure diagnostic
+  - generated cap payload record
+  - unsupported cap diagnostic
 - Dependencies/services:
   - fragment graph
   - patch family registry
   - trim loops
 - Returns/outputs/signals:
   - cap patch payloads
-  - cut-boundary trim loops
   - unsupported cap diagnostic
 - UI surfaces/components:
   - not applicable
@@ -486,11 +485,11 @@ Project readiness fields:
 - Chosen defaults / parameters:
   - cap family must be explicit; unsupported cap cases refuse
 - Test strategy:
-  - planar caps, curved cut boundaries, unsupported cap diagnostics
+  - planar cap, non-planar unsupported cap, and generated cap payload tests
 - Data ownership:
   - cap construction owns generated patches; source fragments remain immutable
 - Routes:
-  - fragment graph to cap/cut records to result shell assembly
+  - fragment graph to cap payload records to result shell assembly
 - Open questions / nuance discovered:
   - non-planar cap generation may require blend/loft producer coordination
 - Readiness blockers:
@@ -500,7 +499,7 @@ Score:
 - Functions/methods: 3 x 2 = 6
 - Data structures/models: 3 x 1 = 3
 - Dependencies/services: 3 x 1 = 3
-- Returns/outputs/signals: 3 x 1 = 3
+- Returns/outputs/signals: 2 x 1 = 2
 - Existing reusable code reused as-is: 1 x 0.5 = 0.5
 - Adding code to an existing library/module: 1 x 1 = 1
 - Creating a new reusable library/module: 0 x 3 = 0
@@ -513,33 +512,112 @@ Score:
 - Async/concurrency behavior: 0 x 3 = 0
 - Cross-screen reusable behavior: 0 x 2 = 0
 - Readiness blockers: 1 x 2 = 2
-- Total: 23.5
+- Total: 22.5
 
 Split decision:
-- Review for split. Cohesion reason: cap and cut-boundary construction are one
-  generated-boundary contract. Non-planar cap producers may become child specs
-  after this boundary is implemented.
+- Review for split. Cohesion reason: cap family selection and payload
+  construction are one generated-patch contract; trim boundary construction is
+  split separately.
 
-### Candidate Spec: Surface CSG Result Shell Reconstruction And Validity Handoff
+### Candidate Spec: Surface CSG Cut Boundary Trim Construction
+
+Discovery purpose:
+- Construct cut-boundary trim loops and exposed/open boundary diagnostics from
+  classified fragment graph cuts and generated cap records.
+
+Responsibilities:
+- Functions/methods:
+  - cut-boundary trim builder
+  - open/shared boundary classifier
+- Data structures/models:
+  - cut-boundary record
+  - boundary exposure diagnostic
+  - trim attachment record
+- Dependencies/services:
+  - fragment graph
+  - cap construction records
+  - trim loops
+- Returns/outputs/signals:
+  - cut-boundary trim loops
+  - boundary exposure diagnostic
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: current trim and CSG curve records
+  - Additions to existing reusable library/module: cut-boundary trim helpers
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - changes boolean result construction
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - bounded by cut-boundary count
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - `src/impression/modeling/csg.py`
+- Chosen defaults / parameters:
+  - trim attachment must preserve source and generated-cap provenance
+- Test strategy:
+  - curved cut boundary, open boundary refusal, shared boundary stability tests
+- Data ownership:
+  - cut-boundary records own trim attachment truth for reconstruction
+- Routes:
+  - fragment graph and cap records to cut-boundary trim records
+- Open questions / nuance discovered:
+  - exposed boundaries must identify whether they are legal open shells or
+    invalid closed-body breaks
+- Readiness blockers:
+  - fragment graph and cap patch records must exist
+
+Score:
+- Functions/methods: 2 x 2 = 4
+- Data structures/models: 3 x 1 = 3
+- Dependencies/services: 3 x 1 = 3
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 1 x 3 = 3
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 1 x 2 = 2
+- Total: 20.5
+
+Split decision:
+- Review for split. Cohesion reason: cut-boundary trim construction is one
+  trim-attachment contract and no longer bundles cap payload generation.
+
+### Candidate Spec: Surface CSG Result Shell Assembly
 
 Discovery purpose:
 - Assemble surviving fragments and generated caps into durable result shells,
-  then hand them to seam rebuild and validity gates.
+  without running final seam or validity policy.
 
 Responsibilities:
 - Functions/methods:
   - result shell assembler
   - reconstruction diagnostic builder
-  - validity handoff validator
 - Data structures/models:
   - result shell assembly record
   - reconstruction diagnostic
-  - validity handoff record
+  - shell ordering record
 - Dependencies/services:
   - fragment graph
   - cap/cut-boundary records
-  - seam rebuild
-  - validity gate
 - Returns/outputs/signals:
   - reconstructed SurfaceBody candidate
   - invalid reconstruction diagnostic
@@ -571,21 +649,20 @@ Project readiness fields:
 - Chosen defaults / parameters:
   - invalid reconstruction refuses; no geometric invention
 - Test strategy:
-  - empty, single-shell, multi-shell, nested-shell, seam handoff, and
-    provenance tests
+  - empty, single-shell, multi-shell, nested-shell, and stable ordering tests
 - Data ownership:
   - result body owns durable truth; fragment graph remains transient
 - Routes:
-  - fragment/cap records to SurfaceBody candidate to validity gate
+  - fragment/cap records to SurfaceBody candidate
 - Open questions / nuance discovered:
   - multi-shell ordering must be stable across equivalent operand order
 - Readiness blockers:
   - fragment graph and cap/cut-boundary records must exist
 
 Score:
-- Functions/methods: 3 x 2 = 6
+- Functions/methods: 2 x 2 = 4
 - Data structures/models: 3 x 1 = 3
-- Dependencies/services: 4 x 1 = 4
+- Dependencies/services: 2 x 1 = 2
 - Returns/outputs/signals: 2 x 1 = 2
 - Existing reusable code reused as-is: 1 x 0.5 = 0.5
 - Adding code to an existing library/module: 1 x 1 = 1
@@ -599,15 +676,180 @@ Score:
 - Async/concurrency behavior: 0 x 3 = 0
 - Cross-screen reusable behavior: 0 x 2 = 0
 - Readiness blockers: 1 x 2 = 2
-- Total: 23.5
+- Total: 19.5
 
 Split decision:
-- Review for split. Cohesion reason: shell assembly and validity handoff are
-  the durable result boundary; seam rebuild and validity algorithms remain
-  separate downstream gates.
+- Review for split. Cohesion reason: shell assembly is one durable-body
+  construction contract; validity and provenance handoff are split separately.
+
+### Candidate Spec: Surface CSG Result Validity Handoff
+
+Discovery purpose:
+- Validate assembled CSG result shells when handing the candidate body to seam
+  rebuild and validity gates.
+
+Responsibilities:
+- Functions/methods:
+  - validity handoff validator
+  - validity diagnostic builder
+- Data structures/models:
+  - validity handoff record
+  - post-reconstruction validity diagnostic
+- Dependencies/services:
+  - assembled SurfaceBody candidate
+  - seam rebuild
+  - validity gate
+- Returns/outputs/signals:
+  - validated SurfaceBody candidate
+  - validity diagnostic
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: validity and provenance records
+  - Additions to existing reusable library/module: CSG handoff helpers
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - changes boolean result validation behavior
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - bounded by face and seam count
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - `src/impression/modeling/csg.py`
+- Chosen defaults / parameters:
+  - invalid handoff refuses with full validity diagnostics
+- Test strategy:
+  - seam handoff, invalid shell, and validity refusal tests
+- Data ownership:
+  - result body owns durable truth; validity handoff owns acceptance state
+- Routes:
+  - SurfaceBody candidate to seam rebuild/validity gate to final CSG result
+- Open questions / nuance discovered:
+  - validity diagnostics must remain stable after equivalent operand ordering
+- Readiness blockers:
+  - result shell assembly must exist
+
+Score:
+- Functions/methods: 2 x 2 = 4
+- Data structures/models: 2 x 1 = 2
+- Dependencies/services: 3 x 1 = 3
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 1 x 3 = 3
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 1 x 2 = 2
+- Total: 19.5
+
+Split decision:
+- Review for split. Cohesion reason: validity handoff is one post-assembly
+  acceptance contract; provenance mapping is split separately.
+
+### Candidate Spec: Surface CSG Result Provenance Mapping
+
+Discovery purpose:
+- Preserve stable operand, fragment, cap, and generated-boundary provenance for
+  CSG result shells and diagnostics.
+
+Responsibilities:
+- Functions/methods:
+  - provenance mapper
+  - provenance diagnostic builder
+  - equivalent operand ordering normalizer
+- Data structures/models:
+  - result provenance map
+  - provenance diagnostic
+  - operand ordering normalization record
+- Dependencies/services:
+  - assembled SurfaceBody candidate
+  - fragment graph
+  - cap/cut-boundary records
+- Returns/outputs/signals:
+  - result provenance map
+  - provenance diagnostic
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: provenance records
+  - Additions to existing reusable library/module: CSG provenance mapping
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - changes boolean provenance behavior
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - bounded by face and provenance-map count
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - `src/impression/modeling/csg.py`
+- Chosen defaults / parameters:
+  - provenance keys must be deterministic for equivalent operand ordering
+- Test strategy:
+  - source face, generated cap, cut-boundary, and ordering-normalization tests
+- Data ownership:
+  - provenance map owns source traceability; result body owns geometry truth
+- Routes:
+  - assembled result and fragment records to provenance map to diagnostics
+- Open questions / nuance discovered:
+  - generated cap provenance must remain inspectable without exposing mesh ids
+- Readiness blockers:
+  - result shell assembly and cut-boundary records must exist
+
+Score:
+- Functions/methods: 3 x 2 = 6
+- Data structures/models: 3 x 1 = 3
+- Dependencies/services: 3 x 1 = 3
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 1 x 3 = 3
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 1 x 2 = 2
+- Total: 22.5
+
+Split decision:
+- Review for split. Cohesion reason: provenance mapping is one traceability
+  contract and no longer bundles validity handoff.
 
 ## Change History
 
+- 2026-05-27: Ran two additional critical manifest cycles and split remaining
+  hidden CSG boundaries. Context: cap payloads, cut-boundary trims, shell
+  assembly, validity handoff, and provenance mapping are now separate
+  candidates.
 - 2026-05-27: Critically reviewed, rescored, and split the specification
   manifest. Context: hidden work in fragment graph construction, cap/cut
   boundary construction, and result shell reconstruction needed separate

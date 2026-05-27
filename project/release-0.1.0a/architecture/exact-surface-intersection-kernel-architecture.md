@@ -571,35 +571,32 @@ Split decision:
 - Review for split. Cohesion reason: subdivision intersection has a distinct
   refinement budget and contour representation from implicit fields.
 
-### Candidate Spec: Implicit Surface Intersection Safety Boundary
+### Candidate Spec: Implicit Intersection Safety And Budget Policy
 
 Discovery purpose:
-- Define bounded declared-tolerance intersection support for implicit field
-  surfaces without unsafe execution or mesh fallback.
+- Define the safety, budget, and refusal policy for implicit field surface
+  intersections before any implicit solver executes.
 
 Responsibilities:
 - Functions/methods:
-  - implicit intersection adapter
   - implicit safety checker
   - budget/refusal checker
 - Data structures/models:
   - implicit intersection budget
-  - implicit contour record
   - refusal diagnostic
 - Dependencies/services:
   - implicit field safety policy
-  - result records
 - Returns/outputs/signals:
-  - declared-tolerance result
-  - budget refusal
+  - safety decision
+  - budget refusal diagnostic
 - UI surfaces/components:
   - not applicable
 - UI fields/elements:
   - not applicable
 - Reusable code plan:
   - Existing code reused as-is: implicit safety policy
-  - Additions to existing reusable library/module: bounded implicit
-    intersection adapter
+  - Additions to existing reusable library/module: implicit intersection
+    budget policy
   - New reusable library/module to create: none
 - Database queries/tables/migrations:
   - none
@@ -618,21 +615,101 @@ Project readiness fields:
 - Implementation owner/module:
   - `src/impression/modeling/surface_intersections.py`
 - Chosen defaults / parameters:
-  - budget exhaustion is deterministic refusal
+  - unsafe field and budget exhaustion are deterministic refusal
 - Test strategy:
-  - safe implicit positive fixtures, unsafe refusal, budget refusal
+  - unsafe refusal, budget refusal, and safe-decision tests
 - Data ownership:
-  - implicit/subdivision families own evaluation; intersection owns result
+  - policy owns executability; implicit family owns evaluation
 - Routes:
-  - registry dispatch to bounded adapter
+  - registry dispatch to safety policy to bounded adapter
 - Open questions / nuance discovered:
-  - sampled contour record must remain implicit/surface-native, not mesh truth
+  - safety decisions must be serializable for diagnostic references
 - Readiness blockers:
   - implicit evaluation and safety contracts
 
 Score:
-- Functions/methods: 3 x 2 = 6
-- Data structures/models: 3 x 1 = 3
+- Functions/methods: 2 x 2 = 4
+- Data structures/models: 2 x 1 = 2
+- Dependencies/services: 1 x 1 = 1
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 0 x 3 = 0
+- Security/privacy-sensitive behavior: 1 x 3 = 3
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 1 x 2 = 2
+- Total: 17.5
+
+Split decision:
+- Review for split. Cohesion reason: implicit safety and budget policy are one
+  executability gate; bounded solver execution is split separately.
+
+### Candidate Spec: Bounded Implicit Contour Extraction Adapter
+
+Discovery purpose:
+- Extract surface-native declared-tolerance contour records for safe implicit
+  field surface intersections under the explicit safety and budget policy.
+
+Responsibilities:
+- Functions/methods:
+  - implicit intersection adapter
+  - implicit contour extractor
+- Data structures/models:
+  - implicit contour record
+  - contour extraction trace
+- Dependencies/services:
+  - implicit safety and budget policy
+  - implicit field evaluator
+- Returns/outputs/signals:
+  - implicit contour records
+  - extraction trace
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: implicit field evaluator
+  - Additions to existing reusable library/module: bounded implicit
+    intersection adapter
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - none
+- Security/privacy-sensitive behavior:
+  - adapter only executes after safety policy approval
+- Performance-sensitive behavior:
+  - strict budgets for cells, depth, and iterations
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - `src/impression/modeling/surface_intersections.py`
+- Chosen defaults / parameters:
+  - sampled contour records remain surface-native, not mesh truth
+- Test strategy:
+  - safe implicit positive fixture and contour extraction trace tests
+- Data ownership:
+  - implicit family owns evaluation; contour record owns extracted curve truth
+- Routes:
+  - approved implicit request to bounded contour extractor
+- Open questions / nuance discovered:
+  - contour extraction must not create a hidden tessellation fallback
+- Readiness blockers:
+  - implicit safety and budget policy must exist
+
+Score:
+- Functions/methods: 2 x 2 = 4
+- Data structures/models: 2 x 1 = 2
 - Dependencies/services: 2 x 1 = 2
 - Returns/outputs/signals: 2 x 1 = 2
 - Existing reusable code reused as-is: 1 x 0.5 = 0.5
@@ -647,14 +724,101 @@ Score:
 - Async/concurrency behavior: 0 x 3 = 0
 - Cross-screen reusable behavior: 0 x 2 = 0
 - Readiness blockers: 1 x 2 = 2
-- Total: 21.5
+- Total: 18.5
 
 Split decision:
-- Review for split. Cohesion reason: implicit intersections need one safety and
-  budget boundary; subdivision has been split into its own adapter.
+- Review for split. Cohesion reason: the adapter owns contour extraction only;
+  residual/result classification is split separately.
+
+### Candidate Spec: Implicit Intersection Residual And Result Classification
+
+Discovery purpose:
+- Classify bounded implicit contour extraction output into declared-tolerance
+  intersection results, residual reports, and non-convergence diagnostics.
+
+Responsibilities:
+- Functions/methods:
+  - residual classifier
+  - implicit result assembler
+  - non-convergence diagnostic builder
+- Data structures/models:
+  - residual report
+  - non-convergence diagnostic
+  - declared-tolerance result classification
+- Dependencies/services:
+  - implicit contour records
+  - result records
+  - implicit safety and budget policy
+- Returns/outputs/signals:
+  - declared-tolerance result
+  - residual or non-convergence diagnostic
+- UI surfaces/components:
+  - not applicable
+- UI fields/elements:
+  - not applicable
+- Reusable code plan:
+  - Existing code reused as-is: intersection result records
+  - Additions to existing reusable library/module: implicit residual/result
+    classifier
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - none
+- Destructive/write behavior:
+  - none
+- Security/privacy-sensitive behavior:
+  - classifier only consumes already-approved contour records
+- Performance-sensitive behavior:
+  - bounded by contour and residual sample count
+- Cross-screen reusable behavior:
+  - not applicable
+
+Project readiness fields:
+- Implementation owner/module:
+  - `src/impression/modeling/surface_intersections.py`
+- Chosen defaults / parameters:
+  - residual metadata is required for every declared-tolerance result
+- Test strategy:
+  - residual pass/fail, non-convergence, and result assembly tests
+- Data ownership:
+  - intersection result owns reusable curve truth and residual metadata
+- Routes:
+  - implicit contour records to residual classification to result records
+- Open questions / nuance discovered:
+  - non-convergence diagnostics must distinguish budget exhaustion from
+    residual failure
+- Readiness blockers:
+  - bounded implicit contour extraction adapter must exist
+
+Score:
+- Functions/methods: 3 x 2 = 6
+- Data structures/models: 3 x 1 = 3
+- Dependencies/services: 3 x 1 = 3
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 0 x 3 = 0
+- Security/privacy-sensitive behavior: 1 x 3 = 3
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 1 x 2 = 2
+- Total: 23.5
+
+Split decision:
+- Review for split. Cohesion reason: residual and result classification are one
+  post-extraction contract and no longer bundle contour extraction.
 
 ## Change History
 
+- 2026-05-27: Ran two additional critical manifest cycles and split remaining
+  implicit-intersection hidden work. Context: safety/budget policy, contour
+  extraction, and residual/result classification are now separate candidates.
 - 2026-05-27: Critically reviewed, rescored, and split the specification
   manifest. Context: analytic-to-spline, spline-to-spline, subdivision, and
   implicit intersection work needed separate implementation boundaries.
