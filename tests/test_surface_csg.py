@@ -26,6 +26,7 @@ from impression.modeling import (
     SurfaceBooleanTrimmedPatchFragment,
     SurfaceCSGAnalyticIntersectionRecord,
     SurfaceCSGArrangementDiagnostic,
+    SurfaceCSGBoundaryUseProvenanceRecord,
     SurfaceCSGConicDiagnostic,
     SurfaceCSGCutCapRequirementRecord,
     SurfaceCSGCurvePrimitive,
@@ -40,6 +41,7 @@ from impression.modeling import (
     SurfaceCSGPlanarRelationDiagnostic,
     SurfaceCSGRevolutionIntersectionRecord,
     SurfaceCSGShellAssemblyRecord,
+    SurfaceCSGSeamRebuildRecord,
     SurfaceCSGSplitTrimLoopRecord,
     SurfaceCSGToleranceDiagnostic,
     SurfaceCSGTolerancePolicy,
@@ -65,6 +67,7 @@ from impression.modeling import (
     make_surface_shell,
     prepare_surface_boolean_difference_operands,
     prepare_surface_boolean_operands,
+    rebuild_surface_csg_shell_seams,
     sort_surface_csg_curves,
     surface_csg_curve_digest,
     surface_csg_curve_key,
@@ -380,6 +383,34 @@ def test_surface_csg_shell_assembly_represents_empty_and_multi_shell_results() -
     assert multi.classification == "closed"
     assert len(multi.shells) == 2
     assert tuple(record.result_shell_index for record in multi.provenance) == (0, 1)
+
+
+def test_surface_csg_seam_rebuild_deduplicates_seams_and_records_boundary_uses() -> None:
+    body = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    shell = body.iter_shells(world=True)[0]
+    duplicate = replace(shell.seams[0], seam_id=f"{shell.seams[0].seam_id}-copy")
+    dirty_shell = replace(shell, seams=shell.seams + (duplicate,))
+
+    record = rebuild_surface_csg_shell_seams(dirty_shell)
+
+    assert isinstance(record, SurfaceCSGSeamRebuildRecord)
+    assert record.supported is True
+    assert len(record.shell.seams) == len(shell.seams)
+    assert all(isinstance(boundary_use, SurfaceCSGBoundaryUseProvenanceRecord) for boundary_use in record.boundary_uses)
+    assert all(boundary_use.use_count == 1 for boundary_use in record.boundary_uses)
+    assert record.diagnostics == ()
+
+
+def test_surface_csg_seam_rebuild_reports_open_boundaries() -> None:
+    body = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    shell = body.iter_shells(world=True)[0]
+    open_shell = replace(shell, seams=shell.seams[:-1])
+
+    record = rebuild_surface_csg_shell_seams(open_shell)
+
+    assert record.supported is False
+    assert "missing seam coverage" in record.diagnostics[0]
+    assert any(boundary_use.use_count == 0 for boundary_use in record.boundary_uses)
 
 
 def test_planar_linear_analytic_intersection_emits_exact_line_record() -> None:
