@@ -276,6 +276,81 @@ class SurfaceSeamContinuityConstraint:
 
 
 @dataclass(frozen=True)
+class SurfaceContinuityEnforcementRequest:
+    """Request for an operation-owned producer to satisfy a continuity constraint."""
+
+    operation_id: str
+    producer: str
+    constraint: SurfaceSeamContinuityConstraint
+    owns_generated_geometry: bool = False
+    mutates_source_geometry: bool = False
+
+    def __post_init__(self) -> None:
+        operation_id = str(self.operation_id).strip()
+        producer = str(self.producer).strip()
+        if not operation_id:
+            raise ValueError("SurfaceContinuityEnforcementRequest.operation_id must be non-empty.")
+        if not producer:
+            raise ValueError("SurfaceContinuityEnforcementRequest.producer must be non-empty.")
+        object.__setattr__(self, "operation_id", operation_id)
+        object.__setattr__(self, "producer", producer)
+        object.__setattr__(self, "owns_generated_geometry", bool(self.owns_generated_geometry))
+        object.__setattr__(self, "mutates_source_geometry", bool(self.mutates_source_geometry))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "constraint": self.constraint.canonical_payload(),
+            "mutates_source_geometry": self.mutates_source_geometry,
+            "operation_id": self.operation_id,
+            "owns_generated_geometry": self.owns_generated_geometry,
+            "producer": self.producer,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceContinuityEnforcementRefusalDiagnostic:
+    """Explicit reason a continuity enforcement request cannot alter geometry."""
+
+    code: Literal[
+        "validation-only",
+        "source-mutation-forbidden",
+        "invalid-constraint",
+        "validation-failed",
+    ]
+    message: str
+    operation_id: str
+    seam_id: str
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "operation_id": self.operation_id,
+            "seam_id": self.seam_id,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceContinuityEnforcementResult:
+    """Boundary result for operation-owned continuity enforcement."""
+
+    request: SurfaceContinuityEnforcementRequest
+    accepted: bool
+    validation_report: "SurfaceHigherOrderContinuityValidationReport | None" = None
+    diagnostics: tuple[SurfaceContinuityEnforcementRefusalDiagnostic, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "accepted": self.accepted,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "request": self.request.canonical_payload(),
+            "validation_report": None
+            if self.validation_report is None
+            else self.validation_report.canonical_payload(),
+        }
+
+
+@dataclass(frozen=True)
 class PatchFamilyPromotionGapRecord:
     """One missing or unsupported promotion criterion for a patch family."""
 
@@ -4105,6 +4180,75 @@ def validate_surface_seam_continuity_constraint(
     return tuple(diagnostics)
 
 
+def check_surface_continuity_enforcement_eligibility(
+    request: SurfaceContinuityEnforcementRequest,
+) -> tuple[SurfaceContinuityEnforcementRefusalDiagnostic, ...]:
+    """Check whether an operation may construct or adjust geometry for continuity."""
+
+    diagnostics: list[SurfaceContinuityEnforcementRefusalDiagnostic] = []
+    if request.mutates_source_geometry:
+        diagnostics.append(
+            SurfaceContinuityEnforcementRefusalDiagnostic(
+                code="source-mutation-forbidden",
+                operation_id=request.operation_id,
+                seam_id=request.constraint.seam_id,
+                message=(
+                    "Continuity enforcement may not mutate authored source geometry; "
+                    "only operation-owned generated output may be adjusted."
+                ),
+            )
+        )
+    if not request.owns_generated_geometry:
+        diagnostics.append(
+            SurfaceContinuityEnforcementRefusalDiagnostic(
+                code="validation-only",
+                operation_id=request.operation_id,
+                seam_id=request.constraint.seam_id,
+                message=(
+                    "Continuity enforcement is validation-only because the producer did "
+                    "not declare ownership of generated geometry."
+                ),
+            )
+        )
+    diagnostics.extend(
+        SurfaceContinuityEnforcementRefusalDiagnostic(
+            code="invalid-constraint",
+            operation_id=request.operation_id,
+            seam_id=request.constraint.seam_id,
+            message=diagnostic.message,
+        )
+        for diagnostic in validate_surface_seam_continuity_constraint(request.constraint)
+    )
+    return tuple(diagnostics)
+
+
+def validate_surface_continuity_enforcement_result(
+    request: SurfaceContinuityEnforcementRequest,
+    validation_report: "SurfaceHigherOrderContinuityValidationReport",
+) -> SurfaceContinuityEnforcementResult:
+    """Validate an operation-owned continuity enforcement result."""
+
+    diagnostics = list(check_surface_continuity_enforcement_eligibility(request))
+    if not validation_report.passed:
+        diagnostics.append(
+            SurfaceContinuityEnforcementRefusalDiagnostic(
+                code="validation-failed",
+                operation_id=request.operation_id,
+                seam_id=request.constraint.seam_id,
+                message=(
+                    f"Continuity enforcement result failed requested "
+                    f"{request.constraint.requested} validation."
+                ),
+            )
+        )
+    return SurfaceContinuityEnforcementResult(
+        request=request,
+        accepted=not diagnostics,
+        validation_report=validation_report,
+        diagnostics=tuple(diagnostics),
+    )
+
+
 def build_surface_unsupported_continuity_diagnostic(
     request: SurfaceContinuityRequest | str,
 ) -> SurfaceUnsupportedContinuityDiagnostic:
@@ -4416,6 +4560,9 @@ __all__ = [
     "SurfaceSeamBoundaryUseRef",
     "SurfaceContinuityConstraintDiagnostic",
     "SurfaceSeamContinuityConstraint",
+    "SurfaceContinuityEnforcementRequest",
+    "SurfaceContinuityEnforcementRefusalDiagnostic",
+    "SurfaceContinuityEnforcementResult",
     "SurfaceBoundaryDerivativeDiagnostic",
     "SurfaceBoundaryDerivativeSample",
     "SurfaceBoundaryDerivativeSummary",
@@ -4442,6 +4589,8 @@ __all__ = [
     "assess_patch_family_availability_promotion",
     "build_surface_unsupported_continuity_diagnostic",
     "normalize_surface_seam_continuity_constraint",
+    "check_surface_continuity_enforcement_eligibility",
+    "validate_surface_continuity_enforcement_result",
     "evaluate_surface_body_completion_gate",
     "evaluate_surface_body_completion_reference_evidence_matrix",
     "make_surface_body_completion_evidence_from_capabilities",

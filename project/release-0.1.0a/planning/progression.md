@@ -482,7 +482,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 264: Boundary Derivative Evaluation For Continuity (v1.0)](../specifications/surface-264-boundary-derivative-evaluation-for-continuity-v1_0.md)
 - [x] [Surface Spec 265: Higher-Order Continuity Residual Validation (v1.0)](../specifications/surface-265-higher-order-continuity-residual-validation-v1_0.md)
 - [x] [Surface Spec 266: Higher-Order Continuity Violation Locators (v1.0)](../specifications/surface-266-higher-order-continuity-violation-locators-v1_0.md)
-- [ ] [Surface Spec 267: Bounded Continuity Enforcement Boundary (v1.0)](../specifications/surface-267-bounded-continuity-enforcement-boundary-v1_0.md)
+- [x] [Surface Spec 267: Bounded Continuity Enforcement Boundary (v1.0)](../specifications/surface-267-bounded-continuity-enforcement-boundary-v1_0.md)
 - [ ] [Surface Spec 268: Intersection Request And Solver Registry (v1.0)](../specifications/surface-268-intersection-request-and-solver-registry-v1_0.md)
 - [ ] [Surface Spec 269: Intersection Curve Result And Degeneracy Records (v1.0)](../specifications/surface-269-intersection-curve-result-and-degeneracy-records-v1_0.md)
 - [ ] [Surface Spec 270: Analytic To Spline Surface Intersection Solvers (v1.0)](../specifications/surface-270-analytic-to-spline-surface-intersection-solvers-v1_0.md)
