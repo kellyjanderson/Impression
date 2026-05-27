@@ -45,6 +45,38 @@ from impression.modeling._surface_primitives import (
     make_surface_sphere,
     make_surface_torus,
 )
+from tests.reference_images import (
+    ExpectedDiagnosticKeyRecord,
+    NegativeDiagnosticFixtureRecord,
+    evaluate_negative_diagnostic_fixture_matrix,
+    normalize_diagnostic_snapshot,
+)
+
+
+def _mesh_boundary_negative_fixture(
+    fixture_id: str,
+    operation,
+    *,
+    expected_keys: tuple[ExpectedDiagnosticKeyRecord, ...],
+) -> NegativeDiagnosticFixtureRecord:
+    try:
+        diagnostic = operation()
+    except Exception as exc:  # noqa: BLE001 - negative fixture runner records refusal shape.
+        snapshot = normalize_diagnostic_snapshot(
+            {
+                "code": type(exc).__name__,
+                "message": str(exc),
+            },
+            fixture_id=fixture_id,
+        )
+    else:
+        snapshot = normalize_diagnostic_snapshot(diagnostic, fixture_id=fixture_id)
+    return NegativeDiagnosticFixtureRecord(
+        fixture_id=fixture_id,
+        domain="mesh-boundary",
+        expected_keys=expected_keys,
+        expected_snapshot=snapshot,
+    )
 from impression.modeling._surface_ops import make_surface_linear_extrude, make_surface_rotate_extrude
 from impression.modeling import (
     PATCH_FAMILY_CAPABILITY_MATRIX,
@@ -2459,6 +2491,48 @@ def test_tessellation_helper_contract_accepts_only_surface_boundary_inputs() -> 
     assert isinstance(diagnostic, TessellationBoundaryViolationDiagnostic)
     assert diagnostic.received_type == "dict"
     assert "SurfaceBody" in diagnostic.expected_inputs
+
+
+def test_mesh_boundary_negative_fixtures_feed_diagnostic_matrix() -> None:
+    fixtures = (
+        _mesh_boundary_negative_fixture(
+            "mesh-boundary/dict-primitive-input",
+            lambda: validate_tessellation_helper_boundary_input({"kind": "box", "size": (1.0, 1.0, 1.0)}),
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("helper_name",), "surface-to-mesh-adapter"),
+                ExpectedDiagnosticKeyRecord(("received_type",), "dict"),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+        _mesh_boundary_negative_fixture(
+            "mesh-boundary/list-points-input",
+            lambda: validate_tessellation_helper_boundary_input([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]),
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("helper_name",), "surface-to-mesh-adapter"),
+                ExpectedDiagnosticKeyRecord(("received_type",), "list"),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+        _mesh_boundary_negative_fixture(
+            "mesh-boundary/adapter-record-refuses-primitive-args",
+            lambda: make_surface_to_mesh_adapter_record({"kind": "sphere", "radius": 1.0}),  # type: ignore[arg-type]
+            expected_keys=(
+                ExpectedDiagnosticKeyRecord(("code",), "ValueError"),
+                ExpectedDiagnosticKeyRecord(("message",)),
+            ),
+        ),
+    )
+
+    report = evaluate_negative_diagnostic_fixture_matrix(fixtures, required_domains=("mesh-boundary",))
+
+    assert report.passed is True
+    assert report.domain_coverage[0].fixture_count == 3
+    assert any(
+        fixture.fixture_id == "mesh-boundary/adapter-record-refuses-primitive-args"
+        and "tessellation boundary" in fixture.expected_snapshot.payload["message"]  # type: ignore[index, union-attr]
+        for fixture in fixtures
+    )
+    assert all(fixture.expected_snapshot is not None for fixture in fixtures)
 
 
 def test_surface_primitive_family_appropriateness_matrix_stays_exact_and_native() -> None:
