@@ -41,6 +41,7 @@ IMPRESS_FORMAT = "impress"
 CURRENT_IMPRESS_SCHEMA_VERSION = "1.0"
 DEFAULT_IMPRESS_LENGTH_UNIT = "unitless"
 SUPPORTED_IMPRESS_LENGTH_UNITS = frozenset({"unitless", "mm", "cm", "m", "in", "ft"})
+IMPRESS_DIAGNOSTIC_METADATA_FIELDS = frozenset({"code", "message", "path", "severity"})
 _PATCH_KIND_FAMILIES = {
     "PlanarSurfacePatch": "planar",
     "RuledSurfacePatch": "ruled",
@@ -87,6 +88,30 @@ class ImpressPatchCodecCoverageRecord:
     @property
     def covered(self) -> bool:
         return self.encode_supported and self.decode_supported
+
+
+@dataclass(frozen=True)
+class ImpressWholeStoreFixtureCoverageReport:
+    """Deterministic coverage report for a whole-store `.impress` fixture."""
+
+    required_families: tuple[str, ...]
+    covered_families: tuple[str, ...]
+    covered_store_areas: tuple[str, ...]
+    missing_payloads: tuple[str, ...]
+    mesh_truth_present: bool
+
+    @property
+    def covered(self) -> bool:
+        return not self.missing_payloads and not self.mesh_truth_present
+
+    @property
+    def diagnostic(self) -> str:
+        problems = list(self.missing_payloads)
+        if self.mesh_truth_present:
+            problems.append("mesh truth payload")
+        if not problems:
+            return "Whole-store `.impress` fixture coverage is complete."
+        return "Whole-store `.impress` fixture coverage is incomplete: " + ", ".join(problems)
 
 
 @dataclass(frozen=True)
@@ -176,6 +201,94 @@ def assert_impress_patch_codec_coverage_for_available_families() -> tuple[Impres
         joined = ", ".join(record.family for record in missing)
         raise ImpressFormatError(f"Missing `.impress` patch codec coverage for available families: {joined}")
     return records
+
+
+def inspect_impress_whole_store_fixture_coverage(
+    payload: Mapping[str, object],
+) -> ImpressWholeStoreFixtureCoverageReport:
+    """Inspect whether a fixture exercises the complete surface-native store shape."""
+
+    required_families = tuple(sorted(record.family for record in inspect_impress_patch_codec_coverage() if record.covered))
+    missing: list[str] = []
+    covered_store_areas: list[str] = []
+
+    body_store = payload.get("body_store") if isinstance(payload, Mapping) else None
+    bodies = payload.get("bodies") if isinstance(payload, Mapping) else None
+    patches = payload.get("patches") if isinstance(payload, Mapping) else None
+    metadata = payload.get("metadata", {}) if isinstance(payload, Mapping) else {}
+
+    if isinstance(body_store, Mapping):
+        covered_store_areas.append("body_store")
+        body_entries = body_store.get("bodies")
+        if not isinstance(body_entries, Sequence) or isinstance(body_entries, (str, bytes)) or not body_entries:
+            missing.append("body_store.bodies")
+        elif not all(isinstance(entry, Mapping) and entry.get("body_id") and entry.get("stable_identity") for entry in body_entries):
+            missing.append("body_store.identity")
+    else:
+        missing.append("body_store")
+
+    if isinstance(bodies, Mapping) and bodies:
+        covered_store_areas.append("bodies")
+        if not _payload_contains_body_area(bodies, "shells"):
+            missing.append("bodies.shells")
+        if not _payload_contains_body_area(bodies, "seams"):
+            missing.append("bodies.shells.seams")
+        if not _payload_contains_body_area(bodies, "adjacency"):
+            missing.append("bodies.shells.adjacency")
+    else:
+        missing.append("bodies")
+
+    covered_families: tuple[str, ...] = ()
+    if isinstance(patches, Mapping) and patches:
+        covered_store_areas.append("patches")
+        families = {
+            str(patch_payload.get("family"))
+            for patch_payload in patches.values()
+            if isinstance(patch_payload, Mapping) and patch_payload.get("family")
+        }
+        covered_families = tuple(sorted(families))
+        for family in required_families:
+            if family not in families:
+                missing.append(f"patches.family[{family}]")
+        if not any(
+            isinstance(patch_payload, Mapping) and patch_payload.get("trim_loops")
+            for patch_payload in patches.values()
+        ):
+            missing.append("patches.trim_loops")
+        if not all(
+            isinstance(patch_payload, Mapping) and patch_payload.get("stable_identity")
+            for patch_payload in patches.values()
+        ):
+            missing.append("patches.identity")
+    else:
+        missing.append("patches")
+
+    if not isinstance(metadata, Mapping):
+        missing.append("metadata")
+    else:
+        for key in ("topology_rails", "lifecycle_records", "operation_provenance"):
+            if key not in metadata:
+                missing.append(f"metadata.{key}")
+
+    mesh_truth_present = _payload_contains_key(payload, "mesh")
+    return ImpressWholeStoreFixtureCoverageReport(
+        required_families=required_families,
+        covered_families=covered_families,
+        covered_store_areas=tuple(sorted(set(covered_store_areas))),
+        missing_payloads=tuple(sorted(set(missing))),
+        mesh_truth_present=mesh_truth_present,
+    )
+
+
+def assert_impress_whole_store_fixture_coverage(
+    payload: Mapping[str, object],
+) -> ImpressWholeStoreFixtureCoverageReport:
+    """Return whole-store coverage or raise with a deterministic diagnostic."""
+
+    report = inspect_impress_whole_store_fixture_coverage(payload)
+    if not report.covered:
+        raise ImpressFormatError(report.diagnostic)
+    return report
 
 
 def inspect_impress_patch_family_dispatch() -> tuple[SurfacePatchFamilyDispatchRecord, ...]:
@@ -1245,6 +1358,29 @@ def _required_mapping(payload: object, name: str) -> Mapping[str, object]:
     return payload
 
 
+def _payload_contains_key(payload: object, key: str) -> bool:
+    if isinstance(payload, Mapping):
+        return key in payload or any(_payload_contains_key(value, key) for value in payload.values())
+    if isinstance(payload, Sequence) and not isinstance(payload, (str, bytes)):
+        return any(_payload_contains_key(value, key) for value in payload)
+    return False
+
+
+def _payload_contains_body_area(bodies: Mapping[str, object], area: str) -> bool:
+    for body_payload in bodies.values():
+        if not isinstance(body_payload, Mapping):
+            continue
+        shell_payloads = body_payload.get("shells")
+        if area == "shells" and isinstance(shell_payloads, Sequence) and not isinstance(shell_payloads, (str, bytes)) and shell_payloads:
+            return True
+        if not isinstance(shell_payloads, Sequence) or isinstance(shell_payloads, (str, bytes)):
+            continue
+        for shell_payload in shell_payloads:
+            if isinstance(shell_payload, Mapping) and shell_payload.get(area):
+                return True
+    return False
+
+
 def _validate_patch_identity_payload(patch_id: object) -> str:
     if not isinstance(patch_id, str) or not patch_id:
         raise ImpressFormatError("`.impress` patch IDs must be non-empty strings.")
@@ -1812,6 +1948,34 @@ def validate_impress_document_root(root: Mapping[str, object]) -> ImpressDocumen
     metadata = root.get("metadata", {})
     if not isinstance(metadata, Mapping):
         raise ImpressFormatError("`.impress` root metadata must be an object when present.")
+    _validate_impress_diagnostic_metadata(metadata)
 
     units = validate_impress_units(root.get("units"))
     return ImpressDocumentRoot(schema_version=schema_version, units=units, metadata=dict(metadata))
+
+
+def _validate_impress_diagnostic_metadata(metadata: Mapping[str, object]) -> None:
+    diagnostics = metadata.get("diagnostics")
+    if diagnostics is None:
+        return
+    if not isinstance(diagnostics, Sequence) or isinstance(diagnostics, (str, bytes)):
+        raise ImpressFormatError("`.impress` diagnostic metadata must be an array.")
+    for index, diagnostic in enumerate(diagnostics):
+        if not isinstance(diagnostic, Mapping):
+            raise ImpressFormatError(f"`.impress` diagnostic metadata at diagnostics[{index}] must be an object.")
+        unknown_keys = set(diagnostic) - IMPRESS_DIAGNOSTIC_METADATA_FIELDS
+        if unknown_keys:
+            keys = ", ".join(sorted(str(key) for key in unknown_keys))
+            raise ImpressFormatError(f"Unsupported `.impress` diagnostic metadata fields at diagnostics[{index}]: {keys}.")
+        code = diagnostic.get("code")
+        message = diagnostic.get("message")
+        severity = diagnostic.get("severity", "error")
+        if not isinstance(code, str) or not code.strip():
+            raise ImpressFormatError(f"`.impress` diagnostic metadata at diagnostics[{index}].code must be a non-empty string.")
+        if not isinstance(message, str) or not message.strip():
+            raise ImpressFormatError(f"`.impress` diagnostic metadata at diagnostics[{index}].message must be a non-empty string.")
+        if not isinstance(severity, str) or not severity.strip():
+            raise ImpressFormatError(f"`.impress` diagnostic metadata at diagnostics[{index}].severity must be a non-empty string.")
+        path = diagnostic.get("path")
+        if path is not None and (not isinstance(path, str) or not path.strip()):
+            raise ImpressFormatError(f"`.impress` diagnostic metadata at diagnostics[{index}].path must be a non-empty string.")

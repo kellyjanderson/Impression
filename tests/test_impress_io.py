@@ -13,12 +13,15 @@ from impression.io import (
     ImpressFormatError,
     ImpressSaveOptions,
     ImpressUnits,
+    ImpressWholeStoreFixtureCoverageReport,
     InvalidSurfaceWrapperDiagnostic,
+    IMPRESS_DIAGNOSTIC_METADATA_FIELDS,
     SurfaceBodyStore,
     SurfacePatchBasePayload,
     UnsupportedImpressSchemaVersion,
     atomic_write_text,
     assert_impress_patch_codec_coverage_for_available_families,
+    assert_impress_whole_store_fixture_coverage,
     decode_surface_adjacency_payload,
     decode_surface_boundary_ref_payload,
     decode_surface_body_payload,
@@ -42,6 +45,7 @@ from impression.io import (
     make_surface_body_store,
     inspect_impress_patch_family_dispatch,
     inspect_impress_patch_codec_coverage,
+    inspect_impress_whole_store_fixture_coverage,
     load_impress,
     loads_impress_json,
     validate_impress_units,
@@ -261,7 +265,11 @@ def _codec_covered_patch_fixtures() -> tuple[object, ...]:
     knots = (0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
     field = make_implicit_field_node("sphere", parameters={"center": (0.0, 0.0, 0.0), "radius": 0.75})
     return (
-        PlanarSurfacePatch(family="planar", metadata={"kernel": {"fixture": "planar"}}),
+        PlanarSurfacePatch(
+            family="planar",
+            metadata={"kernel": {"fixture": "planar"}},
+            trim_loops=(TrimLoop(points_uv=[(0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0)], category="outer"),),
+        ),
         RuledSurfacePatch(
             family="ruled",
             start_curve=[(0.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
@@ -402,7 +410,26 @@ def test_decode_surface_patch_payload_refuses_unknown_family_before_geometry_int
 
 def _all_codec_covered_family_body() -> object:
     return make_surface_body(
-        [make_surface_shell(_codec_covered_patch_fixtures(), metadata={"fixture": "all-codec-covered"})],
+        [
+            make_surface_shell(
+                _codec_covered_patch_fixtures(),
+                seams=(
+                    SurfaceSeam(
+                        "fixture-planar-ruled",
+                        (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left")),
+                        metadata={"kernel": {"continuity_source": "authored"}},
+                    ),
+                ),
+                adjacency=(
+                    SurfaceAdjacencyRecord(
+                        source=SurfaceBoundaryRef(0, "right"),
+                        target=SurfaceBoundaryRef(1, "left"),
+                        seam_id="fixture-planar-ruled",
+                    ),
+                ),
+                metadata={"fixture": "all-codec-covered"},
+            )
+        ],
         metadata={"body": "all-codec-covered"},
     )
 
@@ -431,6 +458,46 @@ def test_impress_all_codec_covered_families_round_trip_preserves_identity_and_fa
     assert {patch.family for patch in loaded_patches} == {
         record.family for record in inspect_impress_patch_codec_coverage() if record.covered
     }
+
+
+def test_impress_whole_store_fixture_coverage_gate_accepts_complete_surface_truth() -> None:
+    body = _all_codec_covered_family_body()
+    payload = make_impress_document_payload(
+        [body],
+        metadata={
+            "topology_rails": [{"id": "rail.outer", "anchors": ["station0.p0", "station1.p0"]}],
+            "lifecycle_records": [{"entity": "point.notch", "event": "birth"}],
+            "operation_provenance": [{"operation": "fixture-loft", "producer": "surface"}],
+        },
+    )
+
+    report = assert_impress_whole_store_fixture_coverage(payload)
+    loaded = loads_impress_json(dumps_impress_json(payload))
+
+    assert isinstance(report, ImpressWholeStoreFixtureCoverageReport)
+    assert report.covered is True
+    assert set(report.covered_families) == set(report.required_families)
+    assert report.covered_store_areas == ("bodies", "body_store", "patches")
+    assert loaded.root.metadata["operation_provenance"][0]["producer"] == "surface"
+    assert loaded.bodies[0].shells[0].seams[0].metadata == {"kernel": {"continuity_source": "authored"}}
+    assert loaded.bodies[0].shells[0].adjacency[0].seam_id == "fixture-planar-ruled"
+
+
+def test_impress_whole_store_fixture_coverage_gate_reports_missing_payloads() -> None:
+    payload = make_impress_document_payload([_round_trip_fixture_body()])
+    patches = dict(payload["patches"])  # type: ignore[arg-type]
+    patches.pop(next(iter(patches)))
+    payload["patches"] = patches
+    payload["mesh"] = {"vertices": [], "faces": []}
+
+    report = inspect_impress_whole_store_fixture_coverage(payload)
+
+    assert report.covered is False
+    assert "metadata.topology_rails" in report.missing_payloads
+    assert "patches.family[implicit]" in report.missing_payloads
+    assert report.mesh_truth_present is True
+    with pytest.raises(ImpressFormatError, match="mesh truth payload"):
+        assert_impress_whole_store_fixture_coverage(payload)
 
 
 def _invalid_impress_file(path, payload: dict[str, object]) -> None:
@@ -670,6 +737,46 @@ def test_impress_acceptance_invalid_files_refuse_explicitly(tmp_path, mutate, me
 
     with pytest.raises(ImpressFormatError, match=message):
         load_impress(path)
+
+
+def test_impress_invalid_payload_diagnostics_are_deterministic_and_surface_native(tmp_path) -> None:
+    payload = make_impress_document_payload([_round_trip_fixture_body()])
+    payload["metadata"] = {"diagnostics": [{"code": "invalid", "message": "broken", "unknown": "field"}]}
+    path = tmp_path / "invalid-diagnostic.impress"
+    _invalid_impress_file(path, payload)
+
+    messages = []
+    for _ in range(2):
+        with pytest.raises(ImpressFormatError) as exc_info:
+            load_impress(path)
+        messages.append(str(exc_info.value))
+
+    assert IMPRESS_DIAGNOSTIC_METADATA_FIELDS == frozenset({"code", "message", "path", "severity"})
+    assert messages == [
+        "Unsupported `.impress` diagnostic metadata fields at diagnostics[0]: unknown.",
+        "Unsupported `.impress` diagnostic metadata fields at diagnostics[0]: unknown.",
+    ]
+    assert "mesh" not in messages[0]
+
+
+def test_impress_unsafe_payload_refusal_does_not_recover_as_mesh_or_mutate_payload() -> None:
+    payload = make_impress_document_payload([_all_codec_covered_family_body()])
+    patch_payload = next(
+        patch for patch in payload["patches"].values()  # type: ignore[union-attr]
+        if isinstance(patch, dict) and patch.get("kind") == "ImplicitSurfacePatch"
+    )
+    geometry = dict(patch_payload["geometry"])
+    field = dict(geometry["field"])
+    field["parameters"] = {"script": "lambda x: x"}
+    geometry["field"] = field
+    patch_payload["geometry"] = geometry
+    before = dumps_impress_json(payload)
+
+    with pytest.raises(ImpressFormatError, match="Unsafe implicit field payload"):
+        loads_impress_json(before)
+
+    assert dumps_impress_json(payload) == before
+    assert "mesh" not in payload
 
 
 def test_loads_impress_json_returns_load_result_without_path() -> None:
