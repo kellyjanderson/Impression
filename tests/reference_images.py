@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
+import re
 import shutil
 from typing import Literal, Sequence
 
@@ -50,6 +52,7 @@ TextCvResultClass = Literal[
     "unreadable",
 ]
 DiagnosticPanelLabel = Literal["left", "result", "right", "expected", "actual", "diff"]
+DiagnosticSnapshotDriftKind = Literal["matches", "changed"]
 
 
 @dataclass(frozen=True)
@@ -114,6 +117,48 @@ class ReferenceArtifactPromotionGateReport:
     state: ReferenceFixturePairState
     contract: ReferenceFixtureContractVersionRecord
     diagnostics: tuple[ReferencePromotionDiagnostic, ...]
+
+
+@dataclass(frozen=True)
+class DiagnosticSnapshotKeyPolicy:
+    """Stable diagnostic snapshot key policy that excludes volatile details."""
+
+    ignored_keys: tuple[str, ...] = ("traceback", "stack", "stack_trace", "cwd", "tmp_path", "temporary_path")
+    path_keys: tuple[str, ...] = ("path", "file", "filename", "implementation_owner")
+
+    def __post_init__(self) -> None:
+        _validate_unique_nonempty_strings("ignored_keys", self.ignored_keys)
+        _validate_unique_nonempty_strings("path_keys", self.path_keys)
+
+
+@dataclass(frozen=True)
+class DiagnosticSnapshotRecord:
+    fixture_id: str
+    diagnostic_type: str
+    payload: dict[str, object]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "diagnostic_type": self.diagnostic_type,
+            "fixture_id": self.fixture_id,
+            "payload": self.payload,
+        }
+
+    def stable_json(self) -> str:
+        return json.dumps(self.canonical_payload(), sort_keys=True, separators=(",", ":"))
+
+
+@dataclass(frozen=True)
+class DiagnosticSnapshotComparison:
+    fixture_id: str
+    drift_kind: DiagnosticSnapshotDriftKind
+    expected: DiagnosticSnapshotRecord
+    actual: DiagnosticSnapshotRecord
+    message: str = ""
+
+    @property
+    def matches(self) -> bool:
+        return self.drift_kind == "matches"
 
 
 @dataclass(frozen=True)
@@ -701,6 +746,87 @@ def classify_reference_fixture_pair_promotion_gate(
         state=state,
         contract=contract,
         diagnostics=tuple(diagnostics),
+    )
+
+
+_PATH_FRAGMENT_RE = re.compile(r"(?P<path>(?:~|/)[^\s:]+)")
+
+
+def _normalize_snapshot_string(value: str) -> str:
+    def replace_path(match: re.Match[str]) -> str:
+        path = match.group("path")
+        name = Path(path).name
+        return f"<path:{name}>" if name else "<path>"
+
+    return _PATH_FRAGMENT_RE.sub(replace_path, value)
+
+
+def _normalize_diagnostic_snapshot_value(value: object, policy: DiagnosticSnapshotKeyPolicy) -> object:
+    if hasattr(value, "canonical_payload") and callable(value.canonical_payload):
+        value = value.canonical_payload()
+    if isinstance(value, BaseException):
+        return {"message": _normalize_snapshot_string(str(value)), "type": type(value).__name__}
+    if isinstance(value, Path):
+        return f"<path:{value.name}>"
+    if isinstance(value, dict):
+        normalized: dict[str, object] = {}
+        for raw_key in sorted(value, key=lambda item: str(item)):
+            key = str(raw_key)
+            if key in policy.ignored_keys:
+                continue
+            raw_value = value[raw_key]
+            if key in policy.path_keys and isinstance(raw_value, (str, Path)):
+                normalized[key] = _normalize_snapshot_string(str(raw_value))
+            else:
+                normalized[key] = _normalize_diagnostic_snapshot_value(raw_value, policy)
+        return normalized
+    if isinstance(value, (list, tuple, set)):
+        return tuple(_normalize_diagnostic_snapshot_value(item, policy) for item in value)
+    if isinstance(value, str):
+        return _normalize_snapshot_string(value)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return repr(value)
+
+
+def normalize_diagnostic_snapshot(
+    diagnostic: object,
+    *,
+    fixture_id: str,
+    policy: DiagnosticSnapshotKeyPolicy | None = None,
+) -> DiagnosticSnapshotRecord:
+    """Normalize a refusal diagnostic into a stable, portable snapshot."""
+
+    snapshot_policy = DiagnosticSnapshotKeyPolicy() if policy is None else policy
+    payload = _normalize_diagnostic_snapshot_value(diagnostic, snapshot_policy)
+    if not isinstance(payload, dict):
+        payload = {"value": payload}
+    return DiagnosticSnapshotRecord(
+        fixture_id=fixture_id,
+        diagnostic_type=type(diagnostic).__name__,
+        payload=payload,
+    )
+
+
+def compare_diagnostic_snapshots(
+    expected: DiagnosticSnapshotRecord,
+    actual: DiagnosticSnapshotRecord,
+) -> DiagnosticSnapshotComparison:
+    """Compare normalized diagnostic snapshots without incidental formatting drift."""
+
+    if expected.stable_json() == actual.stable_json():
+        return DiagnosticSnapshotComparison(
+            fixture_id=actual.fixture_id,
+            drift_kind="matches",
+            expected=expected,
+            actual=actual,
+        )
+    return DiagnosticSnapshotComparison(
+        fixture_id=actual.fixture_id,
+        drift_kind="changed",
+        expected=expected,
+        actual=actual,
+        message=f"Diagnostic snapshot drift for {actual.fixture_id}.",
     )
 
 

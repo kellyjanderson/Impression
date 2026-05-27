@@ -43,6 +43,7 @@ from tests.reference_images import (
     CvArtifactBundleContract,
     CvFixtureContract,
     DiagnosticPanelContract,
+    DiagnosticSnapshotKeyPolicy,
     assess_cv_result,
     canonical_object_view_camera_contracts,
     classify_reference_fixture_pair_promotion_gate,
@@ -65,6 +66,8 @@ from tests.reference_images import (
     invalidate_reference_image_bundle,
     initial_text_cv_scope_support,
     HandednessSpaceAnchorContract,
+    compare_diagnostic_snapshots,
+    normalize_diagnostic_snapshot,
     planar_loop_bounds,
     reference_artifact_state,
     reference_artifact_contract_version_path,
@@ -416,6 +419,52 @@ def test_reference_fixture_pair_promotion_gate_rejects_dirty_missing_partial_and
     assert {diagnostic.code for diagnostic in missing_report.diagnostics} == {"missing-artifact"}
     assert any(diagnostic.code == "partial-fixture" for diagnostic in partial_report.diagnostics)
     assert {diagnostic.code for diagnostic in invalid_report.diagnostics} == {"invalidated-contract"}
+
+
+def test_diagnostic_snapshot_normalization_strips_paths_and_volatile_keys(tmp_path: Path) -> None:
+    diagnostic = {
+        "code": "unsafe-payload",
+        "message": f"Refused file {tmp_path / 'nested' / 'payload.impress'}",
+        "path": tmp_path / "nested" / "payload.impress",
+        "stack_trace": "machine specific stack",
+        "details": {"b": 2, "a": f"{tmp_path}/scratch.txt"},
+    }
+
+    snapshot = normalize_diagnostic_snapshot(diagnostic, fixture_id="unsafe/impress")
+
+    assert snapshot.payload == {
+        "code": "unsafe-payload",
+        "details": {"a": "<path:scratch.txt>", "b": 2},
+        "message": "Refused file <path:payload.impress>",
+        "path": "<path:payload.impress>",
+    }
+    assert "stack_trace" not in snapshot.stable_json()
+    assert str(tmp_path) not in snapshot.stable_json()
+
+
+def test_diagnostic_snapshot_comparator_uses_stable_payload_ordering() -> None:
+    policy = DiagnosticSnapshotKeyPolicy(ignored_keys=("traceback",), path_keys=("file",))
+    expected = normalize_diagnostic_snapshot(
+        {"b": 2, "a": 1, "file": "/tmp/demo/thing.json", "traceback": "ignored"},
+        fixture_id="diagnostic/order",
+        policy=policy,
+    )
+    actual = normalize_diagnostic_snapshot(
+        {"file": "/private/tmp/other/thing.json", "a": 1, "b": 2},
+        fixture_id="diagnostic/order",
+        policy=policy,
+    )
+    drift = normalize_diagnostic_snapshot(
+        {"file": "/private/tmp/other/thing.json", "a": 3, "b": 2},
+        fixture_id="diagnostic/order",
+        policy=policy,
+    )
+
+    assert compare_diagnostic_snapshots(expected, actual).matches is True
+    comparison = compare_diagnostic_snapshots(expected, drift)
+    assert comparison.matches is False
+    assert comparison.drift_kind == "changed"
+    assert "diagnostic/order" in comparison.message
 
 
 def test_reference_fixture_pair_fails_for_partial_existing_group(tmp_path: Path) -> None:
