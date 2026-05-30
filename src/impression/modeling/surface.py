@@ -5728,6 +5728,46 @@ class ImplicitResidualClassificationRecord:
         return {"value": self.value, "tolerance": self.tolerance, "classification": self.classification}
 
 
+@dataclass(frozen=True)
+class ImplicitFieldSafetyValidationReport:
+    """CSG-facing safety gate for bounded implicit field composition."""
+
+    accepted: bool
+    bounds: ImplicitBoundsDiagnostic
+    budget: ImplicitBudgetDiagnostic
+    unsafe_field: ImplicitUnsafeAuthoringDiagnostic
+    graph_id: str = ""
+    no_mesh_fallback: bool = True
+
+    def __post_init__(self) -> None:
+        bounds = self.bounds if isinstance(self.bounds, ImplicitBoundsDiagnostic) else ImplicitBoundsDiagnostic(**dict(self.bounds))
+        budget = self.budget if isinstance(self.budget, ImplicitBudgetDiagnostic) else ImplicitBudgetDiagnostic(**dict(self.budget))
+        unsafe_field = (
+            self.unsafe_field
+            if isinstance(self.unsafe_field, ImplicitUnsafeAuthoringDiagnostic)
+            else ImplicitUnsafeAuthoringDiagnostic(**dict(self.unsafe_field))
+        )
+        accepted = bool(self.accepted)
+        if accepted and (not bounds.bounded or not budget.executable or not unsafe_field.safe):
+            raise ValueError("Accepted implicit safety reports must have bounded, executable, and safe checks.")
+        object.__setattr__(self, "accepted", accepted)
+        object.__setattr__(self, "bounds", bounds)
+        object.__setattr__(self, "budget", budget)
+        object.__setattr__(self, "unsafe_field", unsafe_field)
+        object.__setattr__(self, "graph_id", str(self.graph_id).strip())
+        object.__setattr__(self, "no_mesh_fallback", bool(self.no_mesh_fallback))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "accepted": self.accepted,
+            "bounds": self.bounds.canonical_payload(),
+            "budget": self.budget.canonical_payload(),
+            "unsafe_field": self.unsafe_field.canonical_payload(),
+            "graph_id": self.graph_id,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
 def _coerce_implicit_field_node(value: object) -> ImplicitFieldNode:
     if isinstance(value, ImplicitFieldNode):
         return value
@@ -6008,6 +6048,99 @@ def validate_implicit_extraction_budget(
     if not diagnostic.executable:
         raise ValueError(diagnostic.message)
     return make_implicit_extraction_budget(bounds=bounds, samples=samples, max_sample_count=max_sample_count)
+
+
+def build_implicit_field_safety_validation_report(
+    graph_or_root: ImplicitFieldExpressionGraph | ImplicitFieldNode | dict[str, object],
+    *,
+    bounds: Sequence[float] | None = None,
+    samples: tuple[int, int, int] = (8, 8, 8),
+    max_sample_count: int = 262144,
+    policy: ImplicitFieldSafetyPolicy | None = None,
+) -> ImplicitFieldSafetyValidationReport:
+    """Collect implicit field safety, bounds, and budget checks for CSG composition."""
+
+    graph_id = ""
+    if isinstance(graph_or_root, ImplicitFieldExpressionGraph):
+        root: ImplicitFieldNode | dict[str, object] = graph_or_root.root
+        field_bounds: Sequence[float] | None = graph_or_root.bounds if bounds is None else bounds
+        graph_id = graph_or_root.graph_id
+    else:
+        root = graph_or_root
+        field_bounds = bounds
+
+    if field_bounds is None:
+        bounds_diagnostic = ImplicitBoundsDiagnostic(
+            code="missing-implicit-bounds",
+            message="Implicit CSG safety validation requires explicit bounded field domain; no mesh fallback was attempted.",
+            family="implicit",
+            bounded=False,
+            locator="bounds",
+        )
+        budget_diagnostic = ImplicitBudgetDiagnostic(
+            code="invalid-implicit-extraction-budget",
+            message="Implicit CSG safety validation cannot allocate a budget without bounds.",
+            family="implicit",
+            executable=False,
+            locator="bounds",
+        )
+    else:
+        bounds_diagnostic = build_implicit_bounds_diagnostic(field_bounds, family="implicit")
+        if bounds_diagnostic.bounded:
+            budget_diagnostic = build_implicit_budget_diagnostic(
+                bounds=_as_bounds3(field_bounds, name="implicit.csg_safety.bounds"),
+                samples=samples,
+                max_sample_count=max_sample_count,
+                family="implicit",
+            )
+        else:
+            budget_diagnostic = ImplicitBudgetDiagnostic(
+                code="invalid-implicit-extraction-budget",
+                message="Implicit CSG safety validation cannot allocate a budget for invalid bounds.",
+                family="implicit",
+                executable=False,
+                locator="bounds",
+            )
+
+    unsafe_diagnostic = build_implicit_unsafe_authoring_diagnostic(root, policy=policy)
+    accepted = bounds_diagnostic.bounded and budget_diagnostic.executable and unsafe_diagnostic.safe
+    return ImplicitFieldSafetyValidationReport(
+        accepted=accepted,
+        bounds=bounds_diagnostic,
+        budget=budget_diagnostic,
+        unsafe_field=unsafe_diagnostic,
+        graph_id=graph_id,
+        no_mesh_fallback=True,
+    )
+
+
+def validate_implicit_field_safety_for_csg(
+    graph_or_root: ImplicitFieldExpressionGraph | ImplicitFieldNode | dict[str, object],
+    *,
+    bounds: Sequence[float] | None = None,
+    samples: tuple[int, int, int] = (8, 8, 8),
+    max_sample_count: int = 262144,
+    policy: ImplicitFieldSafetyPolicy | None = None,
+) -> ImplicitFieldSafetyValidationReport:
+    """Return a safety report or raise a deterministic CSG refusal message."""
+
+    report = build_implicit_field_safety_validation_report(
+        graph_or_root,
+        bounds=bounds,
+        samples=samples,
+        max_sample_count=max_sample_count,
+        policy=policy,
+    )
+    if not report.accepted:
+        reasons = [
+            diagnostic.message
+            for diagnostic in (report.bounds, report.budget)
+            if not getattr(diagnostic, "bounded", getattr(diagnostic, "executable", True))
+        ]
+        if not report.unsafe_field.safe:
+            reasons.append(report.unsafe_field.reason)
+        raise ValueError("Implicit CSG field safety validation failed: " + "; ".join(reason for reason in reasons if reason))
+    return report
 
 
 def _evaluate_implicit_field_value(node: ImplicitFieldNode, point: np.ndarray) -> float:
@@ -7790,6 +7923,7 @@ __all__ = [
     "ImplicitFieldExpressionDiagnostic",
     "ImplicitFieldExpressionGraph",
     "ImplicitFieldExpressionProvenanceSeed",
+    "ImplicitFieldSafetyValidationReport",
     "ImplicitOperandFieldAdapterRecord",
     "ImplicitOperandFieldAdapterRefusalDiagnostic",
     "ImplicitOperandFieldAdapterResidualRecord",
@@ -7872,6 +8006,7 @@ __all__ = [
     "build_implicit_bounds_diagnostic",
     "build_implicit_budget_diagnostic",
     "build_implicit_field_expression_diagnostic",
+    "build_implicit_field_safety_validation_report",
     "adapt_surface_patch_to_implicit_field",
     "build_displacement_payload_diagnostic",
     "build_available_family_missing_evidence_diagnostic",
@@ -7902,6 +8037,7 @@ __all__ = [
     "validate_nurbs_weights",
     "validate_implicit_authoring_safety",
     "validate_implicit_extraction_budget",
+    "validate_implicit_field_safety_for_csg",
     "normalize_implicit_field_expression_graph",
     "interpolate_path_twist_scale",
     "make_implicit_extraction_budget",
@@ -7957,6 +8093,7 @@ __all__ = [
     "ImplicitFieldExpressionDiagnostic",
     "ImplicitFieldExpressionGraph",
     "ImplicitFieldExpressionProvenanceSeed",
+    "ImplicitFieldSafetyValidationReport",
     "ImplicitOperandFieldAdapterRecord",
     "ImplicitOperandFieldAdapterRefusalDiagnostic",
     "ImplicitOperandFieldAdapterResidualRecord",
@@ -7973,6 +8110,8 @@ __all__ = [
     "build_implicit_field_expression_diagnostic",
     "normalize_implicit_field_expression_graph",
     "adapt_surface_patch_to_implicit_field",
+    "build_implicit_field_safety_validation_report",
+    "validate_implicit_field_safety_for_csg",
     "validate_implicit_field_security",
     "refine_subdivision_control_cage",
     "classify_surface_seam_continuity",

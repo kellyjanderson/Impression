@@ -168,6 +168,7 @@ from impression.modeling import (
     ImplicitFieldExpressionDiagnostic,
     ImplicitFieldExpressionGraph,
     ImplicitFieldExpressionProvenanceSeed,
+    ImplicitFieldSafetyValidationReport,
     ImplicitOperandFieldAdapterRecord,
     ImplicitOperandFieldAdapterRefusalDiagnostic,
     ImplicitOperandFieldAdapterResidualRecord,
@@ -224,6 +225,7 @@ from impression.modeling import (
     implicit_sphere_field,
     implicit_union_field,
     build_implicit_field_expression_diagnostic,
+    build_implicit_field_safety_validation_report,
     evaluate_path_frame,
     interpolate_path_twist_scale,
     make_implicit_extraction_budget,
@@ -397,6 +399,7 @@ from impression.modeling import (
     validate_feature_surface_handoff,
     validate_implicit_authoring_safety,
     validate_implicit_extraction_budget,
+    validate_implicit_field_safety_for_csg,
     validate_implicit_field_security,
     validate_surface_seam_continuity_constraint,
     validate_surface_seam_participation,
@@ -2415,6 +2418,54 @@ def test_implicit_unsafe_authoring_diagnostic_reports_rejected_path() -> None:
     assert diagnostic.locator.node_kind == "sphere"
     with pytest.raises(ValueError, match=r"field\.children\[1\]\.parameters\.label"):
         validate_implicit_authoring_safety(node)
+
+
+def test_implicit_field_safety_validation_accepts_bounded_safe_graph() -> None:
+    graph = normalize_implicit_field_expression_graph(
+        implicit_sphere_field(radius=1.0),
+        bounds=(-1.5, 1.5, -1.5, 1.5, -1.5, 1.5),
+    )
+
+    report = validate_implicit_field_safety_for_csg(graph, samples=(4, 4, 4), max_sample_count=64)
+
+    assert isinstance(report, ImplicitFieldSafetyValidationReport)
+    assert report.accepted is True
+    assert report.graph_id == graph.graph_id
+    assert report.bounds.bounded is True
+    assert report.budget.executable is True
+    assert report.unsafe_field.safe is True
+    assert report.no_mesh_fallback is True
+
+
+def test_implicit_field_safety_validation_reports_missing_bounds_without_mesh_fallback() -> None:
+    report = build_implicit_field_safety_validation_report(implicit_sphere_field(radius=1.0))
+
+    assert report.accepted is False
+    assert report.bounds.code == "missing-implicit-bounds"
+    assert report.budget.executable is False
+    assert report.unsafe_field.safe is True
+    assert report.no_mesh_fallback is True
+    with pytest.raises(ValueError, match="requires explicit bounded field domain"):
+        validate_implicit_field_safety_for_csg(implicit_sphere_field(radius=1.0))
+
+
+def test_implicit_field_safety_validation_reports_unsafe_payload_and_budget_overflow() -> None:
+    unsafe_node = make_implicit_field_node("sphere", parameters={"label": "__import__('os')"})
+
+    report = build_implicit_field_safety_validation_report(
+        unsafe_node,
+        bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+        samples=(8, 8, 8),
+        max_sample_count=4,
+    )
+
+    assert report.accepted is False
+    assert report.bounds.bounded is True
+    assert report.budget.executable is False
+    assert report.budget.locator == "max_sample_count"
+    assert report.unsafe_field.safe is False
+    assert report.unsafe_field.locator is not None
+    assert report.unsafe_field.locator.path == "field.parameters.label"
 
 
 def test_implicit_surface_patch_constructor_runs_security_validator() -> None:
