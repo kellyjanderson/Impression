@@ -5166,6 +5166,49 @@ class SurfaceRepresentationRefusalRecord:
         }
 
 
+@dataclass(frozen=True)
+class SurfaceSampledImplicitReferenceFixtureRow:
+    """Reference fixture promotion row for sampled/implicit CSG evidence."""
+
+    fixture_id: str
+    route_kind: Literal["native", "promoted", "refusal", "unsafe", "malformed"]
+    payload_kind: str
+    passed: bool
+    reference_state: Literal["clean", "dirty", "missing"] = "clean"
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "fixture_id": self.fixture_id,
+            "route_kind": self.route_kind,
+            "payload_kind": self.payload_kind,
+            "passed": self.passed,
+            "reference_state": self.reference_state,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSampledImplicitReferenceFixturePromotionReport:
+    """Promoted reference fixture set for sampled/implicit native, promoted, and refusal routes."""
+
+    rows: tuple[SurfaceSampledImplicitReferenceFixtureRow, ...]
+    required_route_kinds: tuple[str, ...] = ("native", "promoted", "refusal", "unsafe", "malformed")
+    diagnostics: tuple[SurfaceSampledImplicitPromotionDiagnostic, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return bool(self.rows) and not self.diagnostics and all(row.passed for row in self.rows)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "passed": self.passed,
+            "required_route_kinds": self.required_route_kinds,
+            "rows": [row.canonical_payload() for row in self.rows],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
 _SURFACE_BOOLEAN_EXECUTABLE_FAMILY_PAIRS: frozenset[tuple[str, str]] = frozenset(
     (
         {
@@ -6696,6 +6739,124 @@ def classify_sampled_implicit_representation_refusal(
             reason="Use a deliberate authored workflow instead of treating this request as CSG.",
         ),
     )
+
+
+def enumerate_sampled_implicit_reference_fixture_promotions() -> tuple[SurfaceSampledImplicitReferenceFixtureRow, ...]:
+    """Return promoted clean reference fixtures for sampled/implicit CSG route outcomes."""
+
+    rows: list[SurfaceSampledImplicitReferenceFixtureRow] = []
+    native_sources = (
+        ("implicit-csg", verify_implicit_csg_fixture_evidence_matrix()),
+        ("heightmap-csg", verify_heightmap_csg_fixture_evidence_matrix()),
+        ("displacement-csg", verify_displacement_csg_fixture_evidence_matrix()),
+    )
+    for payload_kind, report in native_sources:
+        rows.append(
+            SurfaceSampledImplicitReferenceFixtureRow(
+                fixture_id=f"sampled-implicit-reference/{payload_kind}",
+                route_kind="native",
+                payload_kind=payload_kind,
+                passed=report.passed,
+                reference_state="clean" if report.passed else "dirty",
+            )
+        )
+    promotion = verify_sampled_implicit_promotion_fixture_evidence_matrix()
+    rows.append(
+        SurfaceSampledImplicitReferenceFixtureRow(
+            fixture_id="sampled-implicit-reference/promotion",
+            route_kind="promoted",
+            payload_kind="sampled-implicit-promotion",
+            passed=promotion.passed,
+            reference_state="clean" if promotion.passed else "dirty",
+        )
+    )
+    refusal = classify_sampled_implicit_representation_refusal(
+        "union",
+        ("heightmap", "displacement"),
+        reason_code="non-csg-replacement",
+        message="Reference fixture captures a deliberate non-CSG replacement route.",
+    )
+    rows.append(
+        SurfaceSampledImplicitReferenceFixtureRow(
+            fixture_id="sampled-implicit-reference/refusal",
+            route_kind="refusal",
+            payload_kind="sampled-implicit-representation-refusal",
+            passed=refusal.supported_refusal,
+            reference_state="clean" if refusal.supported_refusal else "dirty",
+        )
+    )
+    unsafe = compose_implicit_field_csg_result(
+        "union",
+        (
+            adapt_surface_patch_to_implicit_field(PlanarSurfacePatch(family="planar")),
+            adapt_surface_patch_to_implicit_field(PlanarSurfacePatch(family="planar")),
+        ),
+        samples=(4, 4, 4),
+        max_sample_count=1,
+    )
+    unsafe_refusal = representation_refusal_from_implicit_result(unsafe)
+    rows.append(
+        SurfaceSampledImplicitReferenceFixtureRow(
+            fixture_id="sampled-implicit-reference/unsafe-implicit",
+            route_kind="unsafe",
+            payload_kind="sampled-implicit-representation-refusal",
+            passed=unsafe_refusal.supported_refusal,
+            reference_state="clean" if unsafe_refusal.supported_refusal else "dirty",
+        )
+    )
+    malformed = build_sampled_implicit_promotion_matrix(operations=("union",), allowed_targets=("subdivision",))
+    rows.append(
+        SurfaceSampledImplicitReferenceFixtureRow(
+            fixture_id="sampled-implicit-reference/malformed-promotion",
+            route_kind="malformed",
+            payload_kind="sampled-implicit-promotion",
+            passed=not malformed.passed and any(diagnostic.code == "missing-target" for diagnostic in malformed.diagnostics),
+            reference_state="clean",
+        )
+    )
+    return tuple(rows)
+
+
+def verify_sampled_implicit_reference_fixture_promotions() -> SurfaceSampledImplicitReferenceFixturePromotionReport:
+    """Verify sampled/implicit reference fixture promotions are clean and no-mesh."""
+
+    rows = enumerate_sampled_implicit_reference_fixture_promotions()
+    diagnostics: list[SurfaceSampledImplicitPromotionDiagnostic] = []
+    required = SurfaceSampledImplicitReferenceFixturePromotionReport(()).required_route_kinds
+    by_kind = {kind: [row for row in rows if row.route_kind == kind] for kind in required}
+    for route_kind, kind_rows in by_kind.items():
+        if not kind_rows:
+            diagnostics.append(
+                SurfaceSampledImplicitPromotionDiagnostic(
+                    code="incomplete-route",
+                    operation="union",
+                    left_family="sampled-implicit-reference",
+                    right_family="sampled-implicit-reference",
+                    message=f"Sampled/implicit reference fixture promotion is missing route kind {route_kind}.",
+                )
+            )
+        for row in kind_rows:
+            if not row.passed or row.reference_state != "clean":
+                diagnostics.append(
+                    SurfaceSampledImplicitPromotionDiagnostic(
+                        code="incomplete-route",
+                        operation="union",
+                        left_family=row.payload_kind,
+                        right_family=row.payload_kind,
+                        message=f"Sampled/implicit reference fixture {row.fixture_id} is not clean evidence.",
+                    )
+                )
+            if not row.no_mesh_fallback:
+                diagnostics.append(
+                    SurfaceSampledImplicitPromotionDiagnostic(
+                        code="mesh-fallback",
+                        operation="union",
+                        left_family=row.payload_kind,
+                        right_family=row.payload_kind,
+                        message=f"Sampled/implicit reference fixture {row.fixture_id} attempted mesh fallback.",
+                    )
+                )
+    return SurfaceSampledImplicitReferenceFixturePromotionReport(rows=rows, diagnostics=tuple(diagnostics))
 
 
 def _surface_csg_fixture_category(pair_class: SurfaceCSGRoutePairClass) -> Literal[
