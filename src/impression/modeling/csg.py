@@ -33,10 +33,12 @@ from .surface import (
 )
 from .surface_intersections import (
     SurfaceAnalyticSplineResidualReport,
+    SurfaceIntersectionOverlapRegionRecord,
     SurfaceIntersectionResultRecord,
     SurfaceIntersectionSupportDiagnostic,
     SurfaceSplineSplineResidualReport,
     make_surface_intersection_request,
+    normalize_surface_intersection_result,
     solve_analytic_spline_surface_intersection,
     solve_spline_spline_surface_intersection,
 )
@@ -842,6 +844,52 @@ class SurfaceCSGSplinePairIntersectionRecord:
             "patch_local_curves": [curve.canonical_payload() for curve in self.patch_local_curves],
             "tangent_events": [event.canonical_payload() for event in self.tangent_events],
             "residual_report": self.residual_report.canonical_payload(),
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGSplineCoincidentRegionRecord:
+    """CSG overlap-region output for coincident B-spline/NURBS patch pairs."""
+
+    first_patch: SurfaceBooleanPatchRef
+    second_patch: SurfaceBooleanPatchRef
+    intersection: SurfaceIntersectionResultRecord
+    region_mappings: tuple[SurfaceCSGPatchLocalRegionMappingResult, ...] = ()
+    ownership_diagnostics: tuple[SurfaceCSGCoincidentOwnershipDiagnostic, ...] = ()
+    diagnostics: tuple[
+        SurfaceIntersectionSupportDiagnostic | SurfaceCSGCurveMappingDiagnostic | SurfaceCSGArrangementDiagnostic,
+        ...,
+    ] = ()
+
+    @property
+    def supported(self) -> bool:
+        return (
+            self.intersection.supported
+            and self.intersection.classification == "overlap"
+            and bool(self.region_mappings)
+            and all(mapping.supported for mapping in self.region_mappings)
+            and not self.ownership_diagnostics
+            and not self.diagnostics
+        )
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "first_patch": {
+                "operand_index": self.first_patch.operand_index,
+                "patch_index": self.first_patch.patch_index,
+            },
+            "second_patch": {
+                "operand_index": self.second_patch.operand_index,
+                "patch_index": self.second_patch.patch_index,
+            },
+            "supported": self.supported,
+            "classification": self.intersection.classification,
+            "quality": self.intersection.quality,
+            "max_residual": self.intersection.max_residual,
+            "overlap_regions": [region.canonical_payload() for region in self.intersection.overlap_regions],
+            "region_mappings": [mapping.canonical_payload() for mapping in self.region_mappings],
+            "ownership_diagnostics": [diagnostic.canonical_payload() for diagnostic in self.ownership_diagnostics],
             "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
         }
 
@@ -3872,6 +3920,112 @@ def intersect_spline_nurbs_patch_pair(
         patch_local_curves=tuple(patch_local_curves),
         tangent_events=tuple(tangent_events),
         diagnostics=tuple(diagnostics),
+    )
+
+
+def _surface_patch_domain_loop(patch: SurfacePatch) -> tuple[tuple[float, float], ...]:
+    u0, u1 = patch.domain.u_range
+    v0, v1 = patch.domain.v_range
+    return ((float(u0), float(v0)), (float(u1), float(v0)), (float(u1), float(v1)), (float(u0), float(v1)))
+
+
+def detect_spline_nurbs_coincident_regions(
+    first_ref: SurfaceBooleanPatchRef,
+    first_patch: BSplineSurfacePatch | NURBSSurfacePatch,
+    second_ref: SurfaceBooleanPatchRef,
+    second_patch: BSplineSurfacePatch | NURBSSurfacePatch,
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+    sample_count: int = 5,
+) -> SurfaceCSGSplineCoincidentRegionRecord:
+    """Detect full-domain coincident B-spline/NURBS regions for CSG overlap handling."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    request = make_surface_intersection_request(
+        first_patch,
+        second_patch,
+        first_patch_ref=first_ref,
+        second_patch_ref=second_ref,
+        consumer="surface-csg",
+    )
+    valid_pair = isinstance(first_patch, (BSplineSurfacePatch, NURBSSurfacePatch)) and isinstance(
+        second_patch,
+        (BSplineSurfacePatch, NURBSSurfacePatch),
+    )
+    if not valid_pair:
+        diagnostic = SurfaceIntersectionSupportDiagnostic(
+            code="unsupported-family-pair",
+            consumer="surface-csg",
+            family_pair=request.normalized_family_pair,
+            message="spline/NURBS coincident-region CSG requires two B-spline or NURBS patches",
+        )
+        return SurfaceCSGSplineCoincidentRegionRecord(
+            first_patch=first_ref,
+            second_patch=second_ref,
+            intersection=normalize_surface_intersection_result(request, quality="unsupported"),
+            diagnostics=(diagnostic,),
+        )
+
+    first_samples = _sampled_region_points(first_patch, sample_count)
+    second_samples = _sampled_region_points(second_patch, sample_count)
+    distances = tuple(
+        float(np.linalg.norm(np.asarray(first_point, dtype=float) - np.asarray(second_point, dtype=float)))
+        for first_point, second_point in zip(first_samples, second_samples, strict=True)
+    )
+    max_distance = max(distances, default=float("inf"))
+    if max_distance > normalized_policy.equality_tolerance:
+        diagnostic = SurfaceCSGArrangementDiagnostic(
+            code="ambiguous-overlap",
+            message=(
+                "Spline/NURBS patches are not coincident within CSG equality tolerance; "
+                f"max sampled separation was {max_distance}."
+            ),
+            patch=first_ref,
+        )
+        return SurfaceCSGSplineCoincidentRegionRecord(
+            first_patch=first_ref,
+            second_patch=second_ref,
+            intersection=normalize_surface_intersection_result(
+                request,
+                max_residual=max_distance if np.isfinite(max_distance) else 0.0,
+                quality="unsupported",
+            ),
+            diagnostics=(diagnostic,),
+        )
+
+    first_loop = _surface_patch_domain_loop(first_patch)
+    second_loop = _surface_patch_domain_loop(second_patch)
+    overlap = SurfaceIntersectionOverlapRegionRecord(
+        region_id="spline-coincident-region-0",
+        first_loop_uv=first_loop,
+        second_loop_uv=second_loop,
+    )
+    result = normalize_surface_intersection_result(
+        request,
+        overlap_regions=(overlap,),
+        max_residual=max_distance,
+        quality="within-tolerance",
+    )
+    first_mapping = map_surface_csg_coincident_region_loop(overlap.region_id, first_ref, first_patch, overlap.first_loop_uv)
+    second_mapping = map_surface_csg_coincident_region_loop(overlap.region_id, second_ref, second_patch, overlap.second_loop_uv)
+    diagnostics = tuple(diagnostic for mapping in (first_mapping, second_mapping) for diagnostic in mapping.diagnostics)
+    return SurfaceCSGSplineCoincidentRegionRecord(
+        first_patch=first_ref,
+        second_patch=second_ref,
+        intersection=result,
+        region_mappings=(first_mapping, second_mapping),
+        diagnostics=diagnostics,
+    )
+
+
+def _sampled_region_points(patch: SurfacePatch, sample_count: int) -> tuple[tuple[float, float, float], ...]:
+    u0, u1 = patch.domain.u_range
+    v0, v1 = patch.domain.v_range
+    count = max(2, int(sample_count))
+    return tuple(
+        tuple(float(component) for component in patch.point_at(float(u), float(v)))
+        for u in np.linspace(u0, u1, count)
+        for v in np.linspace(v0, v1, count)
     )
 
 
