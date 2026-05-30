@@ -228,6 +228,7 @@ class HeightmapCompositionDiagnostic:
         "invalid-operation",
         "unsupported-operand",
         "alignment-refusal",
+        "representability-refusal",
         "unrepresentable-result",
     ]
     message: str
@@ -262,6 +263,52 @@ class HeightmapCompositionRecord:
             "resample_kernel": self.resample_kernel,
             "result_family": self.result_family,
             "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapOverhangDiagnostic:
+    """Heightmap representability diagnostic for non-2.5D projected states."""
+
+    code: Literal[
+        "invalid-projection",
+        "overhang",
+        "multi-valued-projection",
+        "unsafe-grid",
+    ]
+    message: str
+    patch_id: str | None = None
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "patch_id": self.patch_id,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapRepresentabilityReport:
+    """Pre-execution 2.5D representability report for heightmap CSG."""
+
+    operation: SurfaceBooleanOperation
+    operand_ids: tuple[str, str]
+    alignment: HeightmapGridAlignmentRecord
+    diagnostics: tuple[HeightmapOverhangDiagnostic, ...] = ()
+
+    @property
+    def representable(self) -> bool:
+        return not self.diagnostics and self.alignment.supported
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "operand_ids": self.operand_ids,
+            "alignment": self.alignment.canonical_payload(),
+            "representable": self.representable,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
         }
 
 
@@ -336,6 +383,88 @@ def _heightmap_patch_world_height_and_mask(
     sample_row = int(np.clip(round(v), 0, rows - 1))
     sample_col = int(np.clip(round(u), 0, cols - 1))
     return height, bool(patch.alpha_mask[sample_row, sample_col])
+
+
+def _heightmap_transform_representability_diagnostics(
+    patch: HeightmapSurfacePatch,
+    *,
+    tolerance: float,
+) -> tuple[HeightmapOverhangDiagnostic, ...]:
+    matrix = np.asarray(patch.transform_matrix, dtype=float)
+    diagnostics: list[HeightmapOverhangDiagnostic] = []
+    if abs(float(matrix[3, 3]) - 1.0) > tolerance or np.any(np.abs(matrix[3, :3]) > tolerance):
+        diagnostics.append(
+            HeightmapOverhangDiagnostic(
+                code="invalid-projection",
+                patch_id=patch.stable_identity,
+                message="Heightmap transform uses projective coordinates and cannot preserve a finite 2.5D projection.",
+            )
+        )
+    if abs(float(matrix[0, 2])) > tolerance or abs(float(matrix[1, 2])) > tolerance:
+        diagnostics.append(
+            HeightmapOverhangDiagnostic(
+                code="overhang",
+                patch_id=patch.stable_identity,
+                message="Heightmap transform maps height into projected x/y coordinates, creating possible overhangs.",
+            )
+        )
+    projected_jacobian = matrix[:2, :2]
+    if abs(float(np.linalg.det(projected_jacobian))) <= tolerance:
+        diagnostics.append(
+            HeightmapOverhangDiagnostic(
+                code="multi-valued-projection",
+                patch_id=patch.stable_identity,
+                message="Heightmap transform collapses the projected x/y axes, creating a multi-valued height projection.",
+            )
+        )
+    if patch.alpha_mode == "mask" and not bool(np.any(patch.alpha_mask)):
+        diagnostics.append(
+            HeightmapOverhangDiagnostic(
+                code="unsafe-grid",
+                patch_id=patch.stable_identity,
+                message="Heightmap operand mask contains no visible samples for heightmap CSG execution.",
+            )
+        )
+    return tuple(diagnostics)
+
+
+def heightmap_representability_report(
+    operation: SurfaceBooleanOperation,
+    left: HeightmapSurfacePatch,
+    right: HeightmapSurfacePatch,
+    *,
+    alignment: HeightmapGridAlignmentRecord | None = None,
+    tolerance: float = 1e-9,
+) -> HeightmapRepresentabilityReport:
+    """Return the pre-execution refusal report for heightmap-preserving CSG."""
+
+    if operation not in SURFACE_BOOLEAN_OPERATIONS:
+        raise ValueError("Heightmap representability operation must be union, difference, or intersection.")
+    if not isinstance(left, HeightmapSurfacePatch) or not isinstance(right, HeightmapSurfacePatch):
+        raise TypeError("Heightmap representability requires HeightmapSurfacePatch operands.")
+    tol = float(tolerance)
+    if not np.isfinite(tol) or tol < 0.0:
+        raise ValueError("Heightmap representability tolerance must be finite and non-negative.")
+    checked_alignment = alignment if alignment is not None else plan_heightmap_grid_alignment(left, right, tolerance=tol)
+    diagnostics: list[HeightmapOverhangDiagnostic] = []
+    if not checked_alignment.supported:
+        message = "Heightmap CSG projection/grid alignment is not representable as a heightmap."
+        if checked_alignment.diagnostics:
+            message = checked_alignment.diagnostics[0].message
+        diagnostics.append(
+            HeightmapOverhangDiagnostic(
+                code="invalid-projection",
+                message=f"{message} No mesh fallback was attempted.",
+            )
+        )
+    diagnostics.extend(_heightmap_transform_representability_diagnostics(left, tolerance=tol))
+    diagnostics.extend(_heightmap_transform_representability_diagnostics(right, tolerance=tol))
+    return HeightmapRepresentabilityReport(
+        operation=operation,
+        operand_ids=(left.stable_identity, right.stable_identity),
+        alignment=checked_alignment,
+        diagnostics=tuple(diagnostics),
+    )
 
 
 def _compose_heightmap_samples(
@@ -441,6 +570,39 @@ def compose_heightmap_csg_result(
                     message=(
                         "Heightmap CSG composition refused because grid alignment failed; "
                         "no mesh fallback was attempted."
+                    ),
+                ),
+            ),
+        )
+    representability = heightmap_representability_report(
+        operation,
+        left,
+        right,
+        alignment=alignment,
+        tolerance=tol,
+    )
+    if not representability.representable:
+        metadata_record = record.canonical_payload()
+        metadata_record["representability"] = representability.canonical_payload()
+        refusal_record = HeightmapCompositionRecord(
+            operation=record.operation,
+            operand_ids=record.operand_ids,
+            alignment=record.alignment,
+            sample_shape=record.sample_shape,
+            resample_kernel=record.resample_kernel,
+        )
+        return HeightmapCompositionResult(
+            operation=operation,
+            supported=False,
+            operation_record=refusal_record,
+            diagnostics=(
+                HeightmapCompositionDiagnostic(
+                    code="representability-refusal",
+                    message=(
+                        "Heightmap CSG composition refused before execution because the result is not "
+                        f"representable as a single-valued 2.5D heightmap: "
+                        f"{'; '.join(diagnostic.message for diagnostic in representability.diagnostics)} "
+                        "No mesh fallback was attempted."
                     ),
                 ),
             ),
