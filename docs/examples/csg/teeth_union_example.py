@@ -11,7 +11,7 @@ from pathlib import Path
 
 from impression.io import write_stl
 
-from impression.modeling import make_cylinder, union_meshes
+from impression.modeling import make_cylinder_mesh, union_meshes
 
 
 def build():
@@ -28,7 +28,7 @@ def build():
         angle = math.radians(start + i * step)
         x = radius * math.cos(angle)
         y = radius * math.sin(angle)
-        cyl = make_cylinder(radius=tooth_radius, height=tooth_height, center=(x, y, tooth_height / 2.0))
+        cyl = make_cylinder_mesh(radius=tooth_radius, height=tooth_height, center=(x, y, tooth_height / 2.0))
         meshes[f"tooth-{i}"] = cyl
 
     return union_meshes(meshes)

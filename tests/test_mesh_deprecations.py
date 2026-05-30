@@ -43,7 +43,7 @@ def _messages_from(callable_obj) -> list[warnings.WarningMessage]:
 
 
 def test_mesh_only_public_apis_warn() -> None:
-    draft_messages = _messages_from(lambda: make_line((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)))
+    draft_messages = _messages_from(lambda: make_line((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), backend="mesh"))
     heightmap_messages = _messages_from(
         lambda: heightmap(np.asarray([[0.0, 1.0], [1.0, 0.0]], dtype=float))
     )

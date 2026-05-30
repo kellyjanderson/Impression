@@ -7,6 +7,9 @@ import numpy as np
 
 from impression.mesh import Mesh, combine_meshes
 
+MESH_GROUP_COMPATIBILITY_CLASSIFICATION = "mesh-compatibility"
+MESH_GROUP_COMPATIBILITY_BOUNDARY = "explicit-mesh-group-compatibility"
+
 
 def _normalize_axis(axis: Sequence[float]) -> np.ndarray:
     vec = np.asarray(axis, dtype=float).reshape(3)
@@ -105,14 +108,58 @@ def _rotation_euler_matrix(angles_deg: Sequence[float], origin: Sequence[float],
     return back @ mat @ to_origin
 
 
+@dataclass(frozen=True)
+class MeshGroupCompatibilityDiagnostic:
+    """Diagnostic proving MeshGroup is an explicit mesh compatibility boundary."""
+
+    target_type: str
+    reason: str = "MeshGroup accepts mesh inputs only"
+    boundary: str = MESH_GROUP_COMPATIBILITY_BOUNDARY
+    classification: str = MESH_GROUP_COMPATIBILITY_CLASSIFICATION
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary": self.boundary,
+            "classification": self.classification,
+            "reason": self.reason,
+            "target_type": self.target_type,
+        }
+
+
+class MeshGroupCompatibilityError(TypeError):
+    """Raised when a non-mesh value crosses into MeshGroup compatibility APIs."""
+
+    def __init__(self, diagnostic: MeshGroupCompatibilityDiagnostic) -> None:
+        self.diagnostic = diagnostic
+        super().__init__(
+            f"Unsupported {diagnostic.target_type} at MeshGroup compatibility boundary: {diagnostic.reason}."
+        )
+
+
 @dataclass
 class MeshGroup:
     """Hold multiple meshes and apply shared transforms."""
 
     meshes: List[Mesh] = field(default_factory=list)
     _transform: np.ndarray = field(default_factory=lambda: np.eye(4))
+    metadata: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self._transform = np.asarray(self._transform, dtype=float).reshape(4, 4)
+        self.metadata = dict(self.metadata)
+        self.metadata.setdefault("mesh_group_compatibility", self.compatibility_diagnostic().canonical_payload())
+        for mesh in self.meshes:
+            _ensure_mesh_input(mesh)
+
+    @property
+    def classification(self) -> str:
+        return MESH_GROUP_COMPATIBILITY_CLASSIFICATION
+
+    def compatibility_diagnostic(self) -> MeshGroupCompatibilityDiagnostic:
+        return MeshGroupCompatibilityDiagnostic(target_type=type(self).__name__)
 
     def add(self, mesh: Mesh) -> "MeshGroup":
+        _ensure_mesh_input(mesh)
         self.meshes.append(mesh)
         return self
 
@@ -163,3 +210,20 @@ def group(meshes: Iterable[Mesh]) -> MeshGroup:
     for m in meshes:
         grp.add(m)
     return grp
+
+
+def mesh_group_compatibility_diagnostic(target: object) -> MeshGroupCompatibilityDiagnostic:
+    if isinstance(target, MeshGroup):
+        return target.compatibility_diagnostic()
+    if isinstance(target, Mesh):
+        return MeshGroupCompatibilityDiagnostic(target_type=type(target).__name__)
+    return MeshGroupCompatibilityDiagnostic(
+        target_type=type(target).__name__,
+        reason="surface-authored values must use SurfaceComposition instead of MeshGroup",
+    )
+
+
+def _ensure_mesh_input(target: object) -> None:
+    if isinstance(target, Mesh):
+        return
+    raise MeshGroupCompatibilityError(mesh_group_compatibility_diagnostic(target))

@@ -23,12 +23,13 @@ Canonical API:
 - `loft(...)` is the profile/path convenience API over the same surface-first planner.
 - `loft_sections(...)` is the explicit-station convenience form of that same planner/executor pipeline.
 - `loft_plan_sections(...)` builds a deterministic `LoftPlan` without executing it.
-- `loft_execute_plan(...)` executes a previously built `LoftPlan`.
+- `loft_execute_plan(...)` executes a previously built `LoftPlan` into the canonical `SurfaceBody`.
+- `loft_execute_plan_debug_mesh(...)` is the explicit debug/compatibility mesh route for a previously built `LoftPlan`.
 - `loft_plan_ambiguities(...)` reports ambiguous intervals and candidate IDs without executing geometry.
 - `loft_profiles(...)` remains as a compatibility alias for `loft(...)`.
 
 ```python
-from impression.modeling import Loft, Station, loft, loft_execute_plan, loft_plan_ambiguities, loft_plan_sections, loft_sections
+from impression.modeling import Loft, Station, loft, loft_execute_plan, loft_execute_plan_debug_mesh, loft_plan_ambiguities, loft_plan_sections, loft_sections
 from impression.modeling.drawing2d import make_rect
 from impression.modeling import Path3D
 ```
@@ -51,6 +52,7 @@ Use the loft API that matches the representation you want to own:
   - uses the same planner, then hands off to the current public consumer path
 - `loft_plan_sections(...)` + `loft_execute_plan(...)`
   - best when you need to inspect or persist planner output before execution
+  - returns canonical `SurfaceBody`; use `loft_execute_plan_debug_mesh(...)` for explicit mesh/debug output
 - `loft_plan_ambiguities(...)`
   - best when you want a report of ambiguous intervals/candidate IDs before choosing interactive selections
 
@@ -178,10 +180,11 @@ interactive control instead of a single black-box loft call.
 Build a plan without executing it:
 
 ```python
-from impression.modeling import loft_execute_plan, loft_plan_sections
+from impression.modeling import loft_execute_plan, loft_execute_plan_debug_mesh, loft_plan_sections
 
 plan = loft_plan_sections(stations, samples=48, split_merge_mode="resolve")
 loft_output = loft_execute_plan(plan, cap_ends=True)
+debug_mesh = loft_execute_plan_debug_mesh(plan, cap_ends=True)
 ```
 
 Inspect ambiguity candidates without generating geometry:

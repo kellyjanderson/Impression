@@ -8,6 +8,7 @@ from impression.modeling.drawing2d import make_rect
 from impression.modeling.loft import (
     LoftAmbiguityCandidate,
     LoftAmbiguityIntervalReport,
+    LoftAmbiguityRecord,
     LoftAmbiguityReport,
     LoftPlan,
     PlannedLoopPair,
@@ -25,7 +26,10 @@ from impression.modeling.loft import (
     _resolve_interactive_region_assignment,
     _resolve_probabilistic_region_assignment,
     _validate_loft_plan,
+    build_loft_ambiguity_record,
+    loft_execute_plan,
     loft_plan_ambiguities,
+    validate_loft_ambiguity_locators,
 )
 
 
@@ -307,6 +311,14 @@ def test_loft_probabilistic_assignment_helper_covers_empty_single_fallback_and_f
 
 def test_loft_ambiguity_report_records_are_constructible() -> None:
     candidate = _candidate("demo", (0, 1))
+    ambiguity = build_loft_ambiguity_record(
+        interval=(0, 1),
+        ambiguity_class="containment",
+        ambiguous_region_indices=(2,),
+        relationship_group="point_birth",
+        entity_ref="station:1:loop:0:point:notch",
+        candidate_lifecycle="point_birth",
+    )
     interval = LoftAmbiguityIntervalReport(
         interval=(0, 1),
         topology_case="many_to_many_expand",
@@ -318,6 +330,11 @@ def test_loft_ambiguity_report_records_are_constructible() -> None:
 
     assert report.schema_version == 1
     assert report.intervals[0].candidates[0].assignment == (0, 1)
+    assert ambiguity.locator is not None
+    assert ambiguity.locator.station_interval == (0, 1)
+    assert ambiguity.locator.entity_ref == "station:1:loop:0:point:notch"
+    assert ambiguity.suggested_rails[0].rail_kind == "correspondence"
+    assert validate_loft_ambiguity_locators((ambiguity,)) == (ambiguity,)
 
 
 def test_loft_candidate_enumerators_and_prediction_helpers_cover_remaining_paths() -> None:
@@ -483,6 +500,39 @@ def test_loft_plan_validation_and_transition_properties_cover_guardrails() -> No
     )
     with pytest.raises(ValueError, match="missing key 'containment'"):
         _validate_loft_plan(bad_class_counts)
+
+    ambiguity = build_loft_ambiguity_record(
+        interval=(0, 1),
+        ambiguity_class="permutation",
+        ambiguous_region_indices=(0, 1),
+        relationship_group="many_to_many_regions",
+        entity_ref="station:1:region:0",
+        candidate_lifecycle="split_merge",
+    )
+    blocked_with_locator = LoftPlan(
+        samples=plan.samples,
+        stations=plan.stations,
+        transitions=plan.transitions,
+        metadata={
+            **plan.metadata,
+            "ambiguity_failed_intervals_count": 1,
+            "unresolved_ambiguities": (ambiguity,),
+        },
+    )
+    _validate_loft_plan(blocked_with_locator)
+    assert blocked_with_locator.is_executable is False
+    assert blocked_with_locator.executability_status.unresolved_ambiguities == (ambiguity,)
+    with pytest.raises(ValueError, match="1 unresolved ambiguity"):
+        loft_execute_plan(blocked_with_locator)
+
+    missing_locator = LoftAmbiguityRecord(
+        interval=(0, 1),
+        topology_state_index=1,
+        ambiguous_region_indices=(0,),
+        ambiguity_class="permutation",
+    )
+    with pytest.raises(ValueError, match="missing locator"):
+        validate_loft_ambiguity_locators((missing_locator,))
 
     invalid_pair = PlannedRegionPair(
         prev_region_ref=PlannedRegionRef(kind="actual", index=0),

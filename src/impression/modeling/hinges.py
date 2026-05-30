@@ -29,3 +29,42 @@ def _load_extension() -> ModuleType:
 _extension = _load_extension()
 __all__ = list(getattr(_extension, "__all__", ()))
 globals().update({name: getattr(_extension, name) for name in __all__})
+
+
+def hinge_feature_csg_dependencies():
+    from .csg import SurfaceCSGFeatureDependencyRecord
+
+    return (
+        SurfaceCSGFeatureDependencyRecord(
+            caller_id="hinges.make_traditional_hinge_leaf",
+            module="impression.modeling.hinges",
+            operation=None,
+            surface_builder="make_traditional_hinge_leaf",
+            explicit_mesh_route="backend='mesh'",
+        ),
+        SurfaceCSGFeatureDependencyRecord(
+            caller_id="hinges.make_traditional_hinge_pair",
+            module="impression.modeling.hinges",
+            operation="union",
+            surface_builder="make_traditional_hinge_pair",
+            explicit_mesh_route="backend='mesh'",
+        ),
+        SurfaceCSGFeatureDependencyRecord(
+            caller_id="hinges.make_living_hinge",
+            module="impression.modeling.hinges",
+            operation=None,
+            surface_builder="make_living_hinge",
+            explicit_mesh_route="backend='mesh'",
+        ),
+        SurfaceCSGFeatureDependencyRecord(
+            caller_id="hinges.make_bistable_hinge",
+            module="impression.modeling.hinges",
+            operation=None,
+            surface_builder="make_bistable_hinge",
+            explicit_mesh_route="backend='mesh'",
+        ),
+    )
+
+
+if "hinge_feature_csg_dependencies" not in __all__:
+    __all__.append("hinge_feature_csg_dependencies")

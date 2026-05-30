@@ -18,17 +18,17 @@ from impression.modeling import (
 
 Hinges are now on an explicit surface-first migration path.
 
-The legacy mesh builders still exist, but `backend="surface"` now exposes
-deterministic surfaced hinge contracts instead of silently collapsing back to
-mesh-first truth.
+The legacy mesh builders still exist through `backend="mesh"`, but traditional
+hinge helpers now default to deterministic surfaced hinge contracts instead of
+silently collapsing back to mesh-first truth.
 
 Today the surfaced path is split into two layers:
 
-- direct surfaced leaf geometry for `make_traditional_hinge_leaf(..., backend="surface")`
+- direct surfaced leaf geometry for `make_traditional_hinge_leaf(...)`
 - structured surfaced assemblies for:
-  - `make_traditional_hinge_pair(..., backend="surface")`
-  - `make_living_hinge(..., backend="surface")`
-  - `make_bistable_hinge(..., backend="surface")`
+  - `make_traditional_hinge_pair(...)`
+  - `make_living_hinge(...)`
+  - `make_bistable_hinge(...)`
 
 Those structured results are returned as `HingeSurfaceAssembly`, which preserves:
 

@@ -74,15 +74,6 @@ Read:
 
 - `docs/modeling/csg.md`
 
-### Threading
-
-Use for surfaced thread operands, assemblies, and standards-based thread
-geometry.
-
-Read:
-
-- `docs/modeling/threading.md`
-
 ### Hinges
 
 Use for traditional, living, and bistable hinge outputs.

@@ -334,7 +334,6 @@ It should reflect reality, not excuse it.
 
 These can proceed independently while the surfaced CSG lane remains active:
 
-- surface threading reference-fixture track
 - thin-geometry invariants track for drafting / text / heightmap
 - loft orientation-hardening track with asymmetric witnesses
 - documentation-contract hardening where docs currently outpace executable
@@ -342,8 +341,6 @@ These can proceed independently while the surfaced CSG lane remains active:
 
 Representative files:
 
-- [tests/test_surface_threading.py](../../tests/test_surface_threading.py)
-- [tests/test_surface_threading_docs.py](../../tests/test_surface_threading_docs.py)
 - [tests/test_drafting.py](../../tests/test_drafting.py)
 - [tests/test_heightmap.py](../../tests/test_heightmap.py)
 - [tests/test_text.py](../../tests/test_text.py)

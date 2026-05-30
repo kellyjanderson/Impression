@@ -7,8 +7,10 @@ import pytest
 from impression.mesh import combine_meshes
 from impression.modeling import (
     HingeSurfaceAssembly,
+    SurfaceCSGFeatureDependencyRecord,
     SurfaceBody,
     SurfaceConsumerCollection,
+    hinge_feature_csg_dependencies,
     handoff_hinge_surface,
     make_bistable_hinge,
     make_living_hinge,
@@ -33,6 +35,35 @@ def test_surface_traditional_hinge_leaf_returns_surface_body_without_deprecation
     assert mesh.n_vertices > 0
     assert mesh.n_faces > 0
     assert not [item for item in caught if issubclass(item.category, DeprecationWarning)]
+
+
+def test_traditional_hinge_defaults_lower_to_surface_outputs() -> None:
+    leaf = make_traditional_hinge_leaf(width=24.0, knuckle_count=5)
+    pair = make_traditional_hinge_pair(width=24.0, knuckle_count=5, include_pin=True)
+
+    assert isinstance(leaf, SurfaceBody)
+    assert tessellate_surface_body(leaf).mesh.n_faces > 0
+    assert isinstance(pair, HingeSurfaceAssembly)
+    assert pair.assembly_type == "traditional_hinge_pair"
+    collection = handoff_hinge_surface(pair)
+    assert len(collection.items) == 3
+    assert _combined_collection_mesh(collection).n_faces > 0
+
+
+def test_hinge_feature_csg_dependencies_name_surface_and_explicit_mesh_routes() -> None:
+    dependencies = hinge_feature_csg_dependencies()
+    caller_ids = {record.caller_id for record in dependencies}
+
+    assert all(isinstance(record, SurfaceCSGFeatureDependencyRecord) for record in dependencies)
+    assert {
+        "hinges.make_traditional_hinge_leaf",
+        "hinges.make_traditional_hinge_pair",
+        "hinges.make_living_hinge",
+        "hinges.make_bistable_hinge",
+    }.issubset(caller_ids)
+    assert all(record.surface_builder.startswith("make_") for record in dependencies)
+    assert all(record.explicit_mesh_route == "backend='mesh'" for record in dependencies)
+    assert any(record.operation == "union" for record in dependencies)
 
 
 def test_surface_hinge_paths_preserve_consumer_color_metadata() -> None:
@@ -94,7 +125,6 @@ def test_surface_living_hinge_handoff_returns_structured_surface_collection() ->
         height=20.0,
         hinge_band_width=12.0,
         slit_pitch=1.8,
-        backend="surface",
     )
 
     assert isinstance(assembly, HingeSurfaceAssembly)
@@ -113,7 +143,6 @@ def test_surface_bistable_hinge_handoff_returns_structured_surface_collection() 
     assembly = make_bistable_hinge(
         width=40.0,
         preload_offset=2.0,
-        backend="surface",
     )
 
     assert isinstance(assembly, HingeSurfaceAssembly)

@@ -15,12 +15,22 @@ from impression.modeling import (
     PlannedRegionRef,
     Section,
     Station,
+    BSplineSurfacePatch,
+    NURBSSurfacePatch,
+    SweepSurfacePatch,
     SurfaceBody,
     SurfaceConsumerCollection,
+    assert_loft_bspline_output_contract,
+    assert_loft_nurbs_output_contract,
+    assert_loft_sweep_output_contract,
+    classify_loft_patch_family,
     export_tessellation_request,
     loft,
     loft_execute_plan,
+    loft_execute_plan_debug_mesh,
+    loft_execute_plan_debug_mesh_result,
     loft_endcaps,
+    loft_patch_family_selection_records,
     loft_plan_ambiguities,
     loft_plan_sections,
     loft_sections,
@@ -28,6 +38,9 @@ from impression.modeling import (
     mesh_from_surface_body,
     preview_tessellation_request,
     tessellate_surface_body,
+    validate_loft_bspline_intent,
+    validate_loft_nurbs_intent,
+    validate_loft_sweep_intent,
     as_section,
 )
 from impression.modeling.drawing2d import Path2D, PlanarShape2D, make_circle, make_rect
@@ -40,13 +53,54 @@ from impression.modeling.loft import (
     _minimum_cost_hole_assignment,
     _local_assignment_fairness,
 )
+from tests.reference_images import (
+    ExpectedDiagnosticKeyRecord,
+    NegativeDiagnosticFixtureRecord,
+    evaluate_negative_diagnostic_fixture_matrix,
+    normalize_diagnostic_snapshot,
+)
+
+
+def _loft_negative_fixture(
+    fixture_id: str,
+    diagnostic: object,
+    *,
+    expected_keys: tuple[ExpectedDiagnosticKeyRecord, ...],
+) -> NegativeDiagnosticFixtureRecord:
+    return NegativeDiagnosticFixtureRecord(
+        fixture_id=fixture_id,
+        domain="loft",
+        expected_keys=expected_keys,
+        expected_snapshot=normalize_diagnostic_snapshot(diagnostic, fixture_id=fixture_id),
+    )
 
 
 def _assert_mesh_quality(mesh) -> None:
+    assert not isinstance(mesh, SurfaceBody), "mesh quality checks belong at explicit tessellation/debug boundaries"
     analysis = analyze_mesh(mesh)
     assert analysis.boundary_edges == 0, analysis.issues()
     assert analysis.nonmanifold_edges == 0, analysis.issues()
     assert analysis.degenerate_faces == 0, analysis.issues()
+
+
+def _assert_surface_body_quality(body: SurfaceBody) -> None:
+    assert isinstance(body, SurfaceBody)
+    assert body.shell_count > 0
+    assert body.patch_count > 0
+
+
+def _assert_surface_body_tessellates(body: SurfaceBody) -> None:
+    _assert_surface_body_quality(body)
+    result = tessellate_surface_body(body, export_tessellation_request(require_watertight=False))
+    assert result.mesh.n_vertices > 0
+    assert result.mesh.n_faces > 0
+
+
+def _assert_loft_scene_item(item) -> None:
+    if isinstance(item, SurfaceBody):
+        _assert_surface_body_quality(item)
+    else:
+        _assert_mesh_quality(item)
 
 
 def _plan_transition_signature(plan) -> tuple:
@@ -98,9 +152,8 @@ def test_loft_positive():
         make_rect(size=(0.8, 0.8)),
     ]
     path = Path3D.from_points([(0, 0, 0), (0, 0, 1), (0, 0, 2)])
-    mesh = loft(profiles, path=path, cap_ends=True, samples=40)
-    assert mesh.n_faces > 0
-    assert mesh.n_vertices > 0
+    body = loft(profiles, path=path, cap_ends=True, samples=40)
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_quality_preview():
@@ -108,8 +161,8 @@ def test_loft_quality_preview():
         make_rect(size=(1.0, 1.0)),
         make_rect(size=(0.6, 1.4)),
     ]
-    mesh = loft(profiles, samples=40, quality=MeshQuality(lod="preview"))
-    assert mesh.n_faces > 0
+    body = loft(profiles, samples=40, quality=MeshQuality(lod="preview"))
+    _assert_surface_body_quality(body)
 
 
 def test_loft_requires_two_profiles():
@@ -122,9 +175,8 @@ def test_loft_supports_hole_birth():
     hole = make_rect(size=(0.4, 0.4)).outer
     start = PlanarShape2D(outer=outer, holes=[])
     end = PlanarShape2D(outer=outer, holes=[hole])
-    mesh = loft([start, end], samples=28, cap_ends=True)
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    body = loft([start, end], samples=28, cap_ends=True)
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_rotates_profiles_along_path():
@@ -133,7 +185,8 @@ def test_loft_rotates_profiles_along_path():
         make_rect(size=(1.0, 1.0)),
     ]
     path = Path3D.from_points([(0, 0, 0), (2, 0, 0)])
-    mesh = loft(profiles, path=path, samples=40)
+    body = loft(profiles, path=path, samples=40)
+    mesh = tessellate_surface_body(body, preview_tessellation_request(require_watertight=False)).mesh
     _, _, _, _, zmin, zmax = mesh.bounds
     assert (zmax - zmin) > 0.1
 
@@ -154,7 +207,7 @@ def test_loft_cap_types_add_geometry():
         end_cap_length=0.75,
         cap_scale_dims="both",
     )
-    assert capped.n_vertices > base.n_vertices
+    assert capped.patch_count > base.patch_count
 
 
 def test_loft_invalid_cap_type():
@@ -196,9 +249,8 @@ def test_loft_supports_region_split():
     left = as_section(make_rect(size=(0.5, 0.8), center=(-0.55, 0.0))).regions[0]
     right = as_section(make_rect(size=(0.5, 0.8), center=(0.55, 0.0))).regions[0]
     end = Section((left, right))
-    mesh = loft([start, end], samples=28, cap_ends=True, split_merge_mode="resolve")
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    body = loft([start, end], samples=28, cap_ends=True, split_merge_mode="resolve")
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_endcaps_legacy_amount_compatibility():
@@ -323,12 +375,9 @@ def test_loft_is_deterministic_for_identical_inputs():
         make_rect(size=(1.1, 0.9)),
     ]
     path = Path3D.from_points([(0, 0, 0), (0.2, 0.1, 0.8), (0.3, 0.2, 1.6)])
-    mesh_a = loft(profiles, path=path, samples=48, cap_ends=True)
-    mesh_b = loft(profiles, path=path, samples=48, cap_ends=True)
-    assert mesh_a.vertices.shape == mesh_b.vertices.shape
-    assert mesh_a.faces.shape == mesh_b.faces.shape
-    assert (mesh_a.vertices == mesh_b.vertices).all()
-    assert (mesh_a.faces == mesh_b.faces).all()
+    body_a = loft(profiles, path=path, samples=48, cap_ends=True)
+    body_b = loft(profiles, path=path, samples=48, cap_ends=True)
+    assert body_a.stable_identity == body_b.stable_identity
 
 
 def test_loft_endcaps_reports_region_collapse_for_oversized_endcap():
@@ -362,13 +411,10 @@ def test_loft_hole_order_is_deterministically_matched():
     mid_b = PlanarShape2D(outer=make_rect(size=(1.8, 1.2)).outer, holes=[right_hole, left_hole])
     end = PlanarShape2D(outer=make_rect(size=(1.6, 1.0)).outer, holes=[left_hole, right_hole])
 
-    mesh_a = loft([start, mid_a, end], samples=40)
-    mesh_b = loft([start, mid_b, end], samples=40)
+    body_a = loft([start, mid_a, end], samples=40)
+    body_b = loft([start, mid_b, end], samples=40)
 
-    assert mesh_a.vertices.shape == mesh_b.vertices.shape
-    assert mesh_a.faces.shape == mesh_b.faces.shape
-    assert (mesh_a.vertices == mesh_b.vertices).all()
-    assert (mesh_a.faces == mesh_b.faces).all()
+    assert body_a.stable_identity == body_b.stable_identity
 
 
 def test_loft_sections_basic_with_station_frames():
@@ -392,10 +438,8 @@ def test_loft_sections_basic_with_station_frames():
             n=[0.0, 0.0, 1.0],
         ),
     ]
-    mesh = loft_sections(stations, samples=40, cap_ends=True)
-    assert mesh.n_vertices > 0
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    body = loft_sections(stations, samples=40, cap_ends=True)
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_sections_matches_planner_executor_pipeline():
@@ -423,10 +467,391 @@ def test_loft_sections_matches_planner_executor_pipeline():
     ]
     direct = loft_sections(stations, samples=36, cap_ends=True)
     plan = loft_plan_sections(stations, samples=36)
-    from_plan = loft_execute_plan(plan, cap_ends=True)
-    assert np.array_equal(direct.vertices, from_plan.vertices)
-    assert np.array_equal(direct.faces, from_plan.faces)
+    from_surface = loft_execute_plan(plan, cap_ends=True)
+    from_plan = loft_execute_plan_debug_mesh(plan, cap_ends=True)
+    assert isinstance(direct, SurfaceBody)
+    assert direct.stable_identity == from_surface.stable_identity
     _assert_mesh_quality(from_plan)
+
+
+def test_loft_execute_plan_returns_canonical_surface_body_and_debug_mesh_is_explicit() -> None:
+    start = make_rect(size=(1.0, 1.0))
+    end = make_rect(size=(0.6, 1.4))
+    stations = [
+        Station(
+            t=0.0,
+            section=as_section(start),
+            origin=[0.0, 0.0, 0.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+        Station(
+            t=1.0,
+            section=as_section(end),
+            origin=[0.0, 0.0, 1.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+    ]
+    plan = loft_plan_sections(stations, samples=24)
+
+    body = loft_execute_plan(plan, cap_ends=True)
+    debug_result = loft_execute_plan_debug_mesh_result(plan, cap_ends=True)
+
+    assert isinstance(body, SurfaceBody)
+    assert body.patch_count > 0
+    assert debug_result.boundary == "debug-compatibility"
+    assert debug_result.mesh.metadata["canonical_executor"] == "surface"
+    assert debug_result.mesh.n_faces > 0
+
+
+def test_loft_plan_records_patch_family_selection_and_executor_consumes_it() -> None:
+    start = make_rect(size=(1.0, 1.0))
+    end = make_rect(size=(0.6, 1.4))
+    stations = [
+        Station(
+            t=0.0,
+            section=as_section(start),
+            origin=[0.0, 0.0, 0.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+        Station(
+            t=1.0,
+            section=as_section(end),
+            origin=[0.0, 0.0, 1.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+    ]
+    plan = loft_plan_sections(stations, samples=24)
+
+    records = loft_patch_family_selection_records(plan)
+    body = loft_execute_plan(plan)
+
+    assert records[0].selected_family == "ruled"
+    assert records[0].evidence.loop_pair_count == 1
+    assert records[0].canonical_payload() == plan.metadata["loft_family_selection_records"][0]
+    sidewall = body.shells[0].patches[0]
+    assert sidewall.family == "ruled"
+    assert sidewall.metadata["kernel"]["loft_family_selection"]["selected_family"] == "ruled"
+
+
+def test_loft_patch_family_classifier_records_intent_and_refusals() -> None:
+    plan = loft_plan_sections(
+        [
+            Station(
+                t=0.0,
+                section=as_section(make_rect(size=(1.0, 1.0))),
+                origin=[0.0, 0.0, 0.0],
+                u=[1.0, 0.0, 0.0],
+                v=[0.0, 1.0, 0.0],
+                n=[0.0, 0.0, 1.0],
+            ),
+            Station(
+                t=1.0,
+                section=as_section(make_rect(size=(1.0, 1.0))),
+                origin=[0.0, 0.0, 1.0],
+                u=[1.0, 0.0, 0.0],
+                v=[0.0, 1.0, 0.0],
+                n=[0.0, 0.0, 1.0],
+            ),
+        ],
+        samples=12,
+    )
+    transition = plan.transitions[0]
+    sweep_path = Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.0, 1.0)])
+
+    assert classify_loft_patch_family(transition).selected_family == "ruled"
+    assert classify_loft_patch_family(transition, smooth_intent=True).selected_family == "bspline"
+    nurbs = classify_loft_patch_family(transition, rational_intent=True)
+    assert nurbs.selected_family == "nurbs"
+    assert nurbs.evidence.rational_intent is True
+    sweep = classify_loft_patch_family(transition, sweep_path=sweep_path)
+    assert sweep.selected_family == "sweep"
+    assert sweep.evidence.sweep_intent is True
+    refused = classify_loft_patch_family(transition, requested_family="implicit")
+    assert refused.accepted is False
+    assert refused.refusal_reason == "unsupported_loft_patch_family:implicit"
+
+
+def test_loft_bspline_contract_validates_smooth_intent_and_refuses_underdefined_selection() -> None:
+    plan = loft_plan_sections(
+        [
+            Station(
+                t=0.0,
+                section=as_section(make_rect(size=(1.0, 1.0))),
+                origin=[0.0, 0.0, 0.0],
+                u=[1.0, 0.0, 0.0],
+                v=[0.0, 1.0, 0.0],
+                n=[0.0, 0.0, 1.0],
+            ),
+            Station(
+                t=1.0,
+                section=as_section(make_rect(size=(1.0, 1.0))),
+                origin=[0.0, 0.0, 1.0],
+                u=[1.0, 0.0, 0.0],
+                v=[0.0, 1.0, 0.0],
+                n=[0.0, 0.0, 1.0],
+            ),
+        ],
+        samples=12,
+        smooth_intent=True,
+    )
+
+    selection = loft_patch_family_selection_records(plan, smooth_intent=True)[0]
+    ruled_selection = loft_patch_family_selection_records(plan)[0]
+
+    assert validate_loft_bspline_intent(selection) == selection
+    assert selection.selected_family == "bspline"
+    assert selection.evidence.smooth_intent is True
+    assert plan.metadata["loft_family_selection_records"][0]["selected_family"] == "bspline"
+    with pytest.raises(ValueError, match="B-spline smooth intent"):
+        validate_loft_bspline_intent(ruled_selection)
+
+
+def test_smooth_loft_emits_bspline_surface_patch_and_tessellates_at_boundary() -> None:
+    stations = [
+        Station(
+            t=0.0,
+            section=as_section(make_rect(size=(1.0, 1.0))),
+            origin=[0.0, 0.0, 0.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+        Station(
+            t=0.5,
+            section=as_section(make_rect(size=(1.2, 0.8))),
+            origin=[0.0, 0.0, 0.75],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+        Station(
+            t=1.0,
+            section=as_section(make_rect(size=(0.7, 1.3))),
+            origin=[0.0, 0.0, 1.5],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+    ]
+    plan = loft_plan_sections(stations, samples=16, smooth_intent=True)
+
+    body = loft_execute_plan(plan)
+    patches = body.shells[0].patches
+    mesh = tessellate_surface_body(body, preview_tessellation_request()).mesh
+
+    assert len(patches) == 2
+    assert all(isinstance(patch, BSplineSurfacePatch) for patch in patches)
+    for patch, selection in zip(patches, plan.metadata["loft_family_selection_records"], strict=True):
+        metadata = assert_loft_bspline_output_contract(patch, selection)
+        assert metadata["fit_posture"] == "interpolation"
+        assert patch.control_net.shape[0] == 2
+        assert patch.control_net.shape[1] >= 16
+    assert mesh.metadata["adapter_lossiness"] == "lossy"
+    assert mesh.n_faces > 0
+
+
+def test_loft_nurbs_contract_requires_explicit_rational_intent_and_weights() -> None:
+    stations = [
+        Station(
+            t=0.0,
+            section=as_section(make_rect(size=(1.0, 1.0))),
+            origin=[0.0, 0.0, 0.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+        Station(
+            t=1.0,
+            section=as_section(make_rect(size=(1.0, 1.0))),
+            origin=[0.0, 0.0, 1.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="explicit positive finite rational weights"):
+        loft_plan_sections(stations, samples=12, rational_intent=True)
+
+    plan = loft_plan_sections(stations, samples=12, rational_intent=True, rational_weights=1.25)
+    selection = loft_patch_family_selection_records(plan, rational_intent=True)[0]
+
+    assert selection.selected_family == "nurbs"
+    assert selection.evidence.rational_intent is True
+    assert validate_loft_nurbs_intent(selection, plan.metadata["loft_rational_weights"]) == selection
+    with pytest.raises(ValueError, match="NURBS rational intent"):
+        validate_loft_nurbs_intent(loft_patch_family_selection_records(plan)[0], 1.0)
+
+
+def test_rational_loft_emits_nurbs_with_positive_weights_and_tessellates_at_boundary() -> None:
+    stations = [
+        Station(
+            t=0.0,
+            section=as_section(make_rect(size=(1.0, 1.0))),
+            origin=[0.0, 0.0, 0.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+        Station(
+            t=1.0,
+            section=as_section(make_rect(size=(0.75, 1.25))),
+            origin=[0.0, 0.0, 1.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+    ]
+    plan = loft_plan_sections(stations, samples=16, rational_intent=True, rational_weights=1.5)
+
+    body = loft_execute_plan(plan)
+    patch = body.shells[0].patches[0]
+    mesh = tessellate_surface_body(body, preview_tessellation_request()).mesh
+
+    assert isinstance(patch, NURBSSurfacePatch)
+    assert np.all(np.isfinite(patch.weights))
+    assert np.all(patch.weights == 1.5)
+    metadata = assert_loft_nurbs_output_contract(patch, plan.metadata["loft_family_selection_records"][0])
+    assert metadata["rational_weight_policy"]["source"] == "explicit_scalar"
+    assert metadata["rational_weight_policy"]["min_weight"] == 1.5
+    assert mesh.metadata["adapter_lossiness"] == "lossy"
+    assert mesh.n_faces > 0
+
+
+def test_rational_loft_refuses_malformed_weight_grid_before_partial_output() -> None:
+    stations = [
+        Station(
+            t=0.0,
+            section=as_section(make_rect(size=(1.0, 1.0))),
+            origin=[0.0, 0.0, 0.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+        Station(
+            t=1.0,
+            section=as_section(make_rect(size=(1.0, 1.0))),
+            origin=[0.0, 0.0, 1.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+    ]
+    bad_grid_plan = loft_plan_sections(stations, samples=12, rational_intent=True, rational_weights=[[1.0, 1.0]])
+    bad_scalar_plan = loft_plan_sections(stations, samples=12, rational_intent=True, rational_weights=-1.0)
+
+    with pytest.raises(ValueError, match="rational weights must have shape"):
+        loft_execute_plan(bad_grid_plan)
+    with pytest.raises(ValueError, match="finite and positive"):
+        loft_execute_plan(bad_scalar_plan)
+
+
+def test_path_guided_loft_emits_sweep_and_preserves_path_profile_references() -> None:
+    stations = [
+        Station(
+            t=0.0,
+            section=as_section(make_rect(size=(1.0, 1.0))),
+            origin=[0.0, 0.0, 0.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+        Station(
+            t=1.0,
+            section=as_section(make_rect(size=(1.0, 1.0))),
+            origin=[0.0, 0.0, 1.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+    ]
+    sweep_path = Path3D.from_points([(0.0, 0.0, 0.0), (0.15, 0.0, 0.5), (0.0, 0.0, 1.0)])
+    plan = loft_plan_sections(stations, samples=14, sweep_path=sweep_path, sweep_frame_policy="fixed")
+
+    body = loft_execute_plan(plan)
+    patch = body.shells[0].patches[0]
+    mesh = tessellate_surface_body(body, preview_tessellation_request()).mesh
+    selection = loft_patch_family_selection_records(plan, sweep_path=sweep_path)[0]
+
+    assert validate_loft_sweep_intent(selection, sweep_path) == selection
+    assert isinstance(patch, SweepSurfacePatch)
+    assert patch.frame_policy == "fixed"
+    assert patch.path_reference is not None
+    assert patch.profile_reference is not None
+    metadata = assert_loft_sweep_output_contract(patch, plan.metadata["loft_family_selection_records"][0])
+    assert metadata["frame_policy"]["frame_policy"] == "fixed"
+    assert metadata["path_reference"] == patch.path_reference
+    assert metadata["profile_reference"] == patch.profile_reference
+    assert np.asarray(patch.path.sample()).shape == (3, 3)
+    assert mesh.metadata["adapter_lossiness"] == "lossy"
+    assert mesh.n_faces > 0
+
+
+def test_path_guided_loft_refuses_missing_path_and_invalid_frame_policy() -> None:
+    stations = [
+        Station(
+            t=0.0,
+            section=as_section(make_rect(size=(1.0, 1.0))),
+            origin=[0.0, 0.0, 0.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+        Station(
+            t=1.0,
+            section=as_section(make_rect(size=(1.0, 1.0))),
+            origin=[0.0, 0.0, 1.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="explicit Path3D guide"):
+        loft_plan_sections(stations, samples=12, requested_patch_family="sweep")
+    with pytest.raises(ValueError, match="frame_policy"):
+        loft_plan_sections(
+            stations,
+            samples=12,
+            sweep_path=Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.0, 1.0)]),
+            sweep_frame_policy="magic",
+        )
+
+
+def test_loft_family_selection_refuses_unsupported_intent_before_execution_paths() -> None:
+    stations = [
+        Station(
+            t=0.0,
+            section=as_section(make_rect(size=(1.0, 1.0))),
+            origin=[0.0, 0.0, 0.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+        Station(
+            t=1.0,
+            section=as_section(make_rect(size=(1.0, 1.0))),
+            origin=[0.0, 0.0, 1.0],
+            u=[1.0, 0.0, 0.0],
+            v=[0.0, 1.0, 0.0],
+            n=[0.0, 0.0, 1.0],
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="unsupported_loft_patch_family:implicit"):
+        loft_plan_sections(stations, samples=12, requested_patch_family="implicit")
+    with pytest.raises(ValueError, match="explicit positive finite rational weights"):
+        loft_plan_sections(stations, samples=12, rational_intent=True)
+    with pytest.raises(ValueError, match="explicit Path3D guide"):
+        loft_plan_sections(stations, samples=12, requested_patch_family="sweep")
 
 
 def test_private_surface_loft_executor_maps_simple_plan_to_surface_body() -> None:
@@ -817,9 +1242,10 @@ def test_loft_sections_resolve_mode_matches_planner_executor_pipeline():
         split_merge_steps=10,
         split_merge_bias=0.5,
     )
-    from_plan = loft_execute_plan(plan, cap_ends=True)
-    assert np.array_equal(direct.vertices, from_plan.vertices)
-    assert np.array_equal(direct.faces, from_plan.faces)
+    from_surface = loft_execute_plan(plan, cap_ends=True)
+    from_plan = loft_execute_plan_debug_mesh(plan, cap_ends=True)
+    assert isinstance(direct, SurfaceBody)
+    assert direct.stable_identity == from_surface.stable_identity
     _assert_mesh_quality(from_plan)
 
 
@@ -1398,7 +1824,7 @@ def test_loft_sections_accepts_fairness_and_skeleton_controls_surface():
         Station(t=0.0, section=base, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
         Station(t=1.0, section=base, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
     ]
-    mesh = loft_sections(
+    body = loft_sections(
         stations,
         samples=24,
         cap_ends=True,
@@ -1408,9 +1834,7 @@ def test_loft_sections_accepts_fairness_and_skeleton_controls_surface():
         skeleton_mode="auto",
         fairness_iterations=20,
     )
-    assert mesh.n_vertices > 0
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_sections_skeleton_required_fails_when_unavailable():
@@ -1429,13 +1853,13 @@ def test_loft_sections_skeleton_required_fails_when_unavailable():
         )
 
 
-def test_loft_sections_skeleton_auto_falls_back_and_preserves_mesh_quality():
+def test_loft_sections_skeleton_auto_uses_surface_body_when_skeleton_is_unavailable():
     base = as_section(make_rect(size=(1.0, 1.0)))
     stations = [
         Station(t=0.0, section=base, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
         Station(t=1.0, section=base, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
     ]
-    mesh = loft_sections(
+    body = loft_sections(
         stations,
         samples=24,
         split_merge_mode="resolve",
@@ -1443,9 +1867,7 @@ def test_loft_sections_skeleton_auto_falls_back_and_preserves_mesh_quality():
         skeleton_mode="auto",
         cap_ends=True,
     )
-    assert mesh.n_vertices > 0
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_plan_sections_reports_nonzero_fairness_terms_for_split_birth_transition():
@@ -1616,14 +2038,11 @@ def test_loft_sections_multi_region_order_is_deterministically_matched():
         Station(t=1.0, section=s1_swapped, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
     ]
 
-    mesh_a = loft_sections(stations_a, samples=32, cap_ends=True)
-    mesh_b = loft_sections(stations_b, samples=32, cap_ends=True)
-    assert mesh_a.vertices.shape == mesh_b.vertices.shape
-    assert mesh_a.faces.shape == mesh_b.faces.shape
-    assert (mesh_a.vertices == mesh_b.vertices).all()
-    assert (mesh_a.faces == mesh_b.faces).all()
-    _assert_mesh_quality(mesh_a)
-    _assert_mesh_quality(mesh_b)
+    body_a = loft_sections(stations_a, samples=32, cap_ends=True)
+    body_b = loft_sections(stations_b, samples=32, cap_ends=True)
+    assert body_a.stable_identity == body_b.stable_identity
+    _assert_surface_body_tessellates(body_a)
+    _assert_surface_body_tessellates(body_b)
 
 
 def test_loft_plan_sections_region_2_to_2_symmetric_ambiguity_resolves_deterministically():
@@ -1662,8 +2081,8 @@ def test_loft_plan_sections_region_2_to_2_symmetric_ambiguity_resolves_determini
     assert plan_b.transitions[0].topology_case == "one_to_one"
     assert _plan_transition_signature(plan_a) == _plan_transition_signature(plan_b)
 
-    mesh_a = loft_execute_plan(plan_a, cap_ends=True)
-    mesh_b = loft_execute_plan(plan_b, cap_ends=True)
+    mesh_a = loft_execute_plan_debug_mesh(plan_a, cap_ends=True)
+    mesh_b = loft_execute_plan_debug_mesh(plan_b, cap_ends=True)
     assert np.array_equal(mesh_a.vertices, mesh_b.vertices)
     assert np.array_equal(mesh_a.faces, mesh_b.faces)
     _assert_mesh_quality(mesh_a)
@@ -1684,14 +2103,11 @@ def test_loft_sections_multi_hole_order_is_deterministically_matched():
         Station(t=0.0, section=as_section(start), origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
         Station(t=1.0, section=as_section(end_b), origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
     ]
-    mesh_a = loft_sections(stations_a, samples=32, cap_ends=True)
-    mesh_b = loft_sections(stations_b, samples=32, cap_ends=True)
-    assert mesh_a.vertices.shape == mesh_b.vertices.shape
-    assert mesh_a.faces.shape == mesh_b.faces.shape
-    assert (mesh_a.vertices == mesh_b.vertices).all()
-    assert (mesh_a.faces == mesh_b.faces).all()
-    _assert_mesh_quality(mesh_a)
-    _assert_mesh_quality(mesh_b)
+    body_a = loft_sections(stations_a, samples=32, cap_ends=True)
+    body_b = loft_sections(stations_b, samples=32, cap_ends=True)
+    assert body_a.stable_identity == body_b.stable_identity
+    _assert_surface_body_tessellates(body_a)
+    _assert_surface_body_tessellates(body_b)
 
 
 def test_loft_plan_sections_hole_2_to_2_symmetric_ambiguity_resolves_deterministically():
@@ -1724,8 +2140,8 @@ def test_loft_plan_sections_hole_2_to_2_symmetric_ambiguity_resolves_determinist
     )
     assert _plan_transition_signature(plan_a) == _plan_transition_signature(plan_b)
 
-    mesh_a = loft_execute_plan(plan_a, cap_ends=True)
-    mesh_b = loft_execute_plan(plan_b, cap_ends=True)
+    mesh_a = loft_execute_plan_debug_mesh(plan_a, cap_ends=True)
+    mesh_b = loft_execute_plan_debug_mesh(plan_b, cap_ends=True)
     assert np.array_equal(mesh_a.vertices, mesh_b.vertices)
     assert np.array_equal(mesh_a.faces, mesh_b.faces)
     _assert_mesh_quality(mesh_a)
@@ -1741,10 +2157,8 @@ def test_loft_sections_supports_region_birth_transition():
         Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
         Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
     ]
-    mesh = loft_sections(stations, samples=24, cap_ends=True)
-    assert mesh.n_vertices > 0
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    body = loft_sections(stations, samples=24, cap_ends=True)
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_sections_fail_mode_supports_region_birth_transition():
@@ -1756,10 +2170,8 @@ def test_loft_sections_fail_mode_supports_region_birth_transition():
         Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
         Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
     ]
-    mesh = loft_sections(stations, samples=24, cap_ends=True, split_merge_mode="fail")
-    assert mesh.n_vertices > 0
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    body = loft_sections(stations, samples=24, cap_ends=True, split_merge_mode="fail")
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_sections_supports_region_death_transition():
@@ -1771,10 +2183,8 @@ def test_loft_sections_supports_region_death_transition():
         Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
         Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
     ]
-    mesh = loft_sections(stations, samples=24, cap_ends=True)
-    assert mesh.n_vertices > 0
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    body = loft_sections(stations, samples=24, cap_ends=True)
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_sections_fail_mode_supports_region_death_transition():
@@ -1786,10 +2196,8 @@ def test_loft_sections_fail_mode_supports_region_death_transition():
         Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
         Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
     ]
-    mesh = loft_sections(stations, samples=24, cap_ends=True, split_merge_mode="fail")
-    assert mesh.n_vertices > 0
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    body = loft_sections(stations, samples=24, cap_ends=True, split_merge_mode="fail")
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_sections_supports_hole_birth_transition():
@@ -1815,10 +2223,8 @@ def test_loft_sections_supports_hole_birth_transition():
             n=[0, 0, 1],
         ),
     ]
-    mesh = loft_sections(stations, samples=28, cap_ends=True)
-    assert mesh.n_vertices > 0
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    body = loft_sections(stations, samples=28, cap_ends=True)
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_sections_supports_hole_death_transition():
@@ -1844,10 +2250,8 @@ def test_loft_sections_supports_hole_death_transition():
             n=[0, 0, 1],
         ),
     ]
-    mesh = loft_sections(stations, samples=28, cap_ends=True)
-    assert mesh.n_vertices > 0
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    body = loft_sections(stations, samples=28, cap_ends=True)
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_sections_rejects_ambiguous_region_merge_transition():
@@ -1889,7 +2293,7 @@ def test_loft_sections_resolves_region_merge_transition_when_enabled():
         Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
         Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
     ]
-    mesh = loft_sections(
+    body = loft_sections(
         stations,
         samples=32,
         cap_ends=True,
@@ -1897,9 +2301,7 @@ def test_loft_sections_resolves_region_merge_transition_when_enabled():
         split_merge_steps=10,
         split_merge_bias=0.5,
     )
-    assert mesh.n_vertices > 0
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_sections_resolve_mode_stages_transitions_with_more_steps():
@@ -1912,7 +2314,7 @@ def test_loft_sections_resolve_mode_stages_transitions_with_more_steps():
         Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
         Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
     ]
-    mesh_low = loft_sections(
+    body_low = loft_sections(
         stations,
         samples=32,
         cap_ends=True,
@@ -1920,7 +2322,7 @@ def test_loft_sections_resolve_mode_stages_transitions_with_more_steps():
         split_merge_steps=2,
         split_merge_bias=0.5,
     )
-    mesh_high = loft_sections(
+    body_high = loft_sections(
         stations,
         samples=32,
         cap_ends=True,
@@ -1928,10 +2330,9 @@ def test_loft_sections_resolve_mode_stages_transitions_with_more_steps():
         split_merge_steps=10,
         split_merge_bias=0.5,
     )
-    assert mesh_high.n_vertices > mesh_low.n_vertices
-    assert mesh_high.n_faces > mesh_low.n_faces
-    _assert_mesh_quality(mesh_low)
-    _assert_mesh_quality(mesh_high)
+    assert body_high.patch_count > body_low.patch_count
+    _assert_surface_body_tessellates(body_low)
+    _assert_surface_body_tessellates(body_high)
 
 
 def test_loft_sections_resolves_region_split_transition_when_enabled():
@@ -1944,7 +2345,7 @@ def test_loft_sections_resolves_region_split_transition_when_enabled():
         Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
         Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
     ]
-    mesh = loft_sections(
+    body = loft_sections(
         stations,
         samples=32,
         cap_ends=True,
@@ -1952,9 +2353,7 @@ def test_loft_sections_resolves_region_split_transition_when_enabled():
         split_merge_steps=10,
         split_merge_bias=0.5,
     )
-    assert mesh.n_vertices > 0
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_sections_resolves_hole_merge_transition_when_enabled():
@@ -1968,7 +2367,7 @@ def test_loft_sections_resolves_hole_merge_transition_when_enabled():
         Station(t=0.0, section=as_section(start), origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
         Station(t=1.0, section=as_section(end), origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
     ]
-    mesh = loft_sections(
+    body = loft_sections(
         stations,
         samples=32,
         cap_ends=True,
@@ -1976,9 +2375,7 @@ def test_loft_sections_resolves_hole_merge_transition_when_enabled():
         split_merge_steps=10,
         split_merge_bias=0.5,
     )
-    assert mesh.n_vertices > 0
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_sections_resolves_hole_split_transition_when_enabled():
@@ -1992,7 +2389,7 @@ def test_loft_sections_resolves_hole_split_transition_when_enabled():
         Station(t=0.0, section=as_section(start), origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
         Station(t=1.0, section=as_section(end), origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
     ]
-    mesh = loft_sections(
+    body = loft_sections(
         stations,
         samples=32,
         cap_ends=True,
@@ -2000,9 +2397,7 @@ def test_loft_sections_resolves_hole_split_transition_when_enabled():
         split_merge_steps=10,
         split_merge_bias=0.5,
     )
-    assert mesh.n_vertices > 0
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_sections_resolve_mode_supports_many_to_many_region_2_to_3():
@@ -2038,7 +2433,7 @@ def test_loft_sections_resolve_mode_supports_many_to_many_region_2_to_3():
     assert plan.metadata["region_topology_case_counts"]["many_to_many_expand"] == 1
     assert plan.metadata["region_action_counts"]["split_birth"] >= 1
 
-    mesh = loft_sections(
+    body = loft_sections(
         stations,
         samples=30,
         cap_ends=True,
@@ -2046,9 +2441,7 @@ def test_loft_sections_resolve_mode_supports_many_to_many_region_2_to_3():
         split_merge_steps=8,
         split_merge_bias=0.5,
     )
-    assert mesh.n_vertices > 0
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_plan_sections_exposes_many_to_many_candidate_set_and_decomposition_order():
@@ -2137,7 +2530,7 @@ def test_loft_sections_resolve_mode_supports_many_to_many_region_3_to_2():
     assert plan.metadata["region_topology_case_counts"]["many_to_many_collapse"] == 1
     assert plan.metadata["region_action_counts"]["merge_death"] >= 1
 
-    mesh = loft_sections(
+    body = loft_sections(
         stations,
         samples=30,
         cap_ends=True,
@@ -2145,9 +2538,7 @@ def test_loft_sections_resolve_mode_supports_many_to_many_region_3_to_2():
         split_merge_steps=8,
         split_merge_bias=0.5,
     )
-    assert mesh.n_vertices > 0
-    assert mesh.n_faces > 0
-    _assert_mesh_quality(mesh)
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_plan_sections_many_to_many_region_2_to_3_branch_order_is_deterministic_under_reordering():
@@ -2197,8 +2588,8 @@ def test_loft_plan_sections_many_to_many_region_2_to_3_branch_order_is_determini
     )
 
     assert _plan_transition_signature(plan_a) == _plan_transition_signature(plan_b)
-    mesh_a = loft_execute_plan(plan_a, cap_ends=True)
-    mesh_b = loft_execute_plan(plan_b, cap_ends=True)
+    mesh_a = loft_execute_plan_debug_mesh(plan_a, cap_ends=True)
+    mesh_b = loft_execute_plan_debug_mesh(plan_b, cap_ends=True)
     assert np.array_equal(mesh_a.vertices, mesh_b.vertices)
     assert np.array_equal(mesh_a.faces, mesh_b.faces)
     _assert_mesh_quality(mesh_a)
@@ -2294,6 +2685,62 @@ def test_loft_plan_sections_ambiguity_mode_fail_rejects_auto_resolvable_ambiguit
             split_merge_mode="resolve",
             ambiguity_mode="fail",
         )
+
+
+def test_loft_ambiguity_negative_diagnostic_fixture_feeds_matrix():
+    left = make_rect(size=(0.85, 0.85), center=(-1.0, 0.0))
+    right = make_rect(size=(0.85, 0.85), center=(1.0, 0.0))
+    left_end = make_rect(size=(0.8, 0.8), center=(-1.0, 0.0))
+    center_end = make_rect(size=(0.7, 0.7), center=(0.0, 0.0))
+    right_end = make_rect(size=(0.8, 0.8), center=(1.0, 0.0))
+    s0 = Section((as_section(left).regions[0], as_section(right).regions[0]))
+    s1 = Section(
+        (
+            as_section(left_end).regions[0],
+            as_section(center_end).regions[0],
+            as_section(right_end).regions[0],
+        )
+    )
+    stations = [
+        Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    with pytest.raises(LoftPlanningBlockedError) as excinfo:
+        loft_plan_sections(
+            stations,
+            samples=30,
+            split_merge_mode="resolve",
+            ambiguity_mode="fail",
+        )
+    error = excinfo.value
+    fixture = _loft_negative_fixture(
+        "loft/ambiguity-mode-fail",
+        {
+            "code": type(error).__name__,
+            "message": str(error),
+            "ambiguity_record": error.ambiguity_record.canonical_payload(),
+            "constraint_request": {
+                "interval": error.constraint_request.interval,
+                "topology_state_index": error.constraint_request.topology_state_index,
+                "ambiguous_region_indices": error.constraint_request.ambiguous_region_indices,
+                "requested_ties": error.constraint_request.requested_ties,
+                "ambiguity_class": error.constraint_request.ambiguity_class,
+                "relationship_group": error.constraint_request.relationship_group,
+            },
+        },
+        expected_keys=(
+            ExpectedDiagnosticKeyRecord(("code",), "LoftPlanningBlockedError"),
+            ExpectedDiagnosticKeyRecord(("ambiguity_record", "interval"), (0, 1)),
+            ExpectedDiagnosticKeyRecord(("ambiguity_record", "relationship_group"), "many_to_many_regions"),
+            ExpectedDiagnosticKeyRecord(("constraint_request", "requested_ties")),
+        ),
+    )
+
+    report = evaluate_negative_diagnostic_fixture_matrix((fixture,), required_domains=("loft",))
+
+    assert report.passed is True
+    assert report.domain_coverage[0].fixture_count == 1
+    assert "unsupported_topology_ambiguity" in fixture.expected_snapshot.payload["message"]  # type: ignore[index, union-attr]
 
 
 def test_loft_plan_sections_reports_structured_residual_ambiguity_diagnostics_for_branch_budget_exhaustion():
@@ -2715,7 +3162,7 @@ def test_loft_sections_resolve_mode_supports_many_to_many_hole_3_to_2():
     roles = [loop_pair.role for loop_pair in pair.loop_pairs]
     assert roles.count("stable") == 3  # outer + 2 matched holes
     assert roles.count("synthetic_death") == 1  # collapsed unmatched hole
-    mesh = loft_sections(
+    body = loft_sections(
         stations,
         samples=28,
         cap_ends=True,
@@ -2724,7 +3171,7 @@ def test_loft_sections_resolve_mode_supports_many_to_many_hole_3_to_2():
         split_merge_bias=0.5,
         ambiguity_mode="auto",
     )
-    _assert_mesh_quality(mesh)
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_plan_ambiguities_reports_hole_candidate_ids_for_many_to_many_holes() -> None:
@@ -2774,7 +3221,7 @@ def test_loft_sections_resolve_mode_supports_many_to_many_hole_2_to_3():
     roles = [loop_pair.role for loop_pair in pair.loop_pairs]
     assert roles.count("stable") == 3  # outer + 2 matched holes
     assert roles.count("synthetic_birth") == 1  # synthetic seed for new hole
-    mesh = loft_sections(
+    body = loft_sections(
         stations,
         samples=28,
         cap_ends=True,
@@ -2783,7 +3230,7 @@ def test_loft_sections_resolve_mode_supports_many_to_many_hole_2_to_3():
         split_merge_bias=0.5,
         ambiguity_mode="auto",
     )
-    _assert_mesh_quality(mesh)
+    _assert_surface_body_tessellates(body)
 
 
 def test_loft_plan_sections_interactive_mode_accepts_hole_candidate_selection() -> None:
@@ -2864,7 +3311,7 @@ def test_loft_sections_resolve_mode_is_deterministic_for_identical_inputs():
         Station(t=0.0, section=s0, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
         Station(t=1.0, section=s1, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
     ]
-    mesh_a = loft_sections(
+    body_a = loft_sections(
         stations,
         samples=32,
         cap_ends=True,
@@ -2872,7 +3319,7 @@ def test_loft_sections_resolve_mode_is_deterministic_for_identical_inputs():
         split_merge_steps=10,
         split_merge_bias=0.5,
     )
-    mesh_b = loft_sections(
+    body_b = loft_sections(
         stations,
         samples=32,
         cap_ends=True,
@@ -2880,11 +3327,8 @@ def test_loft_sections_resolve_mode_is_deterministic_for_identical_inputs():
         split_merge_steps=10,
         split_merge_bias=0.5,
     )
-    assert mesh_a.vertices.shape == mesh_b.vertices.shape
-    assert mesh_a.faces.shape == mesh_b.faces.shape
-    assert (mesh_a.vertices == mesh_b.vertices).all()
-    assert (mesh_a.faces == mesh_b.faces).all()
-    _assert_mesh_quality(mesh_a)
+    assert body_a.stable_identity == body_b.stable_identity
+    _assert_surface_body_tessellates(body_a)
 
 
 def test_loft_plan_sections_region_split_branch_order_is_deterministic_under_reordering():
@@ -2920,8 +3364,8 @@ def test_loft_plan_sections_region_split_branch_order_is_deterministic_under_reo
     )
 
     assert _plan_transition_signature(plan_a) == _plan_transition_signature(plan_b)
-    mesh_a = loft_execute_plan(plan_a, cap_ends=True)
-    mesh_b = loft_execute_plan(plan_b, cap_ends=True)
+    mesh_a = loft_execute_plan_debug_mesh(plan_a, cap_ends=True)
+    mesh_b = loft_execute_plan_debug_mesh(plan_b, cap_ends=True)
     assert np.array_equal(mesh_a.vertices, mesh_b.vertices)
     assert np.array_equal(mesh_a.faces, mesh_b.faces)
 
@@ -2959,13 +3403,13 @@ def test_loft_plan_sections_region_merge_branch_order_is_deterministic_under_reo
     )
 
     assert _plan_transition_signature(plan_a) == _plan_transition_signature(plan_b)
-    mesh_a = loft_execute_plan(plan_a, cap_ends=True)
-    mesh_b = loft_execute_plan(plan_b, cap_ends=True)
+    mesh_a = loft_execute_plan_debug_mesh(plan_a, cap_ends=True)
+    mesh_b = loft_execute_plan_debug_mesh(plan_b, cap_ends=True)
     assert np.array_equal(mesh_a.vertices, mesh_b.vertices)
     assert np.array_equal(mesh_a.faces, mesh_b.faces)
 
 
-def test_loft_split_merge_resolve_example_meshes_are_watertight():
+def test_loft_split_merge_resolve_example_outputs_are_surface_native_or_explicit_meshes():
     module_path = Path("docs/examples/loft/loft_split_merge_resolve_example.py")
     spec = importlib.util.spec_from_file_location("loft_split_merge_resolve_example", module_path)
     assert spec is not None and spec.loader is not None
@@ -2973,13 +3417,13 @@ def test_loft_split_merge_resolve_example_meshes_are_watertight():
     spec.loader.exec_module(module)
 
     scene = module.build()
-    meshes = scene if isinstance(scene, list) else [scene]
-    assert meshes, "Expected at least one mesh from resolve demo build()."
-    for mesh in meshes:
-        _assert_mesh_quality(mesh)
+    items = scene if isinstance(scene, list) else [scene]
+    assert items, "Expected at least one scene item from resolve demo build()."
+    for item in items:
+        _assert_loft_scene_item(item)
 
 
-def test_loft_real_world_splitter_manifold_example_meshes_are_watertight():
+def test_loft_real_world_splitter_manifold_example_outputs_are_surface_native_or_explicit_meshes():
     module_path = Path("docs/examples/loft/real_world/loft_splitter_manifold_example.py")
     spec = importlib.util.spec_from_file_location("loft_splitter_manifold_example", module_path)
     assert spec is not None and spec.loader is not None
@@ -2987,10 +3431,10 @@ def test_loft_real_world_splitter_manifold_example_meshes_are_watertight():
     spec.loader.exec_module(module)
 
     scene = module.build()
-    meshes = scene if isinstance(scene, list) else [scene]
-    assert meshes, "Expected at least one mesh from splitter manifold build()."
-    for mesh in meshes:
-        _assert_mesh_quality(mesh)
+    items = scene if isinstance(scene, list) else [scene]
+    assert items, "Expected at least one scene item from splitter manifold build()."
+    for item in items:
+        _assert_loft_scene_item(item)
 
 
 def test_loft_real_world_hourglass_vessel_example_meshes_are_watertight():
