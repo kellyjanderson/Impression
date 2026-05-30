@@ -78,6 +78,8 @@ from impression.modeling import (
     SurfaceCSGSolverRegistryRecord,
     SurfaceCSGOperationSelectionRecord,
     SurfaceCSGPairDispatchRecord,
+    SurfaceCSGPairFixtureEvidenceReport,
+    SurfaceCSGPairFixtureRow,
     SurfaceCSGPatchLocalCurve,
     SurfaceCSGPatchLocalArrangementGraph,
     SurfaceCSGPatchLocalCurveMappingResult,
@@ -115,6 +117,7 @@ from impression.modeling import (
     SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX,
     SURFACE_BOOLEAN_OPERATIONS,
     SURFACE_CSG_SOLVER_REGISTRY,
+    HIGHER_ORDER_CSG_FIXTURE_PAIR_CLASSES,
     SurfaceShell,
     SubdivisionSurfacePatch,
     SweepSurfacePatch,
@@ -139,6 +142,7 @@ from impression.modeling import (
     classify_surface_csg_fragment_against_body,
     classify_surface_csg_point_against_bounds,
     detect_spline_nurbs_coincident_regions,
+    enumerate_higher_order_csg_pair_fixture_rows,
     intersect_analytic_bspline_patch_pair,
     intersect_analytic_nurbs_patch_pair,
     intersect_axis_compatible_revolution_pair,
@@ -188,6 +192,7 @@ from impression.modeling import (
     validate_surface_csg_patch_local_curve_domain,
     validate_surface_csg_result_handoff,
     verify_surface_csg_persistence_tessellation_evidence,
+    verify_higher_order_csg_pair_fixture_matrix,
 )
 from impression.modeling.surface import PATCH_FAMILY_CAPABILITY_MATRIX
 
@@ -720,6 +725,22 @@ def test_subdivision_csg_patch_pair_intersection_reports_budget_refusal_without_
     assert result.diagnostics
     assert result.diagnostics[0].code == "budget-exhausted"
     assert "mesh" not in result.diagnostics[0].message.lower()
+
+
+def test_higher_order_csg_pair_fixture_matrix_covers_promoted_pair_classes_without_mesh() -> None:
+    rows = enumerate_higher_order_csg_pair_fixture_rows()
+    report = verify_higher_order_csg_pair_fixture_matrix()
+
+    assert rows
+    assert isinstance(report, SurfaceCSGPairFixtureEvidenceReport)
+    assert report.passed is True
+    assert set(report.required_pair_classes) == set(HIGHER_ORDER_CSG_FIXTURE_PAIR_CLASSES)
+    assert all(isinstance(row, SurfaceCSGPairFixtureRow) for row in rows)
+    assert all(row.mesh_fallback_attempted is False for row in rows)
+    assert all(row.executable for row in rows)
+    assert set(HIGHER_ORDER_CSG_FIXTURE_PAIR_CLASSES) <= {row.pair_class for row in rows}
+    assert {row.expected_category for row in rows} >= {"crossing", "coincident", "boundary"}
+    assert report.canonical_payload()["diagnostics"] == []
 
 
 def test_surface_csg_coincident_region_loop_maps_to_patch_local_trim_space() -> None:
