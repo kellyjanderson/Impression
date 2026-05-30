@@ -4926,6 +4926,87 @@ class SurfaceSampledImplicitPromotionMatrixReport:
         }
 
 
+@dataclass(frozen=True)
+class SurfaceSampledImplicitPromotionLossinessRecord:
+    """Normalized lossiness and tolerance facts for a sampled/implicit promotion route."""
+
+    target_family: SurfaceSampledImplicitPromotionTargetFamily
+    lossiness: Literal["lossless", "sampled-reconstruction", "volumetric-field", "exact-reconstruction"]
+    tolerance: float
+    sampling_policy: Literal["none", "bounded-samples", "field-sampling", "chart-reconstruction"]
+    reconstruction_kind: Literal["none", "implicit-field", "subdivision-chart", "nurbs-fit", "bspline-fit"]
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "target_family": self.target_family,
+            "lossiness": self.lossiness,
+            "tolerance": self.tolerance,
+            "sampling_policy": self.sampling_policy,
+            "reconstruction_kind": self.reconstruction_kind,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSampledImplicitPromotionProvenanceDiagnostic:
+    """Diagnostic emitted while building promotion provenance metadata."""
+
+    code: Literal["invalid-tolerance", "incomplete-route", "invalid-operands"]
+    message: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSampledImplicitPromotionProvenanceRecord:
+    """Durable metadata for a sampled/implicit CSG promotion decision."""
+
+    operation: SurfaceBooleanOperation
+    source_families: tuple[str, str]
+    source_operand_ids: tuple[str, str]
+    route_status: SurfaceSampledImplicitCSGRouteStatus
+    route_id: str
+    target_family: SurfaceSampledImplicitPromotionTargetFamily | None
+    lossiness: SurfaceSampledImplicitPromotionLossinessRecord | None
+    source_support_state: SurfaceBooleanSupportState
+    required_future_capability: str
+    diagnostics: tuple[SurfaceSampledImplicitPromotionProvenanceDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    @property
+    def supported(self) -> bool:
+        return (
+            not self.diagnostics
+            and self.route_status != "in-progress"
+            and self.target_family is not None
+            and self.lossiness is not None
+            and self.no_mesh_fallback
+        )
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "source_families": self.source_families,
+            "source_operand_ids": self.source_operand_ids,
+            "route_status": self.route_status,
+            "route_id": self.route_id,
+            "target_family": self.target_family,
+            "lossiness": None if self.lossiness is None else self.lossiness.canonical_payload(),
+            "source_support_state": self.source_support_state,
+            "required_future_capability": self.required_future_capability,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "supported": self.supported,
+        }
+
+
 _SURFACE_BOOLEAN_EXECUTABLE_FAMILY_PAIRS: frozenset[tuple[str, str]] = frozenset(
     (
         {
@@ -5953,6 +6034,120 @@ def verify_sampled_implicit_promotion_matrix(
         expected_rows_per_operation=report.expected_rows_per_operation,
         diagnostics=tuple(diagnostics),
     )
+
+
+def normalize_sampled_implicit_promotion_tolerance(tolerance: float) -> float:
+    """Normalize promotion provenance tolerance and reject unsafe values."""
+
+    normalized = float(tolerance)
+    if not np.isfinite(normalized) or normalized < 0.0:
+        raise ValueError("Sampled/implicit promotion tolerance must be finite and non-negative.")
+    return normalized
+
+
+def sampled_implicit_promotion_lossiness_record(
+    row: SurfaceSampledImplicitPromotionPolicyRow,
+    *,
+    tolerance: float = 1e-9,
+) -> SurfaceSampledImplicitPromotionLossinessRecord:
+    """Return normalized lossiness metadata for a sampled/implicit promotion row."""
+
+    if row.target_family is None:
+        raise ValueError("Sampled/implicit promotion lossiness requires a selected target family.")
+    normalized_tolerance = normalize_sampled_implicit_promotion_tolerance(tolerance)
+    if row.target_family == "implicit":
+        sampling_policy: Literal["none", "bounded-samples", "field-sampling", "chart-reconstruction"] = "field-sampling"
+        reconstruction_kind: Literal["none", "implicit-field", "subdivision-chart", "nurbs-fit", "bspline-fit"] = "implicit-field"
+    elif row.target_family == "subdivision":
+        sampling_policy = "chart-reconstruction"
+        reconstruction_kind = "subdivision-chart"
+    elif row.target_family == "nurbs":
+        sampling_policy = "bounded-samples"
+        reconstruction_kind = "nurbs-fit"
+    elif row.target_family == "bspline":
+        sampling_policy = "bounded-samples"
+        reconstruction_kind = "bspline-fit"
+    else:
+        sampling_policy = "none"
+        reconstruction_kind = "none"
+    return SurfaceSampledImplicitPromotionLossinessRecord(
+        target_family=row.target_family,
+        lossiness=row.lossiness,
+        tolerance=normalized_tolerance,
+        sampling_policy=sampling_policy,
+        reconstruction_kind=reconstruction_kind,
+    )
+
+
+def build_sampled_implicit_promotion_provenance_record(
+    row: SurfaceSampledImplicitPromotionPolicyRow,
+    *,
+    operand_ids: Sequence[str] | None = None,
+    tolerance: float = 1e-9,
+) -> SurfaceSampledImplicitPromotionProvenanceRecord:
+    """Build durable sampled/implicit CSG promotion provenance for result metadata."""
+
+    diagnostics: list[SurfaceSampledImplicitPromotionProvenanceDiagnostic] = []
+    source_operand_ids: tuple[str, str]
+    if operand_ids is None:
+        source_operand_ids = (f"{row.left_family}:left", f"{row.right_family}:right")
+    elif len(operand_ids) != 2 or any(not str(operand_id).strip() for operand_id in operand_ids):
+        source_operand_ids = ("", "")
+        diagnostics.append(
+            SurfaceSampledImplicitPromotionProvenanceDiagnostic(
+                code="invalid-operands",
+                message="Sampled/implicit promotion provenance requires two non-empty source operand ids.",
+            )
+        )
+    else:
+        source_operand_ids = (str(operand_ids[0]).strip(), str(operand_ids[1]).strip())
+    lossiness: SurfaceSampledImplicitPromotionLossinessRecord | None = None
+    try:
+        if row.complete:
+            lossiness = sampled_implicit_promotion_lossiness_record(row, tolerance=tolerance)
+        else:
+            diagnostics.append(
+                SurfaceSampledImplicitPromotionProvenanceDiagnostic(
+                    code="incomplete-route",
+                    message="Sampled/implicit promotion provenance cannot be supported for an incomplete route.",
+                )
+            )
+            normalize_sampled_implicit_promotion_tolerance(tolerance)
+    except ValueError as exc:
+        diagnostics.append(
+            SurfaceSampledImplicitPromotionProvenanceDiagnostic(
+                code="invalid-tolerance",
+                message=f"{exc}; no mesh fallback was attempted.",
+            )
+        )
+    return SurfaceSampledImplicitPromotionProvenanceRecord(
+        operation=row.operation,
+        source_families=(row.left_family, row.right_family),
+        source_operand_ids=source_operand_ids,
+        route_status=row.route_status,
+        route_id=row.route_id,
+        target_family=row.target_family,
+        lossiness=lossiness,
+        source_support_state=row.source_support_state,
+        required_future_capability=row.required_future_capability,
+        diagnostics=tuple(diagnostics),
+        no_mesh_fallback=not row.mesh_fallback_attempted,
+    )
+
+
+def sampled_implicit_promotion_metadata_payload(
+    row: SurfaceSampledImplicitPromotionPolicyRow,
+    *,
+    operand_ids: Sequence[str] | None = None,
+    tolerance: float = 1e-9,
+) -> dict[str, object]:
+    """Return serializable promotion provenance metadata for a result patch or body."""
+
+    return build_sampled_implicit_promotion_provenance_record(
+        row,
+        operand_ids=operand_ids,
+        tolerance=tolerance,
+    ).canonical_payload()
 
 
 def _surface_csg_fixture_category(pair_class: SurfaceCSGRoutePairClass) -> Literal[
