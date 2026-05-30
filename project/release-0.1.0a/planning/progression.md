@@ -584,7 +584,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 358: Heightmap Composition Operators (v1.0)](../specifications/surface-358-heightmap-composition-operators-v1_0.md)
 - [x] [Surface Spec 359: Heightmap Representability And Refusal (v1.0)](../specifications/surface-359-heightmap-representability-and-refusal-v1_0.md)
 - [x] [Surface Spec 360: Heightmap Promotion Integration (v1.0)](../specifications/surface-360-heightmap-promotion-integration-v1_0.md)
-- [ ] [Surface Spec 361: Heightmap CSG Impress Payload Persistence (v1.0)](../specifications/surface-361-heightmap-csg-impress-payload-persistence-v1_0.md)
+- [x] [Surface Spec 361: Heightmap CSG Impress Payload Persistence (v1.0)](../specifications/surface-361-heightmap-csg-impress-payload-persistence-v1_0.md)
 - [ ] [Surface Spec 362: Heightmap CSG Fixture And Evidence Matrix (v1.0)](../specifications/surface-362-heightmap-csg-fixture-and-evidence-matrix-v1_0.md)
 - [ ] [Surface Spec 363: Displacement Source Identity Resolution (v1.0)](../specifications/surface-363-displacement-source-identity-resolution-v1_0.md)
 - [ ] [Surface Spec 364: Displacement Domain And Sample Resampling (v1.0)](../specifications/surface-364-displacement-domain-and-sample-resampling-v1_0.md)

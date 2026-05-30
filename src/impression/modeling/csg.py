@@ -811,6 +811,12 @@ def compose_heightmap_csg_result(
             "heightmap_csg_composition": {
                 **record.canonical_payload(),
                 "sample_shape": tuple(int(value) for value in samples.shape),
+                "projection_frame": {
+                    "projection": alignment.left.projection,
+                    "plane": alignment.left.plane,
+                    "bounds": alignment.clipping.overlap_bounds if alignment.clipping is not None else None,
+                },
+                "lossiness": "lossless" if alignment.resample_kernel == "none" else "sampled-reconstruction",
             }
         }
     }
