@@ -80,6 +80,8 @@ from impression.modeling import (
     SurfaceCSGPairDispatchRecord,
     SurfaceCSGPairFixtureEvidenceReport,
     SurfaceCSGPairFixtureRow,
+    SurfaceSampledImplicitCSGUnsupportedRow,
+    SurfaceSampledImplicitCSGUnsupportedRowReport,
     SurfaceCSGPatchLocalCurve,
     SurfaceCSGPatchLocalArrangementGraph,
     SurfaceCSGPatchLocalCurveMappingResult,
@@ -143,6 +145,7 @@ from impression.modeling import (
     classify_surface_csg_point_against_bounds,
     detect_spline_nurbs_coincident_regions,
     enumerate_higher_order_csg_pair_fixture_rows,
+    enumerate_sampled_implicit_csg_unsupported_rows,
     intersect_analytic_bspline_patch_pair,
     intersect_analytic_nurbs_patch_pair,
     intersect_axis_compatible_revolution_pair,
@@ -193,6 +196,7 @@ from impression.modeling import (
     validate_surface_csg_result_handoff,
     verify_surface_csg_persistence_tessellation_evidence,
     verify_higher_order_csg_pair_fixture_matrix,
+    verify_sampled_implicit_csg_unsupported_row_tracker,
 )
 from impression.modeling.surface import PATCH_FAMILY_CAPABILITY_MATRIX
 
@@ -1198,6 +1202,47 @@ def test_surface_csg_solver_registry_reports_missing_and_unknown_pairs() -> None
     assert {diagnostic.code for diagnostic in registry.diagnostics} == {"missing-pair", "unknown-pair"}
     with pytest.raises(ValueError, match="missing-pair:union:planar/planar"):
         assert_surface_csg_solver_registry_complete(registry)
+
+
+def test_sampled_implicit_csg_unsupported_row_tracker_covers_153_in_progress_rows() -> None:
+    rows = enumerate_sampled_implicit_csg_unsupported_rows()
+    report = verify_sampled_implicit_csg_unsupported_row_tracker()
+
+    assert len(rows) == 153
+    assert isinstance(report, SurfaceSampledImplicitCSGUnsupportedRowReport)
+    assert report.passed is True
+    assert report.diagnostics == ()
+    assert report.expected_row_count == 153
+    assert report.expected_rows_per_operation == 51
+    assert {len(report.rows_for_operation(operation)) for operation in SURFACE_BOOLEAN_OPERATIONS} == {51}
+    assert all(isinstance(row, SurfaceSampledImplicitCSGUnsupportedRow) for row in rows)
+    assert {row.route_status for row in rows} == {"in-progress"}
+    assert {row.support_state for row in rows} == {"unsupported"}
+    assert all(row.required_future_capability for row in rows)
+    assert all(not row.mesh_fallback_attempted for row in rows)
+    assert all(
+        row.left_family in {"implicit", "heightmap", "displacement"}
+        or row.right_family in {"implicit", "heightmap", "displacement"}
+        for row in rows
+    )
+    assert report.canonical_payload()["passed"] is True
+
+
+def test_sampled_implicit_csg_unsupported_row_tracker_reports_missing_route_classification() -> None:
+    broken_matrix = dict(SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX)
+    key = ("union", "implicit", "planar")
+    broken_matrix[key] = replace(broken_matrix[key], required_future_capability=None)
+    registry = build_surface_csg_solver_registry(broken_matrix)
+
+    report = verify_sampled_implicit_csg_unsupported_row_tracker(registry=registry)
+
+    assert report.passed is False
+    assert any(
+        diagnostic.left_family == "implicit"
+        and diagnostic.right_family == "planar"
+        and "future capability or route classification" in diagnostic.message
+        for diagnostic in report.diagnostics
+    )
 
 
 def test_surface_csg_operation_plan_accumulates_invalid_operand_diagnostics() -> None:
