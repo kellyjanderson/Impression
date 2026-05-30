@@ -192,6 +192,52 @@ class ImplicitCSGImpressRoundTripDiagnostic:
         }
 
 
+@dataclass(frozen=True)
+class HeightmapCSGImpressPayloadRecord:
+    """Inspectable `.impress` payload facts for a heightmap CSG result body."""
+
+    operation: str
+    body_id: str
+    patch_id: str
+    sample_shape: tuple[int, int]
+    resample_kernel: str
+    lossiness: str
+    source_operand_ids: tuple[str, ...]
+    no_mesh_fallback: bool
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "body_id": self.body_id,
+            "patch_id": self.patch_id,
+            "sample_shape": self.sample_shape,
+            "resample_kernel": self.resample_kernel,
+            "lossiness": self.lossiness,
+            "source_operand_ids": self.source_operand_ids,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapCSGImpressRoundTripDiagnostic:
+    """Round-trip verifier result for heightmap CSG `.impress` payloads."""
+
+    supported: bool
+    code: str
+    message: str
+    before: HeightmapCSGImpressPayloadRecord | None = None
+    after: HeightmapCSGImpressPayloadRecord | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "supported": self.supported,
+            "code": self.code,
+            "message": self.message,
+            "before": None if self.before is None else self.before.canonical_payload(),
+            "after": None if self.after is None else self.after.canonical_payload(),
+        }
+
+
 _PATCH_FAMILY_DISPATCH = {
     kind: SurfacePatchFamilyDispatchRecord(
         kind=kind,
@@ -578,6 +624,120 @@ def verify_implicit_csg_impress_round_trip(result_or_body: object) -> ImplicitCS
         supported=True,
         code="implicit-csg-impress-roundtrip-supported",
         message="Implicit CSG `.impress` payload round-tripped without mesh truth.",
+        before=before,
+        after=after,
+    )
+
+
+def heightmap_csg_impress_payload_record(body: SurfaceBody) -> HeightmapCSGImpressPayloadRecord:
+    """Return persisted heightmap CSG facts for a surface-native result body."""
+
+    if not isinstance(body, SurfaceBody):
+        raise ImpressFormatError("heightmap_csg_impress_payload_record requires a SurfaceBody.")
+    patches = tuple(patch for patch in body.iter_patches(world=True) if isinstance(patch, HeightmapSurfacePatch))
+    if len(patches) != 1:
+        raise ImpressFormatError("Heightmap CSG `.impress` payloads require exactly one heightmap result patch.")
+    patch = patches[0]
+    kernel = patch.metadata.get("kernel", {})
+    if not isinstance(kernel, Mapping):
+        raise ImpressFormatError("Heightmap CSG result patch requires kernel metadata.")
+    composition = kernel.get("heightmap_csg_composition")
+    if not isinstance(composition, Mapping):
+        raise ImpressFormatError("Heightmap CSG result patch metadata must declare heightmap_csg_composition.")
+    operation = str(composition.get("operation", "")).strip()
+    if operation not in {"union", "difference", "intersection"}:
+        raise ImpressFormatError("Heightmap CSG result patch metadata must declare a supported operation.")
+    operand_ids = composition.get("operand_ids", ())
+    if not isinstance(operand_ids, Sequence) or isinstance(operand_ids, (str, bytes)):
+        raise ImpressFormatError("Heightmap CSG operand_ids must be an array.")
+    source_operand_ids = tuple(str(source_id).strip() for source_id in operand_ids)
+    if len(source_operand_ids) != 2 or any(not source_id for source_id in source_operand_ids):
+        raise ImpressFormatError("Heightmap CSG operand_ids must contain two non-empty strings.")
+    resample_kernel = str(composition.get("resample_kernel", "")).strip()
+    if resample_kernel not in {"none", "bilinear"}:
+        raise ImpressFormatError("Heightmap CSG resample_kernel must be none or bilinear.")
+    lossiness = str(composition.get("lossiness", "")).strip()
+    if lossiness not in {"lossless", "sampled-reconstruction"}:
+        raise ImpressFormatError("Heightmap CSG lossiness must be lossless or sampled-reconstruction.")
+    no_mesh_fallback = bool(composition.get("no_mesh_fallback", False))
+    if not no_mesh_fallback:
+        raise ImpressFormatError("Heightmap CSG `.impress` payload must declare no_mesh_fallback=true.")
+    sample_shape = composition.get("sample_shape", patch.height_samples.shape)
+    if not isinstance(sample_shape, Sequence) or isinstance(sample_shape, (str, bytes)) or len(sample_shape) != 2:
+        raise ImpressFormatError("Heightmap CSG sample_shape must contain two integers.")
+    normalized_shape = tuple(int(value) for value in sample_shape)
+    if normalized_shape != tuple(int(value) for value in patch.height_samples.shape):
+        raise ImpressFormatError("Heightmap CSG sample_shape must match persisted height_samples.")
+    alignment = composition.get("alignment")
+    if not isinstance(alignment, Mapping) or "clipping" not in alignment:
+        raise ImpressFormatError("Heightmap CSG alignment metadata is required.")
+    projection_frame = composition.get("projection_frame")
+    if not isinstance(projection_frame, Mapping):
+        raise ImpressFormatError("Heightmap CSG projection_frame metadata is required.")
+    return HeightmapCSGImpressPayloadRecord(
+        operation=operation,
+        body_id=body.stable_identity,
+        patch_id=patch.stable_identity,
+        sample_shape=normalized_shape,
+        resample_kernel=resample_kernel,
+        lossiness=lossiness,
+        source_operand_ids=source_operand_ids,
+        no_mesh_fallback=no_mesh_fallback,
+    )
+
+
+def encode_heightmap_csg_impress_payload(
+    result_or_body: object,
+    *,
+    units: ImpressUnits | Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Encode a heightmap CSG result body as a `.impress` document payload."""
+
+    body = result_or_body.body if hasattr(result_or_body, "body") else result_or_body
+    if body is None or not isinstance(body, SurfaceBody):
+        raise ImpressFormatError("Heightmap CSG `.impress` encoding requires a supported SurfaceBody result.")
+    record = heightmap_csg_impress_payload_record(body)
+    return make_impress_document_payload(
+        (body,),
+        units=units,
+        metadata={
+            "surface_csg_payload": {
+                "kind": "heightmap-csg",
+                "operation": record.operation,
+                "patch_id": record.patch_id,
+                "resample_kernel": record.resample_kernel,
+                "lossiness": record.lossiness,
+                "no_mesh_fallback": True,
+            }
+        },
+    )
+
+
+def verify_heightmap_csg_impress_round_trip(result_or_body: object) -> HeightmapCSGImpressRoundTripDiagnostic:
+    """Verify heightmap CSG survives `.impress` JSON round-trip as surface truth."""
+
+    try:
+        body = result_or_body.body if hasattr(result_or_body, "body") else result_or_body
+        if body is None or not isinstance(body, SurfaceBody):
+            raise ImpressFormatError("Heightmap CSG round-trip requires a supported SurfaceBody result.")
+        before = heightmap_csg_impress_payload_record(body)
+        payload = encode_heightmap_csg_impress_payload(body)
+        loaded = loads_impress_json(dumps_impress_json(payload))
+        if len(loaded.bodies) != 1:
+            raise ImpressFormatError("Heightmap CSG round-trip expected exactly one body.")
+        after = heightmap_csg_impress_payload_record(loaded.bodies[0])
+        if before.canonical_payload() != after.canonical_payload():
+            raise ImpressFormatError("Heightmap CSG `.impress` round-trip changed persisted payload identity.")
+    except Exception as exc:
+        return HeightmapCSGImpressRoundTripDiagnostic(
+            supported=False,
+            code="heightmap-csg-impress-roundtrip-failed",
+            message=f"{exc}; no mesh fallback was attempted.",
+        )
+    return HeightmapCSGImpressRoundTripDiagnostic(
+        supported=True,
+        code="heightmap-csg-impress-roundtrip-supported",
+        message="Heightmap CSG `.impress` payload round-tripped without mesh truth.",
         before=before,
         after=after,
     )

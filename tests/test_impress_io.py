@@ -14,6 +14,8 @@ from impression.io import (
     ImpressSaveOptions,
     ImpressUnits,
     ImpressWholeStoreFixtureCoverageReport,
+    HeightmapCSGImpressPayloadRecord,
+    HeightmapCSGImpressRoundTripDiagnostic,
     ImplicitCSGImpressPayloadRecord,
     ImplicitCSGImpressRoundTripDiagnostic,
     InvalidSurfaceWrapperDiagnostic,
@@ -34,6 +36,7 @@ from impression.io import (
     decode_trim_loop_payload,
     decode_impress_document_payload,
     dumps_impress_json,
+    encode_heightmap_csg_impress_payload,
     encode_implicit_csg_impress_payload,
     encode_surface_adjacency_payload,
     encode_surface_boundary_ref_payload,
@@ -49,6 +52,7 @@ from impression.io import (
     inspect_impress_patch_family_dispatch,
     inspect_impress_patch_codec_coverage,
     inspect_impress_whole_store_fixture_coverage,
+    heightmap_csg_impress_payload_record,
     implicit_csg_impress_payload_record,
     load_impress,
     loads_impress_json,
@@ -56,6 +60,7 @@ from impression.io import (
     validate_impress_document_root,
     validate_surface_patch_serialization_guard,
     validate_surface_body_store,
+    verify_heightmap_csg_impress_round_trip,
     verify_implicit_csg_impress_round_trip,
     save_impress,
     write_impress_json,
@@ -85,6 +90,7 @@ from impression.modeling.surface import (
 )
 from impression.modeling import (
     adapt_surface_patch_to_implicit_field,
+    compose_heightmap_csg_result,
     compose_implicit_field_csg_result,
 )
 from tests.reference_images import (
@@ -1331,6 +1337,67 @@ def test_implicit_csg_impress_payload_refuses_malformed_or_mesh_truth_metadata()
     assert "no_mesh_fallback=true" in diagnostic.message
     with pytest.raises(ImpressFormatError, match="no_mesh_fallback=true"):
         implicit_csg_impress_payload_record(body)
+
+
+def test_heightmap_csg_impress_payload_round_trips_composition_metadata() -> None:
+    left = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.asarray([[0.0, 1.0], [2.0, 3.0]], dtype=float),
+        alpha_mask=np.ones((2, 2), dtype=bool),
+    )
+    right = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.asarray([[1.0, 0.5], [1.5, 4.0]], dtype=float),
+        alpha_mask=np.ones((2, 2), dtype=bool),
+    )
+    result = compose_heightmap_csg_result("union", left, right)
+
+    payload = encode_heightmap_csg_impress_payload(result)
+    loaded = decode_impress_document_payload(payload)
+    diagnostic = verify_heightmap_csg_impress_round_trip(result)
+    record = heightmap_csg_impress_payload_record(result.body)
+
+    assert len(loaded.bodies) == 1
+    assert isinstance(record, HeightmapCSGImpressPayloadRecord)
+    assert record.operation == "union"
+    assert record.sample_shape == (2, 2)
+    assert record.resample_kernel == "none"
+    assert record.lossiness == "lossless"
+    assert record.no_mesh_fallback is True
+    assert isinstance(diagnostic, HeightmapCSGImpressRoundTripDiagnostic)
+    assert diagnostic.supported is True
+    assert diagnostic.before == diagnostic.after
+    assert payload["metadata"]["surface_csg_payload"]["kind"] == "heightmap-csg"
+
+
+def test_heightmap_csg_impress_payload_refuses_malformed_or_mesh_truth_metadata() -> None:
+    patch = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.ones((2, 2), dtype=float),
+        metadata={
+            "kernel": {
+                "heightmap_csg_composition": {
+                    "operation": "union",
+                    "operand_ids": ("a", "b"),
+                    "sample_shape": (2, 2),
+                    "resample_kernel": "none",
+                    "lossiness": "lossless",
+                    "alignment": {"clipping": {}},
+                    "projection_frame": {"plane": "xy"},
+                    "no_mesh_fallback": False,
+                }
+            }
+        },
+    )
+    body = make_surface_body((make_surface_shell((patch,), connected=False),))
+
+    diagnostic = verify_heightmap_csg_impress_round_trip(body)
+
+    assert diagnostic.supported is False
+    assert diagnostic.code == "heightmap-csg-impress-roundtrip-failed"
+    assert "no_mesh_fallback=true" in diagnostic.message
+    with pytest.raises(ImpressFormatError, match="no_mesh_fallback=true"):
+        heightmap_csg_impress_payload_record(body)
 
 
 def test_decode_implicit_surface_patch_payload_reports_path_specific_unknown_node() -> None:
