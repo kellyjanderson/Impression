@@ -591,7 +591,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 365: Displacement Offset Composition Operators (v1.0)](../specifications/surface-365-displacement-offset-composition-operators-v1_0.md)
 - [x] [Surface Spec 366: Displacement Source Mismatch Refusal (v1.0)](../specifications/surface-366-displacement-source-mismatch-refusal-v1_0.md)
 - [x] [Surface Spec 367: Displacement Promotion Integration (v1.0)](../specifications/surface-367-displacement-promotion-integration-v1_0.md)
-- [ ] [Surface Spec 368: Displacement CSG Persistence And Fixtures (v1.0)](../specifications/surface-368-displacement-csg-persistence-and-fixtures-v1_0.md)
+- [x] [Surface Spec 368: Displacement CSG Persistence And Fixtures (v1.0)](../specifications/surface-368-displacement-csg-persistence-and-fixtures-v1_0.md)
 - [ ] [Surface Spec 369: Sampled Implicit Promotion Matrix (v1.0)](../specifications/surface-369-sampled-implicit-promotion-matrix-v1_0.md)
 - [ ] [Surface Spec 370: Promotion Provenance And Lossiness Records (v1.0)](../specifications/surface-370-promotion-provenance-and-lossiness-records-v1_0.md)
 - [ ] [Surface Spec 371: Promotion Target Reconstruction Criteria (v1.0)](../specifications/surface-371-promotion-target-reconstruction-criteria-v1_0.md)

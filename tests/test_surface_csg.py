@@ -88,6 +88,8 @@ from impression.modeling import (
     SurfaceHeightmapCSGFixtureRow,
     SurfaceImplicitCSGEvidenceReport,
     SurfaceImplicitCSGFixtureRow,
+    SurfaceDisplacementCSGEvidenceReport,
+    SurfaceDisplacementCSGFixtureRow,
     SurfaceSampledImplicitCSGUnsupportedRow,
     SurfaceSampledImplicitCSGUnsupportedRowReport,
     SurfaceCSGPatchLocalCurve,
@@ -206,6 +208,8 @@ from impression.modeling import (
     verify_surface_csg_persistence_tessellation_evidence,
     verify_higher_order_csg_pair_fixture_matrix,
     verify_heightmap_csg_fixture_evidence_matrix,
+    enumerate_displacement_csg_fixture_rows,
+    verify_displacement_csg_fixture_evidence_matrix,
     enumerate_implicit_csg_fixture_rows,
     verify_implicit_csg_fixture_evidence_matrix,
     verify_sampled_implicit_csg_unsupported_row_tracker,
@@ -1390,6 +1394,27 @@ def test_heightmap_csg_fixture_evidence_matrix_covers_success_promotion_persiste
     by_kind = {row.route_kind: row for row in rows}
     assert by_kind["success"].operation == "union"
     assert by_kind["representability-refusal"].operation == "intersection"
+    assert by_kind["promotion"].target_family == "implicit"
+    assert by_kind["persistence"].message.endswith("without mesh truth.")
+    assert "no mesh fallback" in by_kind["no-mesh-fallback"].message.lower()
+    assert report.canonical_payload()["passed"] is True
+
+
+def test_displacement_csg_fixture_evidence_matrix_covers_success_promotion_persistence_and_no_mesh() -> None:
+    rows = enumerate_displacement_csg_fixture_rows()
+    report = verify_displacement_csg_fixture_evidence_matrix()
+
+    assert isinstance(report, SurfaceDisplacementCSGEvidenceReport)
+    assert report.passed is True
+    assert report.diagnostics == ()
+    assert {row.route_kind for row in rows} == set(report.required_route_kinds)
+    assert all(isinstance(row, SurfaceDisplacementCSGFixtureRow) for row in rows)
+    assert all(row.reference_state == "clean" for row in rows)
+    assert all(not row.mesh_fallback_attempted for row in rows)
+    assert all(row.passed for row in rows)
+    by_kind = {row.route_kind: row for row in rows}
+    assert by_kind["success"].operation == "union"
+    assert by_kind["source-refusal"].operation == "union"
     assert by_kind["promotion"].target_family == "implicit"
     assert by_kind["persistence"].message.endswith("without mesh truth.")
     assert "no mesh fallback" in by_kind["no-mesh-fallback"].message.lower()

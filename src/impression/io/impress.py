@@ -238,6 +238,56 @@ class HeightmapCSGImpressRoundTripDiagnostic:
         }
 
 
+@dataclass(frozen=True)
+class DisplacementCSGImpressPayloadRecord:
+    """Inspectable `.impress` payload facts for a displacement CSG result body."""
+
+    operation: str
+    body_id: str
+    patch_id: str
+    sample_shape: tuple[int, int]
+    resample_kernel: str
+    lossiness: str
+    source_patch_id: str
+    source_operand_ids: tuple[str, ...]
+    projection_bounds: tuple[float, float, float, float]
+    no_mesh_fallback: bool
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "body_id": self.body_id,
+            "patch_id": self.patch_id,
+            "sample_shape": self.sample_shape,
+            "resample_kernel": self.resample_kernel,
+            "lossiness": self.lossiness,
+            "source_patch_id": self.source_patch_id,
+            "source_operand_ids": self.source_operand_ids,
+            "projection_bounds": self.projection_bounds,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class DisplacementCSGImpressRoundTripDiagnostic:
+    """Round-trip verifier result for displacement CSG `.impress` payloads."""
+
+    supported: bool
+    code: str
+    message: str
+    before: DisplacementCSGImpressPayloadRecord | None = None
+    after: DisplacementCSGImpressPayloadRecord | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "supported": self.supported,
+            "code": self.code,
+            "message": self.message,
+            "before": None if self.before is None else self.before.canonical_payload(),
+            "after": None if self.after is None else self.after.canonical_payload(),
+        }
+
+
 _PATCH_FAMILY_DISPATCH = {
     kind: SurfacePatchFamilyDispatchRecord(
         kind=kind,
@@ -738,6 +788,135 @@ def verify_heightmap_csg_impress_round_trip(result_or_body: object) -> Heightmap
         supported=True,
         code="heightmap-csg-impress-roundtrip-supported",
         message="Heightmap CSG `.impress` payload round-tripped without mesh truth.",
+        before=before,
+        after=after,
+    )
+
+
+def displacement_csg_impress_payload_record(body: SurfaceBody) -> DisplacementCSGImpressPayloadRecord:
+    """Return persisted displacement CSG facts for a surface-native result body."""
+
+    if not isinstance(body, SurfaceBody):
+        raise ImpressFormatError("displacement_csg_impress_payload_record requires a SurfaceBody.")
+    patches = tuple(patch for patch in body.iter_patches(world=True) if isinstance(patch, DisplacementSurfacePatch))
+    if len(patches) != 1:
+        raise ImpressFormatError("Displacement CSG `.impress` payloads require exactly one displacement result patch.")
+    patch = patches[0]
+    kernel = patch.metadata.get("kernel", {})
+    if not isinstance(kernel, Mapping):
+        raise ImpressFormatError("Displacement CSG result patch requires kernel metadata.")
+    composition = kernel.get("displacement_csg_composition")
+    if not isinstance(composition, Mapping):
+        raise ImpressFormatError("Displacement CSG result patch metadata must declare displacement_csg_composition.")
+    operation = str(composition.get("operation", "")).strip()
+    if operation not in {"union", "difference", "intersection"}:
+        raise ImpressFormatError("Displacement CSG result patch metadata must declare a supported operation.")
+    operand_ids = composition.get("operand_ids", ())
+    if not isinstance(operand_ids, Sequence) or isinstance(operand_ids, (str, bytes)):
+        raise ImpressFormatError("Displacement CSG operand_ids must be an array.")
+    source_operand_ids = tuple(str(source_id).strip() for source_id in operand_ids)
+    if len(source_operand_ids) != 2 or any(not source_id for source_id in source_operand_ids):
+        raise ImpressFormatError("Displacement CSG operand_ids must contain two non-empty strings.")
+    source_patch_id = str(composition.get("source_patch_id", "")).strip()
+    if not source_patch_id:
+        raise ImpressFormatError("Displacement CSG source_patch_id is required.")
+    if source_patch_id != patch.source_patch.stable_identity:
+        raise ImpressFormatError("Displacement CSG source_patch_id must match the embedded source patch identity.")
+    resampling = composition.get("resampling")
+    if not isinstance(resampling, Mapping):
+        raise ImpressFormatError("Displacement CSG resampling metadata is required.")
+    resample_kernel = str(resampling.get("resample_kernel", "")).strip()
+    if resample_kernel not in {"none", "bilinear"}:
+        raise ImpressFormatError("Displacement CSG resample_kernel must be none or bilinear.")
+    lossiness = str(composition.get("lossiness", resampling.get("lossiness", ""))).strip()
+    if lossiness not in {"lossless", "sampled-reconstruction"}:
+        raise ImpressFormatError("Displacement CSG lossiness must be lossless or sampled-reconstruction.")
+    no_mesh_fallback = bool(composition.get("no_mesh_fallback", False))
+    if not no_mesh_fallback:
+        raise ImpressFormatError("Displacement CSG `.impress` payload must declare no_mesh_fallback=true.")
+    sample_shape = composition.get("sample_shape", patch.displacement_samples.shape)
+    if not isinstance(sample_shape, Sequence) or isinstance(sample_shape, (str, bytes)) or len(sample_shape) != 2:
+        raise ImpressFormatError("Displacement CSG sample_shape must contain two integers.")
+    normalized_shape = tuple(int(value) for value in sample_shape)
+    if normalized_shape != tuple(int(value) for value in patch.displacement_samples.shape):
+        raise ImpressFormatError("Displacement CSG sample_shape must match persisted displacement_samples.")
+    projection_bounds = composition.get("projection_bounds", patch.projection_bounds)
+    if (
+        not isinstance(projection_bounds, Sequence)
+        or isinstance(projection_bounds, (str, bytes))
+        or len(projection_bounds) != 4
+    ):
+        raise ImpressFormatError("Displacement CSG projection_bounds must contain four numbers.")
+    normalized_bounds = tuple(float(value) for value in projection_bounds)
+    if normalized_bounds != tuple(float(value) for value in patch.projection_bounds):
+        raise ImpressFormatError("Displacement CSG projection_bounds must match the persisted patch projection bounds.")
+    return DisplacementCSGImpressPayloadRecord(
+        operation=operation,
+        body_id=body.stable_identity,
+        patch_id=patch.stable_identity,
+        sample_shape=normalized_shape,
+        resample_kernel=resample_kernel,
+        lossiness=lossiness,
+        source_patch_id=source_patch_id,
+        source_operand_ids=source_operand_ids,
+        projection_bounds=normalized_bounds,
+        no_mesh_fallback=no_mesh_fallback,
+    )
+
+
+def encode_displacement_csg_impress_payload(
+    result_or_body: object,
+    *,
+    units: ImpressUnits | Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Encode a displacement CSG result body as a `.impress` document payload."""
+
+    body = result_or_body.body if hasattr(result_or_body, "body") else result_or_body
+    if body is None or not isinstance(body, SurfaceBody):
+        raise ImpressFormatError("Displacement CSG `.impress` encoding requires a supported SurfaceBody result.")
+    record = displacement_csg_impress_payload_record(body)
+    return make_impress_document_payload(
+        (body,),
+        units=units,
+        metadata={
+            "surface_csg_payload": {
+                "kind": "displacement-csg",
+                "operation": record.operation,
+                "patch_id": record.patch_id,
+                "source_patch_id": record.source_patch_id,
+                "resample_kernel": record.resample_kernel,
+                "lossiness": record.lossiness,
+                "no_mesh_fallback": True,
+            }
+        },
+    )
+
+
+def verify_displacement_csg_impress_round_trip(result_or_body: object) -> DisplacementCSGImpressRoundTripDiagnostic:
+    """Verify displacement CSG survives `.impress` JSON round-trip as surface truth."""
+
+    try:
+        body = result_or_body.body if hasattr(result_or_body, "body") else result_or_body
+        if body is None or not isinstance(body, SurfaceBody):
+            raise ImpressFormatError("Displacement CSG round-trip requires a supported SurfaceBody result.")
+        before = displacement_csg_impress_payload_record(body)
+        payload = encode_displacement_csg_impress_payload(body)
+        loaded = loads_impress_json(dumps_impress_json(payload))
+        if len(loaded.bodies) != 1:
+            raise ImpressFormatError("Displacement CSG round-trip expected exactly one body.")
+        after = displacement_csg_impress_payload_record(loaded.bodies[0])
+        if before.canonical_payload() != after.canonical_payload():
+            raise ImpressFormatError("Displacement CSG `.impress` round-trip changed persisted payload identity.")
+    except Exception as exc:
+        return DisplacementCSGImpressRoundTripDiagnostic(
+            supported=False,
+            code="displacement-csg-impress-roundtrip-failed",
+            message=f"{exc}; no mesh fallback was attempted.",
+        )
+    return DisplacementCSGImpressRoundTripDiagnostic(
+        supported=True,
+        code="displacement-csg-impress-roundtrip-supported",
+        message="Displacement CSG `.impress` payload round-tripped without mesh truth.",
         before=before,
         after=after,
     )

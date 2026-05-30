@@ -4707,6 +4707,59 @@ class SurfaceHeightmapCSGEvidenceReport:
 
 
 @dataclass(frozen=True)
+class SurfaceDisplacementCSGFixtureRow:
+    """One displacement CSG route evidence row."""
+
+    fixture_id: str
+    route_kind: Literal["success", "source-refusal", "promotion", "persistence", "no-mesh-fallback"]
+    passed: bool
+    operation: SurfaceBooleanOperation
+    message: str
+    target_family: str | None = None
+    mesh_fallback_attempted: bool = False
+    reference_state: Literal["clean", "dirty", "missing"] = "clean"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "fixture_id": self.fixture_id,
+            "route_kind": self.route_kind,
+            "passed": self.passed,
+            "operation": self.operation,
+            "message": self.message,
+            "target_family": self.target_family,
+            "mesh_fallback_attempted": self.mesh_fallback_attempted,
+            "reference_state": self.reference_state,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceDisplacementCSGEvidenceReport:
+    """Evidence matrix for displacement-preserving, promoted, and refused CSG routes."""
+
+    rows: tuple[SurfaceDisplacementCSGFixtureRow, ...]
+    required_route_kinds: tuple[str, ...] = (
+        "success",
+        "source-refusal",
+        "promotion",
+        "persistence",
+        "no-mesh-fallback",
+    )
+    diagnostics: tuple[SurfaceCSGRouteSupportDiagnostic, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return bool(self.rows) and not self.diagnostics and all(row.passed for row in self.rows)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "passed": self.passed,
+            "required_route_kinds": self.required_route_kinds,
+            "rows": [row.canonical_payload() for row in self.rows],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceSampledImplicitCSGUnsupportedRow:
     """Tracked sampled/implicit CSG row that still needs route promotion."""
 
@@ -5286,6 +5339,140 @@ def verify_heightmap_csg_fixture_evidence_matrix() -> SurfaceHeightmapCSGEvidenc
                     )
                 )
     return SurfaceHeightmapCSGEvidenceReport(rows=rows, diagnostics=tuple(diagnostics))
+
+
+def _displacement_csg_fixture_source_patch(*, source: str = "shared") -> PlanarSurfacePatch:
+    return PlanarSurfacePatch(family="planar", metadata={"fixture_source": source})
+
+
+def enumerate_displacement_csg_fixture_rows() -> tuple[SurfaceDisplacementCSGFixtureRow, ...]:
+    """Build deterministic displacement CSG success/refusal/promotion/persistence evidence rows."""
+
+    rows: list[SurfaceDisplacementCSGFixtureRow] = []
+    source = _displacement_csg_fixture_source_patch()
+    left = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.asarray([[0.0, 0.25], [0.5, 0.75]], dtype=float),
+        alpha_mask=np.ones((2, 2), dtype=bool),
+        projection_bounds=(-1.0, 1.0, -1.0, 1.0),
+    )
+    right = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.asarray([[0.5, 0.1], [0.25, 1.0]], dtype=float),
+        alpha_mask=np.ones((2, 2), dtype=bool),
+        projection_bounds=(-1.0, 1.0, -1.0, 1.0),
+    )
+    success = compose_displacement_csg_result("union", left, right)
+    rows.append(
+        SurfaceDisplacementCSGFixtureRow(
+            fixture_id="displacement-csg/success-union",
+            route_kind="success",
+            passed=success.supported and success.patch is not None and success.operation_record.resampling.resample_kernel == "none",
+            operation="union",
+            message="Displacement CSG union produced a surface-native displacement result.",
+        )
+    )
+
+    other_source = _displacement_csg_fixture_source_patch(source="other")
+    mismatch = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=other_source,
+        displacement_samples=np.ones((2, 2), dtype=float),
+        alpha_mask=np.ones((2, 2), dtype=bool),
+        projection_bounds=(-1.0, 1.0, -1.0, 1.0),
+    )
+    refusal = displacement_source_mismatch_refusal_record("union", left, mismatch)
+    rows.append(
+        SurfaceDisplacementCSGFixtureRow(
+            fixture_id="displacement-csg/source-mismatch-refusal",
+            route_kind="source-refusal",
+            passed=refusal.supported_refusal and refusal.reason_code == "source-mismatch",
+            operation="union",
+            message=refusal.message,
+        )
+    )
+
+    promotion = plan_displacement_promotion_route("union", left, mismatch)
+    rows.append(
+        SurfaceDisplacementCSGFixtureRow(
+            fixture_id="displacement-csg/promotion-implicit",
+            route_kind="promotion",
+            passed=promotion.supported and promotion.target_family == "implicit",
+            operation="union",
+            target_family=promotion.target_family,
+            message="Displacement CSG source mismatch promotion selected an implicit target.",
+        )
+    )
+
+    if success.body is None:
+        persistence_passed = False
+        persistence_message = "Displacement CSG success fixture produced no body."
+    else:
+        from impression.io import verify_displacement_csg_impress_round_trip
+
+        persistence = verify_displacement_csg_impress_round_trip(success.body)
+        persistence_passed = persistence.supported
+        persistence_message = persistence.message
+    rows.append(
+        SurfaceDisplacementCSGFixtureRow(
+            fixture_id="displacement-csg/impress-persistence",
+            route_kind="persistence",
+            passed=persistence_passed,
+            operation="union",
+            message=persistence_message,
+        )
+    )
+
+    no_mesh_passed = all(not row.mesh_fallback_attempted for row in rows) and any(
+        "mesh fallback" in row.message.lower() for row in rows
+    )
+    rows.append(
+        SurfaceDisplacementCSGFixtureRow(
+            fixture_id="displacement-csg/no-mesh-fallback",
+            route_kind="no-mesh-fallback",
+            passed=no_mesh_passed,
+            operation="union",
+            message="Displacement CSG fixture matrix contains no mesh fallback attempts.",
+            mesh_fallback_attempted=False,
+        )
+    )
+    return tuple(rows)
+
+
+def verify_displacement_csg_fixture_evidence_matrix() -> SurfaceDisplacementCSGEvidenceReport:
+    """Return a clean evidence report for displacement CSG routes."""
+
+    rows = enumerate_displacement_csg_fixture_rows()
+    diagnostics: list[SurfaceCSGRouteSupportDiagnostic] = []
+    required = SurfaceDisplacementCSGEvidenceReport(()).required_route_kinds
+    by_kind = {kind: [row for row in rows if row.route_kind == kind] for kind in required}
+    for route_kind, kind_rows in by_kind.items():
+        if not kind_rows:
+            diagnostics.append(
+                SurfaceCSGRouteSupportDiagnostic(
+                    code="missing-route",
+                    operation="union",
+                    left_family="displacement",
+                    right_family="displacement",
+                    pair_class="sampled-boundary",
+                    message=f"Displacement CSG evidence matrix is missing route kind {route_kind}.",
+                )
+            )
+        for row in kind_rows:
+            if not row.passed or row.mesh_fallback_attempted or row.reference_state != "clean":
+                diagnostics.append(
+                    SurfaceCSGRouteSupportDiagnostic(
+                        code="non-executable-route",
+                        operation=row.operation,
+                        left_family="displacement",
+                        right_family="displacement",
+                        pair_class="sampled-boundary",
+                        message=f"Displacement CSG fixture {row.fixture_id} is not clean evidence: {row.message}",
+                    )
+                )
+    return SurfaceDisplacementCSGEvidenceReport(rows=rows, diagnostics=tuple(diagnostics))
 
 
 def enumerate_sampled_implicit_csg_unsupported_rows(
