@@ -5253,6 +5253,63 @@ class SurfaceSampledImplicitNoMeshFallbackEvidenceGate:
         }
 
 
+@dataclass(frozen=True)
+class SurfaceSampledImplicitEvidenceStateRecord:
+    """Classified sampled/implicit evidence state for completion gating."""
+
+    fixture_id: str
+    payload_kind: str
+    state: Literal["clean", "dirty", "stale", "missing", "diagnostic-only", "under-evidenced"]
+    completion_blocking: bool
+    reason: str
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "fixture_id": self.fixture_id,
+            "payload_kind": self.payload_kind,
+            "state": self.state,
+            "completion_blocking": self.completion_blocking,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSampledImplicitDirtyEvidenceDiagnostic:
+    """Completion-blocking diagnostic for dirty sampled/implicit evidence."""
+
+    code: Literal["dirty", "stale", "missing", "diagnostic-only", "under-evidenced"]
+    message: str
+    fixture_id: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "fixture_id": self.fixture_id,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSampledImplicitDirtyEvidenceReport:
+    """Dirty evidence report for sampled/implicit CSG completion."""
+
+    states: tuple[SurfaceSampledImplicitEvidenceStateRecord, ...]
+    diagnostics: tuple[SurfaceSampledImplicitDirtyEvidenceDiagnostic, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return bool(self.states) and not self.diagnostics and all(not state.completion_blocking for state in self.states)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "passed": self.passed,
+            "states": [state.canonical_payload() for state in self.states],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
 _SURFACE_BOOLEAN_EXECUTABLE_FAMILY_PAIRS: frozenset[tuple[str, str]] = frozenset(
     (
         {
@@ -6960,6 +7017,75 @@ def assert_sampled_implicit_no_mesh_fallback_evidence_gate() -> SurfaceSampledIm
         details = "; ".join(diagnostic.message for diagnostic in gate.diagnostics)
         raise BooleanOperationError(details)
     return gate
+
+
+def classify_sampled_implicit_evidence_state(
+    row: SurfaceSampledImplicitReferenceFixtureRow,
+    *,
+    stale_fixture_ids: Sequence[str] = (),
+) -> SurfaceSampledImplicitEvidenceStateRecord:
+    """Classify one sampled/implicit evidence row for completion use."""
+
+    stale_ids = {str(fixture_id) for fixture_id in stale_fixture_ids}
+    if row.fixture_id in stale_ids:
+        state: Literal["clean", "dirty", "stale", "missing", "diagnostic-only", "under-evidenced"] = "stale"
+        reason = "Reference fixture is stale and must be regenerated before completion."
+    elif row.reference_state == "missing":
+        state = "missing"
+        reason = "Reference fixture is missing."
+    elif row.reference_state == "dirty":
+        state = "dirty"
+        reason = "Reference fixture is dirty."
+    elif row.payload_kind == "diagnostic-only":
+        state = "diagnostic-only"
+        reason = "Diagnostic-only evidence does not prove executable or supported-refusal behavior."
+    elif not row.passed:
+        state = "under-evidenced"
+        reason = "Evidence row did not pass its route-specific completion check."
+    else:
+        state = "clean"
+        reason = "Evidence row is clean completion evidence."
+    return SurfaceSampledImplicitEvidenceStateRecord(
+        fixture_id=row.fixture_id,
+        payload_kind=row.payload_kind,
+        state=state,
+        completion_blocking=state != "clean",
+        reason=reason,
+    )
+
+
+def build_sampled_implicit_dirty_evidence_completion_blocker(
+    state: SurfaceSampledImplicitEvidenceStateRecord,
+) -> SurfaceSampledImplicitDirtyEvidenceDiagnostic | None:
+    """Build a completion blocker diagnostic for non-clean sampled/implicit evidence."""
+
+    if not state.completion_blocking:
+        return None
+    return SurfaceSampledImplicitDirtyEvidenceDiagnostic(
+        code=state.state,  # type: ignore[arg-type]
+        fixture_id=state.fixture_id,
+        message=f"Sampled/implicit evidence fixture {state.fixture_id!r} is {state.state}: {state.reason}",
+    )
+
+
+def detect_sampled_implicit_dirty_evidence(
+    rows: Sequence[SurfaceSampledImplicitReferenceFixtureRow] | None = None,
+    *,
+    stale_fixture_ids: Sequence[str] = (),
+) -> SurfaceSampledImplicitDirtyEvidenceReport:
+    """Reject dirty, stale, missing, diagnostic-only, or under-evidenced sampled/implicit artifacts."""
+
+    source_rows = tuple(rows) if rows is not None else enumerate_sampled_implicit_reference_fixture_promotions()
+    states = tuple(
+        classify_sampled_implicit_evidence_state(row, stale_fixture_ids=stale_fixture_ids)
+        for row in source_rows
+    )
+    diagnostics = tuple(
+        diagnostic
+        for diagnostic in (build_sampled_implicit_dirty_evidence_completion_blocker(state) for state in states)
+        if diagnostic is not None
+    )
+    return SurfaceSampledImplicitDirtyEvidenceReport(states=states, diagnostics=diagnostics)
 
 
 def _surface_csg_fixture_category(pair_class: SurfaceCSGRoutePairClass) -> Literal[

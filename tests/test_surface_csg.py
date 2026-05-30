@@ -105,6 +105,8 @@ from impression.modeling import (
     SurfaceSampledImplicitReferenceFixtureRow,
     SurfaceSampledImplicitNoMeshFallbackEvidenceGate,
     SurfaceSampledImplicitNoMeshProofRecord,
+    SurfaceSampledImplicitDirtyEvidenceReport,
+    SurfaceSampledImplicitEvidenceStateRecord,
     SurfaceSampledImplicitCSGUnsupportedRow,
     SurfaceSampledImplicitCSGUnsupportedRowReport,
     SurfaceCSGPatchLocalCurve,
@@ -182,6 +184,8 @@ from impression.modeling import (
     enumerate_sampled_implicit_promotion_fixture_rows,
     enumerate_sampled_implicit_reference_fixture_promotions,
     collect_sampled_implicit_no_mesh_fallback_evidence,
+    classify_sampled_implicit_evidence_state,
+    detect_sampled_implicit_dirty_evidence,
     sampled_implicit_reconstruction_criteria,
     sampled_implicit_promotion_metadata_payload,
     select_sampled_implicit_promotion_target,
@@ -1620,6 +1624,92 @@ def test_sampled_implicit_no_mesh_fallback_evidence_gate_rejects_forbidden_mesh_
     assert gate.passed is False
     assert any(diagnostic.code == "mesh-fallback" for diagnostic in gate.diagnostics)
     assert "mesh fallback" in gate.diagnostics[0].message
+
+
+def test_sampled_implicit_dirty_evidence_detector_accepts_clean_reference_rows() -> None:
+    report = detect_sampled_implicit_dirty_evidence()
+
+    assert isinstance(report, SurfaceSampledImplicitDirtyEvidenceReport)
+    assert report.passed is True
+    assert report.diagnostics == ()
+    assert all(isinstance(state, SurfaceSampledImplicitEvidenceStateRecord) for state in report.states)
+    assert {state.state for state in report.states} == {"clean"}
+    assert all(not state.completion_blocking for state in report.states)
+    assert report.canonical_payload()["passed"] is True
+
+
+def test_sampled_implicit_dirty_evidence_detector_rejects_dirty_stale_missing_diagnostic_only_and_under_evidenced_rows() -> None:
+    rows = (
+        SurfaceSampledImplicitReferenceFixtureRow(
+            fixture_id="dirty",
+            route_kind="native",
+            payload_kind="implicit-csg",
+            passed=True,
+            reference_state="dirty",
+        ),
+        SurfaceSampledImplicitReferenceFixtureRow(
+            fixture_id="missing",
+            route_kind="native",
+            payload_kind="heightmap-csg",
+            passed=True,
+            reference_state="missing",
+        ),
+        SurfaceSampledImplicitReferenceFixtureRow(
+            fixture_id="diagnostic",
+            route_kind="refusal",
+            payload_kind="diagnostic-only",
+            passed=True,
+            reference_state="clean",
+        ),
+        SurfaceSampledImplicitReferenceFixtureRow(
+            fixture_id="under-evidenced",
+            route_kind="promoted",
+            payload_kind="sampled-implicit-promotion",
+            passed=False,
+            reference_state="clean",
+        ),
+        SurfaceSampledImplicitReferenceFixtureRow(
+            fixture_id="stale",
+            route_kind="malformed",
+            payload_kind="sampled-implicit-promotion",
+            passed=True,
+            reference_state="clean",
+        ),
+    )
+
+    report = detect_sampled_implicit_dirty_evidence(rows, stale_fixture_ids=("stale",))
+
+    assert report.passed is False
+    assert {state.state for state in report.states} == {
+        "dirty",
+        "missing",
+        "diagnostic-only",
+        "under-evidenced",
+        "stale",
+    }
+    assert {diagnostic.code for diagnostic in report.diagnostics} == {
+        "dirty",
+        "missing",
+        "diagnostic-only",
+        "under-evidenced",
+        "stale",
+    }
+    assert all("Sampled/implicit evidence fixture" in diagnostic.message for diagnostic in report.diagnostics)
+
+
+def test_sampled_implicit_evidence_state_classifier_marks_clean_rows_non_blocking() -> None:
+    state = classify_sampled_implicit_evidence_state(
+        SurfaceSampledImplicitReferenceFixtureRow(
+            fixture_id="clean",
+            route_kind="native",
+            payload_kind="implicit-csg",
+            passed=True,
+            reference_state="clean",
+        )
+    )
+
+    assert state.state == "clean"
+    assert state.completion_blocking is False
 
 
 def test_implicit_composition_operation_sign_policies_are_deterministic() -> None:
