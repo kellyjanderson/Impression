@@ -451,6 +451,68 @@ class DisplacementSourceCompatibilityReport:
 
 
 @dataclass(frozen=True)
+class DisplacementDomainOverlapRecord:
+    """Projection-domain overlap facts for displacement-preserving CSG."""
+
+    overlap_bounds: tuple[float, float, float, float]
+    left_index_window: tuple[int, int, int, int]
+    right_index_window: tuple[int, int, int, int]
+
+    @property
+    def has_overlap(self) -> bool:
+        umin, umax, vmin, vmax = self.overlap_bounds
+        return umax > umin and vmax > vmin
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "overlap_bounds": self.overlap_bounds,
+            "left_index_window": self.left_index_window,
+            "right_index_window": self.right_index_window,
+            "has_overlap": self.has_overlap,
+        }
+
+
+@dataclass(frozen=True)
+class DisplacementTangentFrameDiagnostic:
+    """Diagnostic for incompatible displacement sampling frames."""
+
+    code: Literal["source-mismatch", "frame-mismatch", "disjoint-domain", "resampling-budget-exceeded"]
+    message: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class DisplacementResamplingRecord:
+    """Aligned displacement sample plan over a shared source-domain overlap."""
+
+    supported: bool
+    alignment: Literal["aligned", "resample-required", "refused"]
+    overlap: DisplacementDomainOverlapRecord | None = None
+    result_shape: tuple[int, int] | None = None
+    resample_kernel: Literal["none", "bilinear"] = "none"
+    lossiness: Literal["lossless", "sampled-reconstruction"] = "lossless"
+    diagnostics: tuple[DisplacementTangentFrameDiagnostic, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "supported": self.supported,
+            "alignment": self.alignment,
+            "overlap": None if self.overlap is None else self.overlap.canonical_payload(),
+            "result_shape": self.result_shape,
+            "resample_kernel": self.resample_kernel,
+            "lossiness": self.lossiness,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
 class HeightmapCompositionResult:
     """Heightmap-preserving CSG result or explicit refusal."""
 
@@ -807,6 +869,178 @@ def displacement_source_compatibility_report(
         operation=operation,
         source_records=tuple(records),
         diagnostics=tuple(diagnostics),
+    )
+
+
+def _displacement_sample_spacing(patch: DisplacementSurfacePatch) -> tuple[float, float]:
+    umin, umax, vmin, vmax = patch.projection_bounds
+    rows, cols = patch.displacement_samples.shape
+    return (
+        float((umax - umin) / max(cols - 1, 1)),
+        float((vmax - vmin) / max(rows - 1, 1)),
+    )
+
+
+def _displacement_index_window(
+    patch: DisplacementSurfacePatch,
+    overlap: tuple[float, float, float, float],
+    *,
+    tolerance: float,
+) -> tuple[int, int, int, int]:
+    u0, u1, v0, v1 = overlap
+    umin, _umax, vmin, _vmax = patch.projection_bounds
+    sx, sy = _displacement_sample_spacing(patch)
+    rows, cols = patch.displacement_samples.shape
+    c0 = max(0, int(np.floor(((u0 - umin) / sx) + tolerance)))
+    c1 = min(cols - 1, int(np.ceil(((u1 - umin) / sx) - tolerance)))
+    r0 = max(0, int(np.floor(((v0 - vmin) / sy) + tolerance)))
+    r1 = min(rows - 1, int(np.ceil(((v1 - vmin) / sy) - tolerance)))
+    return (r0, r1, c0, c1)
+
+
+def _displacement_grid_lines_align(
+    left: DisplacementSurfacePatch,
+    right: DisplacementSurfacePatch,
+    *,
+    tolerance: float,
+) -> bool:
+    if not np.allclose(_displacement_sample_spacing(left), _displacement_sample_spacing(right), atol=tolerance):
+        return False
+    sx, sy = _displacement_sample_spacing(left)
+    dx = abs((left.projection_bounds[0] - right.projection_bounds[0]) / sx)
+    dy = abs((left.projection_bounds[2] - right.projection_bounds[2]) / sy)
+    return abs(dx - round(dx)) <= tolerance and abs(dy - round(dy)) <= tolerance
+
+
+def _displacement_frame_matches(left: DisplacementSurfacePatch, right: DisplacementSurfacePatch) -> bool:
+    return (
+        left.projection == right.projection
+        and left.plane == right.plane
+        and left.direction == right.direction
+    )
+
+
+def _projected_overlap_bounds(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    return (max(left[0], right[0]), min(left[1], right[1]), max(left[2], right[2]), min(left[3], right[3]))
+
+
+def plan_displacement_domain_resampling(
+    operation: SurfaceBooleanOperation,
+    left: DisplacementSurfacePatch,
+    right: DisplacementSurfacePatch,
+    *,
+    max_sample_count: int = 1_000_000,
+    tolerance: float = 1e-9,
+) -> DisplacementResamplingRecord:
+    """Plan source-domain overlap, clipping, and resampling for displacement CSG."""
+
+    if operation not in SURFACE_BOOLEAN_OPERATIONS:
+        raise ValueError("Displacement domain resampling operation must be union, difference, or intersection.")
+    if not isinstance(left, DisplacementSurfacePatch) or not isinstance(right, DisplacementSurfacePatch):
+        raise TypeError("Displacement domain resampling requires DisplacementSurfacePatch operands.")
+    tol = float(tolerance)
+    if not np.isfinite(tol) or tol < 0.0:
+        raise ValueError("Displacement domain resampling tolerance must be finite and non-negative.")
+    budget = int(max_sample_count)
+    if budget <= 0:
+        raise ValueError("Displacement resampling max_sample_count must be positive.")
+    compatibility = displacement_source_compatibility_report(operation, (left, right))
+    if not compatibility.compatible:
+        return DisplacementResamplingRecord(
+            supported=False,
+            alignment="refused",
+            diagnostics=(
+                DisplacementTangentFrameDiagnostic(
+                    code="source-mismatch",
+                    message=f"{compatibility.diagnostics[0].message} No mesh fallback was attempted.",
+                ),
+            ),
+        )
+    if not _displacement_frame_matches(left, right):
+        return DisplacementResamplingRecord(
+            supported=False,
+            alignment="refused",
+            diagnostics=(
+                DisplacementTangentFrameDiagnostic(
+                    code="frame-mismatch",
+                    message="Displacement operands use incompatible projection planes or displacement directions; no mesh fallback was attempted.",
+                ),
+            ),
+        )
+    overlap_bounds = _projected_overlap_bounds(left.projection_bounds, right.projection_bounds)
+    overlap = DisplacementDomainOverlapRecord(
+        overlap_bounds=overlap_bounds,
+        left_index_window=_displacement_index_window(left, overlap_bounds, tolerance=tol),
+        right_index_window=_displacement_index_window(right, overlap_bounds, tolerance=tol),
+    )
+    if not overlap.has_overlap:
+        return DisplacementResamplingRecord(
+            supported=False,
+            alignment="refused",
+            overlap=overlap,
+            diagnostics=(
+                DisplacementTangentFrameDiagnostic(
+                    code="disjoint-domain",
+                    message="Displacement projection domains are disjoint; no mesh fallback was attempted.",
+                ),
+            ),
+        )
+    aligned = _displacement_grid_lines_align(left, right, tolerance=tol)
+    if aligned:
+        result_shape = (
+            max(1, overlap.left_index_window[1] - overlap.left_index_window[0] + 1),
+            max(1, overlap.left_index_window[3] - overlap.left_index_window[2] + 1),
+        )
+        if result_shape[0] * result_shape[1] > budget:
+            return DisplacementResamplingRecord(
+                supported=False,
+                alignment="refused",
+                overlap=overlap,
+                result_shape=result_shape,
+                diagnostics=(
+                    DisplacementTangentFrameDiagnostic(
+                        code="resampling-budget-exceeded",
+                        message="Displacement aligned output grid exceeds max_sample_count; no mesh fallback was attempted.",
+                    ),
+                ),
+            )
+        return DisplacementResamplingRecord(
+            supported=True,
+            alignment="aligned",
+            overlap=overlap,
+            result_shape=result_shape,
+            resample_kernel="none",
+            lossiness="lossless",
+        )
+    min_sx = min(_displacement_sample_spacing(left)[0], _displacement_sample_spacing(right)[0])
+    min_sy = min(_displacement_sample_spacing(left)[1], _displacement_sample_spacing(right)[1])
+    result_shape = (
+        max(2, int(np.floor((overlap_bounds[3] - overlap_bounds[2]) / min_sy + tol)) + 1),
+        max(2, int(np.floor((overlap_bounds[1] - overlap_bounds[0]) / min_sx + tol)) + 1),
+    )
+    if result_shape[0] * result_shape[1] > budget:
+        return DisplacementResamplingRecord(
+            supported=False,
+            alignment="refused",
+            overlap=overlap,
+            result_shape=result_shape,
+            diagnostics=(
+                DisplacementTangentFrameDiagnostic(
+                    code="resampling-budget-exceeded",
+                    message="Displacement resampling output grid exceeds max_sample_count; no mesh fallback was attempted.",
+                ),
+            ),
+        )
+    return DisplacementResamplingRecord(
+        supported=True,
+        alignment="resample-required",
+        overlap=overlap,
+        result_shape=result_shape,
+        resample_kernel="bilinear",
+        lossiness="sampled-reconstruction",
     )
 
 
