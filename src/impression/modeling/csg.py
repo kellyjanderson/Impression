@@ -26,6 +26,10 @@ from .surface import (
     NURBSWeightValidationDiagnostic,
     PATCH_FAMILY_CAPABILITY_MATRIX,
     SurfaceBoundaryRef,
+    DisplacementIdentityDiagnostic,
+    DisplacementSourceProvenanceRecord,
+    DisplacementSourceResolutionResult,
+    DisplacementSurfacePatch,
     HeightmapSurfacePatch,
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
@@ -44,6 +48,7 @@ from .surface import (
     implicit_difference_field,
     implicit_intersection_field,
     implicit_union_field,
+    resolve_displacement_source_identity,
 )
 from .heightmap import (
     HeightmapGridAlignmentRecord,
@@ -378,6 +383,74 @@ class HeightmapPromotionDecision:
 
 
 @dataclass(frozen=True)
+class DisplacementSourceIdentityRecord:
+    """CSG-facing source identity for one displacement operand."""
+
+    operand_index: int
+    patch_id: str
+    source_family: str | None
+    source_patch_id: str | None
+    source_transform_digest: str | None
+    provenance: DisplacementSourceProvenanceRecord | None
+    diagnostic: DisplacementIdentityDiagnostic
+
+    @property
+    def resolved(self) -> bool:
+        return self.source_patch_id is not None and self.diagnostic.code.endswith("resolved")
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operand_index": self.operand_index,
+            "patch_id": self.patch_id,
+            "source_family": self.source_family,
+            "source_patch_id": self.source_patch_id,
+            "source_transform_digest": self.source_transform_digest,
+            "provenance": None if self.provenance is None else self.provenance.canonical_payload(),
+            "diagnostic": self.diagnostic.canonical_payload(),
+            "resolved": self.resolved,
+        }
+
+
+@dataclass(frozen=True)
+class DisplacementSourceMismatchDiagnostic:
+    """Blocking CSG diagnostic for incompatible displacement source identities."""
+
+    code: Literal["missing-source", "source-mismatch", "transformed-source-mismatch", "invalid-operand"]
+    message: str
+    operand_index: int | None = None
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "operand_index": self.operand_index,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class DisplacementSourceCompatibilityReport:
+    """Compatibility report for displacement-preserving CSG source identity."""
+
+    operation: SurfaceBooleanOperation
+    source_records: tuple[DisplacementSourceIdentityRecord, ...]
+    diagnostics: tuple[DisplacementSourceMismatchDiagnostic, ...] = ()
+
+    @property
+    def compatible(self) -> bool:
+        return bool(self.source_records) and not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "compatible": self.compatible,
+            "source_records": [record.canonical_payload() for record in self.source_records],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
 class HeightmapCompositionResult:
     """Heightmap-preserving CSG result or explicit refusal."""
 
@@ -632,6 +705,109 @@ def plan_heightmap_promotion_route(
 
     report = heightmap_representability_report(operation, left, right, tolerance=tolerance)
     return select_heightmap_promotion_target(report, allowed_targets=allowed_targets)
+
+
+def _displacement_csg_source_transform_digest(patch: DisplacementSurfacePatch) -> str:
+    combined = np.asarray(patch.source_patch.transform_matrix, dtype=float) @ np.asarray(patch.transform_matrix, dtype=float)
+    payload = combined.round(12).tolist()
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def resolve_displacement_csg_source_identity(
+    patch: DisplacementSurfacePatch,
+    *,
+    operand_index: int = 0,
+    candidate_patches: Sequence[SurfacePatch] = (),
+    allow_cross_body_reference: bool = False,
+) -> DisplacementSourceIdentityRecord:
+    """Resolve one displacement operand source identity for CSG planning."""
+
+    if not isinstance(patch, DisplacementSurfacePatch):
+        raise TypeError("Displacement CSG source identity requires a DisplacementSurfacePatch.")
+    resolution: DisplacementSourceResolutionResult = resolve_displacement_source_identity(
+        source_patch=patch.source_patch,
+        candidate_patches=candidate_patches,
+        allow_cross_body_reference=allow_cross_body_reference,
+    )
+    return DisplacementSourceIdentityRecord(
+        operand_index=int(operand_index),
+        patch_id=patch.stable_identity,
+        source_family=None if resolution.provenance is None else resolution.provenance.source_family,
+        source_patch_id=None if resolution.provenance is None else resolution.provenance.source_patch_id,
+        source_transform_digest=_displacement_csg_source_transform_digest(patch),
+        provenance=resolution.provenance,
+        diagnostic=resolution.diagnostic,
+    )
+
+
+def displacement_source_compatibility_report(
+    operation: SurfaceBooleanOperation,
+    patches: Sequence[DisplacementSurfacePatch],
+    *,
+    candidate_patches: Sequence[SurfacePatch] = (),
+    allow_cross_body_reference: bool = False,
+) -> DisplacementSourceCompatibilityReport:
+    """Validate source-surface identity compatibility for displacement-preserving CSG."""
+
+    if operation not in SURFACE_BOOLEAN_OPERATIONS:
+        raise ValueError("Displacement CSG source compatibility operation must be union, difference, or intersection.")
+    records: list[DisplacementSourceIdentityRecord] = []
+    diagnostics: list[DisplacementSourceMismatchDiagnostic] = []
+    for index, patch in enumerate(patches):
+        if not isinstance(patch, DisplacementSurfacePatch):
+            diagnostics.append(
+                DisplacementSourceMismatchDiagnostic(
+                    code="invalid-operand",
+                    operand_index=index,
+                    message="Displacement-preserving CSG requires DisplacementSurfacePatch operands; no mesh fallback was attempted.",
+                )
+            )
+            continue
+        record = resolve_displacement_csg_source_identity(
+            patch,
+            operand_index=index,
+            candidate_patches=candidate_patches,
+            allow_cross_body_reference=allow_cross_body_reference,
+        )
+        records.append(record)
+        if not record.resolved:
+            diagnostics.append(
+                DisplacementSourceMismatchDiagnostic(
+                    code="missing-source",
+                    operand_index=index,
+                    message=f"Displacement operand {index} source identity is unresolved: {record.diagnostic.message}; no mesh fallback was attempted.",
+                )
+            )
+    if records and not diagnostics:
+        first = records[0]
+        for record in records[1:]:
+            if record.source_patch_id != first.source_patch_id:
+                diagnostics.append(
+                    DisplacementSourceMismatchDiagnostic(
+                        code="source-mismatch",
+                        operand_index=record.operand_index,
+                        message=(
+                            "Displacement-preserving CSG requires all operands to resolve to the same source patch identity; "
+                            f"{first.source_patch_id} != {record.source_patch_id}; no mesh fallback was attempted."
+                        ),
+                    )
+                )
+            elif record.source_transform_digest != first.source_transform_digest:
+                diagnostics.append(
+                    DisplacementSourceMismatchDiagnostic(
+                        code="transformed-source-mismatch",
+                        operand_index=record.operand_index,
+                        message=(
+                            "Displacement-preserving CSG requires matching source transform digests for transformed sources; "
+                            "no mesh fallback was attempted."
+                        ),
+                    )
+                )
+    return DisplacementSourceCompatibilityReport(
+        operation=operation,
+        source_records=tuple(records),
+        diagnostics=tuple(diagnostics),
+    )
 
 
 def _compose_heightmap_samples(

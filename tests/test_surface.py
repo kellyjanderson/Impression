@@ -138,6 +138,9 @@ from impression.modeling import (
     DisplacementPayloadDiagnostic,
     DisplacementSurfacePatch,
     DisplacementIdentityDiagnostic,
+    DisplacementSourceCompatibilityReport,
+    DisplacementSourceIdentityRecord,
+    DisplacementSourceMismatchDiagnostic,
     DisplacementSourcePatchReferenceRecord,
     DisplacementSourceProvenanceRecord,
     DisplacementSourceResolutionResult,
@@ -363,6 +366,8 @@ from impression.modeling import (
     import_subdivision_cage,
     make_implicit_field_node,
     resolve_displacement_source_identity,
+    resolve_displacement_csg_source_identity,
+    displacement_source_compatibility_report,
     normalize_surface_seam_continuity_constraint,
     prepare_surface_boolean_operands,
     assess_implicit_field_security,
@@ -2834,6 +2839,84 @@ def test_displacement_source_identity_resolver_reports_embedded_in_body_and_miss
     assert missing.resolved is False
     assert missing.diagnostic.code == "external-source-refused"
     assert "cross-body" in missing.diagnostic.message
+
+
+def test_displacement_csg_source_identity_report_accepts_same_embedded_source() -> None:
+    source = PlanarSurfacePatch(family="planar", metadata={"kernel": {"source": "displacement-csg-base"}})
+    first = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+    )
+    second = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.asarray([[0.25, 0.5], [0.75, 1.0]], dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+    )
+
+    identity = resolve_displacement_csg_source_identity(first)
+    report = displacement_source_compatibility_report("union", (first, second))
+
+    assert isinstance(identity, DisplacementSourceIdentityRecord)
+    assert identity.resolved is True
+    assert identity.source_patch_id == source.stable_identity
+    assert isinstance(report, DisplacementSourceCompatibilityReport)
+    assert report.compatible is True
+    assert report.diagnostics == ()
+    assert all(record.source_patch_id == source.stable_identity for record in report.source_records)
+
+
+def test_displacement_csg_source_identity_report_refuses_mismatched_sources_without_mesh_fallback() -> None:
+    first_source = PlanarSurfacePatch(family="planar", metadata={"kernel": {"source": "first"}})
+    second_source = PlanarSurfacePatch(family="planar", origin=np.asarray([0.0, 0.0, 1.0], dtype=float))
+    first = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=first_source,
+        displacement_samples=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+    )
+    second = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=second_source,
+        displacement_samples=np.asarray([[0.25, 0.5], [0.75, 1.0]], dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+    )
+
+    report = displacement_source_compatibility_report("intersection", (first, second))
+
+    assert report.compatible is False
+    assert isinstance(report.diagnostics[0], DisplacementSourceMismatchDiagnostic)
+    assert report.diagnostics[0].code == "source-mismatch"
+    assert report.diagnostics[0].no_mesh_fallback is True
+    assert "mesh fallback" in report.diagnostics[0].message
+
+
+def test_displacement_csg_source_identity_report_refuses_transformed_source_fixture() -> None:
+    source = PlanarSurfacePatch(family="planar", metadata={"kernel": {"source": "shared"}})
+    transform = np.eye(4, dtype=float)
+    transform[0, 3] = 0.25
+    first = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+    )
+    transformed = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.asarray([[0.25, 0.5], [0.75, 1.0]], dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        transform_matrix=transform,
+    )
+
+    report = displacement_source_compatibility_report("difference", (first, transformed))
+
+    assert report.compatible is False
+    assert report.diagnostics[0].code == "transformed-source-mismatch"
+    assert report.diagnostics[0].no_mesh_fallback is True
+    assert report.source_records[0].source_patch_id == report.source_records[1].source_patch_id
 
 
 def test_displacement_payload_authoring_builder_creates_sampled_surface_body() -> None:
