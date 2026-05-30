@@ -25,6 +25,10 @@ This document extends:
 - [.impress Surface-Native File Format Architecture](impress-surface-native-file-format-architecture.md)
 - [Mesh Execution To Tessellation Boundary Architecture](mesh-execution-tessellation-boundary-architecture.md)
 
+This document is refined by:
+
+- [Sampled and Implicit CSG Unsupported Row Implementation Architecture](sampled-implicit-csg-unsupported-row-implementation-architecture.md)
+
 ## Unsupported Row Audit
 
 For each boolean operation, 51 ordered rows are sampled or implicit:
@@ -436,6 +440,8 @@ Split decision:
 
 ## Change History
 
+- 2026-05-30: Linked the row-level implementation architecture that takes the
+  153 unsupported sampled/implicit CSG rows as in-progress work.
 - 2026-05-28: Created sampled/implicit CSG support architecture after the CSG
   row audit showed 153 operation rows still marked unsupported across implicit,
   heightmap, and displacement families.

@@ -105,6 +105,7 @@ complete.
   - [Higher-Order Parametric CSG Routes Architecture](higher-order-parametric-csg-routes-architecture.md)
   - [Surface CSG Trim Fragment Reconstruction Architecture](surface-csg-trim-fragment-reconstruction-architecture.md)
   - [Sampled and Implicit Surface CSG Support Architecture](sampled-implicit-surface-csg-support-architecture.md)
+  - [Sampled and Implicit CSG Unsupported Row Implementation Architecture](sampled-implicit-csg-unsupported-row-implementation-architecture.md)
   - [Higher-Order Surface CSG Solver Architecture](higher-order-surface-csg-solver-architecture.md)
   - [Exact Surface Intersection Kernel Architecture](exact-surface-intersection-kernel-architecture.md)
   - [Higher-Order Seam Continuity Architecture](higher-order-seam-continuity-architecture.md)
@@ -131,11 +132,18 @@ Architecture-defined work:
   architecture
 - [ ] split and implement sampled/implicit CSG policies for the 51 per-operation
   rows involving implicit, heightmap, and displacement
+  - Status: `In Progress`
+  - Current architecture body of work: 153 unsupported CSG rows across
+    `union`, `difference`, and `intersection`
+  - Tracking document:
+    [Sampled and Implicit CSG Unsupported Row Implementation Architecture](sampled-implicit-csg-unsupported-row-implementation-architecture.md)
 - [ ] distinguish sampled/implicit rows that are missing solver code from rows
   that are mathematically unrepresentable in the requested result family
+  - Status: `In Progress`
 - [ ] define result-family promotion policy for sampled CSG outputs, including
   implicit, subdivision, NURBS/B-spline, and deliberate non-CSG replacement
   workflows
+  - Status: `In Progress`
 - [ ] promote CSG coverage from bounded analytic cases to a family-pair solver
   matrix covering every promoted patch-family pair
 - [ ] add CSG operation plans that accumulate unsupported/invalid diagnostics
