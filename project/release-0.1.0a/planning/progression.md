@@ -600,5 +600,5 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 374: Representation Refusal And Non-CSG Replacement Contract (v1.0)](../specifications/surface-374-representation-refusal-and-non-csg-replacement-contract-v1_0.md)
 - [x] [Surface Spec 375: Sampled Implicit CSG Codec Coverage (v1.0)](../specifications/surface-375-sampled-implicit-csg-codec-coverage-v1_0.md)
 - [x] [Surface Spec 376: Sampled Implicit Reference Fixture Promotion (v1.0)](../specifications/surface-376-sampled-implicit-reference-fixture-promotion-v1_0.md)
-- [ ] [Surface Spec 377: Sampled Implicit No-Mesh-Fallback Evidence Gate (v1.0)](../specifications/surface-377-sampled-implicit-no-mesh-fallback-evidence-gate-v1_0.md)
+- [x] [Surface Spec 377: Sampled Implicit No-Mesh-Fallback Evidence Gate (v1.0)](../specifications/surface-377-sampled-implicit-no-mesh-fallback-evidence-gate-v1_0.md)
 - [ ] [Surface Spec 378: Sampled Implicit Dirty Evidence Rejection (v1.0)](../specifications/surface-378-sampled-implicit-dirty-evidence-rejection-v1_0.md)
