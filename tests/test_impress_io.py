@@ -20,6 +20,8 @@ from impression.io import (
     HeightmapCSGImpressRoundTripDiagnostic,
     ImplicitCSGImpressPayloadRecord,
     ImplicitCSGImpressRoundTripDiagnostic,
+    SampledImplicitPromotionImpressPayloadRecord,
+    SampledImplicitPromotionImpressRoundTripDiagnostic,
     InvalidSurfaceWrapperDiagnostic,
     IMPRESS_DIAGNOSTIC_METADATA_FIELDS,
     SurfaceBodyStore,
@@ -41,6 +43,7 @@ from impression.io import (
     encode_displacement_csg_impress_payload,
     encode_heightmap_csg_impress_payload,
     encode_implicit_csg_impress_payload,
+    encode_sampled_implicit_promotion_impress_payload,
     encode_surface_adjacency_payload,
     encode_surface_boundary_ref_payload,
     encode_surface_body_payload,
@@ -58,6 +61,7 @@ from impression.io import (
     displacement_csg_impress_payload_record,
     heightmap_csg_impress_payload_record,
     implicit_csg_impress_payload_record,
+    sampled_implicit_promotion_impress_payload_record,
     load_impress,
     loads_impress_json,
     validate_impress_units,
@@ -67,6 +71,7 @@ from impression.io import (
     verify_displacement_csg_impress_round_trip,
     verify_heightmap_csg_impress_round_trip,
     verify_implicit_csg_impress_round_trip,
+    verify_sampled_implicit_promotion_impress_round_trip,
     save_impress,
     write_impress_json,
 )
@@ -95,6 +100,8 @@ from impression.modeling.surface import (
 )
 from impression.modeling import (
     adapt_surface_patch_to_implicit_field,
+    build_sampled_implicit_promotion_matrix,
+    build_sampled_implicit_promotion_provenance_record,
     compose_displacement_csg_result,
     compose_heightmap_csg_result,
     compose_implicit_field_csg_result,
@@ -1474,6 +1481,73 @@ def test_displacement_csg_impress_payload_refuses_malformed_or_mesh_truth_metada
     assert "no_mesh_fallback=true" in diagnostic.message
     with pytest.raises(ImpressFormatError, match="no_mesh_fallback=true"):
         displacement_csg_impress_payload_record(body)
+
+
+def _promoted_sampled_implicit_body(target_family: str):
+    row = next(
+        row
+        for row in build_sampled_implicit_promotion_matrix(operations=("union",)).rows
+        if row.target_family == target_family
+    )
+    provenance = build_sampled_implicit_promotion_provenance_record(row, operand_ids=("left-source", "right-source"))
+    metadata = {"kernel": {"sampled_implicit_promotion": provenance.canonical_payload()}}
+    if target_family == "implicit":
+        patch = ImplicitSurfacePatch(
+            family="implicit",
+            field=make_implicit_field_node("sphere"),
+            bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+        )
+    elif target_family == "subdivision":
+        patch = SubdivisionSurfacePatch(family="subdivision")
+    elif target_family == "nurbs":
+        patch = NURBSSurfacePatch(family="nurbs")
+    elif target_family == "bspline":
+        patch = BSplineSurfacePatch(family="bspline")
+    else:
+        raise AssertionError(f"Unsupported promotion test target {target_family!r}.")
+    return make_surface_body((make_surface_shell((patch,), connected=False),), metadata=metadata)
+
+
+@pytest.mark.parametrize("target_family", ["implicit", "subdivision", "bspline", "nurbs"])
+def test_sampled_implicit_promotion_impress_payload_round_trips_target_family_metadata(target_family: str) -> None:
+    body = _promoted_sampled_implicit_body(target_family)
+
+    payload = encode_sampled_implicit_promotion_impress_payload(body)
+    loaded = decode_impress_document_payload(payload)
+    diagnostic = verify_sampled_implicit_promotion_impress_round_trip(body)
+    record = sampled_implicit_promotion_impress_payload_record(body)
+
+    assert len(loaded.bodies) == 1
+    assert isinstance(record, SampledImplicitPromotionImpressPayloadRecord)
+    assert record.operation == "union"
+    assert record.target_family == target_family
+    assert record.route_status == "promotion-route"
+    assert record.source_operand_ids == ("left-source", "right-source")
+    assert record.no_mesh_fallback is True
+    assert isinstance(diagnostic, SampledImplicitPromotionImpressRoundTripDiagnostic)
+    assert diagnostic.supported is True
+    assert diagnostic.before == diagnostic.after
+    assert payload["metadata"]["surface_csg_payload"]["kind"] == "sampled-implicit-promotion"
+
+
+def test_sampled_implicit_promotion_impress_payload_refuses_malformed_metadata() -> None:
+    body = _promoted_sampled_implicit_body("implicit")
+    metadata = dict(body.metadata)
+    kernel = dict(metadata["kernel"])
+    promotion = dict(kernel["sampled_implicit_promotion"])
+    lossiness = dict(promotion["lossiness"])
+    lossiness["no_mesh_fallback"] = False
+    promotion["lossiness"] = lossiness
+    kernel["sampled_implicit_promotion"] = promotion
+    malformed = make_surface_body(body.shells, metadata={"kernel": kernel})
+
+    diagnostic = verify_sampled_implicit_promotion_impress_round_trip(malformed)
+
+    assert diagnostic.supported is False
+    assert diagnostic.code == "sampled-implicit-promotion-impress-roundtrip-failed"
+    assert "no_mesh_fallback=true" in diagnostic.message
+    with pytest.raises(ImpressFormatError, match="no_mesh_fallback=true"):
+        sampled_implicit_promotion_impress_payload_record(malformed)
 
 
 def test_decode_implicit_surface_patch_payload_reports_path_specific_unknown_node() -> None:
