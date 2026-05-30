@@ -3770,11 +3770,16 @@ def test_surface_boolean_family_pair_matrix_declares_every_known_family_pair() -
                     and any(family in ANALYTIC_SURFACE_CSG_FAMILIES for family in pair_families)
                     and pair_families <= (ANALYTIC_SURFACE_CSG_FAMILIES | {"bspline", "nurbs"})
                 )
+                spline_pair = pair_families <= {"bspline", "nurbs"}
                 if analytic_pair:
                     assert record.supported is True
                     assert record.support_state == "exact"
                     assert record.required_future_capability is None
                 elif analytic_spline_pair:
+                    assert record.supported is True
+                    assert record.support_state == "declared-tolerance"
+                    assert record.required_future_capability is None
+                elif spline_pair:
                     assert record.supported is True
                     assert record.support_state == "declared-tolerance"
                     assert record.required_future_capability is None
@@ -3828,7 +3833,7 @@ def test_surface_csg_executable_row_report_flags_analytic_bspline_as_executable(
     report = surface_csg_executable_row_report(families=("planar", "bspline"))
 
     assert isinstance(report, SurfaceCSGExecutableRowReport)
-    assert report.passed is False
+    assert report.passed is True
     assert len(report.rows) == len(SURFACE_BOOLEAN_OPERATIONS) * 4
     assert any(row.executable and row.pair_class == "low-order-analytic" for row in report.rows)
     executable = [row for row in report.rows if row.pair_class == "analytic-to-bspline"]
@@ -3836,8 +3841,8 @@ def test_surface_csg_executable_row_report_flags_analytic_bspline_as_executable(
     assert all(row.executable for row in executable)
     assert all(row.support_state == "declared-tolerance" for row in executable)
     payload = report.canonical_payload()
-    assert payload["passed"] is False
-    assert payload["diagnostics"]
+    assert payload["passed"] is True
+    assert payload["diagnostics"] == []
 
 
 def test_higher_order_csg_residual_collector_records_declared_tolerance_metadata() -> None:
