@@ -23,6 +23,7 @@ from impression.modeling import (
     BooleanOperationError,
     BSplineSurfacePatch,
     NURBSSurfacePatch,
+    Path3D,
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
@@ -34,6 +35,7 @@ from impression.modeling import (
     SurfaceBooleanResult,
     SurfaceBooleanSplitRecord,
     SurfaceBooleanTrimmedPatchFragment,
+    SurfacePatch,
     SurfaceCSGAnalyticBSplineIntersectionRecord,
     SurfaceCSGAnalyticIntersectionRecord,
     SurfaceCSGAnalyticNURBSIntersectionRecord,
@@ -100,6 +102,7 @@ from impression.modeling import (
     SurfaceCSGSplineCoincidentRegionRecord,
     SurfaceCSGSplinePairIntersectionRecord,
     SurfaceCSGSplitTrimLoopRecord,
+    SurfaceCSGSweepPairIntersectionRecord,
     SurfaceCSGTessellationBoundaryEvidenceRecord,
     SurfaceCSGToleranceDiagnostic,
     SurfaceCSGTolerancePolicy,
@@ -112,6 +115,8 @@ from impression.modeling import (
     SURFACE_BOOLEAN_OPERATIONS,
     SURFACE_CSG_SOLVER_REGISTRY,
     SurfaceShell,
+    SubdivisionSurfacePatch,
+    SweepSurfacePatch,
     TrimLoop,
     assert_surface_csg_solver_registry_complete,
     assert_no_hidden_surface_csg_mesh_fallback,
@@ -139,6 +144,7 @@ from impression.modeling import (
     intersect_planar_linear_patch_pair,
     intersect_planar_revolution_patch_pair,
     intersect_spline_nurbs_patch_pair,
+    intersect_sweep_csg_patch_pair,
     finalize_surface_csg_validity_gate,
     detect_surface_csg_dangling_trims,
     map_surface_csg_coincident_region_loop,
@@ -610,6 +616,62 @@ def test_spline_nurbs_coincident_region_detector_reports_ambiguous_overlap_witho
     assert result.diagnostics[0].code == "ambiguous-overlap"
     assert "mesh" not in result.diagnostics[0].message.lower()
     assert result.intersection.classification == "unsupported"
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    (
+        (PlanarSurfacePatch(family="planar"), SweepSurfacePatch(family="sweep")),
+        (BSplineSurfacePatch(family="bspline"), SweepSurfacePatch(family="sweep")),
+        (NURBSSurfacePatch(family="nurbs"), SweepSurfacePatch(family="sweep")),
+        (SweepSurfacePatch(family="sweep"), SweepSurfacePatch(family="sweep")),
+        (
+            SubdivisionSurfacePatch(
+                family="subdivision",
+                control_points=((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 0.0, 1.0), (0.0, 0.0, 1.0)),
+            ),
+            SweepSurfacePatch(family="sweep"),
+        ),
+    ),
+)
+def test_sweep_csg_patch_pair_intersection_emits_patch_local_curves(
+    first: SurfacePatch,
+    second: SurfacePatch,
+) -> None:
+    result = intersect_sweep_csg_patch_pair(
+        SurfaceBooleanPatchRef(0, 0),
+        first,
+        SurfaceBooleanPatchRef(1, 0),
+        second,
+        sample_count=5,
+    )
+
+    assert isinstance(result, SurfaceCSGSweepPairIntersectionRecord)
+    assert result.supported is True
+    assert result.residual_report.converged is True
+    assert result.curves
+    assert len(result.patch_local_curves) == 2
+    assert result.canonical_payload()["supported"] is True
+
+
+def test_sweep_csg_patch_pair_intersection_reports_ambiguity_without_mesh() -> None:
+    sweep = SweepSurfacePatch(
+        family="sweep",
+        path=Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.0, 0.0)]),
+    )
+
+    result = intersect_sweep_csg_patch_pair(
+        SurfaceBooleanPatchRef(0, 0),
+        PlanarSurfacePatch(family="planar"),
+        SurfaceBooleanPatchRef(1, 0),
+        sweep,
+        sample_count=5,
+    )
+
+    assert result.supported is False
+    assert result.ambiguity_diagnostics
+    assert result.ambiguity_diagnostics[0].blocking is True
+    assert "mesh" not in result.ambiguity_diagnostics[0].message.lower()
 
 
 def test_surface_csg_coincident_region_loop_maps_to_patch_local_trim_space() -> None:

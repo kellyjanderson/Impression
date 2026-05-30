@@ -458,6 +458,49 @@ class SurfaceSplineSplineResidualReport:
 
 
 @dataclass(frozen=True)
+class SurfaceSweepPairSolverIterationRecord:
+    """Bounded sampling witness for a sweep-participating surface intersection."""
+
+    first_sample_count: int
+    second_sample_count: int
+    accepted_pair_count: int
+    max_residual: float
+    converged: bool
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "accepted_pair_count": self.accepted_pair_count,
+            "converged": self.converged,
+            "first_sample_count": self.first_sample_count,
+            "max_residual": self.max_residual,
+            "second_sample_count": self.second_sample_count,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSweepPairResidualReport:
+    """Residual, event, and diagnostic report for sweep CSG intersection routes."""
+
+    solver_id: str
+    iterations: tuple[SurfaceSweepPairSolverIterationRecord, ...]
+    sweep_adapters: tuple[SurfaceSweepCSGEvaluatorAdapter, ...] = ()
+    diagnostics: tuple[SurfaceIntersectionSupportDiagnostic | SurfaceSweepCSGFrameEventDiagnostic, ...] = ()
+
+    @property
+    def converged(self) -> bool:
+        return bool(self.iterations) and self.iterations[-1].converged and not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "converged": self.converged,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "iterations": [iteration.canonical_payload() for iteration in self.iterations],
+            "solver_id": self.solver_id,
+            "sweep_adapters": [adapter.canonical_payload() for adapter in self.sweep_adapters],
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceSubdivisionIntersectionBudget:
     """Bounded refinement and contour budget for subdivision intersection adapters."""
 
@@ -1808,6 +1851,124 @@ def solve_spline_spline_surface_intersection(
     )
 
 
+def solve_sweep_surface_intersection_adapter(
+    request: SurfaceIntersectionRequest,
+    *,
+    sample_count: int = 13,
+) -> tuple[SurfaceIntersectionResultRecord, SurfaceSweepPairResidualReport]:
+    """Solve sweep-participating surface pairs by bounded declared-tolerance sampling."""
+
+    dispatch = lookup_surface_intersection_solver(request)
+    if not dispatch.supported or dispatch.solver is None or dispatch.solver.solver_id != "sweep-pair-declared-tolerance":
+        diagnostic = SurfaceIntersectionSupportDiagnostic(
+            code="unsupported-family-pair",
+            consumer=request.consumer,
+            family_pair=request.normalized_family_pair,
+            message="sweep pair solver requires a declared-tolerance sweep registry dispatch",
+        )
+        return (
+            normalize_surface_intersection_result(request, quality="unsupported"),
+            SurfaceSweepPairResidualReport(
+                solver_id="sweep-pair-declared-tolerance",
+                iterations=(),
+                diagnostics=(diagnostic,),
+            ),
+        )
+    if not (isinstance(request.first_patch, SweepSurfacePatch) or isinstance(request.second_patch, SweepSurfacePatch)):
+        diagnostic = SurfaceIntersectionSupportDiagnostic(
+            code="unsupported-family-pair",
+            consumer=request.consumer,
+            family_pair=request.normalized_family_pair,
+            message="sweep pair solver requires at least one sweep surface",
+        )
+        return (
+            normalize_surface_intersection_result(request, quality="unsupported"),
+            SurfaceSweepPairResidualReport(
+                solver_id=dispatch.solver.solver_id,
+                iterations=(),
+                diagnostics=(diagnostic,),
+            ),
+        )
+
+    sweep_adapters = tuple(
+        make_sweep_csg_evaluator_adapter(patch)
+        for patch in (request.first_patch, request.second_patch)
+        if isinstance(patch, SweepSurfacePatch)
+    )
+    adapter_diagnostics = tuple(diagnostic for adapter in sweep_adapters for diagnostic in adapter.diagnostics if diagnostic.blocking)
+    if adapter_diagnostics:
+        return (
+            normalize_surface_intersection_result(request, quality="unsupported"),
+            SurfaceSweepPairResidualReport(
+                solver_id=dispatch.solver.solver_id,
+                iterations=(),
+                sweep_adapters=sweep_adapters,
+                diagnostics=adapter_diagnostics,
+            ),
+        )
+
+    sample_count = max(3, int(sample_count))
+    first_samples = _sample_surface_points(request.first_patch, sample_count)
+    second_samples = _sample_surface_points(request.second_patch, sample_count)
+    threshold = max(request.tolerance_policy.position_tolerance * 10.0, request.tolerance_policy.degeneracy_tolerance)
+    accepted: list[tuple[tuple[float, float, float], tuple[float, float], tuple[float, float], float]] = []
+    for first_point, first_uv in first_samples:
+        first_array = np.asarray(first_point, dtype=float)
+        nearest_point, nearest_uv = min(
+            second_samples,
+            key=lambda sample: float(np.linalg.norm(first_array - np.asarray(sample[0], dtype=float))),
+        )
+        residual = float(np.linalg.norm(first_array - np.asarray(nearest_point, dtype=float)))
+        if residual <= threshold:
+            midpoint = tuple(float(component) for component in ((first_array + np.asarray(nearest_point, dtype=float)) * 0.5))
+            accepted.append((midpoint, first_uv, nearest_uv, residual))
+
+    accepted = sorted(set(accepted), key=lambda item: (item[1], item[2], item[0]))
+    max_residual = max((item[3] for item in accepted), default=float("inf"))
+    converged = len(accepted) >= 2 and max_residual <= threshold
+    iteration = SurfaceSweepPairSolverIterationRecord(
+        first_sample_count=len(first_samples),
+        second_sample_count=len(second_samples),
+        accepted_pair_count=len(accepted),
+        max_residual=max_residual if np.isfinite(max_residual) else 0.0,
+        converged=converged,
+    )
+    diagnostics: tuple[SurfaceIntersectionSupportDiagnostic, ...] = ()
+    if not converged:
+        diagnostics = (
+            SurfaceIntersectionSupportDiagnostic(
+                code="unsupported-family-pair",
+                consumer=request.consumer,
+                family_pair=request.normalized_family_pair,
+                message="sweep pair solver did not converge within declared tolerance sampling budget",
+            ),
+        )
+        result = normalize_surface_intersection_result(request, quality="unsupported")
+    else:
+        curve = SurfaceIntersectionCurveRecord(
+            curve_id="sweep-pair-curve-0",
+            kind="sampled",
+            points_3d=tuple(item[0] for item in accepted),
+            first_parameters=tuple(item[1] for item in accepted),
+            second_parameters=tuple(item[2] for item in accepted),
+        )
+        result = normalize_surface_intersection_result(
+            request,
+            curves=(curve,),
+            max_residual=iteration.max_residual,
+            quality="within-tolerance",
+        )
+    return (
+        result,
+        SurfaceSweepPairResidualReport(
+            solver_id=dispatch.solver.solver_id,
+            iterations=(iteration,),
+            sweep_adapters=sweep_adapters,
+            diagnostics=diagnostics,
+        ),
+    )
+
+
 def _promoted_surface_family_names() -> tuple[str, ...]:
     return tuple(sorted(PATCH_FAMILY_CAPABILITY_MATRIX))
 
@@ -1829,6 +1990,13 @@ def _default_surface_intersection_solver_records() -> tuple[SurfaceIntersectionS
         ("nurbs", "planar"): "analytic-spline-declared-tolerance",
         ("nurbs", "revolution"): "analytic-spline-declared-tolerance",
         ("nurbs", "ruled"): "analytic-spline-declared-tolerance",
+        ("planar", "sweep"): "sweep-pair-declared-tolerance",
+        ("bspline", "sweep"): "sweep-pair-declared-tolerance",
+        ("nurbs", "sweep"): "sweep-pair-declared-tolerance",
+        ("revolution", "sweep"): "sweep-pair-declared-tolerance",
+        ("ruled", "sweep"): "sweep-pair-declared-tolerance",
+        ("subdivision", "sweep"): "sweep-pair-declared-tolerance",
+        ("sweep", "sweep"): "sweep-pair-declared-tolerance",
     }
     adapter_pairs = {
         tuple(sorted((family, "subdivision"))): "subdivision-adapter-declared-tolerance"
