@@ -513,6 +513,68 @@ class DisplacementResamplingRecord:
 
 
 @dataclass(frozen=True)
+class DisplacementCompositionDiagnostic:
+    """Deterministic diagnostic for displacement-preserving CSG composition."""
+
+    code: Literal["invalid-operation", "domain-refusal", "empty-result"]
+    message: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class DisplacementCompositionRecord:
+    """Surface-native displacement offset CSG composition operation record."""
+
+    operation: SurfaceBooleanOperation
+    operand_ids: tuple[str, str]
+    source_patch_id: str
+    resampling: DisplacementResamplingRecord
+    sample_shape: tuple[int, int] | None = None
+    result_family: Literal["displacement"] = "displacement"
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "operand_ids": self.operand_ids,
+            "source_patch_id": self.source_patch_id,
+            "resampling": self.resampling.canonical_payload(),
+            "sample_shape": self.sample_shape,
+            "result_family": self.result_family,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class DisplacementCompositionResult:
+    """Displacement-preserving CSG result or explicit refusal."""
+
+    operation: SurfaceBooleanOperation
+    supported: bool
+    operation_record: DisplacementCompositionRecord
+    body: SurfaceBody | None = None
+    patch: DisplacementSurfacePatch | None = None
+    diagnostics: tuple[DisplacementCompositionDiagnostic, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "supported": self.supported,
+            "operation_record": self.operation_record.canonical_payload(),
+            "body_id": None if self.body is None else self.body.stable_identity,
+            "patch_id": None if self.patch is None else self.patch.stable_identity,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
 class HeightmapCompositionResult:
     """Heightmap-preserving CSG result or explicit refusal."""
 
@@ -1041,6 +1103,188 @@ def plan_displacement_domain_resampling(
         result_shape=result_shape,
         resample_kernel="bilinear",
         lossiness="sampled-reconstruction",
+    )
+
+
+def _sample_displacement_offset(
+    patch: DisplacementSurfacePatch,
+    u: float,
+    v: float,
+    *,
+    tolerance: float,
+) -> tuple[float, bool]:
+    umin, umax, vmin, vmax = patch.projection_bounds
+    if u < umin - tolerance or u > umax + tolerance or v < vmin - tolerance or v > vmax + tolerance:
+        return 0.0, False
+    rows, cols = patch.displacement_samples.shape
+    x = (float(u) - umin) / (umax - umin) * (cols - 1)
+    y = (float(v) - vmin) / (vmax - vmin) * (rows - 1)
+    x = float(np.clip(x, 0.0, cols - 1))
+    y = float(np.clip(y, 0.0, rows - 1))
+    c0 = int(np.floor(x))
+    r0 = int(np.floor(y))
+    c1 = min(c0 + 1, cols - 1)
+    r1 = min(r0 + 1, rows - 1)
+    dx = x - c0
+    dy = y - r0
+    h00 = patch.displacement_samples[r0, c0]
+    h10 = patch.displacement_samples[r0, c1]
+    h01 = patch.displacement_samples[r1, c0]
+    h11 = patch.displacement_samples[r1, c1]
+    height = (
+        (1.0 - dx) * (1.0 - dy) * h00
+        + dx * (1.0 - dy) * h10
+        + (1.0 - dx) * dy * h01
+        + dx * dy * h11
+    )
+    mx = int(np.clip(round(x), 0, cols - 1))
+    my = int(np.clip(round(y), 0, rows - 1))
+    masked = not bool(patch.alpha_mask[my, mx])
+    if patch.alpha_mode == "mask" and masked:
+        return 0.0, False
+    if patch.alpha_mode == "ignore" and masked:
+        height = 0.0
+    return float(height * patch.height_scale), True
+
+
+def _compose_displacement_samples(
+    operation: SurfaceBooleanOperation,
+    left: DisplacementSurfacePatch,
+    right: DisplacementSurfacePatch,
+    plan: DisplacementResamplingRecord,
+    *,
+    tolerance: float,
+) -> tuple[np.ndarray, np.ndarray, tuple[float, float, float, float]]:
+    if plan.overlap is None or plan.result_shape is None:
+        raise ValueError("Displacement composition requires an overlap and result shape.")
+    rows, cols = plan.result_shape
+    umin, umax, vmin, vmax = plan.overlap.overlap_bounds
+    us = np.linspace(umin, umax, cols, dtype=float)
+    vs = np.linspace(vmin, vmax, rows, dtype=float)
+    result = np.zeros((rows, cols), dtype=float)
+    mask = np.zeros((rows, cols), dtype=bool)
+    for row, v in enumerate(vs):
+        for col, u in enumerate(us):
+            left_offset, left_valid = _sample_displacement_offset(left, float(u), float(v), tolerance=tolerance)
+            right_offset, right_valid = _sample_displacement_offset(right, float(u), float(v), tolerance=tolerance)
+            if operation == "union":
+                if left_valid and right_valid:
+                    result[row, col] = max(left_offset, right_offset)
+                    mask[row, col] = True
+                elif left_valid:
+                    result[row, col] = left_offset
+                    mask[row, col] = True
+                elif right_valid:
+                    result[row, col] = right_offset
+                    mask[row, col] = True
+            elif operation == "intersection":
+                if left_valid and right_valid:
+                    result[row, col] = min(left_offset, right_offset)
+                    mask[row, col] = True
+            elif operation == "difference":
+                if left_valid:
+                    result[row, col] = max(left_offset - right_offset, 0.0) if right_valid else left_offset
+                    mask[row, col] = True
+            else:
+                raise ValueError("Displacement composition operation must be union, difference, or intersection.")
+    return result, mask, plan.overlap.overlap_bounds
+
+
+def compose_displacement_csg_result(
+    operation: SurfaceBooleanOperation,
+    left: DisplacementSurfacePatch,
+    right: DisplacementSurfacePatch,
+    *,
+    max_sample_count: int = 1_000_000,
+    tolerance: float = 1e-9,
+) -> DisplacementCompositionResult:
+    """Compose two displacement offsets over a compatible source domain without mesh CSG."""
+
+    if operation not in SURFACE_BOOLEAN_OPERATIONS:
+        raise ValueError("Displacement composition operation must be union, difference, or intersection.")
+    if not isinstance(left, DisplacementSurfacePatch) or not isinstance(right, DisplacementSurfacePatch):
+        raise TypeError("Displacement composition requires DisplacementSurfacePatch operands.")
+    tol = float(tolerance)
+    plan = plan_displacement_domain_resampling(
+        operation,
+        left,
+        right,
+        max_sample_count=max_sample_count,
+        tolerance=tol,
+    )
+    source_id = left.source_patch.stable_identity
+    record = DisplacementCompositionRecord(
+        operation=operation,
+        operand_ids=(left.stable_identity, right.stable_identity),
+        source_patch_id=source_id,
+        resampling=plan,
+        sample_shape=plan.result_shape,
+    )
+    if not plan.supported:
+        return DisplacementCompositionResult(
+            operation=operation,
+            supported=False,
+            operation_record=record,
+            diagnostics=(
+                DisplacementCompositionDiagnostic(
+                    code="domain-refusal",
+                    message=(
+                        "Displacement CSG composition refused because source-domain planning failed: "
+                        f"{'; '.join(diagnostic.message for diagnostic in plan.diagnostics)}"
+                    ),
+                ),
+            ),
+        )
+    samples, mask, bounds = _compose_displacement_samples(operation, left, right, plan, tolerance=tol)
+    if not np.any(mask):
+        return DisplacementCompositionResult(
+            operation=operation,
+            supported=False,
+            operation_record=record,
+            diagnostics=(
+                DisplacementCompositionDiagnostic(
+                    code="empty-result",
+                    message="Displacement CSG composition produced no visible samples; no mesh fallback was attempted.",
+                ),
+            ),
+        )
+    metadata = {
+        "kernel": {
+            "displacement_csg_composition": {
+                **record.canonical_payload(),
+                "sample_shape": tuple(int(value) for value in samples.shape),
+                "projection_bounds": bounds,
+                "lossiness": plan.lossiness,
+            }
+        }
+    }
+    patch = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=left.source_patch,
+        displacement_samples=samples,
+        alpha_mask=mask,
+        alpha_mode="mask",
+        height_scale=1.0,
+        direction=left.direction,
+        projection=left.projection,
+        plane=left.plane,
+        projection_bounds=bounds,
+        metadata=metadata,
+    )
+    body = make_surface_body((make_surface_shell((patch,), connected=False),), metadata=metadata)
+    final_record = DisplacementCompositionRecord(
+        operation=operation,
+        operand_ids=record.operand_ids,
+        source_patch_id=source_id,
+        resampling=plan,
+        sample_shape=tuple(int(value) for value in samples.shape),
+    )
+    return DisplacementCompositionResult(
+        operation=operation,
+        supported=True,
+        operation_record=final_record,
+        body=body,
+        patch=patch,
     )
 
 
