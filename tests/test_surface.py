@@ -146,6 +146,7 @@ from impression.modeling import (
     DisplacementSourceCompatibilityReport,
     DisplacementSourceIdentityRecord,
     DisplacementSourceMismatchDiagnostic,
+    DisplacementSourceMismatchRefusalRecord,
     DisplacementSourcePatchReferenceRecord,
     DisplacementSourceProvenanceRecord,
     DisplacementSourceResolutionResult,
@@ -374,6 +375,7 @@ from impression.modeling import (
     resolve_displacement_source_identity,
     resolve_displacement_csg_source_identity,
     displacement_source_compatibility_report,
+    displacement_source_mismatch_refusal_record,
     plan_displacement_domain_resampling,
     compose_displacement_csg_result,
     normalize_surface_seam_continuity_constraint,
@@ -3090,6 +3092,74 @@ def test_displacement_composition_resamples_and_refuses_domain_failures_without_
     assert refused.diagnostics[0].code == "domain-refusal"
     assert refused.diagnostics[0].no_mesh_fallback is True
     assert "mesh fallback" in refused.diagnostics[0].message
+
+
+def test_displacement_source_mismatch_refusal_record_classifies_source_and_frame_routes() -> None:
+    first_source = PlanarSurfacePatch(family="planar")
+    second_source = PlanarSurfacePatch(family="planar", origin=np.asarray([0.0, 0.0, 1.0], dtype=float))
+    first = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=first_source,
+        displacement_samples=np.zeros((2, 2), dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        direction="z",
+    )
+    source_mismatch = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=second_source,
+        displacement_samples=np.ones((2, 2), dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        direction="z",
+    )
+    frame_mismatch = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=first_source,
+        displacement_samples=np.ones((2, 2), dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        direction="x",
+    )
+
+    source_refusal = displacement_source_mismatch_refusal_record("union", first, source_mismatch)
+    frame_refusal = displacement_source_mismatch_refusal_record("union", first, frame_mismatch)
+
+    assert isinstance(source_refusal, DisplacementSourceMismatchRefusalRecord)
+    assert source_refusal.supported_refusal is True
+    assert source_refusal.reason_code == "source-mismatch"
+    assert source_refusal.replacement_hint == "promote-to-implicit"
+    assert source_refusal.no_mesh_fallback is True
+    assert frame_refusal.supported_refusal is True
+    assert frame_refusal.reason_code == "incompatible-frame"
+    assert frame_refusal.replacement_hint == "promote-to-implicit"
+
+
+def test_displacement_source_mismatch_refusal_record_distinguishes_budget_from_executable_route() -> None:
+    source = PlanarSurfacePatch(family="planar")
+    coarse = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.zeros((2, 2), dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        direction="z",
+    )
+    fine = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.ones((5, 5), dtype=float),
+        alpha_mask=np.ones((5, 5), dtype=bool),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        direction="z",
+    )
+
+    executable = displacement_source_mismatch_refusal_record("difference", coarse, coarse)
+    budget = displacement_source_mismatch_refusal_record("difference", coarse, fine, max_sample_count=4)
+
+    assert executable.refused is False
+    assert executable.reason_code == "none"
+    assert executable.replacement_hint == "execute-displacement"
+    assert budget.supported_refusal is True
+    assert budget.reason_code == "resampling-budget-exceeded"
+    assert budget.replacement_hint == "promote-to-subdivision"
+    assert "mesh fallback" in budget.message
 
 
 def test_displacement_payload_authoring_builder_creates_sampled_surface_body() -> None:

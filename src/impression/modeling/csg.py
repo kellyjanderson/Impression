@@ -575,6 +575,45 @@ class DisplacementCompositionResult:
 
 
 @dataclass(frozen=True)
+class DisplacementSourceMismatchRefusalRecord:
+    """Supported refusal route for displacement CSG source/domain incompatibility."""
+
+    operation: SurfaceBooleanOperation
+    refused: bool
+    reason_code: Literal[
+        "none",
+        "source-mismatch",
+        "transformed-source-mismatch",
+        "missing-source",
+        "incompatible-frame",
+        "incompatible-domain",
+        "resampling-budget-exceeded",
+    ]
+    message: str
+    replacement_hint: Literal["execute-displacement", "promote-to-implicit", "promote-to-subdivision"]
+    source_report: DisplacementSourceCompatibilityReport
+    resampling: DisplacementResamplingRecord | None = None
+    no_mesh_fallback: bool = True
+
+    @property
+    def supported_refusal(self) -> bool:
+        return self.refused and self.reason_code != "none" and self.no_mesh_fallback
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "refused": self.refused,
+            "supported_refusal": self.supported_refusal,
+            "reason_code": self.reason_code,
+            "message": self.message,
+            "replacement_hint": self.replacement_hint,
+            "source_report": self.source_report.canonical_payload(),
+            "resampling": None if self.resampling is None else self.resampling.canonical_payload(),
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
 class HeightmapCompositionResult:
     """Heightmap-preserving CSG result or explicit refusal."""
 
@@ -1285,6 +1324,74 @@ def compose_displacement_csg_result(
         operation_record=final_record,
         body=body,
         patch=patch,
+    )
+
+
+def classify_displacement_source_mismatch_refusal(
+    source_report: DisplacementSourceCompatibilityReport,
+    resampling: DisplacementResamplingRecord | None = None,
+) -> tuple[
+    Literal[
+        "none",
+        "source-mismatch",
+        "transformed-source-mismatch",
+        "missing-source",
+        "incompatible-frame",
+        "incompatible-domain",
+        "resampling-budget-exceeded",
+    ],
+    Literal["execute-displacement", "promote-to-implicit", "promote-to-subdivision"],
+    str,
+]:
+    """Classify displacement CSG incompatibility as a supported refusal reason."""
+
+    if source_report.diagnostics:
+        code = source_report.diagnostics[0].code
+        if code == "missing-source":
+            return "missing-source", "promote-to-implicit", source_report.diagnostics[0].message
+        if code == "transformed-source-mismatch":
+            return "transformed-source-mismatch", "promote-to-subdivision", source_report.diagnostics[0].message
+        return "source-mismatch", "promote-to-implicit", source_report.diagnostics[0].message
+    if resampling is not None and resampling.diagnostics:
+        code = resampling.diagnostics[0].code
+        if code == "frame-mismatch":
+            return "incompatible-frame", "promote-to-implicit", resampling.diagnostics[0].message
+        if code == "resampling-budget-exceeded":
+            return "resampling-budget-exceeded", "promote-to-subdivision", resampling.diagnostics[0].message
+        return "incompatible-domain", "promote-to-subdivision", resampling.diagnostics[0].message
+    return "none", "execute-displacement", "Displacement CSG source/domain checks are compatible."
+
+
+def displacement_source_mismatch_refusal_record(
+    operation: SurfaceBooleanOperation,
+    left: DisplacementSurfacePatch,
+    right: DisplacementSurfacePatch,
+    *,
+    max_sample_count: int = 1_000_000,
+    tolerance: float = 1e-9,
+) -> DisplacementSourceMismatchRefusalRecord:
+    """Return a supported refusal record for displacement source/domain incompatibility."""
+
+    source_report = displacement_source_compatibility_report(operation, (left, right))
+    resampling = None
+    if source_report.compatible:
+        resampling = plan_displacement_domain_resampling(
+            operation,
+            left,
+            right,
+            max_sample_count=max_sample_count,
+            tolerance=tolerance,
+        )
+    reason_code, replacement_hint, message = classify_displacement_source_mismatch_refusal(source_report, resampling)
+    refused = reason_code != "none"
+    return DisplacementSourceMismatchRefusalRecord(
+        operation=operation,
+        refused=refused,
+        reason_code=reason_code,
+        message=message if refused else "Displacement CSG can execute as a displacement-preserving operation.",
+        replacement_hint=replacement_hint,
+        source_report=source_report,
+        resampling=resampling,
     )
 
 
