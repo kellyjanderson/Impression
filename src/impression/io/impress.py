@@ -150,6 +150,48 @@ class SurfacePatchFamilyDispatchRecord:
     payload_version: int
 
 
+@dataclass(frozen=True)
+class ImplicitCSGImpressPayloadRecord:
+    """Inspectable `.impress` payload facts for an implicit CSG result body."""
+
+    operation: str
+    body_id: str
+    patch_id: str
+    field_root_kind: str
+    source_operand_ids: tuple[str, ...]
+    no_mesh_fallback: bool
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "body_id": self.body_id,
+            "patch_id": self.patch_id,
+            "field_root_kind": self.field_root_kind,
+            "source_operand_ids": self.source_operand_ids,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class ImplicitCSGImpressRoundTripDiagnostic:
+    """Round-trip verifier result for implicit CSG `.impress` payloads."""
+
+    supported: bool
+    code: str
+    message: str
+    before: ImplicitCSGImpressPayloadRecord | None = None
+    after: ImplicitCSGImpressPayloadRecord | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "supported": self.supported,
+            "code": self.code,
+            "message": self.message,
+            "before": None if self.before is None else self.before.canonical_payload(),
+            "after": None if self.after is None else self.after.canonical_payload(),
+        }
+
+
 _PATCH_FAMILY_DISPATCH = {
     kind: SurfacePatchFamilyDispatchRecord(
         kind=kind,
@@ -450,6 +492,95 @@ def make_impress_document_payload(
         if entry.body is not None
     }
     return root
+
+
+def implicit_csg_impress_payload_record(body: SurfaceBody) -> ImplicitCSGImpressPayloadRecord:
+    """Return persisted implicit CSG facts for a surface-native result body."""
+
+    if not isinstance(body, SurfaceBody):
+        raise ImpressFormatError("implicit_csg_impress_payload_record requires a SurfaceBody.")
+    patches = tuple(patch for patch in body.iter_patches(world=True) if isinstance(patch, ImplicitSurfacePatch))
+    if len(patches) != 1:
+        raise ImpressFormatError("Implicit CSG `.impress` payloads require exactly one implicit result patch.")
+    patch = patches[0]
+    kernel = patch.metadata.get("kernel", {})
+    if not isinstance(kernel, Mapping):
+        raise ImpressFormatError("Implicit CSG result patch requires kernel metadata.")
+    operation = str(kernel.get("operation", "")).strip()
+    if not operation.startswith("implicit-csg-"):
+        raise ImpressFormatError("Implicit CSG result patch metadata must declare an implicit-csg operation.")
+    source_ids = kernel.get("source_operand_ids", ())
+    if not isinstance(source_ids, Sequence) or isinstance(source_ids, (str, bytes)):
+        raise ImpressFormatError("Implicit CSG result patch source_operand_ids must be an array.")
+    source_operand_ids = tuple(str(source_id).strip() for source_id in source_ids)
+    if any(not source_id for source_id in source_operand_ids):
+        raise ImpressFormatError("Implicit CSG result patch source_operand_ids must contain non-empty strings.")
+    no_mesh_fallback = bool(kernel.get("no_mesh_fallback", False))
+    if not no_mesh_fallback:
+        raise ImpressFormatError("Implicit CSG `.impress` payload must declare no_mesh_fallback=true.")
+    return ImplicitCSGImpressPayloadRecord(
+        operation=operation,
+        body_id=body.stable_identity,
+        patch_id=patch.stable_identity,
+        field_root_kind=patch.field.kind,
+        source_operand_ids=source_operand_ids,
+        no_mesh_fallback=no_mesh_fallback,
+    )
+
+
+def encode_implicit_csg_impress_payload(
+    result_or_body: object,
+    *,
+    units: ImpressUnits | Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Encode an implicit CSG result body as a `.impress` document payload."""
+
+    body = result_or_body.body if hasattr(result_or_body, "body") else result_or_body
+    if body is None or not isinstance(body, SurfaceBody):
+        raise ImpressFormatError("Implicit CSG `.impress` encoding requires a supported SurfaceBody result.")
+    record = implicit_csg_impress_payload_record(body)
+    return make_impress_document_payload(
+        (body,),
+        units=units,
+        metadata={
+            "surface_csg_payload": {
+                "kind": "implicit-csg",
+                "operation": record.operation,
+                "patch_id": record.patch_id,
+                "no_mesh_fallback": True,
+            }
+        },
+    )
+
+
+def verify_implicit_csg_impress_round_trip(result_or_body: object) -> ImplicitCSGImpressRoundTripDiagnostic:
+    """Verify composed implicit CSG survives `.impress` JSON round-trip as surface truth."""
+
+    try:
+        body = result_or_body.body if hasattr(result_or_body, "body") else result_or_body
+        if body is None or not isinstance(body, SurfaceBody):
+            raise ImpressFormatError("Implicit CSG round-trip requires a supported SurfaceBody result.")
+        before = implicit_csg_impress_payload_record(body)
+        payload = encode_implicit_csg_impress_payload(body)
+        loaded = loads_impress_json(dumps_impress_json(payload))
+        if len(loaded.bodies) != 1:
+            raise ImpressFormatError("Implicit CSG round-trip expected exactly one body.")
+        after = implicit_csg_impress_payload_record(loaded.bodies[0])
+        if before.canonical_payload() != after.canonical_payload():
+            raise ImpressFormatError("Implicit CSG `.impress` round-trip changed persisted payload identity.")
+    except Exception as exc:
+        return ImplicitCSGImpressRoundTripDiagnostic(
+            supported=False,
+            code="implicit-csg-impress-roundtrip-failed",
+            message=f"{exc}; no mesh fallback was attempted.",
+        )
+    return ImplicitCSGImpressRoundTripDiagnostic(
+        supported=True,
+        code="implicit-csg-impress-roundtrip-supported",
+        message="Implicit CSG `.impress` payload round-tripped without mesh truth.",
+        before=before,
+        after=after,
+    )
 
 
 def dumps_impress_json(
