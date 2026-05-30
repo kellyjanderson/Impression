@@ -163,6 +163,9 @@ from impression.modeling import (
     heightmap_mask_tessellation_record,
     HeightmapSurfacePatch,
     IMPLICIT_FIELD_NODE_KINDS,
+    ImplicitFieldExpressionDiagnostic,
+    ImplicitFieldExpressionGraph,
+    ImplicitFieldExpressionProvenanceSeed,
     ImplicitBoundsDiagnostic,
     ImplicitBudgetDiagnostic,
     ImplicitExtractionBudgetRecord,
@@ -206,6 +209,7 @@ from impression.modeling import (
     build_nurbs_circular_arc_control_net,
     build_nurbs_exact_conic_profile_payload,
     build_subdivision_approximation_diagnostic,
+    bind_implicit_expression_domain,
     classify_implicit_residual,
     evaluate_implicit_field_gradient,
     implicit_box_field,
@@ -213,9 +217,11 @@ from impression.modeling import (
     implicit_field_provenance_record,
     implicit_sphere_field,
     implicit_union_field,
+    build_implicit_field_expression_diagnostic,
     evaluate_path_frame,
     interpolate_path_twist_scale,
     make_implicit_extraction_budget,
+    normalize_implicit_field_expression_graph,
     SurfaceAdjacencyRecord,
     SurfaceBody,
     SurfaceBoundaryDescriptor,
@@ -2086,6 +2092,88 @@ def test_implicit_field_node_payload_is_allow_listed_and_canonical() -> None:
     assert payload["kind"] == "translate"
     assert payload["parameters"] == {"offset": (1.0, 0.0, 0.0)}
     assert payload["children"][0]["parameters"] == {"center": (0.0, 1.0, 2.0), "radius": 2.0}
+
+
+def test_implicit_field_expression_graph_normalizes_domain_and_identity() -> None:
+    sphere = make_implicit_field_node("sphere", parameters={"radius": 1.0})
+    provenance = ImplicitFieldExpressionProvenanceSeed(
+        operation="csg-union",
+        source_family="implicit",
+        source_ids=("operand-a", "operand-b"),
+        route_id="surface-csg.implicit",
+    )
+
+    graph = normalize_implicit_field_expression_graph(
+        sphere,
+        bounds=(-1, 1, -1, 1, -1, 1),
+        provenance=provenance,
+    )
+    rebuilt = normalize_implicit_field_expression_graph(
+        sphere.canonical_payload(),
+        bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+        provenance=provenance,
+    )
+
+    assert isinstance(graph, ImplicitFieldExpressionGraph)
+    assert graph.graph_id == rebuilt.graph_id
+    assert graph.node_count == 1
+    assert graph.max_depth == 1
+    assert graph.bounds == (-1.0, 1.0, -1.0, 1.0, -1.0, 1.0)
+    assert graph.root.kind == "sphere"
+    assert graph.canonical_payload()["provenance"]["source_ids"] == ("operand-a", "operand-b")
+
+
+def test_implicit_expression_domain_rebinds_nested_graph_with_stable_provenance() -> None:
+    expression = implicit_union_field(
+        (
+            implicit_sphere_field(radius=1.0),
+            implicit_box_field(half_extents=(0.5, 0.5, 0.5)),
+        )
+    )
+    provenance = ImplicitFieldExpressionProvenanceSeed(
+        operation="csg-union",
+        source_family="sampled-promoted",
+        source_ids=("sphere", "box"),
+        route_id="sampled-implicit.promote-field",
+    )
+    graph = normalize_implicit_field_expression_graph(
+        expression,
+        bounds=(-1, 1, -1, 1, -1, 1),
+        provenance=provenance,
+    )
+
+    rebound = bind_implicit_expression_domain(graph, (-2, 2, -2, 2, -2, 2))
+
+    assert rebound.root.canonical_payload() == graph.root.canonical_payload()
+    assert rebound.provenance == graph.provenance
+    assert rebound.bounds == (-2.0, 2.0, -2.0, 2.0, -2.0, 2.0)
+    assert rebound.graph_id != graph.graph_id
+    assert rebound.node_count == 3
+    assert rebound.max_depth == 2
+
+
+def test_implicit_expression_diagnostic_reports_invalid_domain_and_expression() -> None:
+    sphere = implicit_sphere_field(radius=1.0)
+    invalid_domain = build_implicit_field_expression_diagnostic(
+        sphere,
+        bounds=(0.0, 0.0, -1.0, 1.0, -1.0, 1.0),
+    )
+    invalid_expression = build_implicit_field_expression_diagnostic(
+        {"kind": "python_eval"},
+        bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+    )
+    valid = build_implicit_field_expression_diagnostic(
+        sphere,
+        bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+    )
+
+    assert isinstance(invalid_domain, ImplicitFieldExpressionDiagnostic)
+    assert invalid_domain.valid is False
+    assert invalid_domain.code == "invalid-domain"
+    assert invalid_expression.valid is False
+    assert invalid_expression.code == "invalid-expression"
+    assert valid.valid is True
+    assert valid.code == "valid-expression"
 
 
 def test_implicit_surface_patch_owns_field_tree_and_bounds() -> None:

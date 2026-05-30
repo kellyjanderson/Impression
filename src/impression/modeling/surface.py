@@ -5020,6 +5020,166 @@ class ImplicitFieldNode:
 
 
 @dataclass(frozen=True)
+class ImplicitFieldExpressionProvenanceSeed:
+    """Stable provenance seed for an implicit expression graph."""
+
+    operation: str
+    source_family: str = "implicit"
+    source_ids: tuple[str, ...] = ()
+    route_id: str = ""
+
+    def __post_init__(self) -> None:
+        operation = str(self.operation).strip()
+        source_family = str(self.source_family).strip()
+        source_ids = tuple(str(source_id).strip() for source_id in self.source_ids)
+        route_id = str(self.route_id).strip()
+        if not operation or not source_family:
+            raise ValueError("ImplicitFieldExpressionProvenanceSeed operation and source_family must be non-empty.")
+        if any(not source_id for source_id in source_ids):
+            raise ValueError("ImplicitFieldExpressionProvenanceSeed source_ids must be non-empty when provided.")
+        object.__setattr__(self, "operation", operation)
+        object.__setattr__(self, "source_family", source_family)
+        object.__setattr__(self, "source_ids", source_ids)
+        object.__setattr__(self, "route_id", route_id)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "source_family": self.source_family,
+            "source_ids": self.source_ids,
+            "route_id": self.route_id,
+        }
+
+
+@dataclass(frozen=True)
+class ImplicitFieldExpressionGraph:
+    """Normalized implicit expression graph with a bounded evaluation domain."""
+
+    root: ImplicitFieldNode | dict[str, object]
+    bounds: tuple[float, float, float, float, float, float]
+    provenance: ImplicitFieldExpressionProvenanceSeed
+    graph_id: str = ""
+    node_count: int = field(init=False)
+    max_depth: int = field(init=False)
+
+    def __post_init__(self) -> None:
+        root = _coerce_implicit_field_node(self.root)
+        bounds = _as_bounds3(self.bounds, name="ImplicitFieldExpressionGraph.bounds")
+        provenance = (
+            self.provenance
+            if isinstance(self.provenance, ImplicitFieldExpressionProvenanceSeed)
+            else ImplicitFieldExpressionProvenanceSeed(**dict(self.provenance))
+        )
+        node_count, max_depth = _implicit_field_tree_stats(root)
+        graph_id = str(self.graph_id).strip() or _implicit_expression_graph_id(root, bounds, provenance)
+        object.__setattr__(self, "root", root)
+        object.__setattr__(self, "bounds", bounds)
+        object.__setattr__(self, "provenance", provenance)
+        object.__setattr__(self, "graph_id", graph_id)
+        object.__setattr__(self, "node_count", node_count)
+        object.__setattr__(self, "max_depth", max_depth)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "graph_id": self.graph_id,
+            "root": self.root.canonical_payload(),
+            "bounds": self.bounds,
+            "provenance": self.provenance.canonical_payload(),
+            "node_count": self.node_count,
+            "max_depth": self.max_depth,
+        }
+
+
+@dataclass(frozen=True)
+class ImplicitFieldExpressionDiagnostic:
+    """Diagnostic for implicit expression graph normalization."""
+
+    valid: bool
+    code: Literal["valid-expression", "invalid-expression", "invalid-domain"]
+    message: str
+    locator: str = "implicit.expression"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "valid": self.valid,
+            "code": self.code,
+            "message": self.message,
+            "locator": self.locator,
+        }
+
+
+def _implicit_field_tree_stats(root: ImplicitFieldNode) -> tuple[int, int]:
+    node_count = 0
+    max_depth = 0
+    stack: list[tuple[ImplicitFieldNode, int]] = [(root, 1)]
+    while stack:
+        node, depth = stack.pop()
+        node_count += 1
+        max_depth = max(max_depth, depth)
+        stack.extend((child, depth + 1) for child in reversed(node.children))
+    return node_count, max_depth
+
+
+def _implicit_expression_graph_id(
+    root: ImplicitFieldNode,
+    bounds: tuple[float, float, float, float, float, float],
+    provenance: ImplicitFieldExpressionProvenanceSeed,
+) -> str:
+    payload = {
+        "root": root.canonical_payload(),
+        "bounds": bounds,
+        "provenance": provenance.canonical_payload(),
+    }
+    encoded = json.dumps(_canonicalize(payload), sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def normalize_implicit_field_expression_graph(
+    root: ImplicitFieldNode | dict[str, object],
+    *,
+    bounds: Sequence[float],
+    provenance: ImplicitFieldExpressionProvenanceSeed | None = None,
+) -> ImplicitFieldExpressionGraph:
+    """Return a normalized implicit expression graph with stable identity."""
+
+    seed = provenance if provenance is not None else ImplicitFieldExpressionProvenanceSeed(operation="implicit-expression")
+    return ImplicitFieldExpressionGraph(root=root, bounds=_as_bounds3(bounds, name="implicit.expression.bounds"), provenance=seed)
+
+
+def bind_implicit_expression_domain(
+    graph_or_root: ImplicitFieldExpressionGraph | ImplicitFieldNode | dict[str, object],
+    bounds: Sequence[float],
+    *,
+    provenance: ImplicitFieldExpressionProvenanceSeed | None = None,
+) -> ImplicitFieldExpressionGraph:
+    """Bind or rebind an implicit expression graph to a bounded domain."""
+
+    if isinstance(graph_or_root, ImplicitFieldExpressionGraph):
+        seed = provenance if provenance is not None else graph_or_root.provenance
+        return ImplicitFieldExpressionGraph(root=graph_or_root.root, bounds=_as_bounds3(bounds, name="implicit.expression.bounds"), provenance=seed)
+    return normalize_implicit_field_expression_graph(graph_or_root, bounds=bounds, provenance=provenance)
+
+
+def build_implicit_field_expression_diagnostic(
+    root: ImplicitFieldNode | dict[str, object],
+    *,
+    bounds: Sequence[float],
+    provenance: ImplicitFieldExpressionProvenanceSeed | None = None,
+) -> ImplicitFieldExpressionDiagnostic:
+    """Return a non-throwing diagnostic for implicit expression graph validity."""
+
+    try:
+        normalize_implicit_field_expression_graph(root, bounds=bounds, provenance=provenance)
+    except ValueError as exc:
+        text = str(exc)
+        code: Literal["invalid-expression", "invalid-domain"] = (
+            "invalid-domain" if "bounds" in text or "span" in text else "invalid-expression"
+        )
+        return ImplicitFieldExpressionDiagnostic(False, code, text)
+    return ImplicitFieldExpressionDiagnostic(True, "valid-expression", "Implicit field expression graph is valid.")
+
+
+@dataclass(frozen=True)
 class ImplicitFieldSafetyPolicy:
     """Bounds and refusal rules for declarative implicit field payloads."""
 
@@ -7298,6 +7458,9 @@ __all__ = [
     "ImplicitExtractionBudgetRecord",
     "ImplicitBoundsDiagnostic",
     "ImplicitBudgetDiagnostic",
+    "ImplicitFieldExpressionDiagnostic",
+    "ImplicitFieldExpressionGraph",
+    "ImplicitFieldExpressionProvenanceSeed",
     "ImplicitFieldAuthoringRequest",
     "ImplicitFieldProvenanceRecord",
     "ImplicitRejectedNodeLocator",
@@ -7376,6 +7539,7 @@ __all__ = [
     "build_implicit_unsafe_authoring_diagnostic",
     "build_implicit_bounds_diagnostic",
     "build_implicit_budget_diagnostic",
+    "build_implicit_field_expression_diagnostic",
     "build_displacement_payload_diagnostic",
     "build_available_family_missing_evidence_diagnostic",
     "build_available_family_no_hidden_mesh_fallback_diagnostic",
@@ -7397,6 +7561,7 @@ __all__ = [
     "implicit_sphere_field",
     "implicit_union_field",
     "evaluate_path_frame",
+    "bind_implicit_expression_domain",
     "build_surface_unsupported_continuity_diagnostic",
     "normalize_surface_seam_continuity_constraint",
     "check_surface_continuity_enforcement_eligibility",
@@ -7404,6 +7569,7 @@ __all__ = [
     "validate_nurbs_weights",
     "validate_implicit_authoring_safety",
     "validate_implicit_extraction_budget",
+    "normalize_implicit_field_expression_graph",
     "interpolate_path_twist_scale",
     "make_implicit_extraction_budget",
     "evaluate_surface_body_completion_gate",
@@ -7455,6 +7621,9 @@ __all__ = [
     "SubdivisionRefinementResult",
     "SubdivisionSurfacePatch",
     "ImplicitFieldNode",
+    "ImplicitFieldExpressionDiagnostic",
+    "ImplicitFieldExpressionGraph",
+    "ImplicitFieldExpressionProvenanceSeed",
     "ImplicitFieldEvaluationDomain",
     "ImplicitFieldEvaluationResult",
     "ImplicitFieldSafetyPolicy",
@@ -7464,6 +7633,9 @@ __all__ = [
     "evaluate_implicit_field",
     "evaluate_implicit_field_domain",
     "make_implicit_field_node",
+    "bind_implicit_expression_domain",
+    "build_implicit_field_expression_diagnostic",
+    "normalize_implicit_field_expression_graph",
     "validate_implicit_field_security",
     "refine_subdivision_control_cage",
     "classify_surface_seam_continuity",
