@@ -574,6 +574,130 @@ class SurfaceSubdivisionRefinedContourRecord:
 
 
 @dataclass(frozen=True)
+class SurfaceSubdivisionExtraordinaryVertexRecord:
+    """Subdivision control vertex whose cage valence is not regular quad valence."""
+
+    vertex_index: int
+    valence: int
+    point: tuple[float, float, float]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "vertex_index": self.vertex_index,
+            "valence": self.valence,
+            "point": self.point,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSubdivisionRefinedChartRecord:
+    """Bounded refined-chart view of a subdivision patch for CSG routes."""
+
+    chart_id: str
+    refinement_level: int
+    face: tuple[int, ...]
+    points_3d: tuple[tuple[float, float, float], ...]
+    loop_uv: tuple[tuple[float, float], ...]
+    source_patch_family: str = "subdivision"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "chart_id": self.chart_id,
+            "face": self.face,
+            "loop_uv": self.loop_uv,
+            "points_3d": self.points_3d,
+            "refinement_level": self.refinement_level,
+            "source_patch_family": self.source_patch_family,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSubdivisionRefinedChartAdapterRecord:
+    """CSG-ready refined charts and diagnostics for one subdivision patch."""
+
+    patch: SubdivisionSurfacePatch
+    charts: tuple[SurfaceSubdivisionRefinedChartRecord, ...]
+    extraordinary_vertices: tuple[SurfaceSubdivisionExtraordinaryVertexRecord, ...] = ()
+    diagnostics: tuple[SurfaceIntersectionSupportDiagnostic, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return bool(self.charts) and not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "supported": self.supported,
+            "patch_family": self.patch.family,
+            "charts": [chart.canonical_payload() for chart in self.charts],
+            "extraordinary_vertices": [vertex.canonical_payload() for vertex in self.extraordinary_vertices],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+def extract_subdivision_csg_refined_charts(
+    patch: SubdivisionSurfacePatch,
+    *,
+    budget: SurfaceSubdivisionIntersectionBudget = DEFAULT_SURFACE_SUBDIVISION_INTERSECTION_BUDGET,
+    refinement_level: int | None = None,
+) -> SurfaceSubdivisionRefinedChartAdapterRecord:
+    """Extract bounded subdivision refined charts for CSG without mesh execution."""
+
+    if not isinstance(patch, SubdivisionSurfacePatch):
+        raise TypeError("extract_subdivision_csg_refined_charts requires a SubdivisionSurfacePatch.")
+    level = patch.subdivision_level if refinement_level is None else int(refinement_level)
+    request = make_surface_intersection_request(patch, patch, consumer="surface-csg")
+    diagnostics = check_subdivision_intersection_budget(
+        request,
+        budget=budget,
+        sample_count=max(1, level + 1),
+        contour_count=len(patch.faces),
+    )
+    if diagnostics:
+        return SurfaceSubdivisionRefinedChartAdapterRecord(patch=patch, charts=(), diagnostics=diagnostics)
+    refined = patch.refined_cage(levels=level)
+    loop_uv = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
+    charts = tuple(
+        SurfaceSubdivisionRefinedChartRecord(
+            chart_id=f"subdivision-chart-{index}",
+            refinement_level=level,
+            face=tuple(int(vertex) for vertex in face),
+            points_3d=tuple(tuple(float(component) for component in refined.control_points[vertex]) for vertex in face),
+            loop_uv=loop_uv,
+        )
+        for index, face in enumerate(refined.faces)
+    )
+    extraordinary = _subdivision_extraordinary_vertices(patch)
+    return SurfaceSubdivisionRefinedChartAdapterRecord(
+        patch=patch,
+        charts=charts,
+        extraordinary_vertices=extraordinary,
+    )
+
+
+def _subdivision_extraordinary_vertices(
+    patch: SubdivisionSurfacePatch,
+) -> tuple[SurfaceSubdivisionExtraordinaryVertexRecord, ...]:
+    valence: dict[int, set[int]] = {index: set() for index in range(len(patch.control_points))}
+    for face in patch.faces:
+        for index, vertex in enumerate(face):
+            previous_vertex = face[index - 1]
+            next_vertex = face[(index + 1) % len(face)]
+            valence[int(vertex)].update((int(previous_vertex), int(next_vertex)))
+    records = []
+    for vertex, neighbors in sorted(valence.items()):
+        if len(neighbors) != 4:
+            point = patch.control_points[vertex]
+            records.append(
+                SurfaceSubdivisionExtraordinaryVertexRecord(
+                    vertex_index=vertex,
+                    valence=len(neighbors),
+                    point=tuple(float(component) for component in point),
+                )
+            )
+    return tuple(records)
+
+
+@dataclass(frozen=True)
 class SurfaceSubdivisionIntersectionAdapterReport:
     """Report for bounded subdivision intersection adapter execution."""
 
