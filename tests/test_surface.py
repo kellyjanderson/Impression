@@ -140,6 +140,7 @@ from impression.modeling import (
     DisplacementSourceProvenanceRecord,
     DisplacementSourceResolutionResult,
     export_tessellation_request,
+    extract_subdivision_csg_refined_charts,
     feature_surface_handoff_diagnostic,
     FeatureSurfaceHandoffDiagnostic,
     FeatureSurfaceHandoffRecord,
@@ -227,6 +228,10 @@ from impression.modeling import (
     SurfaceSweepCSGEvaluatorAdapter,
     SurfaceSweepCSGEventSeedRecord,
     SurfaceSweepCSGFrameEventDiagnostic,
+    SurfaceSubdivisionExtraordinaryVertexRecord,
+    SurfaceSubdivisionIntersectionBudget,
+    SurfaceSubdivisionRefinedChartAdapterRecord,
+    SurfaceSubdivisionRefinedChartRecord,
     SurfaceComposition,
     SurfaceCompositionError,
     SurfaceCompositionTraversalRecord,
@@ -1791,6 +1796,33 @@ def test_subdivision_scheme_record_and_approximation_diagnostic_are_inspectable(
     assert diagnostic.code == "finite-subdivision-approximation"
     assert "not hidden mesh fallback" in diagnostic.message
     assert explicit.canonical_payload()["level"] == 2
+
+
+def test_subdivision_csg_refined_chart_adapter_records_charts_and_extraordinary_vertices() -> None:
+    patch = SubdivisionSurfacePatch(family="subdivision", subdivision_level=1)
+
+    adapter = extract_subdivision_csg_refined_charts(patch)
+
+    assert isinstance(adapter, SurfaceSubdivisionRefinedChartAdapterRecord)
+    assert adapter.supported is True
+    assert adapter.charts
+    assert all(isinstance(chart, SurfaceSubdivisionRefinedChartRecord) for chart in adapter.charts)
+    assert all(isinstance(vertex, SurfaceSubdivisionExtraordinaryVertexRecord) for vertex in adapter.extraordinary_vertices)
+    assert adapter.extraordinary_vertices
+    assert adapter.canonical_payload()["supported"] is True
+    assert adapter.charts[0].source_patch_family == "subdivision"
+
+
+def test_subdivision_csg_refined_chart_adapter_reports_budget_refusal_without_mesh() -> None:
+    patch = SubdivisionSurfacePatch(family="subdivision", subdivision_level=3)
+    budget = SurfaceSubdivisionIntersectionBudget(max_refinement_level=1, max_sample_count=4, max_contour_count=1)
+
+    adapter = extract_subdivision_csg_refined_charts(patch, budget=budget, refinement_level=3)
+
+    assert adapter.supported is False
+    assert adapter.diagnostics
+    assert {diagnostic.code for diagnostic in adapter.diagnostics} == {"budget-exhausted"}
+    assert all("mesh" not in diagnostic.message.lower() for diagnostic in adapter.diagnostics)
 
 
 @pytest.mark.parametrize(
