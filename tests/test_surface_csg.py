@@ -84,6 +84,8 @@ from impression.modeling import (
     SurfaceCSGPairDispatchRecord,
     SurfaceCSGPairFixtureEvidenceReport,
     SurfaceCSGPairFixtureRow,
+    SurfaceHeightmapCSGEvidenceReport,
+    SurfaceHeightmapCSGFixtureRow,
     SurfaceImplicitCSGEvidenceReport,
     SurfaceImplicitCSGFixtureRow,
     SurfaceSampledImplicitCSGUnsupportedRow,
@@ -151,6 +153,7 @@ from impression.modeling import (
     classify_surface_csg_point_against_bounds,
     detect_spline_nurbs_coincident_regions,
     enumerate_higher_order_csg_pair_fixture_rows,
+    enumerate_heightmap_csg_fixture_rows,
     enumerate_sampled_implicit_csg_unsupported_rows,
     intersect_analytic_bspline_patch_pair,
     intersect_analytic_nurbs_patch_pair,
@@ -202,6 +205,7 @@ from impression.modeling import (
     validate_surface_csg_result_handoff,
     verify_surface_csg_persistence_tessellation_evidence,
     verify_higher_order_csg_pair_fixture_matrix,
+    verify_heightmap_csg_fixture_evidence_matrix,
     enumerate_implicit_csg_fixture_rows,
     verify_implicit_csg_fixture_evidence_matrix,
     verify_sampled_implicit_csg_unsupported_row_tracker,
@@ -1366,6 +1370,27 @@ def test_implicit_csg_fixture_evidence_matrix_covers_success_refusals_persistenc
     by_kind = {row.route_kind: row for row in rows}
     assert by_kind["success"].left_family == "planar"
     assert by_kind["adapter-refusal"].right_family == "unsupported-field"
+    assert by_kind["persistence"].message.endswith("without mesh truth.")
+    assert "no mesh fallback" in by_kind["no-mesh-fallback"].message.lower()
+    assert report.canonical_payload()["passed"] is True
+
+
+def test_heightmap_csg_fixture_evidence_matrix_covers_success_promotion_persistence_and_no_mesh() -> None:
+    rows = enumerate_heightmap_csg_fixture_rows()
+    report = verify_heightmap_csg_fixture_evidence_matrix()
+
+    assert isinstance(report, SurfaceHeightmapCSGEvidenceReport)
+    assert report.passed is True
+    assert report.diagnostics == ()
+    assert {row.route_kind for row in rows} == set(report.required_route_kinds)
+    assert all(isinstance(row, SurfaceHeightmapCSGFixtureRow) for row in rows)
+    assert all(row.reference_state == "clean" for row in rows)
+    assert all(not row.mesh_fallback_attempted for row in rows)
+    assert all(row.passed for row in rows)
+    by_kind = {row.route_kind: row for row in rows}
+    assert by_kind["success"].operation == "union"
+    assert by_kind["representability-refusal"].operation == "intersection"
+    assert by_kind["promotion"].target_family == "implicit"
     assert by_kind["persistence"].message.endswith("without mesh truth.")
     assert "no mesh fallback" in by_kind["no-mesh-fallback"].message.lower()
     assert report.canonical_payload()["passed"] is True
