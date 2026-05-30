@@ -575,7 +575,7 @@ Only final leaf specifications appear here.
 ### Sampled And Implicit CSG Unsupported Row Completion
 - [x] [Surface Spec 350: Sampled Implicit Unsupported Row Tracker (v1.0)](../specifications/surface-350-sampled-implicit-unsupported-row-tracker-v1_0.md)
 - [x] [Surface Spec 351: Implicit Field Expression Graph (v1.0)](../specifications/surface-351-implicit-field-expression-graph-v1_0.md)
-- [ ] [Surface Spec 352: Implicit Operand Field Adapters (v1.0)](../specifications/surface-352-implicit-operand-field-adapters-v1_0.md)
+- [x] [Surface Spec 352: Implicit Operand Field Adapters (v1.0)](../specifications/surface-352-implicit-operand-field-adapters-v1_0.md)
 - [ ] [Surface Spec 353: Implicit Field Safety Validation (v1.0)](../specifications/surface-353-implicit-field-safety-validation-v1_0.md)
 - [ ] [Surface Spec 354: Implicit Composition Operation Semantics (v1.0)](../specifications/surface-354-implicit-composition-operation-semantics-v1_0.md)
 - [ ] [Surface Spec 355: Implicit CSG Impress Payload Persistence (v1.0)](../specifications/surface-355-implicit-csg-impress-payload-persistence-v1_0.md)

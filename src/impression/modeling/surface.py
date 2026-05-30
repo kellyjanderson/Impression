@@ -4377,6 +4377,7 @@ ImplicitFieldNodeKind = Literal[
     "translate",
     "scale",
     "negate",
+    "sampled_surface",
 ]
 
 IMPLICIT_FIELD_NODE_KINDS: frozenset[str] = frozenset(
@@ -4391,6 +4392,7 @@ IMPLICIT_FIELD_NODE_KINDS: frozenset[str] = frozenset(
         "translate",
         "scale",
         "negate",
+        "sampled_surface",
     }
 )
 _IMPLICIT_EXECUTABLE_PARAMETER_NAMES = frozenset(
@@ -5108,6 +5110,148 @@ class ImplicitFieldExpressionDiagnostic:
         }
 
 
+ImplicitOperandFieldAdapterKind = Literal["exact-field", "analytic-field", "sampled-evaluator", "refused"]
+
+
+@dataclass(frozen=True)
+class ImplicitOperandFieldAdapterResidualRecord:
+    """Residual metadata for a surface operand promoted to an implicit field."""
+
+    family: str
+    adapter_kind: ImplicitOperandFieldAdapterKind
+    residual_kind: Literal["exact", "finite-domain", "sampled-distance", "unavailable"]
+    tolerance: float
+    lossiness: Literal["none", "declared-tolerance", "refused"] = "declared-tolerance"
+    sample_count: int = 0
+
+    def __post_init__(self) -> None:
+        family = str(self.family).strip()
+        adapter_kind = str(self.adapter_kind).strip()
+        residual_kind = str(self.residual_kind).strip()
+        tolerance = float(self.tolerance)
+        if not family:
+            raise ValueError("ImplicitOperandFieldAdapterResidualRecord.family must be non-empty.")
+        if adapter_kind not in {"exact-field", "analytic-field", "sampled-evaluator", "refused"}:
+            raise ValueError("Implicit operand field adapter kind is unsupported.")
+        if residual_kind not in {"exact", "finite-domain", "sampled-distance", "unavailable"}:
+            raise ValueError("Implicit operand field residual kind is unsupported.")
+        if not np.isfinite(tolerance) or tolerance < 0.0:
+            raise ValueError("Implicit operand field adapter tolerance must be finite and non-negative.")
+        lossiness = str(self.lossiness).strip()
+        if lossiness not in {"none", "declared-tolerance", "refused"}:
+            raise ValueError("Implicit operand field adapter lossiness is unsupported.")
+        sample_count = int(self.sample_count)
+        if sample_count < 0:
+            raise ValueError("Implicit operand field adapter sample_count must be non-negative.")
+        object.__setattr__(self, "family", family)
+        object.__setattr__(self, "adapter_kind", adapter_kind)
+        object.__setattr__(self, "residual_kind", residual_kind)
+        object.__setattr__(self, "tolerance", tolerance)
+        object.__setattr__(self, "lossiness", lossiness)
+        object.__setattr__(self, "sample_count", sample_count)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "family": self.family,
+            "adapter_kind": self.adapter_kind,
+            "residual_kind": self.residual_kind,
+            "tolerance": self.tolerance,
+            "lossiness": self.lossiness,
+            "sample_count": self.sample_count,
+        }
+
+
+@dataclass(frozen=True)
+class ImplicitOperandFieldAdapterRefusalDiagnostic:
+    """Diagnostic for operands that cannot expose an implicit field adapter."""
+
+    code: Literal["unsupported-family", "invalid-domain", "unsafe-field", "adapter-failed"]
+    message: str
+    family: str
+    patch_id: str = ""
+    no_mesh_fallback: bool = True
+
+    def __post_init__(self) -> None:
+        code = str(self.code).strip()
+        family = str(self.family).strip()
+        if code not in {"unsupported-family", "invalid-domain", "unsafe-field", "adapter-failed"}:
+            raise ValueError("Implicit operand field adapter refusal code is unsupported.")
+        if not family:
+            raise ValueError("Implicit operand field adapter refusal family must be non-empty.")
+        object.__setattr__(self, "code", code)
+        object.__setattr__(self, "message", str(self.message))
+        object.__setattr__(self, "family", family)
+        object.__setattr__(self, "patch_id", str(self.patch_id).strip())
+        object.__setattr__(self, "no_mesh_fallback", bool(self.no_mesh_fallback))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "family": self.family,
+            "patch_id": self.patch_id,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class ImplicitOperandFieldAdapterRecord:
+    """Surface operand to implicit expression graph adapter result."""
+
+    family: str
+    patch_id: str
+    adapter_kind: ImplicitOperandFieldAdapterKind
+    supported: bool
+    graph: ImplicitFieldExpressionGraph | None = None
+    residuals: tuple[ImplicitOperandFieldAdapterResidualRecord, ...] = ()
+    diagnostics: tuple[ImplicitOperandFieldAdapterRefusalDiagnostic, ...] = ()
+
+    def __post_init__(self) -> None:
+        family = str(self.family).strip()
+        patch_id = str(self.patch_id).strip()
+        adapter_kind = str(self.adapter_kind).strip()
+        if not family:
+            raise ValueError("ImplicitOperandFieldAdapterRecord.family must be non-empty.")
+        if adapter_kind not in {"exact-field", "analytic-field", "sampled-evaluator", "refused"}:
+            raise ValueError("Implicit operand field adapter kind is unsupported.")
+        graph = self.graph
+        residuals = tuple(
+            residual
+            if isinstance(residual, ImplicitOperandFieldAdapterResidualRecord)
+            else ImplicitOperandFieldAdapterResidualRecord(**dict(residual))
+            for residual in self.residuals
+        )
+        diagnostics = tuple(
+            diagnostic
+            if isinstance(diagnostic, ImplicitOperandFieldAdapterRefusalDiagnostic)
+            else ImplicitOperandFieldAdapterRefusalDiagnostic(**dict(diagnostic))
+            for diagnostic in self.diagnostics
+        )
+        supported = bool(self.supported)
+        if supported and graph is None:
+            raise ValueError("Supported implicit operand field adapters must include a graph.")
+        if not supported and not diagnostics:
+            raise ValueError("Refused implicit operand field adapters must include diagnostics.")
+        object.__setattr__(self, "family", family)
+        object.__setattr__(self, "patch_id", patch_id)
+        object.__setattr__(self, "adapter_kind", adapter_kind)
+        object.__setattr__(self, "supported", supported)
+        object.__setattr__(self, "graph", graph)
+        object.__setattr__(self, "residuals", residuals)
+        object.__setattr__(self, "diagnostics", diagnostics)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "family": self.family,
+            "patch_id": self.patch_id,
+            "adapter_kind": self.adapter_kind,
+            "supported": self.supported,
+            "graph": None if self.graph is None else self.graph.canonical_payload(),
+            "residuals": [residual.canonical_payload() for residual in self.residuals],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
 def _implicit_field_tree_stats(root: ImplicitFieldNode) -> tuple[int, int]:
     node_count = 0
     max_depth = 0
@@ -5177,6 +5321,181 @@ def build_implicit_field_expression_diagnostic(
         )
         return ImplicitFieldExpressionDiagnostic(False, code, text)
     return ImplicitFieldExpressionDiagnostic(True, "valid-expression", "Implicit field expression graph is valid.")
+
+
+def _inflate_degenerate_bounds(
+    bounds: Sequence[float],
+    *,
+    tolerance: float,
+) -> tuple[float, float, float, float, float, float]:
+    values = tuple(float(value) for value in bounds)
+    if len(values) != 6 or not np.all(np.isfinite(values)):
+        raise ValueError("Implicit operand field adapter bounds must contain six finite values.")
+    pad = max(float(tolerance), 1e-6)
+    xmin, xmax, ymin, ymax, zmin, zmax = values
+    if xmax <= xmin:
+        center = (xmin + xmax) * 0.5
+        xmin, xmax = center - pad, center + pad
+    if ymax <= ymin:
+        center = (ymin + ymax) * 0.5
+        ymin, ymax = center - pad, center + pad
+    if zmax <= zmin:
+        center = (zmin + zmax) * 0.5
+        zmin, zmax = center - pad, center + pad
+    return _as_bounds3((xmin, xmax, ymin, ymax, zmin, zmax), name="implicit.operand_adapter.bounds")
+
+
+def _sampled_surface_field_from_patch(
+    patch: "SurfacePatch",
+    *,
+    sample_grid: tuple[int, int],
+    tolerance: float,
+) -> tuple[ImplicitFieldNode, ImplicitOperandFieldAdapterResidualRecord]:
+    u_count, v_count = (int(sample_grid[0]), int(sample_grid[1]))
+    if u_count < 2 or v_count < 2:
+        raise ValueError("Implicit operand sampled evaluator requires at least a 2x2 sample grid.")
+    samples = patch.sample_grid(u_count, v_count).reshape(-1, 3)
+    node = make_implicit_field_node(
+        "sampled_surface",
+        parameters={
+            "points": tuple(tuple(float(coord) for coord in point) for point in samples),
+            "offset": float(tolerance),
+            "source_family": patch.family,
+            "source_patch_id": patch.stable_identity,
+        },
+    )
+    residual = ImplicitOperandFieldAdapterResidualRecord(
+        family=patch.family,
+        adapter_kind="sampled-evaluator",
+        residual_kind="sampled-distance",
+        tolerance=tolerance,
+        lossiness="declared-tolerance",
+        sample_count=int(samples.shape[0]),
+    )
+    return node, residual
+
+
+def adapt_surface_patch_to_implicit_field(
+    patch: "SurfacePatch",
+    *,
+    operation: str = "operand-field-adapter",
+    bounds: Sequence[float] | None = None,
+    tolerance: float = 1e-6,
+    sample_grid: tuple[int, int] = (5, 5),
+) -> ImplicitOperandFieldAdapterRecord:
+    """Adapt a surface patch into a bounded implicit field expression without mesh fallback."""
+
+    if not isinstance(patch, SurfacePatch):
+        raise TypeError("Implicit operand field adapters require a SurfacePatch operand.")
+    tol = float(tolerance)
+    if not np.isfinite(tol) or tol < 0.0:
+        raise ValueError("Implicit operand field adapter tolerance must be finite and non-negative.")
+    try:
+        adapter_bounds = _inflate_degenerate_bounds(
+            patch.bounds_estimate() if bounds is None else bounds,
+            tolerance=max(tol, 1e-6),
+        )
+        if isinstance(patch, ImplicitSurfacePatch):
+            root = patch.field
+            adapter_kind: ImplicitOperandFieldAdapterKind = "exact-field"
+            residuals = (
+                ImplicitOperandFieldAdapterResidualRecord(
+                    family=patch.family,
+                    adapter_kind=adapter_kind,
+                    residual_kind="exact",
+                    tolerance=tol,
+                    lossiness="none",
+                    sample_count=0,
+                ),
+            )
+            adapter_bounds = _inflate_degenerate_bounds(bounds if bounds is not None else patch.bounds, tolerance=max(tol, 1e-6))
+        elif isinstance(patch, PlanarSurfacePatch):
+            normal = patch.normal_at(patch.domain.u_range[0], patch.domain.v_range[0])
+            origin = patch.point_at(patch.domain.u_range[0], patch.domain.v_range[0])
+            root = make_implicit_field_node(
+                "plane",
+                parameters={
+                    "normal": tuple(float(value) for value in normal),
+                    "offset": float(np.dot(normal, origin)),
+                },
+            )
+            adapter_kind = "analytic-field"
+            residuals = (
+                ImplicitOperandFieldAdapterResidualRecord(
+                    family=patch.family,
+                    adapter_kind=adapter_kind,
+                    residual_kind="finite-domain",
+                    tolerance=tol,
+                    lossiness="declared-tolerance",
+                    sample_count=0,
+                ),
+            )
+        elif patch.family in {"bspline", "nurbs", "sweep", "subdivision", "heightmap", "displacement", "ruled", "revolution"}:
+            root, residual = _sampled_surface_field_from_patch(patch, sample_grid=sample_grid, tolerance=tol)
+            adapter_kind = "sampled-evaluator"
+            residuals = (residual,)
+        else:
+            diagnostic = ImplicitOperandFieldAdapterRefusalDiagnostic(
+                code="unsupported-family",
+                message=(
+                    f"Patch family '{patch.family}' has no implicit operand field adapter; "
+                    "no mesh fallback was attempted."
+                ),
+                family=patch.family,
+                patch_id=patch.stable_identity,
+            )
+            residual = ImplicitOperandFieldAdapterResidualRecord(
+                family=patch.family,
+                adapter_kind="refused",
+                residual_kind="unavailable",
+                tolerance=tol,
+                lossiness="refused",
+            )
+            return ImplicitOperandFieldAdapterRecord(
+                family=patch.family,
+                patch_id=patch.stable_identity,
+                adapter_kind="refused",
+                supported=False,
+                residuals=(residual,),
+                diagnostics=(diagnostic,),
+            )
+        provenance = ImplicitFieldExpressionProvenanceSeed(
+            operation=operation,
+            source_family=patch.family,
+            source_ids=(patch.stable_identity,),
+            route_id=f"implicit-operand-field-adapter.{adapter_kind}",
+        )
+        graph = normalize_implicit_field_expression_graph(root, bounds=adapter_bounds, provenance=provenance)
+        return ImplicitOperandFieldAdapterRecord(
+            family=patch.family,
+            patch_id=patch.stable_identity,
+            adapter_kind=adapter_kind,
+            supported=True,
+            graph=graph,
+            residuals=residuals,
+        )
+    except Exception as exc:
+        diagnostic = ImplicitOperandFieldAdapterRefusalDiagnostic(
+            code="adapter-failed",
+            message=f"Implicit operand field adapter failed for family '{patch.family}': {exc}; no mesh fallback was attempted.",
+            family=patch.family,
+            patch_id=patch.stable_identity,
+        )
+        residual = ImplicitOperandFieldAdapterResidualRecord(
+            family=patch.family,
+            adapter_kind="refused",
+            residual_kind="unavailable",
+            tolerance=tol,
+            lossiness="refused",
+        )
+        return ImplicitOperandFieldAdapterRecord(
+            family=patch.family,
+            patch_id=patch.stable_identity,
+            adapter_kind="refused",
+            supported=False,
+            residuals=(residual,),
+            diagnostics=(diagnostic,),
+        )
 
 
 @dataclass(frozen=True)
@@ -5713,6 +6032,16 @@ def _evaluate_implicit_field_value(node: ImplicitFieldNode, point: np.ndarray) -
         return float(np.dot(normal, point) - offset)
     if node.kind == "constant":
         return _field_param_float(node, "value", 0.0)
+    if node.kind == "sampled_surface":
+        points_value = node.parameters.get("points", ())
+        points = np.asarray(points_value, dtype=float)
+        if points.ndim != 2 or points.shape[1] != 3 or points.shape[0] == 0:
+            raise ValueError("sampled_surface.points must contain one or more 3D points.")
+        offset = _field_param_float(node, "offset", 0.0)
+        if offset < 0.0:
+            raise ValueError("sampled_surface.offset must be non-negative.")
+        distances = np.linalg.norm(points - point, axis=1)
+        return float(np.min(distances) - offset)
     if node.kind == "union":
         _require_child_count(node, minimum=1)
         return float(min(_evaluate_implicit_field_value(child, point) for child in node.children))
@@ -7461,6 +7790,9 @@ __all__ = [
     "ImplicitFieldExpressionDiagnostic",
     "ImplicitFieldExpressionGraph",
     "ImplicitFieldExpressionProvenanceSeed",
+    "ImplicitOperandFieldAdapterRecord",
+    "ImplicitOperandFieldAdapterRefusalDiagnostic",
+    "ImplicitOperandFieldAdapterResidualRecord",
     "ImplicitFieldAuthoringRequest",
     "ImplicitFieldProvenanceRecord",
     "ImplicitRejectedNodeLocator",
@@ -7540,6 +7872,7 @@ __all__ = [
     "build_implicit_bounds_diagnostic",
     "build_implicit_budget_diagnostic",
     "build_implicit_field_expression_diagnostic",
+    "adapt_surface_patch_to_implicit_field",
     "build_displacement_payload_diagnostic",
     "build_available_family_missing_evidence_diagnostic",
     "build_available_family_no_hidden_mesh_fallback_diagnostic",
@@ -7624,6 +7957,9 @@ __all__ = [
     "ImplicitFieldExpressionDiagnostic",
     "ImplicitFieldExpressionGraph",
     "ImplicitFieldExpressionProvenanceSeed",
+    "ImplicitOperandFieldAdapterRecord",
+    "ImplicitOperandFieldAdapterRefusalDiagnostic",
+    "ImplicitOperandFieldAdapterResidualRecord",
     "ImplicitFieldEvaluationDomain",
     "ImplicitFieldEvaluationResult",
     "ImplicitFieldSafetyPolicy",
@@ -7636,6 +7972,7 @@ __all__ = [
     "bind_implicit_expression_domain",
     "build_implicit_field_expression_diagnostic",
     "normalize_implicit_field_expression_graph",
+    "adapt_surface_patch_to_implicit_field",
     "validate_implicit_field_security",
     "refine_subdivision_control_cage",
     "classify_surface_seam_continuity",

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 import pytest
 
@@ -166,6 +168,9 @@ from impression.modeling import (
     ImplicitFieldExpressionDiagnostic,
     ImplicitFieldExpressionGraph,
     ImplicitFieldExpressionProvenanceSeed,
+    ImplicitOperandFieldAdapterRecord,
+    ImplicitOperandFieldAdapterRefusalDiagnostic,
+    ImplicitOperandFieldAdapterResidualRecord,
     ImplicitBoundsDiagnostic,
     ImplicitBudgetDiagnostic,
     ImplicitExtractionBudgetRecord,
@@ -209,6 +214,7 @@ from impression.modeling import (
     build_nurbs_circular_arc_control_net,
     build_nurbs_exact_conic_profile_payload,
     build_subdivision_approximation_diagnostic,
+    adapt_surface_patch_to_implicit_field,
     bind_implicit_expression_domain,
     classify_implicit_residual,
     evaluate_implicit_field_gradient,
@@ -227,6 +233,7 @@ from impression.modeling import (
     SurfaceBoundaryDescriptor,
     SurfaceBoundaryRef,
     SurfaceBodyCompletionEvidenceRecord,
+    SurfacePatch,
     SurfaceReferenceArtifactClassRecord,
     SurfaceReferenceEvidenceMatrixReport,
     SurfaceReferenceFixtureContractRecord,
@@ -2174,6 +2181,111 @@ def test_implicit_expression_diagnostic_reports_invalid_domain_and_expression() 
     assert invalid_expression.code == "invalid-expression"
     assert valid.valid is True
     assert valid.code == "valid-expression"
+
+
+def test_implicit_operand_field_adapter_preserves_exact_implicit_field() -> None:
+    patch = ImplicitSurfacePatch(
+        family="implicit",
+        field=implicit_sphere_field(radius=1.0),
+        bounds=(-1.25, 1.25, -1.25, 1.25, -1.25, 1.25),
+    )
+
+    adapter = adapt_surface_patch_to_implicit_field(patch, operation="csg-union")
+
+    assert isinstance(adapter, ImplicitOperandFieldAdapterRecord)
+    assert adapter.supported is True
+    assert adapter.adapter_kind == "exact-field"
+    assert adapter.graph is not None
+    assert adapter.graph.root.kind == "sphere"
+    assert adapter.graph.provenance.source_ids == (patch.stable_identity,)
+    assert adapter.residuals[0].lossiness == "none"
+
+
+def test_implicit_operand_field_adapter_builds_planar_analytic_field() -> None:
+    patch = PlanarSurfacePatch(family="planar")
+
+    adapter = adapt_surface_patch_to_implicit_field(patch, tolerance=1e-5)
+
+    assert adapter.supported is True
+    assert adapter.adapter_kind == "analytic-field"
+    assert adapter.graph is not None
+    assert adapter.graph.root.kind == "plane"
+    assert adapter.residuals[0].residual_kind == "finite-domain"
+    assert adapter.graph.bounds[4] < adapter.graph.bounds[5]
+    assert "mesh" not in adapter.canonical_payload()["graph"]["provenance"]["route_id"]
+
+
+def test_implicit_operand_field_adapter_builds_sampled_fields_for_higher_order_and_sampled_families() -> None:
+    source = PlanarSurfacePatch(family="planar")
+    patches = (
+        BSplineSurfacePatch(family="bspline"),
+        NURBSSurfacePatch(family="nurbs"),
+        SweepSurfacePatch(family="sweep"),
+        SubdivisionSurfacePatch(family="subdivision"),
+        HeightmapSurfacePatch(family="heightmap"),
+        DisplacementSurfacePatch(
+            family="displacement",
+            source_patch=source,
+            displacement_samples=np.zeros((2, 2), dtype=float),
+            projection_bounds=(-1.0, 1.0, -1.0, 1.0),
+        ),
+    )
+
+    adapters = tuple(adapt_surface_patch_to_implicit_field(patch, sample_grid=(2, 2), tolerance=0.01) for patch in patches)
+
+    assert {adapter.family for adapter in adapters} == {
+        "bspline",
+        "nurbs",
+        "sweep",
+        "subdivision",
+        "heightmap",
+        "displacement",
+    }
+    assert all(adapter.supported for adapter in adapters)
+    assert all(adapter.adapter_kind == "sampled-evaluator" for adapter in adapters)
+    assert all(adapter.graph is not None and adapter.graph.root.kind == "sampled_surface" for adapter in adapters)
+    assert all(isinstance(adapter.residuals[0], ImplicitOperandFieldAdapterResidualRecord) for adapter in adapters)
+    assert all(adapter.residuals[0].sample_count == 4 for adapter in adapters)
+    assert all(not adapter.diagnostics for adapter in adapters)
+
+
+def test_implicit_operand_field_adapter_refuses_unsupported_family_without_mesh_fallback() -> None:
+    @dataclass(frozen=True)
+    class UnsupportedSurfacePatch(SurfacePatch):
+        def point_at(self, u: float, v: float) -> np.ndarray:
+            self.validate_parameters(u, v)
+            return np.array([float(u), float(v), 0.0], dtype=float)
+
+        def derivatives_at(self, u: float, v: float) -> tuple[np.ndarray, np.ndarray]:
+            self.validate_parameters(u, v)
+            return (np.array([1.0, 0.0, 0.0], dtype=float), np.array([0.0, 1.0, 0.0], dtype=float))
+
+        def geometry_payload(self) -> dict[str, object]:
+            return {"kind": "unsupported"}
+
+    patch = UnsupportedSurfacePatch(family="unsupported-field")
+
+    adapter = adapt_surface_patch_to_implicit_field(patch)
+
+    assert adapter.supported is False
+    assert adapter.adapter_kind == "refused"
+    assert isinstance(adapter.diagnostics[0], ImplicitOperandFieldAdapterRefusalDiagnostic)
+    assert adapter.diagnostics[0].code == "unsupported-family"
+    assert adapter.diagnostics[0].no_mesh_fallback is True
+    assert "no mesh fallback" in adapter.diagnostics[0].message
+
+
+def test_sampled_surface_implicit_field_node_evaluates_distance_without_mesh() -> None:
+    node = make_implicit_field_node(
+        "sampled_surface",
+        parameters={"points": ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)), "offset": 0.1},
+    )
+
+    near = evaluate_implicit_field(node, (0.05, 0.0, 0.0))
+    far = evaluate_implicit_field(node, (0.5, 0.5, 0.0))
+
+    assert near.value < 0.0
+    assert far.value > 0.0
 
 
 def test_implicit_surface_patch_owns_field_tree_and_bounds() -> None:
