@@ -101,6 +101,8 @@ from impression.modeling import (
     SurfaceSampledImplicitPromotionProvenanceRecord,
     SurfaceSampledImplicitReconstructionFeasibilityReport,
     SurfaceRepresentationRefusalRecord,
+    SurfaceSampledImplicitReferenceFixturePromotionReport,
+    SurfaceSampledImplicitReferenceFixtureRow,
     SurfaceSampledImplicitCSGUnsupportedRow,
     SurfaceSampledImplicitCSGUnsupportedRowReport,
     SurfaceCSGPatchLocalCurve,
@@ -175,6 +177,7 @@ from impression.modeling import (
     displacement_source_mismatch_refusal_record,
     evaluate_sampled_implicit_reconstruction_feasibility,
     enumerate_sampled_implicit_promotion_fixture_rows,
+    enumerate_sampled_implicit_reference_fixture_promotions,
     sampled_implicit_reconstruction_criteria,
     sampled_implicit_promotion_metadata_payload,
     select_sampled_implicit_promotion_target,
@@ -184,6 +187,7 @@ from impression.modeling import (
     suggest_non_csg_replacement_workflow,
     heightmap_representability_report,
     verify_sampled_implicit_promotion_fixture_evidence_matrix,
+    verify_sampled_implicit_reference_fixture_promotions,
     intersect_analytic_bspline_patch_pair,
     intersect_analytic_nurbs_patch_pair,
     intersect_axis_compatible_revolution_pair,
@@ -1554,6 +1558,28 @@ def test_representation_refusal_contract_distinguishes_non_csg_replacement_from_
     assert missing_solver.supported_refusal is False
     assert missing_solver.replacement is None
     assert "not a representation refusal" in missing_solver.message
+
+
+def test_sampled_implicit_reference_fixture_promotion_covers_native_promoted_refusal_and_negative_routes() -> None:
+    rows = enumerate_sampled_implicit_reference_fixture_promotions()
+    report = verify_sampled_implicit_reference_fixture_promotions()
+
+    assert isinstance(report, SurfaceSampledImplicitReferenceFixturePromotionReport)
+    assert report.passed is True
+    assert report.diagnostics == ()
+    assert set(report.required_route_kinds) == {row.route_kind for row in rows}
+    assert all(isinstance(row, SurfaceSampledImplicitReferenceFixtureRow) for row in rows)
+    assert all(row.reference_state == "clean" for row in rows)
+    assert all(row.no_mesh_fallback for row in rows)
+    assert all(row.passed for row in rows)
+    assert {"implicit-csg", "heightmap-csg", "displacement-csg"} <= {
+        row.payload_kind for row in rows if row.route_kind == "native"
+    }
+    assert any(row.payload_kind == "sampled-implicit-promotion" for row in rows if row.route_kind == "promoted")
+    assert any(row.route_kind == "refusal" for row in rows)
+    assert any(row.route_kind == "unsafe" for row in rows)
+    assert any(row.route_kind == "malformed" for row in rows)
+    assert report.canonical_payload()["passed"] is True
 
 
 def test_implicit_composition_operation_sign_policies_are_deterministic() -> None:
