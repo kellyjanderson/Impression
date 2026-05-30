@@ -59,6 +59,13 @@ SurfaceBooleanPatchRelation = Literal["inside", "outside", "on"]
 SurfaceBooleanSplitRole = Literal["survive", "cut_cap", "discard"]
 SurfaceBooleanUnsupportedPhase = Literal["operand-family-eligibility", "intersection-kernel"]
 SurfaceBooleanSupportState = Literal["exact", "declared-tolerance", "adapter", "unsupported", "not-yet-implemented"]
+SurfaceSampledImplicitCSGRouteStatus = Literal[
+    "in-progress",
+    "native-route",
+    "promotion-route",
+    "representation-refusal",
+    "non-csg-replacement",
+]
 SurfaceCSGRoutePairClass = Literal[
     "low-order-analytic",
     "analytic-to-bspline",
@@ -2799,6 +2806,61 @@ class SurfaceCSGPairFixtureEvidenceReport:
         }
 
 
+@dataclass(frozen=True)
+class SurfaceSampledImplicitCSGUnsupportedRow:
+    """Tracked sampled/implicit CSG row that still needs route promotion."""
+
+    operation: SurfaceBooleanOperation
+    left_family: str
+    right_family: str
+    support_state: SurfaceBooleanSupportState
+    route_status: SurfaceSampledImplicitCSGRouteStatus
+    route_id: str
+    required_future_capability: str
+    mesh_fallback_attempted: bool = False
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "left_family": self.left_family,
+            "right_family": self.right_family,
+            "support_state": self.support_state,
+            "route_status": self.route_status,
+            "route_id": self.route_id,
+            "required_future_capability": self.required_future_capability,
+            "mesh_fallback_attempted": self.mesh_fallback_attempted,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSampledImplicitCSGUnsupportedRowReport:
+    """Completion tracker for sampled/implicit CSG rows still leaving unsupported."""
+
+    rows: tuple[SurfaceSampledImplicitCSGUnsupportedRow, ...]
+    expected_row_count: int
+    expected_rows_per_operation: int
+    diagnostics: tuple[SurfaceCSGRouteSupportDiagnostic, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return len(self.rows) == self.expected_row_count and not self.diagnostics
+
+    def rows_for_operation(
+        self,
+        operation: SurfaceBooleanOperation,
+    ) -> tuple[SurfaceSampledImplicitCSGUnsupportedRow, ...]:
+        return tuple(row for row in self.rows if row.operation == operation)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "passed": self.passed,
+            "expected_row_count": self.expected_row_count,
+            "expected_rows_per_operation": self.expected_rows_per_operation,
+            "rows": [row.canonical_payload() for row in self.rows],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
 _SURFACE_BOOLEAN_EXECUTABLE_FAMILY_PAIRS: frozenset[tuple[str, str]] = frozenset(
     (
         {
@@ -3065,6 +3127,142 @@ def verify_higher_order_csg_pair_fixture_matrix(
     return SurfaceCSGPairFixtureEvidenceReport(
         rows=rows,
         required_pair_classes=required,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def enumerate_sampled_implicit_csg_unsupported_rows(
+    *,
+    registry: SurfaceCSGSolverRegistryRecord | None = None,
+    operations: Iterable[SurfaceBooleanOperation] = SURFACE_BOOLEAN_OPERATIONS,
+    route_status: SurfaceSampledImplicitCSGRouteStatus = "in-progress",
+) -> tuple[SurfaceSampledImplicitCSGUnsupportedRow, ...]:
+    """Enumerate sampled/implicit CSG rows that still need route promotion."""
+
+    source = registry if registry is not None else SURFACE_CSG_SOLVER_REGISTRY
+    rows: list[SurfaceSampledImplicitCSGUnsupportedRow] = []
+    for operation in operations:
+        for left_family in source.families:
+            for right_family in source.families:
+                if left_family not in SAMPLED_SURFACE_CSG_FAMILIES and right_family not in SAMPLED_SURFACE_CSG_FAMILIES:
+                    continue
+                support = source.support_for(operation, left_family, right_family)
+                if support.supported:
+                    continue
+                if support.support_state != "unsupported":
+                    continue
+                rows.append(
+                    SurfaceSampledImplicitCSGUnsupportedRow(
+                        operation=operation,
+                        left_family=left_family,
+                        right_family=right_family,
+                        support_state=support.support_state,
+                        route_status=route_status,
+                        route_id=SURFACE_CSG_ROUTE_ID_BY_PAIR_CLASS["sampled-boundary"],
+                        required_future_capability=support.required_future_capability or "",
+                    )
+                )
+    return tuple(rows)
+
+
+def verify_sampled_implicit_csg_unsupported_row_tracker(
+    *,
+    registry: SurfaceCSGSolverRegistryRecord | None = None,
+    operations: Iterable[SurfaceBooleanOperation] = SURFACE_BOOLEAN_OPERATIONS,
+) -> SurfaceSampledImplicitCSGUnsupportedRowReport:
+    """Verify the current sampled/implicit CSG unsupported-row tracking set."""
+
+    source = registry if registry is not None else SURFACE_CSG_SOLVER_REGISTRY
+    operation_tuple = tuple(operations)
+    sampled_pairs = tuple(
+        (left_family, right_family)
+        for left_family in source.families
+        for right_family in source.families
+        if left_family in SAMPLED_SURFACE_CSG_FAMILIES or right_family in SAMPLED_SURFACE_CSG_FAMILIES
+    )
+    expected_rows_per_operation = len(sampled_pairs)
+    expected_row_count = expected_rows_per_operation * len(operation_tuple)
+    rows = enumerate_sampled_implicit_csg_unsupported_rows(registry=source, operations=operation_tuple)
+    diagnostics: list[SurfaceCSGRouteSupportDiagnostic] = []
+
+    if len(rows) != expected_row_count:
+        diagnostics.append(
+            SurfaceCSGRouteSupportDiagnostic(
+                code="missing-route",
+                operation=operation_tuple[0] if operation_tuple else "union",
+                left_family="sampled-implicit-tracker",
+                right_family="sampled-implicit-tracker",
+                pair_class="sampled-boundary",
+                message=(
+                    f"Sampled/implicit CSG unsupported-row tracker found {len(rows)} rows; "
+                    f"expected {expected_row_count}."
+                ),
+            )
+        )
+
+    for operation in operation_tuple:
+        operation_rows = tuple(row for row in rows if row.operation == operation)
+        if len(operation_rows) != expected_rows_per_operation:
+            diagnostics.append(
+                SurfaceCSGRouteSupportDiagnostic(
+                    code="missing-route",
+                    operation=operation,
+                    left_family="sampled-implicit-tracker",
+                    right_family="sampled-implicit-tracker",
+                    pair_class="sampled-boundary",
+                    message=(
+                        f"Sampled/implicit CSG unsupported-row tracker found {len(operation_rows)} "
+                        f"rows for {operation}; expected {expected_rows_per_operation}."
+                    ),
+                )
+            )
+
+    valid_statuses: set[SurfaceSampledImplicitCSGRouteStatus] = {
+        "in-progress",
+        "native-route",
+        "promotion-route",
+        "representation-refusal",
+        "non-csg-replacement",
+    }
+    for row in rows:
+        if row.route_status not in valid_statuses:
+            diagnostics.append(
+                SurfaceCSGRouteSupportDiagnostic(
+                    code="missing-route",
+                    operation=row.operation,
+                    left_family=row.left_family,
+                    right_family=row.right_family,
+                    pair_class="sampled-boundary",
+                    message=f"Sampled/implicit CSG row has invalid route status {row.route_status!r}.",
+                )
+            )
+        if not row.required_future_capability:
+            diagnostics.append(
+                SurfaceCSGRouteSupportDiagnostic(
+                    code="missing-route",
+                    operation=row.operation,
+                    left_family=row.left_family,
+                    right_family=row.right_family,
+                    pair_class="sampled-boundary",
+                    message="Sampled/implicit CSG row requires a future capability or route classification.",
+                )
+            )
+        if row.mesh_fallback_attempted:
+            diagnostics.append(
+                SurfaceCSGRouteSupportDiagnostic(
+                    code="non-executable-route",
+                    operation=row.operation,
+                    left_family=row.left_family,
+                    right_family=row.right_family,
+                    pair_class="sampled-boundary",
+                    message="Sampled/implicit CSG row attempted mesh fallback.",
+                )
+            )
+
+    return SurfaceSampledImplicitCSGUnsupportedRowReport(
+        rows=rows,
+        expected_row_count=expected_row_count,
+        expected_rows_per_operation=expected_rows_per_operation,
         diagnostics=tuple(diagnostics),
     )
 
