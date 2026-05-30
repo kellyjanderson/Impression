@@ -21,10 +21,13 @@ from impression.modeling import (
     HeightmapCompositionDiagnostic,
     HeightmapCompositionRecord,
     HeightmapCompositionResult,
+    HeightmapOverhangDiagnostic,
+    HeightmapRepresentabilityReport,
     MeshQuality,
     ParameterDomain,
     PlanarSurfacePatch,
     compose_heightmap_csg_result,
+    heightmap_representability_report,
     heightmap,
     displace_heightmap,
     heightmap_cache_key_record,
@@ -360,8 +363,57 @@ def test_heightmap_composition_refuses_disjoint_and_empty_results_without_mesh_f
     assert disjoint_result.diagnostics[0].code == "alignment-refusal"
     assert disjoint_result.diagnostics[0].no_mesh_fallback is True
     assert empty_intersection.supported is False
-    assert empty_intersection.diagnostics[0].code == "unrepresentable-result"
+    assert empty_intersection.diagnostics[0].code == "representability-refusal"
     assert "mesh fallback" in empty_intersection.diagnostics[0].message
+
+
+def test_heightmap_representability_reports_overhang_and_multivalue_projection_without_mesh_fallback():
+    overhang_transform = np.eye(4, dtype=float)
+    overhang_transform[0, 2] = 0.25
+    collapsed_transform = np.eye(4, dtype=float)
+    collapsed_transform[1, 1] = 0.0
+    left = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.ones((2, 2), dtype=float),
+        transform_matrix=overhang_transform,
+    )
+    right = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.ones((2, 2), dtype=float),
+        transform_matrix=collapsed_transform,
+    )
+
+    report = heightmap_representability_report("union", left, right)
+    result = compose_heightmap_csg_result("union", left, right)
+
+    assert isinstance(report, HeightmapRepresentabilityReport)
+    assert report.representable is False
+    assert {diagnostic.code for diagnostic in report.diagnostics} == {"overhang", "multi-valued-projection"}
+    assert all(isinstance(diagnostic, HeightmapOverhangDiagnostic) for diagnostic in report.diagnostics)
+    assert all(diagnostic.no_mesh_fallback for diagnostic in report.diagnostics)
+    assert result.supported is False
+    assert result.diagnostics[0].code == "representability-refusal"
+    assert "No mesh fallback" in result.diagnostics[0].message
+
+
+def test_heightmap_representability_reports_invalid_projection_and_unsafe_grid_before_execution():
+    left = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.ones((2, 2), dtype=float),
+        alpha_mask=np.zeros((2, 2), dtype=bool),
+    )
+    right = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.ones((2, 2), dtype=float),
+        center=(10.0, 0.0, 0.0),
+    )
+
+    report = heightmap_representability_report("intersection", left, right)
+
+    assert report.representable is False
+    assert {diagnostic.code for diagnostic in report.diagnostics} == {"invalid-projection", "unsafe-grid"}
+    assert report.diagnostics[0].no_mesh_fallback is True
+    assert "mesh fallback" in report.diagnostics[0].message
 
 
 def test_displace_heightmap_surface_projection_planes_and_explicit_bounds():
