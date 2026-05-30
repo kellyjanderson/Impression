@@ -562,7 +562,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 338: CSG Seam Adjacency And Provenance Rebuild Completion (v1.0)](../specifications/surface-338-csg-seam-adjacency-and-provenance-rebuild-completion-v1_0.md)
 - [x] [Surface Spec 339: CSG Runtime Result Validity Gate (v1.0)](../specifications/surface-339-csg-runtime-result-validity-gate-v1_0.md)
 - [x] [Surface Spec 340: CSG Persistence Tessellation And Reference Evidence Gate (v1.0)](../specifications/surface-340-csg-persistence-tessellation-and-reference-evidence-gate-v1_0.md)
-- [ ] [Surface Spec 341: Analytic To B-Spline CSG Intersections (v1.0)](../specifications/surface-341-analytic-to-b-spline-csg-intersections-v1_0.md)
+- [x] [Surface Spec 341: Analytic To B-Spline CSG Intersections (v1.0)](../specifications/surface-341-analytic-to-b-spline-csg-intersections-v1_0.md)
 - [ ] [Surface Spec 342: Analytic To NURBS CSG Intersections (v1.0)](../specifications/surface-342-analytic-to-nurbs-csg-intersections-v1_0.md)
 - [ ] [Surface Spec 343: Spline And NURBS Pair Curve Intersections (v1.0)](../specifications/surface-343-spline-and-nurbs-pair-curve-intersections-v1_0.md)
 - [ ] [Surface Spec 344: Spline And NURBS Coincident Region CSG Intersections (v1.0)](../specifications/surface-344-spline-and-nurbs-coincident-region-csg-intersections-v1_0.md)

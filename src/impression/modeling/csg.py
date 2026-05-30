@@ -15,6 +15,7 @@ from impression.modeling.group import MeshGroup
 from ._color import get_mesh_color, set_mesh_color
 from ._legacy_mesh_deprecation import warn_mesh_primary_api
 from .surface import (
+    BSplineSurfacePatch,
     PATCH_FAMILY_CAPABILITY_MATRIX,
     SurfaceBoundaryRef,
     PlanarSurfacePatch,
@@ -26,6 +27,13 @@ from .surface import (
     TrimLoop,
     make_surface_body,
     make_surface_shell,
+)
+from .surface_intersections import (
+    SurfaceAnalyticSplineResidualReport,
+    SurfaceIntersectionResultRecord,
+    SurfaceIntersectionSupportDiagnostic,
+    make_surface_intersection_request,
+    solve_analytic_spline_surface_intersection,
 )
 
 BooleanBackend = Literal["manifold", "surface"]
@@ -689,6 +697,49 @@ class SurfaceCSGAnalyticIntersectionRecord:
     @property
     def supported(self) -> bool:
         return self.curve is not None and self.relation == "crossing" and not self.diagnostics
+
+
+@dataclass(frozen=True)
+class SurfaceCSGAnalyticBSplineIntersectionRecord:
+    """Declared-tolerance CSG intersection result for analytic/B-spline patch pairs."""
+
+    first_patch: SurfaceBooleanPatchRef
+    second_patch: SurfaceBooleanPatchRef
+    intersection: SurfaceIntersectionResultRecord
+    residual_report: SurfaceAnalyticSplineResidualReport
+    curves: tuple[SurfaceCSGCurvePrimitive, ...] = ()
+    patch_local_curves: tuple[SurfaceCSGPatchLocalCurve, ...] = ()
+    diagnostics: tuple[SurfaceIntersectionSupportDiagnostic | SurfaceCSGCurveMappingDiagnostic, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return (
+            self.intersection.supported
+            and self.residual_report.converged
+            and bool(self.curves)
+            and len(self.patch_local_curves) >= len(self.curves) * 2
+            and not self.diagnostics
+        )
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "first_patch": {
+                "operand_index": self.first_patch.operand_index,
+                "patch_index": self.first_patch.patch_index,
+            },
+            "second_patch": {
+                "operand_index": self.second_patch.operand_index,
+                "patch_index": self.second_patch.patch_index,
+            },
+            "supported": self.supported,
+            "classification": self.intersection.classification,
+            "quality": self.intersection.quality,
+            "max_residual": self.intersection.max_residual,
+            "curves": [curve.canonical_payload() for curve in self.curves],
+            "patch_local_curves": [curve.canonical_payload() for curve in self.patch_local_curves],
+            "residual_report": self.residual_report.canonical_payload(),
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
 
 
 @dataclass(frozen=True)
@@ -2459,7 +2510,7 @@ _SURFACE_BOOLEAN_EXECUTABLE_FAMILY_PAIRS: frozenset[tuple[str, str]] = frozenset
         for right_family, right_capability in PATCH_FAMILY_CAPABILITY_MATRIX.items()
         if left_capability.support_phase == "available" and right_capability.support_phase == "available"
         and left_family in {"planar", "ruled", "revolution"}
-        and right_family in {"planar", "ruled", "revolution"}
+        and right_family in {"planar", "ruled", "revolution", "bspline"}
     }
 )
 ANALYTIC_SURFACE_CSG_FAMILIES: frozenset[str] = frozenset({"planar", "ruled", "revolution"})
@@ -3187,10 +3238,31 @@ def _map_revolution_point_to_uv(
     return (float(u0 + u_norm * (u1 - u0)), float(v0 + v_norm * (v1 - v0)))
 
 
+def _sampled_patch_point_to_uv(
+    patch: SurfacePatch,
+    point: Sequence[float],
+    *,
+    sample_count: int = 17,
+) -> tuple[float, float]:
+    target = np.asarray(point, dtype=float).reshape(3)
+    u0, u1 = patch.domain.u_range
+    v0, v1 = patch.domain.v_range
+    best_uv = (float(u0), float(v0))
+    best_distance = float("inf")
+    for u in np.linspace(u0, u1, max(2, int(sample_count))):
+        for v in np.linspace(v0, v1, max(2, int(sample_count))):
+            candidate = patch.point_at(float(u), float(v))
+            distance = float(np.linalg.norm(candidate - target))
+            if distance < best_distance:
+                best_distance = distance
+                best_uv = (float(u), float(v))
+    return best_uv
+
+
 def map_surface_csg_curve_to_patch_local(
     curve: SurfaceCSGCurvePrimitive,
     patch_ref: SurfaceBooleanPatchRef,
-    patch: PlanarSurfacePatch | RevolutionSurfacePatch,
+    patch: SurfacePatch,
     *,
     policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
 ) -> SurfaceCSGPatchLocalCurveMappingResult:
@@ -3217,6 +3289,8 @@ def map_surface_csg_curve_to_patch_local(
                 )
             else:
                 points_uv.append(mapped)
+        elif isinstance(patch, (RuledSurfacePatch, BSplineSurfacePatch)):
+            points_uv.append(_sampled_patch_point_to_uv(patch, point))
         else:
             diagnostics.append(
                 _surface_csg_mapping_diagnostic(
@@ -3250,7 +3324,7 @@ def map_surface_csg_curve_to_patch_local(
 
 def map_surface_csg_curve_to_affected_patches(
     curve: SurfaceCSGCurvePrimitive,
-    patch_bindings: Sequence[tuple[SurfaceBooleanPatchRef, PlanarSurfacePatch | RevolutionSurfacePatch]],
+    patch_bindings: Sequence[tuple[SurfaceBooleanPatchRef, SurfacePatch]],
     *,
     policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
 ) -> SurfaceCSGIntersectionMappingResult:
@@ -3317,6 +3391,146 @@ def map_surface_csg_coincident_region_loop(
             loop=loop,
             source_curve_digests=tuple(source_curve_digests),
         ),
+    )
+
+
+def _surface_csg_patch_local_curve_from_parameters(
+    source_curve: SurfaceCSGCurvePrimitive,
+    patch_ref: SurfaceBooleanPatchRef,
+    patch: SurfacePatch,
+    parameters: Sequence[Sequence[float]],
+    *,
+    policy: SurfaceCSGTolerancePolicy,
+) -> SurfaceCSGPatchLocalCurveMappingResult:
+    source_digest = surface_csg_curve_digest(source_curve, policy=policy)
+    try:
+        local_curve = SurfaceCSGPatchLocalCurve(
+            source_curve_digest=source_digest,
+            patch=patch_ref,
+            points_uv=tuple((float(uv[0]), float(uv[1])) for uv in parameters),
+            domain_bounds=(
+                float(patch.domain.u_range[0]),
+                float(patch.domain.u_range[1]),
+                float(patch.domain.v_range[0]),
+                float(patch.domain.v_range[1]),
+            ),
+        )
+    except (IndexError, TypeError, ValueError) as exc:
+        diagnostic = SurfaceCSGCurveMappingDiagnostic(
+            code="ambiguous-curve",
+            message=f"CSG intersection parameters could not be emitted as patch-local curve: {exc}",
+            patch=patch_ref,
+            source_curve_digest=source_digest,
+        )
+        return SurfaceCSGPatchLocalCurveMappingResult(
+            source_curve=source_curve,
+            patch=patch_ref,
+            diagnostics=(diagnostic,),
+        )
+    diagnostics = validate_surface_csg_patch_local_curve_domain(local_curve, policy=policy)
+    if diagnostics:
+        return SurfaceCSGPatchLocalCurveMappingResult(
+            source_curve=source_curve,
+            patch=patch_ref,
+            diagnostics=diagnostics,
+        )
+    return SurfaceCSGPatchLocalCurveMappingResult(source_curve=source_curve, patch=patch_ref, curve=local_curve)
+
+
+def intersect_analytic_bspline_patch_pair(
+    first_ref: SurfaceBooleanPatchRef,
+    first_patch: PlanarSurfacePatch | RuledSurfacePatch | RevolutionSurfacePatch | BSplineSurfacePatch,
+    second_ref: SurfaceBooleanPatchRef,
+    second_patch: PlanarSurfacePatch | RuledSurfacePatch | RevolutionSurfacePatch | BSplineSurfacePatch,
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+    sample_count: int = 17,
+) -> SurfaceCSGAnalyticBSplineIntersectionRecord:
+    """Intersect one analytic patch with one B-spline patch for surface CSG."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    first_is_bspline = isinstance(first_patch, BSplineSurfacePatch)
+    second_is_bspline = isinstance(second_patch, BSplineSurfacePatch)
+    first_is_analytic = isinstance(first_patch, (PlanarSurfacePatch, RuledSurfacePatch, RevolutionSurfacePatch))
+    second_is_analytic = isinstance(second_patch, (PlanarSurfacePatch, RuledSurfacePatch, RevolutionSurfacePatch))
+    placeholder_request = make_surface_intersection_request(
+        first_patch,
+        second_patch,
+        first_patch_ref=first_ref,
+        second_patch_ref=second_ref,
+        consumer="surface-csg",
+    )
+    if (first_is_bspline == second_is_bspline) or (first_is_analytic == second_is_analytic):
+        diagnostic = SurfaceIntersectionSupportDiagnostic(
+            code="unsupported-family-pair",
+            consumer="surface-csg",
+            family_pair=placeholder_request.normalized_family_pair,
+            message="analytic-to-B-spline CSG requires exactly one analytic patch and one B-spline patch",
+        )
+        result, report = solve_analytic_spline_surface_intersection(placeholder_request, sample_count=sample_count)
+        return SurfaceCSGAnalyticBSplineIntersectionRecord(
+            first_patch=first_ref,
+            second_patch=second_ref,
+            intersection=result,
+            residual_report=report,
+            diagnostics=(diagnostic, *report.diagnostics),
+        )
+
+    result, report = solve_analytic_spline_surface_intersection(placeholder_request, sample_count=sample_count)
+    diagnostics: list[SurfaceIntersectionSupportDiagnostic | SurfaceCSGCurveMappingDiagnostic] = list(report.diagnostics)
+    curves: list[SurfaceCSGCurvePrimitive] = []
+    patch_local_curves: list[SurfaceCSGPatchLocalCurve] = []
+    for curve_record in result.curves:
+        try:
+            curve = make_surface_csg_curve(curve_record.kind, curve_record.points_3d, policy=normalized_policy)
+        except ValueError as exc:
+            source_digest = hashlib.sha256(repr(curve_record.points_3d).encode("utf-8")).hexdigest()
+            diagnostics.append(
+                SurfaceCSGCurveMappingDiagnostic(
+                    code="degenerate-curve",
+                    message=f"Analytic-to-B-spline CSG curve could not be emitted: {exc}",
+                    patch=first_ref,
+                    source_curve_digest=source_digest,
+                )
+            )
+            continue
+        curves.append(curve)
+        first_parameters = curve_record.first_parameters
+        second_parameters = curve_record.second_parameters
+        first_mapping = (
+            _surface_csg_patch_local_curve_from_parameters(
+                curve,
+                first_ref,
+                first_patch,
+                first_parameters,
+                policy=normalized_policy,
+            )
+            if first_parameters
+            else map_surface_csg_curve_to_patch_local(curve, first_ref, first_patch, policy=normalized_policy)
+        )
+        second_mapping = (
+            _surface_csg_patch_local_curve_from_parameters(
+                curve,
+                second_ref,
+                second_patch,
+                second_parameters,
+                policy=normalized_policy,
+            )
+            if second_parameters
+            else map_surface_csg_curve_to_patch_local(curve, second_ref, second_patch, policy=normalized_policy)
+        )
+        for mapping in (first_mapping, second_mapping):
+            diagnostics.extend(mapping.diagnostics)
+            if mapping.curve is not None:
+                patch_local_curves.append(mapping.curve)
+    return SurfaceCSGAnalyticBSplineIntersectionRecord(
+        first_patch=first_ref,
+        second_patch=second_ref,
+        intersection=result,
+        residual_report=report,
+        curves=tuple(curves),
+        patch_local_curves=tuple(patch_local_curves),
+        diagnostics=tuple(diagnostics),
     )
 
 
@@ -4214,6 +4428,16 @@ def classify_higher_order_csg_pair(
             solver_boundary="low-order-analytic",
             support_state=pair_support.support_state,
             required_future_capability=pair_support.required_future_capability,
+        )
+    if pair_support.supported:
+        return SurfaceCSGHigherOrderSupportRecord(
+            operation=operation,
+            left_family=left_family,
+            right_family=right_family,
+            supported=True,
+            solver_boundary="higher-order-declared-tolerance",
+            support_state=pair_support.support_state,
+            required_future_capability=None,
         )
     future = pair_support.required_future_capability or (
         f"exact higher-order surface boolean {operation} solver for {left_family}/{right_family}"
