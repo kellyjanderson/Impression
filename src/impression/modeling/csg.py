@@ -39,11 +39,13 @@ from .surface_intersections import (
     SurfaceIntersectionResultRecord,
     SurfaceIntersectionSupportDiagnostic,
     SurfaceSplineSplineResidualReport,
+    SurfaceSubdivisionIntersectionAdapterReport,
     SurfaceSweepPairResidualReport,
     make_surface_intersection_request,
     normalize_surface_intersection_result,
     solve_analytic_spline_surface_intersection,
     solve_spline_spline_surface_intersection,
+    solve_subdivision_surface_intersection_adapter,
     solve_sweep_surface_intersection_adapter,
 )
 
@@ -940,6 +942,49 @@ class SurfaceCSGSweepPairIntersectionRecord:
             "patch_local_curves": [curve.canonical_payload() for curve in self.patch_local_curves],
             "ambiguity_diagnostics": [diagnostic.canonical_payload() for diagnostic in self.ambiguity_diagnostics],
             "residual_report": self.residual_report.canonical_payload(),
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGSubdivisionPairIntersectionRecord:
+    """Declared-tolerance CSG curve result for subdivision-participating patch pairs."""
+
+    first_patch: SurfaceBooleanPatchRef
+    second_patch: SurfaceBooleanPatchRef
+    intersection: SurfaceIntersectionResultRecord
+    adapter_report: SurfaceSubdivisionIntersectionAdapterReport
+    curves: tuple[SurfaceCSGCurvePrimitive, ...] = ()
+    patch_local_curves: tuple[SurfaceCSGPatchLocalCurve, ...] = ()
+    diagnostics: tuple[SurfaceIntersectionSupportDiagnostic | SurfaceCSGCurveMappingDiagnostic, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return (
+            self.intersection.supported
+            and self.adapter_report.converged
+            and bool(self.curves)
+            and len(self.patch_local_curves) >= len(self.curves) * 2
+            and not self.diagnostics
+        )
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "first_patch": {
+                "operand_index": self.first_patch.operand_index,
+                "patch_index": self.first_patch.patch_index,
+            },
+            "second_patch": {
+                "operand_index": self.second_patch.operand_index,
+                "patch_index": self.second_patch.patch_index,
+            },
+            "supported": self.supported,
+            "classification": self.intersection.classification,
+            "quality": self.intersection.quality,
+            "max_residual": self.intersection.max_residual,
+            "curves": [curve.canonical_payload() for curve in self.curves],
+            "patch_local_curves": [curve.canonical_payload() for curve in self.patch_local_curves],
+            "adapter_report": self.adapter_report.canonical_payload(),
             "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
         }
 
@@ -2734,6 +2779,16 @@ _SURFACE_BOOLEAN_EXECUTABLE_FAMILY_PAIRS: frozenset[tuple[str, str]] = frozenset
             and {left_family, right_family}
             <= {"planar", "ruled", "revolution", "bspline", "nurbs", "sweep", "subdivision"}
         }
+        | {
+            tuple(sorted((left_family, right_family)))
+            for left_family, left_capability in PATCH_FAMILY_CAPABILITY_MATRIX.items()
+            for right_family, right_capability in PATCH_FAMILY_CAPABILITY_MATRIX.items()
+            if left_capability.support_phase == "available"
+            and right_capability.support_phase == "available"
+            and "subdivision" in {left_family, right_family}
+            and {left_family, right_family}
+            <= {"planar", "ruled", "revolution", "bspline", "nurbs", "sweep", "subdivision"}
+        }
     )
 )
 ANALYTIC_SURFACE_CSG_FAMILIES: frozenset[str] = frozenset({"planar", "ruled", "revolution"})
@@ -4157,6 +4212,73 @@ def intersect_sweep_csg_patch_pair(
         curves=tuple(curves),
         patch_local_curves=tuple(patch_local_curves),
         ambiguity_diagnostics=ambiguity_diagnostics,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def intersect_subdivision_csg_patch_pair(
+    first_ref: SurfaceBooleanPatchRef,
+    first_patch: SurfacePatch,
+    second_ref: SurfaceBooleanPatchRef,
+    second_patch: SurfacePatch,
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+    sample_count: int = 5,
+) -> SurfaceCSGSubdivisionPairIntersectionRecord:
+    """Intersect subdivision-participating patch pairs for surface CSG curve routes."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    request = make_surface_intersection_request(
+        first_patch,
+        second_patch,
+        first_patch_ref=first_ref,
+        second_patch_ref=second_ref,
+        consumer="surface-csg",
+    )
+    result, report = solve_subdivision_surface_intersection_adapter(request, sample_count=sample_count)
+    diagnostics: list[SurfaceIntersectionSupportDiagnostic | SurfaceCSGCurveMappingDiagnostic] = list(report.diagnostics)
+    curves: list[SurfaceCSGCurvePrimitive] = []
+    patch_local_curves: list[SurfaceCSGPatchLocalCurve] = []
+    for curve_record in result.curves:
+        try:
+            curve = make_surface_csg_curve(curve_record.kind, curve_record.points_3d, policy=normalized_policy)
+        except ValueError as exc:
+            source_digest = hashlib.sha256(repr(curve_record.points_3d).encode("utf-8")).hexdigest()
+            diagnostics.append(
+                SurfaceCSGCurveMappingDiagnostic(
+                    code="degenerate-curve",
+                    message=f"Subdivision CSG curve could not be emitted: {exc}",
+                    patch=first_ref,
+                    source_curve_digest=source_digest,
+                )
+            )
+            continue
+        curves.append(curve)
+        first_mapping = _surface_csg_patch_local_curve_from_parameters(
+            curve,
+            first_ref,
+            first_patch,
+            curve_record.first_parameters,
+            policy=normalized_policy,
+        )
+        second_mapping = _surface_csg_patch_local_curve_from_parameters(
+            curve,
+            second_ref,
+            second_patch,
+            curve_record.second_parameters,
+            policy=normalized_policy,
+        )
+        for mapping in (first_mapping, second_mapping):
+            diagnostics.extend(mapping.diagnostics)
+            if mapping.curve is not None:
+                patch_local_curves.append(mapping.curve)
+    return SurfaceCSGSubdivisionPairIntersectionRecord(
+        first_patch=first_ref,
+        second_patch=second_ref,
+        intersection=result,
+        adapter_report=report,
+        curves=tuple(curves),
+        patch_local_curves=tuple(patch_local_curves),
         diagnostics=tuple(diagnostics),
     )
 

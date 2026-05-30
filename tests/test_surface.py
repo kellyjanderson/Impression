@@ -3852,6 +3852,10 @@ def test_surface_boolean_family_pair_matrix_declares_every_known_family_pair() -
                     "sweep" in pair_families
                     and pair_families <= {"planar", "ruled", "revolution", "bspline", "nurbs", "sweep", "subdivision"}
                 )
+                subdivision_pair = (
+                    "subdivision" in pair_families
+                    and pair_families <= {"planar", "ruled", "revolution", "bspline", "nurbs", "sweep", "subdivision"}
+                )
                 if analytic_pair:
                     assert record.supported is True
                     assert record.support_state == "exact"
@@ -3865,6 +3869,10 @@ def test_surface_boolean_family_pair_matrix_declares_every_known_family_pair() -
                     assert record.support_state == "declared-tolerance"
                     assert record.required_future_capability is None
                 elif sweep_pair:
+                    assert record.supported is True
+                    assert record.support_state == "declared-tolerance"
+                    assert record.required_future_capability is None
+                elif subdivision_pair:
                     assert record.supported is True
                     assert record.support_state == "declared-tolerance"
                     assert record.required_future_capability is None
@@ -4111,7 +4119,7 @@ def test_surface_boolean_unsupported_family_diagnostic_builder_refuses_supported
 
 
 def test_higher_order_csg_solver_boundary_names_advanced_family_refusals() -> None:
-    advanced_families = tuple(family for family in HIGHER_ORDER_SURFACE_CSG_FAMILIES if family not in {"bspline", "nurbs", "sweep"})
+    advanced_families = tuple(family for family in HIGHER_ORDER_SURFACE_CSG_FAMILIES if family not in {"bspline", "nurbs", "sweep", "subdivision"})
 
     for family in advanced_families:
         support = classify_higher_order_csg_pair("intersection", "planar", family)
@@ -4127,13 +4135,13 @@ def test_higher_order_csg_solver_boundary_names_advanced_family_refusals() -> No
 
 
 def test_higher_order_csg_refusal_is_reflected_in_family_diagnostics() -> None:
-    support = surface_boolean_family_pair_support("union", "planar", "subdivision")
+    support = surface_boolean_family_pair_support("union", "planar", "implicit")
 
     diagnostic = build_surface_boolean_unsupported_family_diagnostic(support)
 
-    assert diagnostic.phase == "higher-order-exact-solver"
+    assert diagnostic.phase == "sampled-tessellation-boundary"
     assert "unsupported higher-order surface boolean pair" in diagnostic.required_future_capability
-    assert "planar/subdivision" in diagnostic.message
+    assert "planar/implicit" in diagnostic.message
 
 
 def test_surface_backend_boolean_api_uses_family_diagnostic_result_for_unsupported_pairs() -> None:
