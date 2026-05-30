@@ -18,9 +18,13 @@ from impression.modeling import (
     HeightmapSampleCoordinateRecord,
     HeightmapSurfacePatch,
     DisplacementSurfacePatch,
+    HeightmapCompositionDiagnostic,
+    HeightmapCompositionRecord,
+    HeightmapCompositionResult,
     MeshQuality,
     ParameterDomain,
     PlanarSurfacePatch,
+    compose_heightmap_csg_result,
     heightmap,
     displace_heightmap,
     heightmap_cache_key_record,
@@ -279,6 +283,85 @@ def test_heightmap_grid_alignment_refuses_disjoint_domains_and_projection_mismat
     assert mismatch.supported is False
     assert mismatch.diagnostics[0].code == "projection-mismatch"
     assert "mesh fallback" in mismatch.diagnostics[0].message
+
+
+def test_heightmap_composition_operators_preserve_native_heightmap_payloads():
+    left = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.asarray([[0.0, 1.0], [2.0, 3.0]], dtype=float),
+        alpha_mask=np.ones((2, 2), dtype=bool),
+    )
+    right = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.asarray([[1.0, 0.5], [1.5, 4.0]], dtype=float),
+        alpha_mask=np.ones((2, 2), dtype=bool),
+    )
+
+    union = compose_heightmap_csg_result("union", left, right)
+    intersection = compose_heightmap_csg_result("intersection", left, right)
+    difference = compose_heightmap_csg_result("difference", left, right)
+
+    assert isinstance(union, HeightmapCompositionResult)
+    assert isinstance(union.operation_record, HeightmapCompositionRecord)
+    assert union.supported is True
+    assert union.patch is not None and union.body is not None
+    assert union.patch.family == "heightmap"
+    assert np.allclose(union.patch.height_samples, [[1.0, 1.0], [2.0, 4.0]])
+    assert np.all(union.patch.alpha_mask)
+    assert np.allclose(intersection.patch.height_samples, [[0.0, 0.5], [1.5, 3.0]])
+    assert np.allclose(difference.patch.height_samples, [[0.0, 0.5], [0.5, 0.0]])
+    assert union.operation_record.no_mesh_fallback is True
+    assert union.operation_record.resample_kernel == "none"
+    assert union.patch.metadata["kernel"]["heightmap_csg_composition"]["operation"] == "union"
+
+
+def test_heightmap_composition_resamples_overlapping_misaligned_grids_without_mesh_fallback():
+    left = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.asarray([[0.0, 0.0], [2.0, 2.0]], dtype=float),
+        alpha_mask=np.ones((2, 2), dtype=bool),
+        xy_scale=(1.0, 1.0),
+    )
+    right = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.ones((3, 3), dtype=float),
+        alpha_mask=np.ones((3, 3), dtype=bool),
+        xy_scale=(0.5, 0.5),
+    )
+
+    result = compose_heightmap_csg_result("union", left, right)
+
+    assert result.supported is True
+    assert result.patch is not None
+    assert result.operation_record.resample_kernel == "bilinear"
+    assert result.patch.height_samples.shape == (3, 3)
+    assert np.max(result.patch.height_samples) >= 1.0
+    assert all(diagnostic.no_mesh_fallback for diagnostic in result.diagnostics)
+
+
+def test_heightmap_composition_refuses_disjoint_and_empty_results_without_mesh_fallback():
+    left = HeightmapSurfacePatch(family="heightmap", height_samples=np.ones((2, 2), dtype=float))
+    disjoint = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.ones((2, 2), dtype=float),
+        center=(10.0, 0.0, 0.0),
+    )
+    masked = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.ones((2, 2), dtype=float),
+        alpha_mask=np.zeros((2, 2), dtype=bool),
+    )
+
+    disjoint_result = compose_heightmap_csg_result("union", left, disjoint)
+    empty_intersection = compose_heightmap_csg_result("intersection", left, masked)
+
+    assert disjoint_result.supported is False
+    assert isinstance(disjoint_result.diagnostics[0], HeightmapCompositionDiagnostic)
+    assert disjoint_result.diagnostics[0].code == "alignment-refusal"
+    assert disjoint_result.diagnostics[0].no_mesh_fallback is True
+    assert empty_intersection.supported is False
+    assert empty_intersection.diagnostics[0].code == "unrepresentable-result"
+    assert "mesh fallback" in empty_intersection.diagnostics[0].message
 
 
 def test_displace_heightmap_surface_projection_planes_and_explicit_bounds():

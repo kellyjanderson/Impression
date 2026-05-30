@@ -26,6 +26,7 @@ from .surface import (
     NURBSWeightValidationDiagnostic,
     PATCH_FAMILY_CAPABILITY_MATRIX,
     SurfaceBoundaryRef,
+    HeightmapSurfacePatch,
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
@@ -43,6 +44,10 @@ from .surface import (
     implicit_difference_field,
     implicit_intersection_field,
     implicit_union_field,
+)
+from .heightmap import (
+    HeightmapGridAlignmentRecord,
+    plan_heightmap_grid_alignment,
 )
 from .surface_intersections import (
     SurfaceAnalyticSplineResidualReport,
@@ -215,6 +220,73 @@ class ImplicitCompositionResult:
         }
 
 
+@dataclass(frozen=True)
+class HeightmapCompositionDiagnostic:
+    """Deterministic diagnostic for heightmap-preserving CSG composition."""
+
+    code: Literal[
+        "invalid-operation",
+        "unsupported-operand",
+        "alignment-refusal",
+        "unrepresentable-result",
+    ]
+    message: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapCompositionRecord:
+    """Surface-native heightmap CSG composition operation record."""
+
+    operation: SurfaceBooleanOperation
+    operand_ids: tuple[str, str]
+    alignment: HeightmapGridAlignmentRecord
+    sample_shape: tuple[int, int] | None = None
+    resample_kernel: Literal["none", "bilinear"] = "none"
+    result_family: Literal["heightmap"] = "heightmap"
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "operand_ids": self.operand_ids,
+            "alignment": self.alignment.canonical_payload(),
+            "sample_shape": self.sample_shape,
+            "resample_kernel": self.resample_kernel,
+            "result_family": self.result_family,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapCompositionResult:
+    """Heightmap-preserving CSG result or explicit refusal."""
+
+    operation: SurfaceBooleanOperation
+    supported: bool
+    operation_record: HeightmapCompositionRecord
+    body: SurfaceBody | None = None
+    patch: HeightmapSurfacePatch | None = None
+    diagnostics: tuple[HeightmapCompositionDiagnostic, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "supported": self.supported,
+            "operation_record": self.operation_record.canonical_payload(),
+            "body_id": None if self.body is None else self.body.stable_identity,
+            "patch_id": None if self.patch is None else self.patch.stable_identity,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
 def implicit_composition_operand_sign_policies(
     operation: SurfaceBooleanOperation,
     operand_count: int,
@@ -243,6 +315,201 @@ def implicit_composition_operand_sign_policies(
             )
         )
     return tuple(policies)
+
+
+def _heightmap_patch_world_height_and_mask(
+    patch: HeightmapSurfacePatch,
+    x: float,
+    y: float,
+    *,
+    tolerance: float,
+) -> tuple[float, bool]:
+    rows, cols = patch.height_samples.shape
+    sx, sy = patch.xy_scale
+    u = (float(x) - float(patch.center[0])) / sx + (cols - 1) / 2.0
+    v = (rows - 1) - ((float(y) - float(patch.center[1])) / sy + (rows - 1) / 2.0)
+    if u < -tolerance or v < -tolerance or u > (cols - 1) + tolerance or v > (rows - 1) + tolerance:
+        return 0.0, False
+    height = float(patch.center[2] + patch._height_at(u, v))
+    if patch.alpha_mode == "ignore":
+        return height, True
+    sample_row = int(np.clip(round(v), 0, rows - 1))
+    sample_col = int(np.clip(round(u), 0, cols - 1))
+    return height, bool(patch.alpha_mask[sample_row, sample_col])
+
+
+def _compose_heightmap_samples(
+    operation: SurfaceBooleanOperation,
+    left: HeightmapSurfacePatch,
+    right: HeightmapSurfacePatch,
+    alignment: HeightmapGridAlignmentRecord,
+    *,
+    tolerance: float,
+) -> tuple[np.ndarray, np.ndarray, tuple[float, float], tuple[float, float, float]]:
+    if alignment.clipping is None or alignment.result_shape is None:
+        raise ValueError("Heightmap composition requires an overlap clipping plan and result shape.")
+    rows, cols = alignment.result_shape
+    xmin, xmax, ymin, ymax = alignment.clipping.overlap_bounds
+    if rows < 2 or cols < 2:
+        raise ValueError("Heightmap composition result must contain at least a 2x2 grid.")
+    xs = np.linspace(xmin, xmax, cols, dtype=float)
+    ys = np.linspace(ymax, ymin, rows, dtype=float)
+    result = np.zeros((rows, cols), dtype=float)
+    mask = np.zeros((rows, cols), dtype=bool)
+    for row, y in enumerate(ys):
+        for col, x in enumerate(xs):
+            left_height, left_valid = _heightmap_patch_world_height_and_mask(left, float(x), float(y), tolerance=tolerance)
+            right_height, right_valid = _heightmap_patch_world_height_and_mask(right, float(x), float(y), tolerance=tolerance)
+            if operation == "union":
+                if left_valid and right_valid:
+                    result[row, col] = max(left_height, right_height)
+                    mask[row, col] = True
+                elif left_valid:
+                    result[row, col] = left_height
+                    mask[row, col] = True
+                elif right_valid:
+                    result[row, col] = right_height
+                    mask[row, col] = True
+            elif operation == "intersection":
+                if left_valid and right_valid:
+                    result[row, col] = min(left_height, right_height)
+                    mask[row, col] = True
+            elif operation == "difference":
+                if left_valid:
+                    result[row, col] = max(left_height - right_height, 0.0) if right_valid else left_height
+                    mask[row, col] = True
+            else:
+                raise ValueError("Heightmap composition operation must be union, difference, or intersection.")
+    xy_scale = (
+        float((xmax - xmin) / max(cols - 1, 1)),
+        float((ymax - ymin) / max(rows - 1, 1)),
+    )
+    center = (float((xmin + xmax) * 0.5), float((ymin + ymax) * 0.5), 0.0)
+    return result, mask, xy_scale, center
+
+
+def compose_heightmap_csg_result(
+    operation: SurfaceBooleanOperation,
+    left: HeightmapSurfacePatch,
+    right: HeightmapSurfacePatch,
+    *,
+    tolerance: float = 1e-9,
+) -> HeightmapCompositionResult:
+    """Compose two native heightmaps over an aligned output grid without mesh CSG."""
+
+    if operation not in SURFACE_BOOLEAN_OPERATIONS:
+        placeholder_alignment = plan_heightmap_grid_alignment(left, right, tolerance=tolerance)
+        record = HeightmapCompositionRecord(
+            operation="union",
+            operand_ids=(left.stable_identity, right.stable_identity),
+            alignment=placeholder_alignment,
+            sample_shape=placeholder_alignment.result_shape,
+            resample_kernel=placeholder_alignment.resample_kernel,
+        )
+        return HeightmapCompositionResult(
+            operation="union",
+            supported=False,
+            operation_record=record,
+            diagnostics=(
+                HeightmapCompositionDiagnostic(
+                    code="invalid-operation",
+                    message="Heightmap CSG composition operation must be union, difference, or intersection; no mesh fallback was attempted.",
+                ),
+            ),
+        )
+    if not isinstance(left, HeightmapSurfacePatch) or not isinstance(right, HeightmapSurfacePatch):
+        raise TypeError("Heightmap CSG composition requires HeightmapSurfacePatch operands.")
+    tol = float(tolerance)
+    if not np.isfinite(tol) or tol < 0.0:
+        raise ValueError("Heightmap CSG composition tolerance must be finite and non-negative.")
+    alignment = plan_heightmap_grid_alignment(left, right, tolerance=tol)
+    record = HeightmapCompositionRecord(
+        operation=operation,
+        operand_ids=(left.stable_identity, right.stable_identity),
+        alignment=alignment,
+        sample_shape=alignment.result_shape,
+        resample_kernel=alignment.resample_kernel,
+    )
+    if not alignment.supported:
+        return HeightmapCompositionResult(
+            operation=operation,
+            supported=False,
+            operation_record=record,
+            diagnostics=(
+                HeightmapCompositionDiagnostic(
+                    code="alignment-refusal",
+                    message=(
+                        "Heightmap CSG composition refused because grid alignment failed; "
+                        "no mesh fallback was attempted."
+                    ),
+                ),
+            ),
+        )
+    try:
+        samples, mask, xy_scale, center = _compose_heightmap_samples(
+            operation,
+            left,
+            right,
+            alignment,
+            tolerance=tol,
+        )
+    except ValueError as exc:
+        return HeightmapCompositionResult(
+            operation=operation,
+            supported=False,
+            operation_record=record,
+            diagnostics=(
+                HeightmapCompositionDiagnostic(
+                    code="unrepresentable-result",
+                    message=f"Heightmap CSG composition result is unrepresentable: {exc}; no mesh fallback was attempted.",
+                ),
+            ),
+        )
+    if not np.any(mask):
+        return HeightmapCompositionResult(
+            operation=operation,
+            supported=False,
+            operation_record=record,
+            diagnostics=(
+                HeightmapCompositionDiagnostic(
+                    code="unrepresentable-result",
+                    message="Heightmap CSG composition produced no visible samples; no mesh fallback was attempted.",
+                ),
+            ),
+        )
+    metadata = {
+        "kernel": {
+            "heightmap_csg_composition": {
+                **record.canonical_payload(),
+                "sample_shape": tuple(int(value) for value in samples.shape),
+            }
+        }
+    }
+    patch = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=samples,
+        alpha_mask=mask,
+        alpha_mode="mask",
+        xy_scale=xy_scale,
+        center=np.asarray(center, dtype=float),
+        height_scale=1.0,
+        metadata=metadata,
+    )
+    body = make_surface_body((make_surface_shell((patch,), connected=False),), metadata=metadata)
+    final_record = HeightmapCompositionRecord(
+        operation=operation,
+        operand_ids=record.operand_ids,
+        alignment=alignment,
+        sample_shape=tuple(int(value) for value in samples.shape),
+        resample_kernel=alignment.resample_kernel,
+    )
+    return HeightmapCompositionResult(
+        operation=operation,
+        supported=True,
+        operation_record=final_record,
+        body=body,
+        patch=patch,
+    )
 
 
 def _implicit_composition_bounds(
