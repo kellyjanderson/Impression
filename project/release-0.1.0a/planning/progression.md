@@ -570,4 +570,4 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 346: Sweep Pair CSG Intersections (v1.0)](../specifications/surface-346-sweep-pair-csg-intersections-v1_0.md)
 - [x] [Surface Spec 347: Subdivision CSG Refined Chart Adapter (v1.0)](../specifications/surface-347-subdivision-csg-refined-chart-adapter-v1_0.md)
 - [x] [Surface Spec 348: Subdivision Pair CSG Intersections (v1.0)](../specifications/surface-348-subdivision-pair-csg-intersections-v1_0.md)
-- [ ] [Surface Spec 349: Higher-Order CSG Pair Fixture Matrix (v1.0)](../specifications/surface-349-higher-order-csg-pair-fixture-matrix-v1_0.md)
+- [x] [Surface Spec 349: Higher-Order CSG Pair Fixture Matrix (v1.0)](../specifications/surface-349-higher-order-csg-pair-fixture-matrix-v1_0.md)

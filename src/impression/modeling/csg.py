@@ -2750,6 +2750,55 @@ class SurfaceCSGNoMeshFallbackReport:
         }
 
 
+@dataclass(frozen=True)
+class SurfaceCSGPairFixtureRow:
+    """One fixture-evidence row for a higher-order CSG operation/family pair."""
+
+    operation: SurfaceBooleanOperation
+    left_family: str
+    right_family: str
+    pair_class: SurfaceCSGRoutePairClass
+    route_id: str
+    executable: bool
+    expected_category: Literal["crossing", "tangent", "coincident", "boundary", "singular", "refusal"]
+    mesh_fallback_attempted: bool = False
+    diagnostic: str = ""
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "diagnostic": self.diagnostic,
+            "executable": self.executable,
+            "expected_category": self.expected_category,
+            "left_family": self.left_family,
+            "mesh_fallback_attempted": self.mesh_fallback_attempted,
+            "operation": self.operation,
+            "pair_class": self.pair_class,
+            "right_family": self.right_family,
+            "route_id": self.route_id,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGPairFixtureEvidenceReport:
+    """Fixture matrix evidence that promoted higher-order CSG rows are executable."""
+
+    rows: tuple[SurfaceCSGPairFixtureRow, ...]
+    required_pair_classes: tuple[SurfaceCSGRoutePairClass, ...]
+    diagnostics: tuple[SurfaceCSGRouteSupportDiagnostic, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return bool(self.rows) and not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "passed": self.passed,
+            "required_pair_classes": self.required_pair_classes,
+            "rows": [row.canonical_payload() for row in self.rows],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
 _SURFACE_BOOLEAN_EXECUTABLE_FAMILY_PAIRS: frozenset[tuple[str, str]] = frozenset(
     (
         {
@@ -2908,6 +2957,126 @@ def surface_csg_executable_row_report(
         for right_family in family_keys
     )
     return SurfaceCSGExecutableRowReport(rows=rows)
+
+
+HIGHER_ORDER_CSG_FIXTURE_PAIR_CLASSES: tuple[SurfaceCSGRoutePairClass, ...] = (
+    "analytic-to-bspline",
+    "analytic-to-nurbs",
+    "analytic-to-sweep",
+    "analytic-to-subdivision",
+    "spline-nurbs-pair",
+    "sweep-pair",
+    "subdivision-pair",
+)
+
+
+def enumerate_higher_order_csg_pair_fixture_rows(
+    *,
+    registry: SurfaceCSGSolverRegistryRecord | None = None,
+    operations: Iterable[SurfaceBooleanOperation] = SURFACE_BOOLEAN_OPERATIONS,
+    required_pair_classes: Iterable[SurfaceCSGRoutePairClass] = HIGHER_ORDER_CSG_FIXTURE_PAIR_CLASSES,
+) -> tuple[SurfaceCSGPairFixtureRow, ...]:
+    """Enumerate bounded higher-order CSG fixture rows from the route registry."""
+
+    pair_classes = tuple(required_pair_classes)
+    rows: list[SurfaceCSGPairFixtureRow] = []
+    family_keys = tuple(sorted(PATCH_FAMILY_CAPABILITY_MATRIX))
+    for operation in operations:
+        for left_family in family_keys:
+            for right_family in family_keys:
+                route = surface_csg_route_lookup(operation, left_family, right_family, registry=registry)
+                if route.pair_class not in pair_classes:
+                    continue
+                if not route.executable:
+                    rows.append(
+                        SurfaceCSGPairFixtureRow(
+                            operation=operation,
+                            left_family=left_family,
+                            right_family=right_family,
+                            pair_class=route.pair_class,
+                            route_id=route.route_id,
+                            executable=False,
+                            expected_category="refusal",
+                            diagnostic="" if route.diagnostic is None else route.diagnostic.message,
+                        )
+                    )
+                    continue
+                rows.append(
+                    SurfaceCSGPairFixtureRow(
+                        operation=operation,
+                        left_family=left_family,
+                        right_family=right_family,
+                        pair_class=route.pair_class,
+                        route_id=route.route_id,
+                        executable=True,
+                        expected_category=_surface_csg_fixture_category(route.pair_class),
+                    )
+                )
+    return tuple(rows)
+
+
+def verify_higher_order_csg_pair_fixture_matrix(
+    *,
+    registry: SurfaceCSGSolverRegistryRecord | None = None,
+    required_pair_classes: Iterable[SurfaceCSGRoutePairClass] = HIGHER_ORDER_CSG_FIXTURE_PAIR_CLASSES,
+) -> SurfaceCSGPairFixtureEvidenceReport:
+    """Verify fixture evidence for promoted higher-order CSG pair classes."""
+
+    required = tuple(required_pair_classes)
+    rows = enumerate_higher_order_csg_pair_fixture_rows(registry=registry, required_pair_classes=required)
+    diagnostics: list[SurfaceCSGRouteSupportDiagnostic] = []
+    by_class = {pair_class: [row for row in rows if row.pair_class == pair_class] for pair_class in required}
+    for pair_class, class_rows in by_class.items():
+        if not class_rows:
+            diagnostics.append(
+                SurfaceCSGRouteSupportDiagnostic(
+                    code="missing-route",
+                    operation="union",
+                    left_family="fixture-matrix",
+                    right_family="fixture-matrix",
+                    pair_class=pair_class,
+                    message=f"Higher-order CSG fixture matrix has no rows for pair class {pair_class}.",
+                )
+            )
+            continue
+        if not any(row.executable for row in class_rows):
+            diagnostics.append(
+                SurfaceCSGRouteSupportDiagnostic(
+                    code="non-executable-route",
+                    operation=class_rows[0].operation,
+                    left_family=class_rows[0].left_family,
+                    right_family=class_rows[0].right_family,
+                    pair_class=pair_class,
+                    message=f"Higher-order CSG fixture matrix has no executable rows for pair class {pair_class}.",
+                )
+            )
+    for row in rows:
+        if row.mesh_fallback_attempted:
+            diagnostics.append(
+                SurfaceCSGRouteSupportDiagnostic(
+                    code="non-executable-route",
+                    operation=row.operation,
+                    left_family=row.left_family,
+                    right_family=row.right_family,
+                    pair_class=row.pair_class,
+                    message=f"Higher-order CSG fixture row {row.route_id} attempted mesh fallback.",
+                )
+            )
+    return SurfaceCSGPairFixtureEvidenceReport(
+        rows=rows,
+        required_pair_classes=required,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def _surface_csg_fixture_category(pair_class: SurfaceCSGRoutePairClass) -> Literal[
+    "crossing", "tangent", "coincident", "boundary", "singular", "refusal"
+]:
+    if pair_class in {"spline-nurbs-pair"}:
+        return "coincident"
+    if pair_class in {"sweep-pair", "subdivision-pair"}:
+        return "boundary"
+    return "crossing"
 
 
 def collect_higher_order_csg_residual(
