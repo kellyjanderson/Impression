@@ -22,12 +22,17 @@ from impression.modeling import (
     HeightmapCompositionRecord,
     HeightmapCompositionResult,
     HeightmapOverhangDiagnostic,
+    HeightmapPromotionDecision,
+    HeightmapPromotionDiagnostic,
+    HeightmapPromotionTriggerRecord,
     HeightmapRepresentabilityReport,
     MeshQuality,
     ParameterDomain,
     PlanarSurfacePatch,
     compose_heightmap_csg_result,
     heightmap_representability_report,
+    plan_heightmap_promotion_route,
+    select_heightmap_promotion_target,
     heightmap,
     displace_heightmap,
     heightmap_cache_key_record,
@@ -414,6 +419,73 @@ def test_heightmap_representability_reports_invalid_projection_and_unsafe_grid_b
     assert {diagnostic.code for diagnostic in report.diagnostics} == {"invalid-projection", "unsafe-grid"}
     assert report.diagnostics[0].no_mesh_fallback is True
     assert "mesh fallback" in report.diagnostics[0].message
+
+
+def test_heightmap_promotion_routes_overhangs_to_implicit_with_provenance():
+    overhang_transform = np.eye(4, dtype=float)
+    overhang_transform[0, 2] = 0.5
+    left = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.ones((2, 2), dtype=float),
+        transform_matrix=overhang_transform,
+    )
+    right = HeightmapSurfacePatch(family="heightmap", height_samples=np.ones((2, 2), dtype=float))
+
+    decision = plan_heightmap_promotion_route("union", left, right)
+
+    assert isinstance(decision, HeightmapPromotionDecision)
+    assert isinstance(decision.trigger, HeightmapPromotionTriggerRecord)
+    assert decision.supported is True
+    assert decision.target_family == "implicit"
+    assert decision.lossiness == "volumetric-field"
+    assert decision.source_families == ("heightmap", "heightmap")
+    assert decision.trigger.trigger_codes == ("overhang",)
+    assert decision.no_mesh_fallback is True
+    assert decision.canonical_payload()["target_family"] == "implicit"
+
+
+def test_heightmap_promotion_routes_multivalue_projection_to_subdivision_and_refuses_missing_target():
+    collapsed_transform = np.eye(4, dtype=float)
+    collapsed_transform[0, 0] = 0.0
+    left = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.ones((2, 2), dtype=float),
+        transform_matrix=collapsed_transform,
+    )
+    right = HeightmapSurfacePatch(family="heightmap", height_samples=np.ones((2, 2), dtype=float))
+
+    report = heightmap_representability_report("intersection", left, right)
+    decision = select_heightmap_promotion_target(report)
+    refused = select_heightmap_promotion_target(report, allowed_targets=("implicit",))
+
+    assert decision.supported is True
+    assert decision.target_family == "subdivision"
+    assert decision.lossiness == "sampled-reconstruction"
+    assert refused.supported is False
+    assert refused.target_family == "subdivision"
+    assert isinstance(refused.diagnostics[0], HeightmapPromotionDiagnostic)
+    assert refused.diagnostics[0].code == "missing-route"
+    assert refused.diagnostics[0].no_mesh_fallback is True
+
+
+def test_heightmap_promotion_refuses_safe_representable_and_unsafe_source_routes():
+    left = HeightmapSurfacePatch(family="heightmap", height_samples=np.ones((2, 2), dtype=float))
+    right = HeightmapSurfacePatch(family="heightmap", height_samples=np.ones((2, 2), dtype=float))
+    unsafe = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.ones((2, 2), dtype=float),
+        alpha_mask=np.zeros((2, 2), dtype=bool),
+    )
+
+    not_needed = plan_heightmap_promotion_route("difference", left, right)
+    unsafe_route = plan_heightmap_promotion_route("union", unsafe, right)
+
+    assert not_needed.supported is False
+    assert not_needed.target_family is None
+    assert not_needed.diagnostics[0].code == "non-applicable"
+    assert unsafe_route.supported is False
+    assert unsafe_route.diagnostics[0].code == "unsafe-source"
+    assert "mesh fallback" in unsafe_route.diagnostics[0].message
 
 
 def test_displace_heightmap_surface_projection_planes_and_explicit_bounds():
