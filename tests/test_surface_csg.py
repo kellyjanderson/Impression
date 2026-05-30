@@ -22,6 +22,10 @@ from tests.reference_images import (
 from impression.modeling import (
     BooleanOperationError,
     BSplineSurfacePatch,
+    ImplicitCompositionDiagnostic,
+    ImplicitCompositionOperandSignPolicy,
+    ImplicitCompositionResult,
+    ImplicitOperandFieldAdapterRecord,
     NURBSSurfacePatch,
     Path3D,
     PlanarSurfacePatch,
@@ -197,6 +201,9 @@ from impression.modeling import (
     verify_surface_csg_persistence_tessellation_evidence,
     verify_higher_order_csg_pair_fixture_matrix,
     verify_sampled_implicit_csg_unsupported_row_tracker,
+    adapt_surface_patch_to_implicit_field,
+    compose_implicit_field_csg_result,
+    implicit_composition_operand_sign_policies,
 )
 from impression.modeling.surface import PATCH_FAMILY_CAPABILITY_MATRIX
 
@@ -1243,6 +1250,101 @@ def test_sampled_implicit_csg_unsupported_row_tracker_reports_missing_route_clas
         and "future capability or route classification" in diagnostic.message
         for diagnostic in report.diagnostics
     )
+
+
+def test_implicit_composition_operation_sign_policies_are_deterministic() -> None:
+    policies = implicit_composition_operand_sign_policies("difference", 3)
+
+    assert all(isinstance(policy, ImplicitCompositionOperandSignPolicy) for policy in policies)
+    assert [policy.role for policy in policies] == ["base", "cutter", "cutter"]
+    assert [policy.sign for policy in policies] == ["preserve", "negate", "negate"]
+    assert implicit_composition_operand_sign_policies("union", 2)[1].role == "member"
+    with pytest.raises(ValueError, match="at least two operands"):
+        implicit_composition_operand_sign_policies("intersection", 1)
+
+
+def test_implicit_composition_result_builds_surface_native_union_body() -> None:
+    left = adapt_surface_patch_to_implicit_field(
+        PlanarSurfacePatch(family="planar"),
+        bounds=(-1.0, 1.0, -1.0, 1.0, -0.1, 0.1),
+    )
+    right = adapt_surface_patch_to_implicit_field(
+        PlanarSurfacePatch(family="planar", origin=np.array([0.0, 0.0, 0.5], dtype=float)),
+        bounds=(-1.0, 1.0, -1.0, 1.0, 0.4, 0.6),
+    )
+
+    result = compose_implicit_field_csg_result("union", (left, right), samples=(3, 3, 3), max_sample_count=27)
+
+    assert isinstance(result, ImplicitCompositionResult)
+    assert result.supported is True
+    assert result.body is not None
+    assert result.patch is not None
+    assert result.patch.family == "implicit"
+    assert result.patch.field.kind == "union"
+    assert result.safety is not None and result.safety.accepted is True
+    assert result.operation_record.result_graph is not None
+    assert result.operation_record.result_graph.root.kind == "union"
+    assert result.patch.metadata["kernel"]["no_mesh_fallback"] is True
+
+
+def test_implicit_composition_result_preserves_difference_operand_order_and_sign_policy() -> None:
+    base = adapt_surface_patch_to_implicit_field(PlanarSurfacePatch(family="planar"))
+    cutter = adapt_surface_patch_to_implicit_field(
+        PlanarSurfacePatch(family="planar", origin=np.array([0.0, 0.0, 1.0], dtype=float))
+    )
+
+    result = compose_implicit_field_csg_result("difference", (base, cutter))
+
+    assert result.supported is True
+    assert result.patch is not None
+    assert result.patch.field.kind == "difference"
+    assert result.operation_record.sign_policies[0].role == "base"
+    assert result.operation_record.sign_policies[1].role == "cutter"
+    assert result.operation_record.sign_policies[1].sign == "negate"
+
+
+def test_implicit_composition_refuses_unsupported_adapter_without_mesh_fallback() -> None:
+    adapter = ImplicitOperandFieldAdapterRecord(
+        family="unsupported-field",
+        patch_id="bad",
+        adapter_kind="refused",
+        supported=False,
+        diagnostics=(
+            {
+                "code": "unsupported-family",
+                "message": "No field adapter exists; no mesh fallback was attempted.",
+                "family": "unsupported-field",
+                "patch_id": "bad",
+            },
+        ),
+    )
+    supported = adapt_surface_patch_to_implicit_field(
+        PlanarSurfacePatch(family="planar"),
+        bounds=(-1.0, 1.0, -1.0, 1.0, -0.1, 0.1),
+    )
+
+    result = compose_implicit_field_csg_result("intersection", (supported, adapter))
+
+    assert result.supported is False
+    assert isinstance(result.diagnostics[0], ImplicitCompositionDiagnostic)
+    assert result.diagnostics[0].code == "unsupported-adapter"
+    assert result.diagnostics[0].no_mesh_fallback is True
+    assert "mesh fallback" in result.diagnostics[0].message
+
+
+def test_implicit_composition_refuses_unsafe_result_budget_without_mesh_fallback() -> None:
+    left = adapt_surface_patch_to_implicit_field(PlanarSurfacePatch(family="planar"))
+    right = adapt_surface_patch_to_implicit_field(
+        PlanarSurfacePatch(family="planar", origin=np.array([0.0, 0.0, 1.0], dtype=float))
+    )
+
+    result = compose_implicit_field_csg_result("union", (left, right), samples=(4, 4, 4), max_sample_count=4)
+
+    assert result.supported is False
+    assert result.safety is not None
+    assert result.safety.accepted is False
+    assert result.diagnostics[0].code == "unsafe-result"
+    assert result.diagnostics[0].no_mesh_fallback is True
 
 
 def test_surface_csg_operation_plan_accumulates_invalid_operand_diagnostics() -> None:
