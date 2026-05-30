@@ -95,6 +95,7 @@ from impression.modeling import (
     SurfaceSampledImplicitPromotionMatrixReport,
     SurfaceSampledImplicitPromotionPolicyRow,
     SurfaceSampledImplicitPromotionProvenanceRecord,
+    SurfaceSampledImplicitReconstructionFeasibilityReport,
     SurfaceSampledImplicitCSGUnsupportedRow,
     SurfaceSampledImplicitCSGUnsupportedRowReport,
     SurfaceCSGPatchLocalCurve,
@@ -164,6 +165,9 @@ from impression.modeling import (
     enumerate_sampled_implicit_csg_unsupported_rows,
     build_sampled_implicit_promotion_matrix,
     build_sampled_implicit_promotion_provenance_record,
+    build_sampled_implicit_reconstruction_refusal,
+    evaluate_sampled_implicit_reconstruction_feasibility,
+    sampled_implicit_reconstruction_criteria,
     sampled_implicit_promotion_metadata_payload,
     select_sampled_implicit_promotion_target,
     intersect_analytic_bspline_patch_pair,
@@ -1370,6 +1374,63 @@ def test_sampled_implicit_promotion_provenance_reports_invalid_tolerance_and_ope
     assert {diagnostic.code for diagnostic in provenance.diagnostics} == {"invalid-operands", "invalid-tolerance"}
     assert all(diagnostic.no_mesh_fallback for diagnostic in provenance.diagnostics)
     assert "no mesh fallback" in provenance.diagnostics[-1].message.lower()
+
+
+def test_sampled_implicit_reconstruction_criteria_accepts_supported_targets() -> None:
+    rows = verify_sampled_implicit_promotion_matrix(operations=("union",)).rows
+    targets = {
+        "implicit": next(row for row in rows if row.target_family == "implicit"),
+        "subdivision": next(row for row in rows if row.target_family == "subdivision"),
+        "nurbs": next(row for row in rows if row.target_family == "nurbs"),
+        "bspline": next(row for row in rows if row.target_family == "bspline"),
+    }
+
+    reports = {}
+    for target, row in targets.items():
+        provenance = build_sampled_implicit_promotion_provenance_record(row, operand_ids=("left", "right"))
+        reports[target] = evaluate_sampled_implicit_reconstruction_feasibility(
+            provenance,
+            estimated_sample_count=16,
+            residual=0.0,
+        )
+
+    assert all(isinstance(report, SurfaceSampledImplicitReconstructionFeasibilityReport) for report in reports.values())
+    assert all(report.supported for report in reports.values())
+    assert reports["implicit"].criteria.target_family == "implicit"
+    assert sampled_implicit_reconstruction_criteria("implicit").max_residual is None
+    assert sampled_implicit_reconstruction_criteria("subdivision").max_residual == pytest.approx(1e-3)
+    assert sampled_implicit_reconstruction_criteria("nurbs").requires_exact_reconstruction is True
+    assert sampled_implicit_reconstruction_criteria("bspline").requires_exact_reconstruction is True
+
+
+def test_sampled_implicit_reconstruction_criteria_refuses_budget_residual_and_incomplete_provenance() -> None:
+    row = next(
+        row
+        for row in verify_sampled_implicit_promotion_matrix(operations=("union",)).rows
+        if row.target_family == "nurbs"
+    )
+    provenance = build_sampled_implicit_promotion_provenance_record(row, operand_ids=("left", "right"))
+    report = evaluate_sampled_implicit_reconstruction_feasibility(
+        provenance,
+        estimated_sample_count=999_999,
+        residual=1e-3,
+    )
+
+    assert report.supported is False
+    assert {diagnostic.code for diagnostic in report.diagnostics} == {"sample-budget-exceeded", "residual-exceeded"}
+    assert all(diagnostic.no_mesh_fallback for diagnostic in report.diagnostics)
+    assert build_sampled_implicit_reconstruction_refusal(report) == report.diagnostics
+
+    incomplete = next(
+        row
+        for row in build_sampled_implicit_promotion_matrix(operations=("union",), allowed_targets=("subdivision",)).rows
+        if row.route_status == "in-progress"
+    )
+    incomplete_provenance = build_sampled_implicit_promotion_provenance_record(incomplete)
+    incomplete_report = evaluate_sampled_implicit_reconstruction_feasibility(incomplete_provenance)
+
+    assert incomplete_report.supported is False
+    assert any(diagnostic.code == "incomplete-provenance" for diagnostic in incomplete_report.diagnostics)
 
 
 def test_implicit_composition_operation_sign_policies_are_deterministic() -> None:
