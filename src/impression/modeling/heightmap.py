@@ -235,6 +235,94 @@ class HeightmapSampleCoordinateRecord:
 
 
 @dataclass(frozen=True)
+class HeightmapProjectionDomainRecord:
+    """Projected domain facts for one heightmap patch used by preserving CSG."""
+
+    patch_id: str
+    projection: Literal["planar"]
+    plane: Literal["xy", "xz", "yz"]
+    bounds: tuple[float, float, float, float]
+    sample_shape: tuple[int, int]
+    sample_spacing: tuple[float, float]
+    origin: tuple[float, float]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "patch_id": self.patch_id,
+            "projection": self.projection,
+            "plane": self.plane,
+            "bounds": self.bounds,
+            "sample_shape": self.sample_shape,
+            "sample_spacing": self.sample_spacing,
+            "origin": self.origin,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapClippingRecord:
+    """Projected overlap and sample-index clipping facts for two heightmap domains."""
+
+    overlap_bounds: tuple[float, float, float, float]
+    left_index_window: tuple[int, int, int, int]
+    right_index_window: tuple[int, int, int, int]
+
+    @property
+    def has_overlap(self) -> bool:
+        umin, umax, vmin, vmax = self.overlap_bounds
+        return umax > umin and vmax > vmin
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "overlap_bounds": self.overlap_bounds,
+            "left_index_window": self.left_index_window,
+            "right_index_window": self.right_index_window,
+            "has_overlap": self.has_overlap,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapProjectionRefusalDiagnostic:
+    """Deterministic refusal for heightmap-preserving CSG projection planning."""
+
+    code: Literal["projection-mismatch", "disjoint-domain", "invalid-heightmap-domain"]
+    message: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapGridAlignmentRecord:
+    """Heightmap-preserving CSG grid alignment plan."""
+
+    supported: bool
+    alignment: Literal["aligned", "resample-required", "refused"]
+    left: HeightmapProjectionDomainRecord
+    right: HeightmapProjectionDomainRecord
+    clipping: HeightmapClippingRecord | None = None
+    result_shape: tuple[int, int] | None = None
+    resample_kernel: Literal["none", "bilinear"] = "none"
+    diagnostics: tuple[HeightmapProjectionRefusalDiagnostic, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "supported": self.supported,
+            "alignment": self.alignment,
+            "left": self.left.canonical_payload(),
+            "right": self.right.canonical_payload(),
+            "clipping": None if self.clipping is None else self.clipping.canonical_payload(),
+            "result_shape": self.result_shape,
+            "resample_kernel": self.resample_kernel,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
 class HeightmapEvaluationDiagnostic:
     code: str
     message: str
@@ -469,6 +557,178 @@ def heightmap_sample_coordinate_record(
         v=v,
         u_normalized=u_norm,
         v_normalized=v_norm,
+    )
+
+
+def heightmap_projection_domain_record(
+    patch: "HeightmapSurfacePatch",
+    *,
+    projection: str = "planar",
+    plane: str = "xy",
+) -> HeightmapProjectionDomainRecord:
+    """Return projected domain facts for a native heightmap patch."""
+
+    from .surface import HeightmapSurfacePatch
+
+    if not isinstance(patch, HeightmapSurfacePatch):
+        raise TypeError("heightmap projection planning requires a HeightmapSurfacePatch.")
+    projection_name = _as_planar_projection(projection)
+    plane_name = _as_projection_plane(plane)
+    if plane_name != "xy":
+        raise ValueError("HeightmapSurfacePatch preserves CSG only in its native xy projection plane.")
+    rows, cols = patch.height_samples.shape
+    sx, sy = patch.xy_scale
+    half_width = (cols - 1) * sx * 0.5
+    half_height = (rows - 1) * sy * 0.5
+    xmin = float(patch.center[0] - half_width)
+    xmax = float(patch.center[0] + half_width)
+    ymin = float(patch.center[1] - half_height)
+    ymax = float(patch.center[1] + half_height)
+    return HeightmapProjectionDomainRecord(
+        patch_id=patch.stable_identity,
+        projection=projection_name,
+        plane=plane_name,
+        bounds=(xmin, xmax, ymin, ymax),
+        sample_shape=(int(rows), int(cols)),
+        sample_spacing=(float(sx), float(sy)),
+        origin=(xmin, ymin),
+    )
+
+
+def _heightmap_overlap_bounds(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    return (max(left[0], right[0]), min(left[1], right[1]), max(left[2], right[2]), min(left[3], right[3]))
+
+
+def _heightmap_index_window(
+    domain: HeightmapProjectionDomainRecord,
+    overlap: tuple[float, float, float, float],
+    *,
+    tolerance: float,
+) -> tuple[int, int, int, int]:
+    u0, u1, v0, v1 = overlap
+    sx, sy = domain.sample_spacing
+    ox, oy = domain.origin
+    cols = domain.sample_shape[1]
+    rows = domain.sample_shape[0]
+    c0 = max(0, int(np.floor(((u0 - ox) / sx) + tolerance)))
+    c1 = min(cols - 1, int(np.ceil(((u1 - ox) / sx) - tolerance)))
+    r0 = max(0, int(np.floor(((v0 - oy) / sy) + tolerance)))
+    r1 = min(rows - 1, int(np.ceil(((v1 - oy) / sy) - tolerance)))
+    return (r0, r1, c0, c1)
+
+
+def _heightmap_grid_lines_align(
+    left: HeightmapProjectionDomainRecord,
+    right: HeightmapProjectionDomainRecord,
+    *,
+    tolerance: float,
+) -> bool:
+    if not np.allclose(left.sample_spacing, right.sample_spacing, atol=tolerance):
+        return False
+    sx, sy = left.sample_spacing
+    dx = abs((left.origin[0] - right.origin[0]) / sx)
+    dy = abs((left.origin[1] - right.origin[1]) / sy)
+    return abs(dx - round(dx)) <= tolerance and abs(dy - round(dy)) <= tolerance
+
+
+def plan_heightmap_grid_alignment(
+    left_patch: "HeightmapSurfacePatch",
+    right_patch: "HeightmapSurfacePatch",
+    *,
+    left_projection: str = "planar",
+    right_projection: str = "planar",
+    left_plane: str = "xy",
+    right_plane: str = "xy",
+    tolerance: float = 1e-9,
+) -> HeightmapGridAlignmentRecord:
+    """Plan projection agreement, XY overlap, clipping, and grid alignment for heightmap CSG."""
+
+    tol = float(tolerance)
+    if not np.isfinite(tol) or tol < 0.0:
+        raise ValueError("heightmap grid alignment tolerance must be finite and non-negative.")
+    try:
+        left = heightmap_projection_domain_record(left_patch, projection=left_projection, plane=left_plane)
+        right = heightmap_projection_domain_record(right_patch, projection=right_projection, plane=right_plane)
+    except Exception as exc:
+        fallback_left = heightmap_projection_domain_record(left_patch)
+        fallback_right = heightmap_projection_domain_record(right_patch)
+        return HeightmapGridAlignmentRecord(
+            supported=False,
+            alignment="refused",
+            left=fallback_left,
+            right=fallback_right,
+            diagnostics=(
+                HeightmapProjectionRefusalDiagnostic(
+                    code="projection-mismatch",
+                    message=f"Heightmap projection planning refused: {exc}; no mesh fallback was attempted.",
+                ),
+            ),
+        )
+    if left.projection != right.projection or left.plane != right.plane:
+        return HeightmapGridAlignmentRecord(
+            supported=False,
+            alignment="refused",
+            left=left,
+            right=right,
+            diagnostics=(
+                HeightmapProjectionRefusalDiagnostic(
+                    code="projection-mismatch",
+                    message="Heightmap projection frames do not match; no mesh fallback was attempted.",
+                ),
+            ),
+        )
+    overlap = _heightmap_overlap_bounds(left.bounds, right.bounds)
+    clipping = HeightmapClippingRecord(
+        overlap_bounds=overlap,
+        left_index_window=_heightmap_index_window(left, overlap, tolerance=tol),
+        right_index_window=_heightmap_index_window(right, overlap, tolerance=tol),
+    )
+    if not clipping.has_overlap:
+        return HeightmapGridAlignmentRecord(
+            supported=False,
+            alignment="refused",
+            left=left,
+            right=right,
+            clipping=clipping,
+            diagnostics=(
+                HeightmapProjectionRefusalDiagnostic(
+                    code="disjoint-domain",
+                    message="Heightmap projected XY domains are disjoint; no mesh fallback was attempted.",
+                ),
+            ),
+        )
+    aligned = _heightmap_grid_lines_align(left, right, tolerance=tol)
+    if aligned:
+        result_shape = (
+            max(1, clipping.left_index_window[1] - clipping.left_index_window[0] + 1),
+            max(1, clipping.left_index_window[3] - clipping.left_index_window[2] + 1),
+        )
+        return HeightmapGridAlignmentRecord(
+            supported=True,
+            alignment="aligned",
+            left=left,
+            right=right,
+            clipping=clipping,
+            result_shape=result_shape,
+            resample_kernel="none",
+        )
+    min_sx = min(left.sample_spacing[0], right.sample_spacing[0])
+    min_sy = min(left.sample_spacing[1], right.sample_spacing[1])
+    result_shape = (
+        int(np.floor((overlap[3] - overlap[2]) / min_sy + tol)) + 1,
+        int(np.floor((overlap[1] - overlap[0]) / min_sx + tol)) + 1,
+    )
+    return HeightmapGridAlignmentRecord(
+        supported=True,
+        alignment="resample-required",
+        left=left,
+        right=right,
+        clipping=clipping,
+        result_shape=(max(2, result_shape[0]), max(2, result_shape[1])),
+        resample_kernel="bilinear",
     )
 
 
@@ -1234,6 +1494,10 @@ __all__ = [
     "HeightmapImportRequest",
     "HeightmapMaskTessellationRecord",
     "HeightmapNoDataDiagnostic",
+    "HeightmapClippingRecord",
+    "HeightmapGridAlignmentRecord",
+    "HeightmapProjectionDomainRecord",
+    "HeightmapProjectionRefusalDiagnostic",
     "HeightmapProjectionBoundsPolicy",
     "HeightmapSampleGridProvenanceRecord",
     "HeightmapSampleCoordinateRecord",
@@ -1244,6 +1508,7 @@ __all__ = [
     "heightmap_cache_key_record",
     "heightmap_import_dependency_boundary",
     "heightmap_mesh_compatibility_result",
+    "heightmap_projection_domain_record",
     "estimate_heightmap_normal",
     "heightmap_mask_tessellation_record",
     "heightmap_sample_grid_provenance_record",
@@ -1251,6 +1516,7 @@ __all__ = [
     "import_heightmap_surface",
     "make_heightmap_surface_from_grid",
     "make_heightmap_surface_patch",
+    "plan_heightmap_grid_alignment",
     "resolve_heightmap_projection_bounds_policy",
     "resolve_heightmap_alpha_mask_policy",
     "validate_heightmap_finite_samples",
