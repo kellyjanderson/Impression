@@ -613,6 +613,69 @@ class DisplacementSourceMismatchRefusalRecord:
         }
 
 
+DisplacementPromotionTargetFamily = Literal["implicit", "subdivision"]
+
+
+@dataclass(frozen=True)
+class DisplacementPromotionDiagnostic:
+    """Diagnostic emitted while selecting a displacement CSG promotion target."""
+
+    code: Literal["non-applicable", "missing-route", "unsafe-source-detach"]
+    message: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class DisplacementSourceDetachTriggerRecord:
+    """Promotion trigger facts from a displacement source/domain refusal."""
+
+    operation: SurfaceBooleanOperation
+    reason_code: str
+    replacement_hint: str
+    reason: str
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "reason_code": self.reason_code,
+            "replacement_hint": self.replacement_hint,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class DisplacementPromotionDecision:
+    """Declared promotion route for source-detaching displacement CSG results."""
+
+    operation: SurfaceBooleanOperation
+    target_family: DisplacementPromotionTargetFamily | None
+    supported: bool
+    trigger: DisplacementSourceDetachTriggerRecord
+    refusal: DisplacementSourceMismatchRefusalRecord
+    lossiness: Literal["lossless", "sampled-reconstruction", "volumetric-field"]
+    diagnostics: tuple[DisplacementPromotionDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "target_family": self.target_family,
+            "supported": self.supported,
+            "trigger": self.trigger.canonical_payload(),
+            "refusal": self.refusal.canonical_payload(),
+            "lossiness": self.lossiness,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
 @dataclass(frozen=True)
 class HeightmapCompositionResult:
     """Heightmap-preserving CSG result or explicit refusal."""
@@ -1393,6 +1456,105 @@ def displacement_source_mismatch_refusal_record(
         source_report=source_report,
         resampling=resampling,
     )
+
+
+def select_displacement_promotion_target(
+    refusal: DisplacementSourceMismatchRefusalRecord,
+    *,
+    allowed_targets: Sequence[DisplacementPromotionTargetFamily] = ("implicit", "subdivision"),
+) -> DisplacementPromotionDecision:
+    """Select the declared non-displacement route for a source-detaching displacement CSG refusal."""
+
+    allowed = tuple(str(target) for target in allowed_targets)
+    invalid_targets = tuple(target for target in allowed if target not in {"implicit", "subdivision"})
+    if invalid_targets:
+        raise ValueError("Displacement promotion targets must be implicit or subdivision.")
+    trigger = DisplacementSourceDetachTriggerRecord(
+        operation=refusal.operation,
+        reason_code=refusal.reason_code,
+        replacement_hint=refusal.replacement_hint,
+        reason=refusal.message,
+    )
+    if not refusal.refused:
+        return DisplacementPromotionDecision(
+            operation=refusal.operation,
+            target_family=None,
+            supported=False,
+            trigger=trigger,
+            refusal=refusal,
+            lossiness="lossless",
+            diagnostics=(
+                DisplacementPromotionDiagnostic(
+                    code="non-applicable",
+                    message="Displacement CSG can execute without detaching from its source; promotion is not applicable.",
+                ),
+            ),
+        )
+    if refusal.reason_code in {"missing-source"}:
+        return DisplacementPromotionDecision(
+            operation=refusal.operation,
+            target_family=None,
+            supported=False,
+            trigger=trigger,
+            refusal=refusal,
+            lossiness="volumetric-field",
+            diagnostics=(
+                DisplacementPromotionDiagnostic(
+                    code="unsafe-source-detach",
+                    message="Displacement promotion refused because the source identity is missing; no mesh fallback was attempted.",
+                ),
+            ),
+        )
+    target: DisplacementPromotionTargetFamily = (
+        "implicit" if refusal.replacement_hint == "promote-to-implicit" else "subdivision"
+    )
+    lossiness: Literal["sampled-reconstruction", "volumetric-field"] = (
+        "volumetric-field" if target == "implicit" else "sampled-reconstruction"
+    )
+    if target not in allowed:
+        return DisplacementPromotionDecision(
+            operation=refusal.operation,
+            target_family=target,
+            supported=False,
+            trigger=trigger,
+            refusal=refusal,
+            lossiness=lossiness,
+            diagnostics=(
+                DisplacementPromotionDiagnostic(
+                    code="missing-route",
+                    message=f"Displacement CSG promotion target {target} is not declared for this route; no mesh fallback was attempted.",
+                ),
+            ),
+        )
+    return DisplacementPromotionDecision(
+        operation=refusal.operation,
+        target_family=target,
+        supported=True,
+        trigger=trigger,
+        refusal=refusal,
+        lossiness=lossiness,
+    )
+
+
+def plan_displacement_promotion_route(
+    operation: SurfaceBooleanOperation,
+    left: DisplacementSurfacePatch,
+    right: DisplacementSurfacePatch,
+    *,
+    allowed_targets: Sequence[DisplacementPromotionTargetFamily] = ("implicit", "subdivision"),
+    max_sample_count: int = 1_000_000,
+    tolerance: float = 1e-9,
+) -> DisplacementPromotionDecision:
+    """Build the displacement refusal-to-promotion route decision for CSG."""
+
+    refusal = displacement_source_mismatch_refusal_record(
+        operation,
+        left,
+        right,
+        max_sample_count=max_sample_count,
+        tolerance=tolerance,
+    )
+    return select_displacement_promotion_target(refusal, allowed_targets=allowed_targets)
 
 
 def _compose_heightmap_samples(
