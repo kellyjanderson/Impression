@@ -84,6 +84,8 @@ from impression.modeling import (
     SurfaceCSGPairDispatchRecord,
     SurfaceCSGPairFixtureEvidenceReport,
     SurfaceCSGPairFixtureRow,
+    SurfaceImplicitCSGEvidenceReport,
+    SurfaceImplicitCSGFixtureRow,
     SurfaceSampledImplicitCSGUnsupportedRow,
     SurfaceSampledImplicitCSGUnsupportedRowReport,
     SurfaceCSGPatchLocalCurve,
@@ -200,6 +202,8 @@ from impression.modeling import (
     validate_surface_csg_result_handoff,
     verify_surface_csg_persistence_tessellation_evidence,
     verify_higher_order_csg_pair_fixture_matrix,
+    enumerate_implicit_csg_fixture_rows,
+    verify_implicit_csg_fixture_evidence_matrix,
     verify_sampled_implicit_csg_unsupported_row_tracker,
     adapt_surface_patch_to_implicit_field,
     compose_implicit_field_csg_result,
@@ -1345,6 +1349,26 @@ def test_implicit_composition_refuses_unsafe_result_budget_without_mesh_fallback
     assert result.safety.accepted is False
     assert result.diagnostics[0].code == "unsafe-result"
     assert result.diagnostics[0].no_mesh_fallback is True
+
+
+def test_implicit_csg_fixture_evidence_matrix_covers_success_refusals_persistence_and_no_mesh() -> None:
+    rows = enumerate_implicit_csg_fixture_rows()
+    report = verify_implicit_csg_fixture_evidence_matrix()
+
+    assert isinstance(report, SurfaceImplicitCSGEvidenceReport)
+    assert report.passed is True
+    assert report.diagnostics == ()
+    assert {row.route_kind for row in rows} == set(report.required_route_kinds)
+    assert all(isinstance(row, SurfaceImplicitCSGFixtureRow) for row in rows)
+    assert all(row.reference_state == "clean" for row in rows)
+    assert all(not row.mesh_fallback_attempted for row in rows)
+    assert all(row.passed for row in rows)
+    by_kind = {row.route_kind: row for row in rows}
+    assert by_kind["success"].left_family == "planar"
+    assert by_kind["adapter-refusal"].right_family == "unsupported-field"
+    assert by_kind["persistence"].message.endswith("without mesh truth.")
+    assert "no mesh fallback" in by_kind["no-mesh-fallback"].message.lower()
+    assert report.canonical_payload()["passed"] is True
 
 
 def test_surface_csg_operation_plan_accumulates_invalid_operand_diagnostics() -> None:
