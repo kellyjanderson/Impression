@@ -16,6 +16,8 @@ from ._color import get_mesh_color, set_mesh_color
 from ._legacy_mesh_deprecation import warn_mesh_primary_api
 from .surface import (
     BSplineSurfacePatch,
+    NURBSSurfacePatch,
+    NURBSWeightValidationDiagnostic,
     PATCH_FAMILY_CAPABILITY_MATRIX,
     SurfaceBoundaryRef,
     PlanarSurfacePatch,
@@ -27,6 +29,7 @@ from .surface import (
     TrimLoop,
     make_surface_body,
     make_surface_shell,
+    validate_nurbs_weights,
 )
 from .surface_intersections import (
     SurfaceAnalyticSplineResidualReport,
@@ -735,6 +738,60 @@ class SurfaceCSGAnalyticBSplineIntersectionRecord:
             "classification": self.intersection.classification,
             "quality": self.intersection.quality,
             "max_residual": self.intersection.max_residual,
+            "curves": [curve.canonical_payload() for curve in self.curves],
+            "patch_local_curves": [curve.canonical_payload() for curve in self.patch_local_curves],
+            "residual_report": self.residual_report.canonical_payload(),
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGAnalyticNURBSIntersectionRecord:
+    """Declared-tolerance CSG intersection result for analytic/NURBS patch pairs."""
+
+    first_patch: SurfaceBooleanPatchRef
+    second_patch: SurfaceBooleanPatchRef
+    intersection: SurfaceIntersectionResultRecord
+    residual_report: SurfaceAnalyticSplineResidualReport
+    weight_diagnostics: tuple[NURBSWeightValidationDiagnostic, ...] = ()
+    curves: tuple[SurfaceCSGCurvePrimitive, ...] = ()
+    patch_local_curves: tuple[SurfaceCSGPatchLocalCurve, ...] = ()
+    diagnostics: tuple[
+        SurfaceIntersectionSupportDiagnostic | SurfaceCSGCurveMappingDiagnostic | NURBSWeightValidationDiagnostic,
+        ...,
+    ] = ()
+
+    @property
+    def supported(self) -> bool:
+        return (
+            self.intersection.supported
+            and self.residual_report.converged
+            and not self.weight_diagnostics
+            and bool(self.curves)
+            and len(self.patch_local_curves) >= len(self.curves) * 2
+            and not self.diagnostics
+        )
+
+    @property
+    def exact_conic_compatible(self) -> bool:
+        return self.intersection.quality == "exact"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "first_patch": {
+                "operand_index": self.first_patch.operand_index,
+                "patch_index": self.first_patch.patch_index,
+            },
+            "second_patch": {
+                "operand_index": self.second_patch.operand_index,
+                "patch_index": self.second_patch.patch_index,
+            },
+            "supported": self.supported,
+            "exact_conic_compatible": self.exact_conic_compatible,
+            "classification": self.intersection.classification,
+            "quality": self.intersection.quality,
+            "max_residual": self.intersection.max_residual,
+            "weight_diagnostics": [diagnostic.canonical_payload() for diagnostic in self.weight_diagnostics],
             "curves": [curve.canonical_payload() for curve in self.curves],
             "patch_local_curves": [curve.canonical_payload() for curve in self.patch_local_curves],
             "residual_report": self.residual_report.canonical_payload(),
@@ -2510,7 +2567,7 @@ _SURFACE_BOOLEAN_EXECUTABLE_FAMILY_PAIRS: frozenset[tuple[str, str]] = frozenset
         for right_family, right_capability in PATCH_FAMILY_CAPABILITY_MATRIX.items()
         if left_capability.support_phase == "available" and right_capability.support_phase == "available"
         and left_family in {"planar", "ruled", "revolution"}
-        and right_family in {"planar", "ruled", "revolution", "bspline"}
+        and right_family in {"planar", "ruled", "revolution", "bspline", "nurbs"}
     }
 )
 ANALYTIC_SURFACE_CSG_FAMILIES: frozenset[str] = frozenset({"planar", "ruled", "revolution"})
@@ -3289,7 +3346,7 @@ def map_surface_csg_curve_to_patch_local(
                 )
             else:
                 points_uv.append(mapped)
-        elif isinstance(patch, (RuledSurfacePatch, BSplineSurfacePatch)):
+        elif isinstance(patch, (RuledSurfacePatch, BSplineSurfacePatch, NURBSSurfacePatch)):
             points_uv.append(_sampled_patch_point_to_uv(patch, point))
         else:
             diagnostics.append(
@@ -3528,6 +3585,126 @@ def intersect_analytic_bspline_patch_pair(
         second_patch=second_ref,
         intersection=result,
         residual_report=report,
+        curves=tuple(curves),
+        patch_local_curves=tuple(patch_local_curves),
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def validate_nurbs_csg_patch_weights(patch: NURBSSurfacePatch) -> tuple[NURBSWeightValidationDiagnostic, ...]:
+    """Return rational weight diagnostics for a NURBS patch entering CSG."""
+
+    return validate_nurbs_weights(patch.weights, control_net_shape=patch.control_net.shape[:2])
+
+
+def intersect_analytic_nurbs_patch_pair(
+    first_ref: SurfaceBooleanPatchRef,
+    first_patch: PlanarSurfacePatch | RuledSurfacePatch | RevolutionSurfacePatch | NURBSSurfacePatch,
+    second_ref: SurfaceBooleanPatchRef,
+    second_patch: PlanarSurfacePatch | RuledSurfacePatch | RevolutionSurfacePatch | NURBSSurfacePatch,
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+    sample_count: int = 17,
+) -> SurfaceCSGAnalyticNURBSIntersectionRecord:
+    """Intersect one analytic patch with one NURBS patch for surface CSG."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    first_is_nurbs = isinstance(first_patch, NURBSSurfacePatch)
+    second_is_nurbs = isinstance(second_patch, NURBSSurfacePatch)
+    first_is_analytic = isinstance(first_patch, (PlanarSurfacePatch, RuledSurfacePatch, RevolutionSurfacePatch))
+    second_is_analytic = isinstance(second_patch, (PlanarSurfacePatch, RuledSurfacePatch, RevolutionSurfacePatch))
+    request = make_surface_intersection_request(
+        first_patch,
+        second_patch,
+        first_patch_ref=first_ref,
+        second_patch_ref=second_ref,
+        consumer="surface-csg",
+    )
+    nurbs_patch = first_patch if first_is_nurbs else second_patch if second_is_nurbs else None
+    weight_diagnostics = (
+        validate_nurbs_csg_patch_weights(nurbs_patch)
+        if isinstance(nurbs_patch, NURBSSurfacePatch)
+        else ()
+    )
+    if (first_is_nurbs == second_is_nurbs) or (first_is_analytic == second_is_analytic):
+        diagnostic = SurfaceIntersectionSupportDiagnostic(
+            code="unsupported-family-pair",
+            consumer="surface-csg",
+            family_pair=request.normalized_family_pair,
+            message="analytic-to-NURBS CSG requires exactly one analytic patch and one NURBS patch",
+        )
+        result, report = solve_analytic_spline_surface_intersection(request, sample_count=sample_count)
+        return SurfaceCSGAnalyticNURBSIntersectionRecord(
+            first_patch=first_ref,
+            second_patch=second_ref,
+            intersection=result,
+            residual_report=report,
+            weight_diagnostics=weight_diagnostics,
+            diagnostics=(diagnostic, *weight_diagnostics, *report.diagnostics),
+        )
+
+    result, report = solve_analytic_spline_surface_intersection(request, sample_count=sample_count)
+    diagnostics: list[
+        SurfaceIntersectionSupportDiagnostic | SurfaceCSGCurveMappingDiagnostic | NURBSWeightValidationDiagnostic
+    ] = [*weight_diagnostics, *report.diagnostics]
+    curves: list[SurfaceCSGCurvePrimitive] = []
+    patch_local_curves: list[SurfaceCSGPatchLocalCurve] = []
+    if weight_diagnostics:
+        return SurfaceCSGAnalyticNURBSIntersectionRecord(
+            first_patch=first_ref,
+            second_patch=second_ref,
+            intersection=result,
+            residual_report=report,
+            weight_diagnostics=weight_diagnostics,
+            diagnostics=tuple(diagnostics),
+        )
+    for curve_record in result.curves:
+        try:
+            curve = make_surface_csg_curve(curve_record.kind, curve_record.points_3d, policy=normalized_policy)
+        except ValueError as exc:
+            source_digest = hashlib.sha256(repr(curve_record.points_3d).encode("utf-8")).hexdigest()
+            diagnostics.append(
+                SurfaceCSGCurveMappingDiagnostic(
+                    code="degenerate-curve",
+                    message=f"Analytic-to-NURBS CSG curve could not be emitted: {exc}",
+                    patch=first_ref,
+                    source_curve_digest=source_digest,
+                )
+            )
+            continue
+        curves.append(curve)
+        first_mapping = (
+            _surface_csg_patch_local_curve_from_parameters(
+                curve,
+                first_ref,
+                first_patch,
+                curve_record.first_parameters,
+                policy=normalized_policy,
+            )
+            if curve_record.first_parameters
+            else map_surface_csg_curve_to_patch_local(curve, first_ref, first_patch, policy=normalized_policy)
+        )
+        second_mapping = (
+            _surface_csg_patch_local_curve_from_parameters(
+                curve,
+                second_ref,
+                second_patch,
+                curve_record.second_parameters,
+                policy=normalized_policy,
+            )
+            if curve_record.second_parameters
+            else map_surface_csg_curve_to_patch_local(curve, second_ref, second_patch, policy=normalized_policy)
+        )
+        for mapping in (first_mapping, second_mapping):
+            diagnostics.extend(mapping.diagnostics)
+            if mapping.curve is not None:
+                patch_local_curves.append(mapping.curve)
+    return SurfaceCSGAnalyticNURBSIntersectionRecord(
+        first_patch=first_ref,
+        second_patch=second_ref,
+        intersection=result,
+        residual_report=report,
+        weight_diagnostics=weight_diagnostics,
         curves=tuple(curves),
         patch_local_curves=tuple(patch_local_curves),
         diagnostics=tuple(diagnostics),

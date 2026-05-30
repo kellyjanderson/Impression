@@ -22,6 +22,7 @@ from tests.reference_images import (
 from impression.modeling import (
     BooleanOperationError,
     BSplineSurfacePatch,
+    NURBSSurfacePatch,
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
@@ -35,6 +36,7 @@ from impression.modeling import (
     SurfaceBooleanTrimmedPatchFragment,
     SurfaceCSGAnalyticBSplineIntersectionRecord,
     SurfaceCSGAnalyticIntersectionRecord,
+    SurfaceCSGAnalyticNURBSIntersectionRecord,
     SurfaceCSGArrangementDiagnostic,
     SurfaceCSGBoundaryExposureDiagnostic,
     SurfaceCSGBoundaryUseProvenanceRecord,
@@ -129,6 +131,7 @@ from impression.modeling import (
     classify_surface_csg_fragment_against_body,
     classify_surface_csg_point_against_bounds,
     intersect_analytic_bspline_patch_pair,
+    intersect_analytic_nurbs_patch_pair,
     intersect_axis_compatible_revolution_pair,
     intersect_planar_linear_patch_pair,
     intersect_planar_revolution_patch_pair,
@@ -404,6 +407,96 @@ def test_analytic_bspline_csg_intersection_reports_non_convergence_without_mesh(
         plane,
         SurfaceBooleanPatchRef(1, 0),
         spline,
+        sample_count=5,
+    )
+
+    assert result.supported is False
+    assert result.diagnostics
+    assert result.diagnostics[0].code == "unsupported-family-pair"
+    assert "mesh" not in result.diagnostics[0].message.lower()
+    assert result.residual_report.converged is False
+
+
+def test_analytic_nurbs_csg_intersection_emits_rational_patch_local_curves() -> None:
+    plane = PlanarSurfacePatch(
+        family="planar",
+        origin=(0.5, 0.0, 0.0),
+        u_axis=(0.0, 1.0, 0.0),
+        v_axis=(0.0, 0.0, 1.0),
+    )
+    nurbs = NURBSSurfacePatch(
+        family="nurbs",
+        weights=((1.0, 2.0), (1.0, 2.0)),
+    )
+
+    result = intersect_analytic_nurbs_patch_pair(
+        SurfaceBooleanPatchRef(0, 0),
+        plane,
+        SurfaceBooleanPatchRef(1, 0),
+        nurbs,
+        sample_count=5,
+    )
+
+    assert isinstance(result, SurfaceCSGAnalyticNURBSIntersectionRecord)
+    assert result.supported is True
+    assert result.weight_diagnostics == ()
+    assert result.residual_report.converged is True
+    assert result.curves[0].kind == "sampled"
+    assert len(result.patch_local_curves) == 2
+    nurbs_curve = next(curve for curve in result.patch_local_curves if curve.patch == SurfaceBooleanPatchRef(1, 0))
+    assert nurbs_curve.points_uv
+    assert result.canonical_payload()["weight_diagnostics"] == []
+
+
+def test_analytic_nurbs_csg_intersection_covers_ruled_and_revolution_pairs() -> None:
+    ruled = RuledSurfacePatch(family="ruled")
+    revolution = RevolutionSurfacePatch(
+        family="revolution",
+        profile_curve=((1.0, 0.0, 0.0), (1.0, 0.0, 1.0)),
+    )
+    vertical_nurbs = NURBSSurfacePatch(
+        family="nurbs",
+        control_net=[
+            [(1.0, 0.0, 0.0), (1.0, 0.0, 1.0)],
+            [(1.0, 0.0, 0.0), (1.0, 0.0, 1.0)],
+        ],
+    )
+
+    ruled_result = intersect_analytic_nurbs_patch_pair(
+        SurfaceBooleanPatchRef(0, 0),
+        ruled,
+        SurfaceBooleanPatchRef(1, 0),
+        NURBSSurfacePatch(family="nurbs"),
+        sample_count=5,
+    )
+    revolution_result = intersect_analytic_nurbs_patch_pair(
+        SurfaceBooleanPatchRef(0, 0),
+        revolution,
+        SurfaceBooleanPatchRef(1, 0),
+        vertical_nurbs,
+        sample_count=5,
+    )
+
+    assert ruled_result.supported is True
+    assert revolution_result.supported is True
+    assert len(ruled_result.patch_local_curves) == 2
+    assert len(revolution_result.patch_local_curves) == 2
+
+
+def test_analytic_nurbs_csg_intersection_reports_non_convergence_without_mesh() -> None:
+    plane = PlanarSurfacePatch(
+        family="planar",
+        origin=(10.0, 0.0, 0.0),
+        u_axis=(0.0, 1.0, 0.0),
+        v_axis=(0.0, 0.0, 1.0),
+    )
+    nurbs = NURBSSurfacePatch(family="nurbs")
+
+    result = intersect_analytic_nurbs_patch_pair(
+        SurfaceBooleanPatchRef(0, 0),
+        plane,
+        SurfaceBooleanPatchRef(1, 0),
+        nurbs,
         sample_count=5,
     )
 

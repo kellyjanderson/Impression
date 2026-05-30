@@ -3765,16 +3765,16 @@ def test_surface_boolean_family_pair_matrix_declares_every_known_family_pair() -
                 assert record.support_state in {"exact", "declared-tolerance", "adapter", "unsupported", "not-yet-implemented"}
                 analytic_pair = left_family in ANALYTIC_SURFACE_CSG_FAMILIES and right_family in ANALYTIC_SURFACE_CSG_FAMILIES
                 pair_families = {left_family, right_family}
-                analytic_bspline_pair = (
-                    "bspline" in pair_families
+                analytic_spline_pair = (
+                    bool(pair_families & {"bspline", "nurbs"})
                     and any(family in ANALYTIC_SURFACE_CSG_FAMILIES for family in pair_families)
-                    and pair_families <= (ANALYTIC_SURFACE_CSG_FAMILIES | {"bspline"})
+                    and pair_families <= (ANALYTIC_SURFACE_CSG_FAMILIES | {"bspline", "nurbs"})
                 )
                 if analytic_pair:
                     assert record.supported is True
                     assert record.support_state == "exact"
                     assert record.required_future_capability is None
-                elif analytic_bspline_pair:
+                elif analytic_spline_pair:
                     assert record.supported is True
                     assert record.support_state == "declared-tolerance"
                     assert record.required_future_capability is None
@@ -3802,6 +3802,7 @@ def test_surface_csg_route_taxonomy_classifies_higher_order_parametric_pairs() -
 def test_surface_csg_route_lookup_exposes_executable_state_separately_from_family_availability() -> None:
     analytic = surface_csg_route_lookup("union", "planar", "ruled")
     higher_order = surface_csg_route_lookup("union", "planar", "bspline")
+    rational = surface_csg_route_lookup("union", "planar", "nurbs")
 
     assert isinstance(analytic, SurfaceCSGRouteRegistryRow)
     assert analytic.pair_class == "low-order-analytic"
@@ -3816,6 +3817,11 @@ def test_surface_csg_route_lookup_exposes_executable_state_separately_from_famil
     assert higher_order.executable is True
     assert higher_order.support_state == "declared-tolerance"
     assert higher_order.diagnostic is None
+    assert rational.pair_class == "analytic-to-nurbs"
+    assert rational.supported is True
+    assert rational.executable is True
+    assert rational.support_state == "declared-tolerance"
+    assert rational.diagnostic is None
 
 
 def test_surface_csg_executable_row_report_flags_analytic_bspline_as_executable() -> None:
@@ -4015,7 +4021,7 @@ def test_surface_boolean_unsupported_family_diagnostic_builder_refuses_supported
 
 
 def test_higher_order_csg_solver_boundary_names_advanced_family_refusals() -> None:
-    advanced_families = tuple(family for family in HIGHER_ORDER_SURFACE_CSG_FAMILIES if family != "bspline")
+    advanced_families = tuple(family for family in HIGHER_ORDER_SURFACE_CSG_FAMILIES if family not in {"bspline", "nurbs"})
 
     for family in advanced_families:
         support = classify_higher_order_csg_pair("intersection", "planar", family)
@@ -4031,20 +4037,20 @@ def test_higher_order_csg_solver_boundary_names_advanced_family_refusals() -> No
 
 
 def test_higher_order_csg_refusal_is_reflected_in_family_diagnostics() -> None:
-    support = surface_boolean_family_pair_support("union", "planar", "nurbs")
+    support = surface_boolean_family_pair_support("union", "planar", "sweep")
 
     diagnostic = build_surface_boolean_unsupported_family_diagnostic(support)
 
     assert diagnostic.phase == "higher-order-exact-solver"
     assert "unsupported higher-order surface boolean pair" in diagnostic.required_future_capability
-    assert "planar/nurbs" in diagnostic.message
+    assert "planar/sweep" in diagnostic.message
 
 
 def test_surface_backend_boolean_api_uses_family_diagnostic_result_for_unsupported_pairs() -> None:
     box = make_surface_box(size=(1.0, 1.0, 1.0), center=(0.0, 0.0, 0.0))
-    nurbs_body = make_surface_body([make_surface_shell([NURBSSurfacePatch(family="nurbs")])])
+    sweep_body = make_surface_body([make_surface_shell([SweepSurfacePatch(family="sweep")])])
 
-    result = boolean_union((box, nurbs_body), backend="surface")
+    result = boolean_union((box, sweep_body), backend="surface")
 
     assert result.status == "unsupported"
     assert result.failure_reason is not None
@@ -4057,9 +4063,9 @@ def test_surface_boolean_family_refusal_gate_never_invokes_mesh_boolean(monkeypa
 
     monkeypatch.setattr(csg_module, "_apply_boolean", fail_mesh_boolean)
     box = make_surface_box(size=(1.0, 1.0, 1.0), center=(0.0, 0.0, 0.0))
-    nurbs_body = make_surface_body([make_surface_shell([NURBSSurfacePatch(family="nurbs")])])
+    sweep_body = make_surface_body([make_surface_shell([SweepSurfacePatch(family="sweep")])])
 
-    result = boolean_union((box, nurbs_body), backend="surface")
+    result = boolean_union((box, sweep_body), backend="surface")
 
     assert result.status == "unsupported"
     assert result.body is None
