@@ -288,6 +288,56 @@ class DisplacementCSGImpressRoundTripDiagnostic:
         }
 
 
+@dataclass(frozen=True)
+class SampledImplicitPromotionImpressPayloadRecord:
+    """Inspectable `.impress` payload facts for a promoted sampled/implicit CSG result."""
+
+    operation: str
+    body_id: str
+    patch_id: str
+    target_family: str
+    route_status: str
+    source_families: tuple[str, str]
+    source_operand_ids: tuple[str, str]
+    lossiness: str
+    reconstruction_kind: str
+    no_mesh_fallback: bool
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "body_id": self.body_id,
+            "patch_id": self.patch_id,
+            "target_family": self.target_family,
+            "route_status": self.route_status,
+            "source_families": self.source_families,
+            "source_operand_ids": self.source_operand_ids,
+            "lossiness": self.lossiness,
+            "reconstruction_kind": self.reconstruction_kind,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class SampledImplicitPromotionImpressRoundTripDiagnostic:
+    """Round-trip verifier for promoted sampled/implicit CSG `.impress` payloads."""
+
+    supported: bool
+    code: str
+    message: str
+    before: SampledImplicitPromotionImpressPayloadRecord | None = None
+    after: SampledImplicitPromotionImpressPayloadRecord | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "supported": self.supported,
+            "code": self.code,
+            "message": self.message,
+            "before": None if self.before is None else self.before.canonical_payload(),
+            "after": None if self.after is None else self.after.canonical_payload(),
+        }
+
+
 _PATCH_FAMILY_DISPATCH = {
     kind: SurfacePatchFamilyDispatchRecord(
         kind=kind,
@@ -917,6 +967,138 @@ def verify_displacement_csg_impress_round_trip(result_or_body: object) -> Displa
         supported=True,
         code="displacement-csg-impress-roundtrip-supported",
         message="Displacement CSG `.impress` payload round-tripped without mesh truth.",
+        before=before,
+        after=after,
+    )
+
+
+def sampled_implicit_promotion_impress_payload_record(
+    body: SurfaceBody,
+) -> SampledImplicitPromotionImpressPayloadRecord:
+    """Return persisted promotion facts for a sampled/implicit CSG result body."""
+
+    if not isinstance(body, SurfaceBody):
+        raise ImpressFormatError("sampled_implicit_promotion_impress_payload_record requires a SurfaceBody.")
+    patches = tuple(body.iter_patches(world=True))
+    if len(patches) != 1:
+        raise ImpressFormatError("Promoted sampled/implicit CSG `.impress` payloads require exactly one result patch.")
+    patch = patches[0]
+    kernel = body.metadata.get("kernel", {})
+    if not isinstance(kernel, Mapping):
+        raise ImpressFormatError("Promoted sampled/implicit CSG body requires kernel metadata.")
+    promotion = kernel.get("sampled_implicit_promotion")
+    if not isinstance(promotion, Mapping):
+        raise ImpressFormatError("Promoted sampled/implicit CSG metadata must declare sampled_implicit_promotion.")
+    if not bool(promotion.get("supported", False)):
+        raise ImpressFormatError("Promoted sampled/implicit CSG metadata must be supported.")
+    operation = str(promotion.get("operation", "")).strip()
+    if operation not in {"union", "difference", "intersection"}:
+        raise ImpressFormatError("Promoted sampled/implicit CSG metadata must declare a supported operation.")
+    target_family = str(promotion.get("target_family", "")).strip()
+    if target_family not in {"implicit", "subdivision", "nurbs", "bspline"}:
+        raise ImpressFormatError("Promoted sampled/implicit CSG target_family must be a persisted target family.")
+    if target_family != patch.family:
+        raise ImpressFormatError("Promoted sampled/implicit CSG target_family must match the result patch family.")
+    route_status = str(promotion.get("route_status", "")).strip()
+    if route_status != "promotion-route":
+        raise ImpressFormatError("Promoted sampled/implicit CSG route_status must be promotion-route.")
+    source_families = promotion.get("source_families", ())
+    if not isinstance(source_families, Sequence) or isinstance(source_families, (str, bytes)) or len(source_families) != 2:
+        raise ImpressFormatError("Promoted sampled/implicit CSG source_families must contain two entries.")
+    normalized_source_families = tuple(str(family).strip() for family in source_families)
+    if any(not family for family in normalized_source_families):
+        raise ImpressFormatError("Promoted sampled/implicit CSG source_families must be non-empty.")
+    source_operand_ids = promotion.get("source_operand_ids", ())
+    if (
+        not isinstance(source_operand_ids, Sequence)
+        or isinstance(source_operand_ids, (str, bytes))
+        or len(source_operand_ids) != 2
+    ):
+        raise ImpressFormatError("Promoted sampled/implicit CSG source_operand_ids must contain two entries.")
+    normalized_operand_ids = tuple(str(operand_id).strip() for operand_id in source_operand_ids)
+    if any(not operand_id for operand_id in normalized_operand_ids):
+        raise ImpressFormatError("Promoted sampled/implicit CSG source_operand_ids must be non-empty.")
+    lossiness = promotion.get("lossiness")
+    if not isinstance(lossiness, Mapping):
+        raise ImpressFormatError("Promoted sampled/implicit CSG lossiness metadata is required.")
+    lossiness_kind = str(lossiness.get("lossiness", "")).strip()
+    if lossiness_kind not in {"lossless", "sampled-reconstruction", "volumetric-field", "exact-reconstruction"}:
+        raise ImpressFormatError("Promoted sampled/implicit CSG lossiness value is unsupported.")
+    reconstruction_kind = str(lossiness.get("reconstruction_kind", "")).strip()
+    if reconstruction_kind not in {"implicit-field", "subdivision-chart", "nurbs-fit", "bspline-fit"}:
+        raise ImpressFormatError("Promoted sampled/implicit CSG reconstruction_kind is unsupported.")
+    no_mesh_fallback = bool(promotion.get("no_mesh_fallback", False)) and bool(lossiness.get("no_mesh_fallback", False))
+    if not no_mesh_fallback:
+        raise ImpressFormatError("Promoted sampled/implicit CSG `.impress` payload must declare no_mesh_fallback=true.")
+    return SampledImplicitPromotionImpressPayloadRecord(
+        operation=operation,
+        body_id=body.stable_identity,
+        patch_id=patch.stable_identity,
+        target_family=target_family,
+        route_status=route_status,
+        source_families=(str(normalized_source_families[0]), str(normalized_source_families[1])),
+        source_operand_ids=(str(normalized_operand_ids[0]), str(normalized_operand_ids[1])),
+        lossiness=lossiness_kind,
+        reconstruction_kind=reconstruction_kind,
+        no_mesh_fallback=no_mesh_fallback,
+    )
+
+
+def encode_sampled_implicit_promotion_impress_payload(
+    result_or_body: object,
+    *,
+    units: ImpressUnits | Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Encode a promoted sampled/implicit CSG result body as `.impress`."""
+
+    body = result_or_body.body if hasattr(result_or_body, "body") else result_or_body
+    if body is None or not isinstance(body, SurfaceBody):
+        raise ImpressFormatError("Promoted sampled/implicit CSG `.impress` encoding requires a SurfaceBody result.")
+    record = sampled_implicit_promotion_impress_payload_record(body)
+    return make_impress_document_payload(
+        (body,),
+        units=units,
+        metadata={
+            "surface_csg_payload": {
+                "kind": "sampled-implicit-promotion",
+                "operation": record.operation,
+                "patch_id": record.patch_id,
+                "target_family": record.target_family,
+                "lossiness": record.lossiness,
+                "reconstruction_kind": record.reconstruction_kind,
+                "no_mesh_fallback": True,
+            }
+        },
+    )
+
+
+def verify_sampled_implicit_promotion_impress_round_trip(
+    result_or_body: object,
+) -> SampledImplicitPromotionImpressRoundTripDiagnostic:
+    """Verify promoted sampled/implicit CSG survives `.impress` JSON round-trip as surface truth."""
+
+    try:
+        body = result_or_body.body if hasattr(result_or_body, "body") else result_or_body
+        if body is None or not isinstance(body, SurfaceBody):
+            raise ImpressFormatError("Promoted sampled/implicit CSG round-trip requires a SurfaceBody result.")
+        before = sampled_implicit_promotion_impress_payload_record(body)
+        payload = encode_sampled_implicit_promotion_impress_payload(body)
+        loaded = loads_impress_json(dumps_impress_json(payload))
+        if len(loaded.bodies) != 1:
+            raise ImpressFormatError("Promoted sampled/implicit CSG round-trip expected exactly one body.")
+        after = sampled_implicit_promotion_impress_payload_record(loaded.bodies[0])
+        if before.canonical_payload() != after.canonical_payload():
+            raise ImpressFormatError("Promoted sampled/implicit CSG `.impress` round-trip changed persisted payload identity.")
+    except Exception as exc:
+        return SampledImplicitPromotionImpressRoundTripDiagnostic(
+            supported=False,
+            code="sampled-implicit-promotion-impress-roundtrip-failed",
+            message=f"{exc}; no mesh fallback was attempted.",
+        )
+    return SampledImplicitPromotionImpressRoundTripDiagnostic(
+        supported=True,
+        code="sampled-implicit-promotion-impress-roundtrip-supported",
+        message="Promoted sampled/implicit CSG `.impress` payload round-tripped without mesh truth.",
         before=before,
         after=after,
     )
