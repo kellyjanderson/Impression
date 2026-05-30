@@ -312,6 +312,71 @@ class HeightmapRepresentabilityReport:
         }
 
 
+HeightmapPromotionTargetFamily = Literal["implicit", "subdivision"]
+
+
+@dataclass(frozen=True)
+class HeightmapPromotionDiagnostic:
+    """Diagnostic emitted while selecting a heightmap CSG promotion target."""
+
+    code: Literal["non-applicable", "missing-route", "unsafe-source"]
+    message: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapPromotionTriggerRecord:
+    """Promotion trigger facts derived from a heightmap representability report."""
+
+    operation: SurfaceBooleanOperation
+    operand_ids: tuple[str, str]
+    trigger_codes: tuple[str, ...]
+    reason: str
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "operand_ids": self.operand_ids,
+            "trigger_codes": self.trigger_codes,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapPromotionDecision:
+    """Declared promotion route for a heightmap CSG result that cannot remain a heightmap."""
+
+    operation: SurfaceBooleanOperation
+    source_families: tuple[str, str]
+    target_family: HeightmapPromotionTargetFamily | None
+    supported: bool
+    trigger: HeightmapPromotionTriggerRecord
+    report: HeightmapRepresentabilityReport
+    lossiness: Literal["lossless", "sampled-reconstruction", "volumetric-field"]
+    diagnostics: tuple[HeightmapPromotionDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "source_families": self.source_families,
+            "target_family": self.target_family,
+            "supported": self.supported,
+            "trigger": self.trigger.canonical_payload(),
+            "report": self.report.canonical_payload(),
+            "lossiness": self.lossiness,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
 @dataclass(frozen=True)
 class HeightmapCompositionResult:
     """Heightmap-preserving CSG result or explicit refusal."""
@@ -465,6 +530,108 @@ def heightmap_representability_report(
         alignment=checked_alignment,
         diagnostics=tuple(diagnostics),
     )
+
+
+def select_heightmap_promotion_target(
+    report: HeightmapRepresentabilityReport,
+    *,
+    allowed_targets: Sequence[HeightmapPromotionTargetFamily] = ("implicit", "subdivision"),
+) -> HeightmapPromotionDecision:
+    """Select the declared non-heightmap route for an unrepresentable heightmap CSG result."""
+
+    allowed = tuple(str(target) for target in allowed_targets)
+    invalid_targets = tuple(target for target in allowed if target not in {"implicit", "subdivision"})
+    if invalid_targets:
+        raise ValueError("Heightmap promotion targets must be implicit or subdivision.")
+    trigger_codes = tuple(dict.fromkeys(diagnostic.code for diagnostic in report.diagnostics))
+    trigger = HeightmapPromotionTriggerRecord(
+        operation=report.operation,
+        operand_ids=report.operand_ids,
+        trigger_codes=trigger_codes,
+        reason="; ".join(diagnostic.message for diagnostic in report.diagnostics) or "heightmap result is representable",
+    )
+    if report.representable:
+        return HeightmapPromotionDecision(
+            operation=report.operation,
+            source_families=("heightmap", "heightmap"),
+            target_family=None,
+            supported=False,
+            trigger=trigger,
+            report=report,
+            lossiness="lossless",
+            diagnostics=(
+                HeightmapPromotionDiagnostic(
+                    code="non-applicable",
+                    message="Heightmap CSG result remains heightmap-representable; promotion is not applicable.",
+                ),
+            ),
+        )
+    if "unsafe-grid" in trigger_codes or "invalid-projection" in trigger_codes:
+        return HeightmapPromotionDecision(
+            operation=report.operation,
+            source_families=("heightmap", "heightmap"),
+            target_family=None,
+            supported=False,
+            trigger=trigger,
+            report=report,
+            lossiness="sampled-reconstruction",
+            diagnostics=(
+                HeightmapPromotionDiagnostic(
+                    code="unsafe-source",
+                    message=(
+                        "Heightmap CSG promotion refused because the source route is unsafe or has no valid "
+                        "projected domain; no mesh fallback was attempted."
+                    ),
+                ),
+            ),
+        )
+    target: HeightmapPromotionTargetFamily
+    lossiness: Literal["sampled-reconstruction", "volumetric-field"]
+    if "overhang" in trigger_codes:
+        target = "implicit"
+        lossiness = "volumetric-field"
+    else:
+        target = "subdivision"
+        lossiness = "sampled-reconstruction"
+    if target not in allowed:
+        return HeightmapPromotionDecision(
+            operation=report.operation,
+            source_families=("heightmap", "heightmap"),
+            target_family=target,
+            supported=False,
+            trigger=trigger,
+            report=report,
+            lossiness=lossiness,
+            diagnostics=(
+                HeightmapPromotionDiagnostic(
+                    code="missing-route",
+                    message=f"Heightmap CSG promotion target {target} is not declared for this route; no mesh fallback was attempted.",
+                ),
+            ),
+        )
+    return HeightmapPromotionDecision(
+        operation=report.operation,
+        source_families=("heightmap", "heightmap"),
+        target_family=target,
+        supported=True,
+        trigger=trigger,
+        report=report,
+        lossiness=lossiness,
+    )
+
+
+def plan_heightmap_promotion_route(
+    operation: SurfaceBooleanOperation,
+    left: HeightmapSurfacePatch,
+    right: HeightmapSurfacePatch,
+    *,
+    allowed_targets: Sequence[HeightmapPromotionTargetFamily] = ("implicit", "subdivision"),
+    tolerance: float = 1e-9,
+) -> HeightmapPromotionDecision:
+    """Build the heightmap refusal-to-promotion route decision for CSG."""
+
+    report = heightmap_representability_report(operation, left, right, tolerance=tolerance)
+    return select_heightmap_promotion_target(report, allowed_targets=allowed_targets)
 
 
 def _compose_heightmap_samples(
