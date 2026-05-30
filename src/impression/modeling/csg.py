@@ -5007,6 +5007,66 @@ class SurfaceSampledImplicitPromotionProvenanceRecord:
         }
 
 
+@dataclass(frozen=True)
+class SurfaceSampledImplicitReconstructionCriteriaRecord:
+    """Eligibility criteria for one sampled/implicit CSG promotion target family."""
+
+    target_family: SurfaceSampledImplicitPromotionTargetFamily
+    max_sample_count: int
+    max_residual: float | None
+    requires_complete_provenance: bool = True
+    requires_exact_reconstruction: bool = False
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "target_family": self.target_family,
+            "max_sample_count": self.max_sample_count,
+            "max_residual": self.max_residual,
+            "requires_complete_provenance": self.requires_complete_provenance,
+            "requires_exact_reconstruction": self.requires_exact_reconstruction,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSampledImplicitReconstructionDiagnostic:
+    """Diagnostic emitted by sampled/implicit promotion reconstruction criteria."""
+
+    code: Literal["incomplete-provenance", "unsupported-target", "sample-budget-exceeded", "residual-exceeded"]
+    message: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSampledImplicitReconstructionFeasibilityReport:
+    """Eligibility verdict for reconstructing a promoted sampled/implicit CSG target."""
+
+    target_family: SurfaceSampledImplicitPromotionTargetFamily | None
+    supported: bool
+    criteria: SurfaceSampledImplicitReconstructionCriteriaRecord | None
+    provenance: SurfaceSampledImplicitPromotionProvenanceRecord
+    estimated_sample_count: int
+    residual: float | None
+    diagnostics: tuple[SurfaceSampledImplicitReconstructionDiagnostic, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "target_family": self.target_family,
+            "supported": self.supported,
+            "criteria": None if self.criteria is None else self.criteria.canonical_payload(),
+            "provenance": self.provenance.canonical_payload(),
+            "estimated_sample_count": self.estimated_sample_count,
+            "residual": self.residual,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
 _SURFACE_BOOLEAN_EXECUTABLE_FAMILY_PAIRS: frozenset[tuple[str, str]] = frozenset(
     (
         {
@@ -6148,6 +6208,134 @@ def sampled_implicit_promotion_metadata_payload(
         operand_ids=operand_ids,
         tolerance=tolerance,
     ).canonical_payload()
+
+
+def sampled_implicit_reconstruction_criteria(
+    target_family: SurfaceSampledImplicitPromotionTargetFamily,
+) -> SurfaceSampledImplicitReconstructionCriteriaRecord:
+    """Return default reconstruction criteria for a sampled/implicit promotion target."""
+
+    if target_family == "implicit":
+        return SurfaceSampledImplicitReconstructionCriteriaRecord(
+            target_family=target_family,
+            max_sample_count=1_000_000,
+            max_residual=None,
+            requires_exact_reconstruction=False,
+        )
+    if target_family == "subdivision":
+        return SurfaceSampledImplicitReconstructionCriteriaRecord(
+            target_family=target_family,
+            max_sample_count=1_000_000,
+            max_residual=1e-3,
+            requires_exact_reconstruction=False,
+        )
+    if target_family == "nurbs":
+        return SurfaceSampledImplicitReconstructionCriteriaRecord(
+            target_family=target_family,
+            max_sample_count=250_000,
+            max_residual=1e-6,
+            requires_exact_reconstruction=True,
+        )
+    if target_family == "bspline":
+        return SurfaceSampledImplicitReconstructionCriteriaRecord(
+            target_family=target_family,
+            max_sample_count=250_000,
+            max_residual=1e-6,
+            requires_exact_reconstruction=True,
+        )
+    return SurfaceSampledImplicitReconstructionCriteriaRecord(
+        target_family=target_family,
+        max_sample_count=0,
+        max_residual=0.0,
+        requires_complete_provenance=True,
+        requires_exact_reconstruction=True,
+    )
+
+
+def evaluate_sampled_implicit_reconstruction_feasibility(
+    provenance: SurfaceSampledImplicitPromotionProvenanceRecord,
+    *,
+    estimated_sample_count: int = 0,
+    residual: float | None = None,
+    criteria: SurfaceSampledImplicitReconstructionCriteriaRecord | None = None,
+) -> SurfaceSampledImplicitReconstructionFeasibilityReport:
+    """Evaluate whether a promoted sampled/implicit target can be reconstructed."""
+
+    target = provenance.target_family
+    selected_criteria = criteria if criteria is not None else (
+        sampled_implicit_reconstruction_criteria(target) if target is not None else None
+    )
+    diagnostics: list[SurfaceSampledImplicitReconstructionDiagnostic] = []
+    sample_count = int(estimated_sample_count)
+    residual_value = None if residual is None else float(residual)
+    if selected_criteria is None or target is None:
+        diagnostics.append(
+            SurfaceSampledImplicitReconstructionDiagnostic(
+                code="unsupported-target",
+                message="Sampled/implicit reconstruction requires a selected target family; no mesh fallback was attempted.",
+            )
+        )
+    elif target in {"representation-refusal", "non-csg-replacement"}:
+        diagnostics.append(
+            SurfaceSampledImplicitReconstructionDiagnostic(
+                code="unsupported-target",
+                message=f"Target {target} is not a reconstructable surface family; no mesh fallback was attempted.",
+            )
+        )
+    if (
+        (selected_criteria is None or selected_criteria.requires_complete_provenance)
+        and not provenance.supported
+    ):
+        diagnostics.append(
+            SurfaceSampledImplicitReconstructionDiagnostic(
+                code="incomplete-provenance",
+                message="Sampled/implicit reconstruction requires supported promotion provenance; no mesh fallback was attempted.",
+            )
+        )
+    if selected_criteria is not None and sample_count > selected_criteria.max_sample_count:
+        diagnostics.append(
+            SurfaceSampledImplicitReconstructionDiagnostic(
+                code="sample-budget-exceeded",
+                message=(
+                    f"Sampled/implicit reconstruction needs {sample_count} samples, "
+                    f"above the {selected_criteria.max_sample_count} target budget; no mesh fallback was attempted."
+                ),
+            )
+        )
+    if (
+        selected_criteria is not None
+        and selected_criteria.max_residual is not None
+        and residual_value is not None
+        and residual_value > selected_criteria.max_residual
+    ):
+        diagnostics.append(
+            SurfaceSampledImplicitReconstructionDiagnostic(
+                code="residual-exceeded",
+                message=(
+                    f"Sampled/implicit reconstruction residual {residual_value} exceeds "
+                    f"{selected_criteria.max_residual}; no mesh fallback was attempted."
+                ),
+            )
+        )
+    return SurfaceSampledImplicitReconstructionFeasibilityReport(
+        target_family=target,
+        supported=not diagnostics,
+        criteria=selected_criteria,
+        provenance=provenance,
+        estimated_sample_count=sample_count,
+        residual=residual_value,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def build_sampled_implicit_reconstruction_refusal(
+    report: SurfaceSampledImplicitReconstructionFeasibilityReport,
+) -> tuple[SurfaceSampledImplicitReconstructionDiagnostic, ...]:
+    """Return deterministic refusal diagnostics for an ineligible reconstruction target."""
+
+    if report.supported:
+        return ()
+    return report.diagnostics
 
 
 def _surface_csg_fixture_category(pair_class: SurfaceCSGRoutePairClass) -> Literal[
