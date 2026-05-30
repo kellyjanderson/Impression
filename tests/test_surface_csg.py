@@ -97,6 +97,7 @@ from impression.modeling import (
     SurfaceCSGShellAssemblyRecord,
     SurfaceCSGShellOrderingRecord,
     SurfaceCSGSeamRebuildRecord,
+    SurfaceCSGSplinePairIntersectionRecord,
     SurfaceCSGSplitTrimLoopRecord,
     SurfaceCSGTessellationBoundaryEvidenceRecord,
     SurfaceCSGToleranceDiagnostic,
@@ -135,6 +136,7 @@ from impression.modeling import (
     intersect_axis_compatible_revolution_pair,
     intersect_planar_linear_patch_pair,
     intersect_planar_revolution_patch_pair,
+    intersect_spline_nurbs_patch_pair,
     finalize_surface_csg_validity_gate,
     detect_surface_csg_dangling_trims,
     map_surface_csg_coincident_region_loop,
@@ -497,6 +499,63 @@ def test_analytic_nurbs_csg_intersection_reports_non_convergence_without_mesh() 
         plane,
         SurfaceBooleanPatchRef(1, 0),
         nurbs,
+        sample_count=5,
+    )
+
+    assert result.supported is False
+    assert result.diagnostics
+    assert result.diagnostics[0].code == "unsupported-family-pair"
+    assert "mesh" not in result.diagnostics[0].message.lower()
+    assert result.residual_report.converged is False
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    (
+        (BSplineSurfacePatch(family="bspline"), BSplineSurfacePatch(family="bspline")),
+        (BSplineSurfacePatch(family="bspline"), NURBSSurfacePatch(family="nurbs")),
+        (NURBSSurfacePatch(family="nurbs"), NURBSSurfacePatch(family="nurbs")),
+    ),
+)
+def test_spline_nurbs_csg_intersection_emits_patch_local_curve_pairs(
+    first: BSplineSurfacePatch | NURBSSurfacePatch,
+    second: BSplineSurfacePatch | NURBSSurfacePatch,
+) -> None:
+    result = intersect_spline_nurbs_patch_pair(
+        SurfaceBooleanPatchRef(0, 0),
+        first,
+        SurfaceBooleanPatchRef(1, 0),
+        second,
+        sample_count=5,
+    )
+
+    assert isinstance(result, SurfaceCSGSplinePairIntersectionRecord)
+    assert result.supported is True
+    assert result.residual_report.converged is True
+    assert result.curves
+    assert len(result.patch_local_curves) == 2
+    assert {curve.patch for curve in result.patch_local_curves} == {
+        SurfaceBooleanPatchRef(0, 0),
+        SurfaceBooleanPatchRef(1, 0),
+    }
+    assert result.canonical_payload()["supported"] is True
+
+
+def test_spline_nurbs_csg_intersection_reports_non_convergence_without_mesh() -> None:
+    first = BSplineSurfacePatch(family="bspline")
+    second = NURBSSurfacePatch(
+        family="nurbs",
+        control_net=[
+            [(10.0, 0.0, 0.0), (10.0, 1.0, 0.0)],
+            [(11.0, 0.0, 0.0), (11.0, 1.0, 0.0)],
+        ],
+    )
+
+    result = intersect_spline_nurbs_patch_pair(
+        SurfaceBooleanPatchRef(0, 0),
+        first,
+        SurfaceBooleanPatchRef(1, 0),
+        second,
         sample_count=5,
     )
 
