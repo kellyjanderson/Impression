@@ -128,6 +128,7 @@ from impression.modeling import (
     compare_tessellation_modes,
     collect_available_family_reference_evidence,
     collect_surface_csg_no_mesh_fallback_evidence,
+    collect_sweep_csg_event_seeds,
     DisplacementAuthoringRequest,
     DisplacementDomainMappingRecord,
     DisplacementEvaluationDiagnostic,
@@ -182,6 +183,7 @@ from impression.modeling import (
     make_surface_mesh_adapter,
     make_surface_scene_group,
     make_surface_scene_node,
+    make_sweep_csg_evaluator_adapter,
     make_surface_to_mesh_adapter_record,
     mesh_from_surface_body,
     NURBSConicConstructionDiagnostic,
@@ -222,6 +224,9 @@ from impression.modeling import (
     SurfaceReferenceEvidenceMatrixReport,
     SurfaceReferenceFixtureContractRecord,
     SurfaceReferenceFixtureRequirementRecord,
+    SurfaceSweepCSGEvaluatorAdapter,
+    SurfaceSweepCSGEventSeedRecord,
+    SurfaceSweepCSGFrameEventDiagnostic,
     SurfaceComposition,
     SurfaceCompositionError,
     SurfaceCompositionTraversalRecord,
@@ -1682,6 +1687,46 @@ def test_sweep_surface_patch_evaluates_profile_along_path() -> None:
     du, dv = patch.derivatives_at(0.5, 0.5)
     assert np.allclose(du, (0.0, 0.0, 2.0), atol=1e-5)
     assert np.allclose(dv, (1.0, 0.0, 0.0), atol=1e-5)
+
+
+def test_sweep_csg_evaluator_adapter_collects_ordered_event_seeds() -> None:
+    patch = SweepSurfacePatch(
+        family="sweep",
+        path=Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.0, 2.0)]),
+        profile_points_uv=[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)],
+        profile_reference="profile:outer",
+        path_reference="path:center",
+    )
+
+    seeds = collect_sweep_csg_event_seeds(patch, frame_sample_count=3)
+    adapter = make_sweep_csg_evaluator_adapter(patch, frame_sample_count=3)
+
+    assert seeds
+    assert all(isinstance(seed, SurfaceSweepCSGEventSeedRecord) for seed in seeds)
+    assert tuple(seed.parameter for seed in seeds) == tuple(sorted(seed.parameter for seed in seeds))
+    assert isinstance(adapter, SurfaceSweepCSGEvaluatorAdapter)
+    assert adapter.supported is True
+    assert any(seed.kind == "path-endpoint" for seed in adapter.event_seeds)
+    assert any(seed.kind == "profile-vertex" for seed in adapter.event_seeds)
+    assert any(seed.kind == "frame-sample" for seed in adapter.event_seeds)
+    assert np.allclose(adapter.point_at(1.0, 1.0), patch.point_at(1.0, 1.0))
+    assert adapter.canonical_payload()["supported"] is True
+
+
+def test_sweep_csg_evaluator_adapter_reports_frame_singularity_without_mesh() -> None:
+    patch = SweepSurfacePatch(
+        family="sweep",
+        path=Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.0, 0.0)]),
+        profile_points_uv=[(0.0, 0.0), (1.0, 0.0)],
+    )
+
+    adapter = make_sweep_csg_evaluator_adapter(patch, frame_sample_count=3)
+
+    assert adapter.supported is False
+    assert adapter.diagnostics
+    assert all(isinstance(diagnostic, SurfaceSweepCSGFrameEventDiagnostic) for diagnostic in adapter.diagnostics)
+    assert any(diagnostic.code == "frame-singularity" for diagnostic in adapter.diagnostics)
+    assert all("mesh" not in diagnostic.message.lower() for diagnostic in adapter.diagnostics)
 
 
 def test_sweep_surface_patch_tessellates_through_surface_boundary() -> None:
