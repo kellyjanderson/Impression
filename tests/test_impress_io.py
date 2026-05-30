@@ -22,6 +22,7 @@ from impression.io import (
     ImplicitCSGImpressRoundTripDiagnostic,
     SampledImplicitPromotionImpressPayloadRecord,
     SampledImplicitPromotionImpressRoundTripDiagnostic,
+    SampledImplicitCSGCodecDispatchRecord,
     InvalidSurfaceWrapperDiagnostic,
     IMPRESS_DIAGNOSTIC_METADATA_FIELDS,
     SurfaceBodyStore,
@@ -58,6 +59,7 @@ from impression.io import (
     inspect_impress_patch_family_dispatch,
     inspect_impress_patch_codec_coverage,
     inspect_impress_whole_store_fixture_coverage,
+    inspect_sampled_implicit_csg_codec_dispatch,
     displacement_csg_impress_payload_record,
     heightmap_csg_impress_payload_record,
     implicit_csg_impress_payload_record,
@@ -68,10 +70,12 @@ from impression.io import (
     validate_impress_document_root,
     validate_surface_patch_serialization_guard,
     validate_surface_body_store,
+    validate_sampled_implicit_csg_payload_dispatch,
     verify_displacement_csg_impress_round_trip,
     verify_heightmap_csg_impress_round_trip,
     verify_implicit_csg_impress_round_trip,
     verify_sampled_implicit_promotion_impress_round_trip,
+    verify_sampled_implicit_csg_codec_coverage,
     save_impress,
     write_impress_json,
 )
@@ -1548,6 +1552,36 @@ def test_sampled_implicit_promotion_impress_payload_refuses_malformed_metadata()
     assert "no_mesh_fallback=true" in diagnostic.message
     with pytest.raises(ImpressFormatError, match="no_mesh_fallback=true"):
         sampled_implicit_promotion_impress_payload_record(malformed)
+
+
+def test_sampled_implicit_csg_codec_dispatch_covers_native_promoted_and_refusal_payloads() -> None:
+    records = verify_sampled_implicit_csg_codec_coverage()
+    inspected = inspect_sampled_implicit_csg_codec_dispatch()
+
+    assert records == inspected
+    assert all(isinstance(record, SampledImplicitCSGCodecDispatchRecord) for record in records)
+    assert {record.payload_kind for record in records} == {
+        "implicit-csg",
+        "heightmap-csg",
+        "displacement-csg",
+        "sampled-implicit-promotion",
+        "sampled-implicit-representation-refusal",
+    }
+    assert {record.route_kind for record in records} == {
+        "native-implicit",
+        "native-heightmap",
+        "native-displacement",
+        "promotion",
+        "refusal",
+    }
+    assert all(record.covered for record in records)
+    assert all(record.no_mesh_fallback for record in records)
+    assert validate_sampled_implicit_csg_payload_dispatch("sampled-implicit-promotion").route_kind == "promotion"
+
+
+def test_sampled_implicit_csg_codec_dispatch_refuses_unknown_payload_kind() -> None:
+    with pytest.raises(ImpressFormatError, match="Unsupported sampled/implicit CSG payload kind"):
+        validate_sampled_implicit_csg_payload_dispatch("mesh-csg")
 
 
 def test_decode_implicit_surface_patch_payload_reports_path_specific_unknown_node() -> None:

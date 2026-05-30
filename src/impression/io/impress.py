@@ -338,6 +338,35 @@ class SampledImplicitPromotionImpressRoundTripDiagnostic:
         }
 
 
+@dataclass(frozen=True)
+class SampledImplicitCSGCodecDispatchRecord:
+    """Codec coverage record for one sampled/implicit CSG route payload kind."""
+
+    payload_kind: str
+    route_kind: str
+    encode_supported: bool
+    decode_supported: bool
+    round_trip_supported: bool
+    no_mesh_fallback: bool = True
+    diagnostic: str = ""
+
+    @property
+    def covered(self) -> bool:
+        return self.encode_supported and self.decode_supported and self.round_trip_supported and self.no_mesh_fallback
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "payload_kind": self.payload_kind,
+            "route_kind": self.route_kind,
+            "encode_supported": self.encode_supported,
+            "decode_supported": self.decode_supported,
+            "round_trip_supported": self.round_trip_supported,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "covered": self.covered,
+            "diagnostic": self.diagnostic,
+        }
+
+
 _PATCH_FAMILY_DISPATCH = {
     kind: SurfacePatchFamilyDispatchRecord(
         kind=kind,
@@ -1102,6 +1131,89 @@ def verify_sampled_implicit_promotion_impress_round_trip(
         before=before,
         after=after,
     )
+
+
+_SAMPLED_IMPLICIT_CSG_CODEC_DISPATCH: tuple[SampledImplicitCSGCodecDispatchRecord, ...] = (
+    SampledImplicitCSGCodecDispatchRecord(
+        payload_kind="implicit-csg",
+        route_kind="native-implicit",
+        encode_supported=True,
+        decode_supported=True,
+        round_trip_supported=True,
+    ),
+    SampledImplicitCSGCodecDispatchRecord(
+        payload_kind="heightmap-csg",
+        route_kind="native-heightmap",
+        encode_supported=True,
+        decode_supported=True,
+        round_trip_supported=True,
+    ),
+    SampledImplicitCSGCodecDispatchRecord(
+        payload_kind="displacement-csg",
+        route_kind="native-displacement",
+        encode_supported=True,
+        decode_supported=True,
+        round_trip_supported=True,
+    ),
+    SampledImplicitCSGCodecDispatchRecord(
+        payload_kind="sampled-implicit-promotion",
+        route_kind="promotion",
+        encode_supported=True,
+        decode_supported=True,
+        round_trip_supported=True,
+    ),
+    SampledImplicitCSGCodecDispatchRecord(
+        payload_kind="sampled-implicit-representation-refusal",
+        route_kind="refusal",
+        encode_supported=True,
+        decode_supported=True,
+        round_trip_supported=True,
+    ),
+)
+
+
+def inspect_sampled_implicit_csg_codec_dispatch() -> tuple[SampledImplicitCSGCodecDispatchRecord, ...]:
+    """Return sampled/implicit CSG `.impress` route codec coverage."""
+
+    return _SAMPLED_IMPLICIT_CSG_CODEC_DISPATCH
+
+
+def validate_sampled_implicit_csg_payload_dispatch(payload_kind: str) -> SampledImplicitCSGCodecDispatchRecord:
+    """Return the codec dispatch record for a sampled/implicit CSG payload kind."""
+
+    normalized = str(payload_kind).strip()
+    for record in _SAMPLED_IMPLICIT_CSG_CODEC_DISPATCH:
+        if record.payload_kind == normalized:
+            if not record.covered:
+                raise ImpressFormatError(
+                    f"Sampled/implicit CSG payload {normalized!r} is not covered by a no-mesh `.impress` codec."
+                )
+            return record
+    raise ImpressFormatError(f"Unsupported sampled/implicit CSG payload kind {normalized!r}.")
+
+
+def verify_sampled_implicit_csg_codec_coverage() -> tuple[SampledImplicitCSGCodecDispatchRecord, ...]:
+    """Assert sampled/implicit CSG native, promoted, and refusal routes have no-mesh codec coverage."""
+
+    records = inspect_sampled_implicit_csg_codec_dispatch()
+    missing = tuple(record.payload_kind for record in records if not record.covered)
+    if missing:
+        joined = ", ".join(sorted(missing))
+        raise ImpressFormatError(f"Missing sampled/implicit CSG `.impress` codec coverage: {joined}")
+    required = {
+        "implicit-csg",
+        "heightmap-csg",
+        "displacement-csg",
+        "sampled-implicit-promotion",
+        "sampled-implicit-representation-refusal",
+    }
+    present = {record.payload_kind for record in records}
+    absent = sorted(required - present)
+    if absent:
+        raise ImpressFormatError(
+            "Missing sampled/implicit CSG `.impress` payload dispatch records: " + ", ".join(absent)
+        )
+    return records
 
 
 def dumps_impress_json(
