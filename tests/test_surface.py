@@ -141,6 +141,9 @@ from impression.modeling import (
     DisplacementLossinessMetadataRecord,
     DisplacementPayloadDiagnostic,
     DisplacementResamplingRecord,
+    DisplacementPromotionDecision,
+    DisplacementPromotionDiagnostic,
+    DisplacementSourceDetachTriggerRecord,
     DisplacementSurfacePatch,
     DisplacementIdentityDiagnostic,
     DisplacementSourceCompatibilityReport,
@@ -377,6 +380,7 @@ from impression.modeling import (
     displacement_source_compatibility_report,
     displacement_source_mismatch_refusal_record,
     plan_displacement_domain_resampling,
+    plan_displacement_promotion_route,
     compose_displacement_csg_result,
     normalize_surface_seam_continuity_constraint,
     prepare_surface_boolean_operands,
@@ -3160,6 +3164,83 @@ def test_displacement_source_mismatch_refusal_record_distinguishes_budget_from_e
     assert budget.reason_code == "resampling-budget-exceeded"
     assert budget.replacement_hint == "promote-to-subdivision"
     assert "mesh fallback" in budget.message
+
+
+def test_displacement_promotion_routes_source_mismatch_to_implicit_and_budget_to_subdivision() -> None:
+    first_source = PlanarSurfacePatch(family="planar")
+    second_source = PlanarSurfacePatch(family="planar", origin=np.asarray([0.0, 0.0, 1.0], dtype=float))
+    first = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=first_source,
+        displacement_samples=np.zeros((2, 2), dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        direction="z",
+    )
+    source_mismatch = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=second_source,
+        displacement_samples=np.ones((2, 2), dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        direction="z",
+    )
+    fine = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=first_source,
+        displacement_samples=np.ones((5, 5), dtype=float),
+        alpha_mask=np.ones((5, 5), dtype=bool),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        direction="z",
+    )
+
+    implicit = plan_displacement_promotion_route("union", first, source_mismatch)
+    subdivision = plan_displacement_promotion_route("difference", first, fine, max_sample_count=4)
+
+    assert isinstance(implicit, DisplacementPromotionDecision)
+    assert isinstance(implicit.trigger, DisplacementSourceDetachTriggerRecord)
+    assert implicit.supported is True
+    assert implicit.target_family == "implicit"
+    assert implicit.lossiness == "volumetric-field"
+    assert implicit.no_mesh_fallback is True
+    assert subdivision.supported is True
+    assert subdivision.target_family == "subdivision"
+    assert subdivision.lossiness == "sampled-reconstruction"
+
+
+def test_displacement_promotion_refuses_not_applicable_and_missing_target_without_mesh_fallback() -> None:
+    source = PlanarSurfacePatch(family="planar")
+    patch = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.zeros((2, 2), dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        direction="z",
+    )
+    fine = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.ones((5, 5), dtype=float),
+        alpha_mask=np.ones((5, 5), dtype=bool),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        direction="z",
+    )
+
+    not_needed = plan_displacement_promotion_route("union", patch, patch)
+    missing_route = plan_displacement_promotion_route(
+        "union",
+        patch,
+        fine,
+        allowed_targets=("implicit",),
+        max_sample_count=4,
+    )
+
+    assert not_needed.supported is False
+    assert not_needed.target_family is None
+    assert isinstance(not_needed.diagnostics[0], DisplacementPromotionDiagnostic)
+    assert not_needed.diagnostics[0].code == "non-applicable"
+    assert missing_route.supported is False
+    assert missing_route.target_family == "subdivision"
+    assert missing_route.diagnostics[0].code == "missing-route"
+    assert "mesh fallback" in missing_route.diagnostics[0].message
 
 
 def test_displacement_payload_authoring_builder_creates_sampled_surface_body() -> None:
