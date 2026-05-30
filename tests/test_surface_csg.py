@@ -103,6 +103,8 @@ from impression.modeling import (
     SurfaceRepresentationRefusalRecord,
     SurfaceSampledImplicitReferenceFixturePromotionReport,
     SurfaceSampledImplicitReferenceFixtureRow,
+    SurfaceSampledImplicitNoMeshFallbackEvidenceGate,
+    SurfaceSampledImplicitNoMeshProofRecord,
     SurfaceSampledImplicitCSGUnsupportedRow,
     SurfaceSampledImplicitCSGUnsupportedRowReport,
     SurfaceCSGPatchLocalCurve,
@@ -149,6 +151,7 @@ from impression.modeling import (
     TrimLoop,
     assert_surface_csg_solver_registry_complete,
     assert_no_hidden_surface_csg_mesh_fallback,
+    assert_sampled_implicit_no_mesh_fallback_evidence_gate,
     boolean_difference,
     boolean_intersection,
     boolean_union,
@@ -178,6 +181,7 @@ from impression.modeling import (
     evaluate_sampled_implicit_reconstruction_feasibility,
     enumerate_sampled_implicit_promotion_fixture_rows,
     enumerate_sampled_implicit_reference_fixture_promotions,
+    collect_sampled_implicit_no_mesh_fallback_evidence,
     sampled_implicit_reconstruction_criteria,
     sampled_implicit_promotion_metadata_payload,
     select_sampled_implicit_promotion_target,
@@ -188,6 +192,7 @@ from impression.modeling import (
     heightmap_representability_report,
     verify_sampled_implicit_promotion_fixture_evidence_matrix,
     verify_sampled_implicit_reference_fixture_promotions,
+    verify_sampled_implicit_no_mesh_fallback_evidence_gate,
     intersect_analytic_bspline_patch_pair,
     intersect_analytic_nurbs_patch_pair,
     intersect_axis_compatible_revolution_pair,
@@ -1580,6 +1585,41 @@ def test_sampled_implicit_reference_fixture_promotion_covers_native_promoted_ref
     assert any(row.route_kind == "unsafe" for row in rows)
     assert any(row.route_kind == "malformed" for row in rows)
     assert report.canonical_payload()["passed"] is True
+
+
+def test_sampled_implicit_no_mesh_fallback_evidence_gate_passes_clean_route_proofs() -> None:
+    proofs = collect_sampled_implicit_no_mesh_fallback_evidence()
+    gate = verify_sampled_implicit_no_mesh_fallback_evidence_gate()
+    asserted = assert_sampled_implicit_no_mesh_fallback_evidence_gate()
+
+    assert isinstance(gate, SurfaceSampledImplicitNoMeshFallbackEvidenceGate)
+    assert isinstance(asserted, SurfaceSampledImplicitNoMeshFallbackEvidenceGate)
+    assert gate.passed is True
+    assert gate.diagnostics == ()
+    assert proofs == gate.proofs
+    assert all(isinstance(proof, SurfaceSampledImplicitNoMeshProofRecord) for proof in proofs)
+    assert all(proof.passed for proof in proofs)
+    assert {"native", "promoted", "refusal", "unsafe", "malformed"} <= {proof.route_kind for proof in proofs}
+    assert gate.canonical_payload()["passed"] is True
+
+
+def test_sampled_implicit_no_mesh_fallback_evidence_gate_rejects_forbidden_mesh_attempts() -> None:
+    dirty_rows = (
+        SurfaceSampledImplicitReferenceFixtureRow(
+            fixture_id="sampled-implicit-reference/forbidden-mesh",
+            route_kind="promoted",
+            payload_kind="sampled-implicit-promotion",
+            passed=False,
+            reference_state="clean",
+            no_mesh_fallback=False,
+        ),
+    )
+
+    gate = verify_sampled_implicit_no_mesh_fallback_evidence_gate(dirty_rows)
+
+    assert gate.passed is False
+    assert any(diagnostic.code == "mesh-fallback" for diagnostic in gate.diagnostics)
+    assert "mesh fallback" in gate.diagnostics[0].message
 
 
 def test_implicit_composition_operation_sign_policies_are_deterministic() -> None:

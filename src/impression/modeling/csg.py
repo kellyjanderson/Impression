@@ -5209,6 +5209,50 @@ class SurfaceSampledImplicitReferenceFixturePromotionReport:
         }
 
 
+@dataclass(frozen=True)
+class SurfaceSampledImplicitNoMeshProofRecord:
+    """No-hidden-mesh proof for one sampled/implicit CSG route family."""
+
+    route_kind: str
+    payload_kind: str
+    fixture_id: str
+    no_mesh_fallback: bool
+    evidence_state: Literal["clean", "dirty", "missing"] = "clean"
+
+    @property
+    def passed(self) -> bool:
+        return self.no_mesh_fallback and self.evidence_state == "clean"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "route_kind": self.route_kind,
+            "payload_kind": self.payload_kind,
+            "fixture_id": self.fixture_id,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "evidence_state": self.evidence_state,
+            "passed": self.passed,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSampledImplicitNoMeshFallbackEvidenceGate:
+    """No-hidden-mesh evidence gate for sampled/implicit CSG routes and refusals."""
+
+    proofs: tuple[SurfaceSampledImplicitNoMeshProofRecord, ...]
+    diagnostics: tuple[SurfaceSampledImplicitPromotionDiagnostic, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return bool(self.proofs) and not self.diagnostics and all(proof.passed for proof in self.proofs)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "passed": self.passed,
+            "proofs": [proof.canonical_payload() for proof in self.proofs],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
 _SURFACE_BOOLEAN_EXECUTABLE_FAMILY_PAIRS: frozenset[tuple[str, str]] = frozenset(
     (
         {
@@ -6857,6 +6901,65 @@ def verify_sampled_implicit_reference_fixture_promotions() -> SurfaceSampledImpl
                     )
                 )
     return SurfaceSampledImplicitReferenceFixturePromotionReport(rows=rows, diagnostics=tuple(diagnostics))
+
+
+def collect_sampled_implicit_no_mesh_fallback_evidence(
+    rows: Sequence[SurfaceSampledImplicitReferenceFixtureRow] | None = None,
+) -> tuple[SurfaceSampledImplicitNoMeshProofRecord, ...]:
+    """Collect no-mesh proof rows from sampled/implicit reference evidence."""
+
+    source_rows = tuple(rows) if rows is not None else enumerate_sampled_implicit_reference_fixture_promotions()
+    return tuple(
+        SurfaceSampledImplicitNoMeshProofRecord(
+            route_kind=row.route_kind,
+            payload_kind=row.payload_kind,
+            fixture_id=row.fixture_id,
+            no_mesh_fallback=row.no_mesh_fallback,
+            evidence_state=row.reference_state,
+        )
+        for row in source_rows
+    )
+
+
+def verify_sampled_implicit_no_mesh_fallback_evidence_gate(
+    rows: Sequence[SurfaceSampledImplicitReferenceFixtureRow] | None = None,
+) -> SurfaceSampledImplicitNoMeshFallbackEvidenceGate:
+    """Verify no sampled/implicit CSG route uses mesh as source truth."""
+
+    proofs = collect_sampled_implicit_no_mesh_fallback_evidence(rows)
+    diagnostics: list[SurfaceSampledImplicitPromotionDiagnostic] = []
+    for proof in proofs:
+        if not proof.no_mesh_fallback:
+            diagnostics.append(
+                SurfaceSampledImplicitPromotionDiagnostic(
+                    code="mesh-fallback",
+                    operation="union",
+                    left_family=proof.payload_kind,
+                    right_family=proof.payload_kind,
+                    message=f"Sampled/implicit no-mesh gate found mesh fallback in fixture {proof.fixture_id}.",
+                )
+            )
+        if proof.evidence_state != "clean":
+            diagnostics.append(
+                SurfaceSampledImplicitPromotionDiagnostic(
+                    code="incomplete-route",
+                    operation="union",
+                    left_family=proof.payload_kind,
+                    right_family=proof.payload_kind,
+                    message=f"Sampled/implicit no-mesh gate requires clean evidence for fixture {proof.fixture_id}.",
+                )
+            )
+    return SurfaceSampledImplicitNoMeshFallbackEvidenceGate(proofs=proofs, diagnostics=tuple(diagnostics))
+
+
+def assert_sampled_implicit_no_mesh_fallback_evidence_gate() -> SurfaceSampledImplicitNoMeshFallbackEvidenceGate:
+    """Raise when sampled/implicit CSG evidence contains a hidden mesh fallback."""
+
+    gate = verify_sampled_implicit_no_mesh_fallback_evidence_gate()
+    if not gate.passed:
+        details = "; ".join(diagnostic.message for diagnostic in gate.diagnostics)
+        raise BooleanOperationError(details)
+    return gate
 
 
 def _surface_csg_fixture_category(pair_class: SurfaceCSGRoutePairClass) -> Literal[
