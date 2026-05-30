@@ -5118,6 +5118,54 @@ class SurfaceSampledImplicitPromotionEvidenceReport:
         }
 
 
+@dataclass(frozen=True)
+class SurfaceNonCSGReplacementRecord:
+    """Deliberate replacement workflow for a request that should not be treated as CSG."""
+
+    workflow: Literal["author-new-surface", "use-loft-or-sweep", "edit-source-samples", "promote-and-retry"]
+    reason: str
+    target_family: SurfaceSampledImplicitPromotionTargetFamily | None = None
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "workflow": self.workflow,
+            "reason": self.reason,
+            "target_family": self.target_family,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceRepresentationRefusalRecord:
+    """Supported refusal contract for impossible sampled/implicit CSG representations."""
+
+    operation: SurfaceBooleanOperation
+    source_families: tuple[str, str]
+    reason_code: Literal[
+        "heightmap-overhang",
+        "displacement-source-mismatch",
+        "unsafe-implicit-field",
+        "non-csg-replacement",
+        "missing-solver-code",
+    ]
+    message: str
+    supported_refusal: bool
+    replacement: SurfaceNonCSGReplacementRecord | None = None
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "source_families": self.source_families,
+            "reason_code": self.reason_code,
+            "message": self.message,
+            "supported_refusal": self.supported_refusal,
+            "replacement": None if self.replacement is None else self.replacement.canonical_payload(),
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
 _SURFACE_BOOLEAN_EXECUTABLE_FAMILY_PAIRS: frozenset[tuple[str, str]] = frozenset(
     (
         {
@@ -6524,6 +6572,130 @@ def verify_sampled_implicit_promotion_fixture_evidence_matrix() -> SurfaceSample
                     )
                 )
     return SurfaceSampledImplicitPromotionEvidenceReport(rows=rows, diagnostics=tuple(diagnostics))
+
+
+def suggest_non_csg_replacement_workflow(
+    intent: Literal["authoring-edit", "profile-transition", "sample-edit", "retry-promotion"],
+    *,
+    target_family: SurfaceSampledImplicitPromotionTargetFamily | None = None,
+    reason: str = "",
+) -> SurfaceNonCSGReplacementRecord:
+    """Return a deliberate non-CSG replacement workflow hint."""
+
+    workflow: Literal["author-new-surface", "use-loft-or-sweep", "edit-source-samples", "promote-and-retry"]
+    if intent == "profile-transition":
+        workflow = "use-loft-or-sweep"
+    elif intent == "sample-edit":
+        workflow = "edit-source-samples"
+    elif intent == "retry-promotion":
+        workflow = "promote-and-retry"
+    else:
+        workflow = "author-new-surface"
+    return SurfaceNonCSGReplacementRecord(
+        workflow=workflow,
+        target_family=target_family,
+        reason=reason or "Request is better represented as an authored modeling operation than as CSG.",
+    )
+
+
+def representation_refusal_from_heightmap_report(
+    report: HeightmapRepresentabilityReport,
+) -> SurfaceRepresentationRefusalRecord:
+    """Convert a heightmap representability failure into a supported refusal record."""
+
+    if report.representable:
+        return SurfaceRepresentationRefusalRecord(
+            operation=report.operation,
+            source_families=("heightmap", "heightmap"),
+            reason_code="missing-solver-code",
+            message="Heightmap report is representable; this is not a representation refusal.",
+            supported_refusal=False,
+        )
+    reason = report.diagnostics[0].message if report.diagnostics else "Heightmap CSG is not representable."
+    return SurfaceRepresentationRefusalRecord(
+        operation=report.operation,
+        source_families=("heightmap", "heightmap"),
+        reason_code="heightmap-overhang",
+        message=f"{reason} No mesh fallback was attempted.",
+        supported_refusal=True,
+        replacement=suggest_non_csg_replacement_workflow(
+            "retry-promotion",
+            target_family="implicit",
+            reason="Promote overhanging heightmap CSG to an implicit route.",
+        ),
+    )
+
+
+def representation_refusal_from_displacement_refusal(
+    refusal: DisplacementSourceMismatchRefusalRecord,
+) -> SurfaceRepresentationRefusalRecord:
+    """Convert displacement source/domain incompatibility into a supported refusal record."""
+
+    return SurfaceRepresentationRefusalRecord(
+        operation=refusal.operation,
+        source_families=("displacement", "displacement"),
+        reason_code="displacement-source-mismatch",
+        message=f"{refusal.message} No mesh fallback was attempted.",
+        supported_refusal=refusal.supported_refusal,
+        replacement=suggest_non_csg_replacement_workflow(
+            "retry-promotion",
+            target_family="implicit" if refusal.replacement_hint == "promote-to-implicit" else "subdivision",
+            reason="Use the declared displacement promotion route instead of mesh CSG.",
+        ),
+    )
+
+
+def representation_refusal_from_implicit_result(
+    result: ImplicitCompositionResult,
+) -> SurfaceRepresentationRefusalRecord:
+    """Convert unsafe implicit composition into a supported refusal record."""
+
+    unsafe = not result.supported and any(diagnostic.code == "unsafe-result" for diagnostic in result.diagnostics)
+    message = result.diagnostics[0].message if result.diagnostics else "Implicit CSG result is unsafe."
+    return SurfaceRepresentationRefusalRecord(
+        operation=result.operation,
+        source_families=("implicit", "implicit"),
+        reason_code="unsafe-implicit-field",
+        message=f"{message} No mesh fallback was attempted.",
+        supported_refusal=unsafe,
+        replacement=suggest_non_csg_replacement_workflow(
+            "retry-promotion",
+            target_family="implicit",
+            reason="Adjust field safety or sampling bounds and retry implicit composition.",
+        ),
+    )
+
+
+def classify_sampled_implicit_representation_refusal(
+    operation: SurfaceBooleanOperation,
+    source_families: tuple[str, str],
+    *,
+    reason_code: Literal["non-csg-replacement", "missing-solver-code"],
+    message: str,
+    replacement: SurfaceNonCSGReplacementRecord | None = None,
+) -> SurfaceRepresentationRefusalRecord:
+    """Classify shared representation refusal or deliberate non-CSG replacement states."""
+
+    if reason_code == "missing-solver-code":
+        return SurfaceRepresentationRefusalRecord(
+            operation=operation,
+            source_families=source_families,
+            reason_code=reason_code,
+            message=f"{message} Missing solver code is not a representation refusal.",
+            supported_refusal=False,
+        )
+    return SurfaceRepresentationRefusalRecord(
+        operation=operation,
+        source_families=source_families,
+        reason_code=reason_code,
+        message=f"{message} No mesh fallback was attempted.",
+        supported_refusal=True,
+        replacement=replacement
+        or suggest_non_csg_replacement_workflow(
+            "authoring-edit",
+            reason="Use a deliberate authored workflow instead of treating this request as CSG.",
+        ),
+    )
 
 
 def _surface_csg_fixture_category(pair_class: SurfaceCSGRoutePairClass) -> Literal[

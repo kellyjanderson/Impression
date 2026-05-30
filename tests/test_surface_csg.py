@@ -22,6 +22,8 @@ from tests.reference_images import (
 from impression.modeling import (
     BooleanOperationError,
     BSplineSurfacePatch,
+    DisplacementSurfacePatch,
+    HeightmapSurfacePatch,
     ImplicitCompositionDiagnostic,
     ImplicitCompositionOperandSignPolicy,
     ImplicitCompositionResult,
@@ -98,6 +100,7 @@ from impression.modeling import (
     SurfaceSampledImplicitPromotionPolicyRow,
     SurfaceSampledImplicitPromotionProvenanceRecord,
     SurfaceSampledImplicitReconstructionFeasibilityReport,
+    SurfaceRepresentationRefusalRecord,
     SurfaceSampledImplicitCSGUnsupportedRow,
     SurfaceSampledImplicitCSGUnsupportedRowReport,
     SurfaceCSGPatchLocalCurve,
@@ -168,11 +171,18 @@ from impression.modeling import (
     build_sampled_implicit_promotion_matrix,
     build_sampled_implicit_promotion_provenance_record,
     build_sampled_implicit_reconstruction_refusal,
+    classify_sampled_implicit_representation_refusal,
+    displacement_source_mismatch_refusal_record,
     evaluate_sampled_implicit_reconstruction_feasibility,
     enumerate_sampled_implicit_promotion_fixture_rows,
     sampled_implicit_reconstruction_criteria,
     sampled_implicit_promotion_metadata_payload,
     select_sampled_implicit_promotion_target,
+    representation_refusal_from_displacement_refusal,
+    representation_refusal_from_heightmap_report,
+    representation_refusal_from_implicit_result,
+    suggest_non_csg_replacement_workflow,
+    heightmap_representability_report,
     verify_sampled_implicit_promotion_fixture_evidence_matrix,
     intersect_analytic_bspline_patch_pair,
     intersect_analytic_nurbs_patch_pair,
@@ -1455,6 +1465,95 @@ def test_sampled_implicit_promotion_fixture_evidence_matrix_covers_targets_persi
     assert any(row.route_kind == "persistence" and row.message.endswith("without mesh truth.") for row in rows)
     assert "no mesh fallback" in next(row.message for row in rows if row.route_kind == "no-mesh-fallback").lower()
     assert report.canonical_payload()["passed"] is True
+
+
+def test_representation_refusal_contract_covers_heightmap_displacement_and_unsafe_implicit() -> None:
+    transform = np.eye(4, dtype=float)
+    transform[0, 2] = 0.25
+    overhang = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.ones((2, 2), dtype=float),
+        transform_matrix=transform,
+    )
+    heightmap_report = heightmap_representability_report(
+        "union",
+        overhang,
+        HeightmapSurfacePatch(family="heightmap", height_samples=np.ones((2, 2), dtype=float)),
+    )
+    heightmap_refusal = representation_refusal_from_heightmap_report(heightmap_report)
+
+    source = PlanarSurfacePatch(family="planar", metadata={"fixture_source": "shared"})
+    mismatch = PlanarSurfacePatch(family="planar", metadata={"fixture_source": "other"})
+    displacement_refusal = representation_refusal_from_displacement_refusal(
+        displacement_source_mismatch_refusal_record(
+            "union",
+            DisplacementSurfacePatch(
+                family="displacement",
+                source_patch=source,
+                displacement_samples=np.ones((2, 2), dtype=float),
+                projection_bounds=(-1.0, 1.0, -1.0, 1.0),
+            ),
+            DisplacementSurfacePatch(
+                family="displacement",
+                source_patch=mismatch,
+                displacement_samples=np.ones((2, 2), dtype=float),
+                projection_bounds=(-1.0, 1.0, -1.0, 1.0),
+            ),
+        )
+    )
+    unsafe_implicit = representation_refusal_from_implicit_result(
+        compose_implicit_field_csg_result(
+            "union",
+            (
+                adapt_surface_patch_to_implicit_field(PlanarSurfacePatch(family="planar")),
+                adapt_surface_patch_to_implicit_field(PlanarSurfacePatch(family="planar")),
+            ),
+            samples=(4, 4, 4),
+            max_sample_count=1,
+        )
+    )
+
+    assert isinstance(heightmap_refusal, SurfaceRepresentationRefusalRecord)
+    assert heightmap_refusal.supported_refusal is True
+    assert heightmap_refusal.reason_code == "heightmap-overhang"
+    assert heightmap_refusal.replacement.target_family == "implicit"
+    assert displacement_refusal.supported_refusal is True
+    assert displacement_refusal.reason_code == "displacement-source-mismatch"
+    assert unsafe_implicit.supported_refusal is True
+    assert unsafe_implicit.reason_code == "unsafe-implicit-field"
+    assert all(
+        "no mesh fallback" in refusal.message.lower()
+        for refusal in (heightmap_refusal, displacement_refusal, unsafe_implicit)
+    )
+
+
+def test_representation_refusal_contract_distinguishes_non_csg_replacement_from_missing_solver() -> None:
+    replacement = suggest_non_csg_replacement_workflow(
+        "profile-transition",
+        target_family="subdivision",
+        reason="A transition between authored profiles should be a loft or sweep.",
+    )
+    non_csg = classify_sampled_implicit_representation_refusal(
+        "union",
+        ("heightmap", "displacement"),
+        reason_code="non-csg-replacement",
+        message="This request is an authored transition, not a boolean.",
+        replacement=replacement,
+    )
+    missing_solver = classify_sampled_implicit_representation_refusal(
+        "union",
+        ("heightmap", "nurbs"),
+        reason_code="missing-solver-code",
+        message="The target route has not been implemented.",
+    )
+
+    assert non_csg.supported_refusal is True
+    assert non_csg.replacement.workflow == "use-loft-or-sweep"
+    assert non_csg.no_mesh_fallback is True
+    assert "no mesh fallback" in non_csg.message.lower()
+    assert missing_solver.supported_refusal is False
+    assert missing_solver.replacement is None
+    assert "not a representation refusal" in missing_solver.message
 
 
 def test_implicit_composition_operation_sign_policies_are_deterministic() -> None:
