@@ -97,6 +97,7 @@ from impression.modeling import (
     SurfaceCSGShellAssemblyRecord,
     SurfaceCSGShellOrderingRecord,
     SurfaceCSGSeamRebuildRecord,
+    SurfaceCSGSplineCoincidentRegionRecord,
     SurfaceCSGSplinePairIntersectionRecord,
     SurfaceCSGSplitTrimLoopRecord,
     SurfaceCSGTessellationBoundaryEvidenceRecord,
@@ -131,6 +132,7 @@ from impression.modeling import (
     classify_surface_csg_fragments_against_body,
     classify_surface_csg_fragment_against_body,
     classify_surface_csg_point_against_bounds,
+    detect_spline_nurbs_coincident_regions,
     intersect_analytic_bspline_patch_pair,
     intersect_analytic_nurbs_patch_pair,
     intersect_axis_compatible_revolution_pair,
@@ -564,6 +566,50 @@ def test_spline_nurbs_csg_intersection_reports_non_convergence_without_mesh() ->
     assert result.diagnostics[0].code == "unsupported-family-pair"
     assert "mesh" not in result.diagnostics[0].message.lower()
     assert result.residual_report.converged is False
+
+
+def test_spline_nurbs_coincident_region_detector_maps_overlap_loops() -> None:
+    first = BSplineSurfacePatch(family="bspline")
+    second = NURBSSurfacePatch(family="nurbs")
+
+    result = detect_spline_nurbs_coincident_regions(
+        SurfaceBooleanPatchRef(0, 0),
+        first,
+        SurfaceBooleanPatchRef(1, 0),
+        second,
+    )
+
+    assert isinstance(result, SurfaceCSGSplineCoincidentRegionRecord)
+    assert result.supported is True
+    assert result.intersection.classification == "overlap"
+    assert result.intersection.overlap_regions[0].region_id == "spline-coincident-region-0"
+    assert len(result.region_mappings) == 2
+    assert all(mapping.supported for mapping in result.region_mappings)
+    assert result.canonical_payload()["supported"] is True
+
+
+def test_spline_nurbs_coincident_region_detector_reports_ambiguous_overlap_without_mesh() -> None:
+    first = BSplineSurfacePatch(family="bspline")
+    second = NURBSSurfacePatch(
+        family="nurbs",
+        control_net=[
+            [(0.1, 0.0, 0.0), (0.1, 1.0, 0.0)],
+            [(1.1, 0.0, 0.0), (1.1, 1.0, 0.0)],
+        ],
+    )
+
+    result = detect_spline_nurbs_coincident_regions(
+        SurfaceBooleanPatchRef(0, 0),
+        first,
+        SurfaceBooleanPatchRef(1, 0),
+        second,
+    )
+
+    assert result.supported is False
+    assert result.diagnostics
+    assert result.diagnostics[0].code == "ambiguous-overlap"
+    assert "mesh" not in result.diagnostics[0].message.lower()
+    assert result.intersection.classification == "unsupported"
 
 
 def test_surface_csg_coincident_region_loop_maps_to_patch_local_trim_space() -> None:
