@@ -90,6 +90,9 @@ from impression.modeling import (
     SurfaceImplicitCSGFixtureRow,
     SurfaceDisplacementCSGEvidenceReport,
     SurfaceDisplacementCSGFixtureRow,
+    SurfaceSampledImplicitPromotionDecision,
+    SurfaceSampledImplicitPromotionMatrixReport,
+    SurfaceSampledImplicitPromotionPolicyRow,
     SurfaceSampledImplicitCSGUnsupportedRow,
     SurfaceSampledImplicitCSGUnsupportedRowReport,
     SurfaceCSGPatchLocalCurve,
@@ -157,6 +160,8 @@ from impression.modeling import (
     enumerate_higher_order_csg_pair_fixture_rows,
     enumerate_heightmap_csg_fixture_rows,
     enumerate_sampled_implicit_csg_unsupported_rows,
+    build_sampled_implicit_promotion_matrix,
+    select_sampled_implicit_promotion_target,
     intersect_analytic_bspline_patch_pair,
     intersect_analytic_nurbs_patch_pair,
     intersect_axis_compatible_revolution_pair,
@@ -213,6 +218,7 @@ from impression.modeling import (
     enumerate_implicit_csg_fixture_rows,
     verify_implicit_csg_fixture_evidence_matrix,
     verify_sampled_implicit_csg_unsupported_row_tracker,
+    verify_sampled_implicit_promotion_matrix,
     adapt_surface_patch_to_implicit_field,
     compose_implicit_field_csg_result,
     implicit_composition_operand_sign_policies,
@@ -1262,6 +1268,55 @@ def test_sampled_implicit_csg_unsupported_row_tracker_reports_missing_route_clas
         and "future capability or route classification" in diagnostic.message
         for diagnostic in report.diagnostics
     )
+
+
+def test_sampled_implicit_promotion_matrix_covers_153_rows_without_in_progress_or_mesh_fallback() -> None:
+    report = verify_sampled_implicit_promotion_matrix()
+
+    assert isinstance(report, SurfaceSampledImplicitPromotionMatrixReport)
+    assert report.passed is True
+    assert report.diagnostics == ()
+    assert len(report.rows) == 153
+    assert report.expected_row_count == 153
+    assert report.expected_rows_per_operation == 51
+    assert {len(report.rows_for_operation(operation)) for operation in SURFACE_BOOLEAN_OPERATIONS} == {51}
+    assert all(isinstance(row, SurfaceSampledImplicitPromotionPolicyRow) for row in report.rows)
+    assert {row.route_status for row in report.rows} == {"promotion-route"}
+    assert all(row.source_support_state == "unsupported" for row in report.rows)
+    assert all(row.target_family is not None for row in report.rows)
+    assert all(row.complete for row in report.rows)
+    assert all(not row.mesh_fallback_attempted for row in report.rows)
+    assert {"implicit", "subdivision", "nurbs", "bspline"} <= {row.target_family for row in report.rows}
+    assert report.canonical_payload()["passed"] is True
+
+
+def test_sampled_implicit_promotion_target_selector_reports_missing_target_without_mesh_fallback() -> None:
+    source_row = next(
+        row
+        for row in enumerate_sampled_implicit_csg_unsupported_rows(operations=("union",))
+        if row.left_family == "implicit" and row.right_family == "planar"
+    )
+
+    decision = select_sampled_implicit_promotion_target(source_row, allowed_targets=("subdivision",))
+
+    assert isinstance(decision, SurfaceSampledImplicitPromotionDecision)
+    assert decision.supported is False
+    assert decision.row.route_status == "in-progress"
+    assert decision.row.target_family is None
+    assert decision.diagnostics[0].code == "missing-target"
+    assert decision.diagnostics[0].no_mesh_fallback is True
+    assert "no mesh fallback" in decision.diagnostics[0].message.lower()
+
+
+def test_sampled_implicit_promotion_matrix_detects_missing_target_policy() -> None:
+    report = build_sampled_implicit_promotion_matrix(
+        operations=("union",),
+        allowed_targets=("subdivision",),
+    )
+
+    assert report.passed is False
+    assert any(diagnostic.code == "missing-target" for diagnostic in report.diagnostics)
+    assert any(row.route_status == "in-progress" for row in report.rows)
 
 
 def test_implicit_composition_operation_sign_policies_are_deterministic() -> None:

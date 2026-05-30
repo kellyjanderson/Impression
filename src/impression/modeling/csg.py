@@ -87,6 +87,14 @@ SurfaceSampledImplicitCSGRouteStatus = Literal[
     "representation-refusal",
     "non-csg-replacement",
 ]
+SurfaceSampledImplicitPromotionTargetFamily = Literal[
+    "implicit",
+    "subdivision",
+    "nurbs",
+    "bspline",
+    "representation-refusal",
+    "non-csg-replacement",
+]
 SurfaceCSGRoutePairClass = Literal[
     "low-order-analytic",
     "analytic-to-bspline",
@@ -4814,6 +4822,110 @@ class SurfaceSampledImplicitCSGUnsupportedRowReport:
         }
 
 
+@dataclass(frozen=True)
+class SurfaceSampledImplicitPromotionDiagnostic:
+    """Diagnostic emitted while assigning sampled/implicit CSG rows to final route classes."""
+
+    code: Literal["missing-target", "incomplete-route", "mesh-fallback"]
+    message: str
+    operation: SurfaceBooleanOperation
+    left_family: str
+    right_family: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "operation": self.operation,
+            "left_family": self.left_family,
+            "right_family": self.right_family,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSampledImplicitPromotionPolicyRow:
+    """Final sampled/implicit CSG promotion policy for one operation/family pair row."""
+
+    operation: SurfaceBooleanOperation
+    left_family: str
+    right_family: str
+    source_support_state: SurfaceBooleanSupportState
+    route_status: SurfaceSampledImplicitCSGRouteStatus
+    target_family: SurfaceSampledImplicitPromotionTargetFamily | None
+    lossiness: Literal["lossless", "sampled-reconstruction", "volumetric-field", "exact-reconstruction"]
+    route_id: str
+    reason: str
+    required_future_capability: str
+    mesh_fallback_attempted: bool = False
+
+    @property
+    def complete(self) -> bool:
+        return self.route_status != "in-progress" and self.target_family is not None and not self.mesh_fallback_attempted
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "left_family": self.left_family,
+            "right_family": self.right_family,
+            "source_support_state": self.source_support_state,
+            "route_status": self.route_status,
+            "target_family": self.target_family,
+            "lossiness": self.lossiness,
+            "route_id": self.route_id,
+            "reason": self.reason,
+            "required_future_capability": self.required_future_capability,
+            "mesh_fallback_attempted": self.mesh_fallback_attempted,
+            "complete": self.complete,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSampledImplicitPromotionDecision:
+    """Target-selection result for one sampled/implicit CSG unsupported row."""
+
+    supported: bool
+    row: SurfaceSampledImplicitPromotionPolicyRow
+    diagnostics: tuple[SurfaceSampledImplicitPromotionDiagnostic, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "supported": self.supported,
+            "row": self.row.canonical_payload(),
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSampledImplicitPromotionMatrixReport:
+    """Promotion matrix report for all sampled/implicit CSG route rows."""
+
+    rows: tuple[SurfaceSampledImplicitPromotionPolicyRow, ...]
+    expected_row_count: int
+    expected_rows_per_operation: int
+    diagnostics: tuple[SurfaceSampledImplicitPromotionDiagnostic, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return len(self.rows) == self.expected_row_count and not self.diagnostics and all(row.complete for row in self.rows)
+
+    def rows_for_operation(
+        self,
+        operation: SurfaceBooleanOperation,
+    ) -> tuple[SurfaceSampledImplicitPromotionPolicyRow, ...]:
+        return tuple(row for row in self.rows if row.operation == operation)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "passed": self.passed,
+            "expected_row_count": self.expected_row_count,
+            "expected_rows_per_operation": self.expected_rows_per_operation,
+            "rows": [row.canonical_payload() for row in self.rows],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
 _SURFACE_BOOLEAN_EXECUTABLE_FAMILY_PAIRS: frozenset[tuple[str, str]] = frozenset(
     (
         {
@@ -5607,6 +5719,238 @@ def verify_sampled_implicit_csg_unsupported_row_tracker(
         rows=rows,
         expected_row_count=expected_row_count,
         expected_rows_per_operation=expected_rows_per_operation,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def _sampled_implicit_default_promotion_target(
+    left_family: str,
+    right_family: str,
+) -> tuple[
+    SurfaceSampledImplicitPromotionTargetFamily,
+    SurfaceSampledImplicitCSGRouteStatus,
+    Literal["lossless", "sampled-reconstruction", "volumetric-field", "exact-reconstruction"],
+    str,
+]:
+    families = {left_family, right_family}
+    if "implicit" in families:
+        return (
+            "implicit",
+            "promotion-route",
+            "volumetric-field",
+            "Implicit participation preserves the CSG predicate as an implicit field route.",
+        )
+    if "nurbs" in families:
+        return (
+            "nurbs",
+            "promotion-route",
+            "exact-reconstruction",
+            "Sampled route promotes to a NURBS reconstruction target for downstream exact-trim ownership.",
+        )
+    if "bspline" in families:
+        return (
+            "bspline",
+            "promotion-route",
+            "exact-reconstruction",
+            "Sampled route promotes to a B-spline reconstruction target for downstream exact-trim ownership.",
+        )
+    if "subdivision" in families or "sweep" in families:
+        return (
+            "subdivision",
+            "promotion-route",
+            "sampled-reconstruction",
+            "Sampled route promotes to subdivision because the paired family is reconstructed as bounded charts.",
+        )
+    if families <= {"heightmap"}:
+        return (
+            "subdivision",
+            "promotion-route",
+            "sampled-reconstruction",
+            "Static sampled matrix routes heightmap-only rows through subdivision when a native heightmap route is unavailable.",
+        )
+    if families <= {"displacement"}:
+        return (
+            "subdivision",
+            "promotion-route",
+            "sampled-reconstruction",
+            "Static sampled matrix routes displacement-only rows through subdivision when source identity cannot be proven statically.",
+        )
+    return (
+        "subdivision",
+        "promotion-route",
+        "sampled-reconstruction",
+        "Sampled route promotes to subdivision as the bounded reconstructed surface target.",
+    )
+
+
+def select_sampled_implicit_promotion_target(
+    row: SurfaceSampledImplicitCSGUnsupportedRow,
+    *,
+    allowed_targets: Sequence[SurfaceSampledImplicitPromotionTargetFamily] = (
+        "implicit",
+        "subdivision",
+        "nurbs",
+        "bspline",
+        "representation-refusal",
+        "non-csg-replacement",
+    ),
+) -> SurfaceSampledImplicitPromotionDecision:
+    """Select a final target route for one sampled/implicit CSG tracker row."""
+
+    allowed = tuple(str(target) for target in allowed_targets)
+    target, route_status, lossiness, reason = _sampled_implicit_default_promotion_target(
+        row.left_family,
+        row.right_family,
+    )
+    diagnostics: list[SurfaceSampledImplicitPromotionDiagnostic] = []
+    supported = True
+    if target not in allowed:
+        supported = False
+        route_status = "in-progress"
+        diagnostics.append(
+            SurfaceSampledImplicitPromotionDiagnostic(
+                code="missing-target",
+                operation=row.operation,
+                left_family=row.left_family,
+                right_family=row.right_family,
+                message=(
+                    f"Sampled/implicit CSG target {target} is not allowed for this promotion matrix; "
+                    "no mesh fallback was attempted."
+                ),
+            )
+        )
+    policy_row = SurfaceSampledImplicitPromotionPolicyRow(
+        operation=row.operation,
+        left_family=row.left_family,
+        right_family=row.right_family,
+        source_support_state=row.support_state,
+        route_status=route_status,
+        target_family=target if supported else None,
+        lossiness=lossiness,
+        route_id=row.route_id,
+        reason=reason,
+        required_future_capability=row.required_future_capability,
+        mesh_fallback_attempted=row.mesh_fallback_attempted,
+    )
+    if policy_row.mesh_fallback_attempted:
+        supported = False
+        diagnostics.append(
+            SurfaceSampledImplicitPromotionDiagnostic(
+                code="mesh-fallback",
+                operation=row.operation,
+                left_family=row.left_family,
+                right_family=row.right_family,
+                message="Sampled/implicit CSG promotion row attempted mesh fallback.",
+            )
+        )
+    return SurfaceSampledImplicitPromotionDecision(
+        supported=supported and policy_row.complete,
+        row=policy_row,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def build_sampled_implicit_promotion_matrix(
+    *,
+    registry: SurfaceCSGSolverRegistryRecord | None = None,
+    operations: Iterable[SurfaceBooleanOperation] = SURFACE_BOOLEAN_OPERATIONS,
+    allowed_targets: Sequence[SurfaceSampledImplicitPromotionTargetFamily] = (
+        "implicit",
+        "subdivision",
+        "nurbs",
+        "bspline",
+        "representation-refusal",
+        "non-csg-replacement",
+    ),
+) -> SurfaceSampledImplicitPromotionMatrixReport:
+    """Build the final promotion matrix for sampled/implicit CSG rows."""
+
+    source = registry if registry is not None else SURFACE_CSG_SOLVER_REGISTRY
+    operation_tuple = tuple(operations)
+    tracker = verify_sampled_implicit_csg_unsupported_row_tracker(registry=source, operations=operation_tuple)
+    rows: list[SurfaceSampledImplicitPromotionPolicyRow] = []
+    diagnostics: list[SurfaceSampledImplicitPromotionDiagnostic] = []
+    for tracker_row in tracker.rows:
+        decision = select_sampled_implicit_promotion_target(tracker_row, allowed_targets=allowed_targets)
+        rows.append(decision.row)
+        diagnostics.extend(decision.diagnostics)
+        if not decision.supported and not decision.diagnostics:
+            diagnostics.append(
+                SurfaceSampledImplicitPromotionDiagnostic(
+                    code="incomplete-route",
+                    operation=tracker_row.operation,
+                    left_family=tracker_row.left_family,
+                    right_family=tracker_row.right_family,
+                    message="Sampled/implicit CSG promotion row remains incomplete; no mesh fallback was attempted.",
+                )
+            )
+    if len(rows) != tracker.expected_row_count:
+        diagnostics.append(
+            SurfaceSampledImplicitPromotionDiagnostic(
+                code="incomplete-route",
+                operation=operation_tuple[0] if operation_tuple else "union",
+                left_family="sampled-implicit-promotion",
+                right_family="sampled-implicit-promotion",
+                message=(
+                    f"Sampled/implicit CSG promotion matrix found {len(rows)} rows; "
+                    f"expected {tracker.expected_row_count}."
+                ),
+            )
+        )
+    return SurfaceSampledImplicitPromotionMatrixReport(
+        rows=tuple(rows),
+        expected_row_count=tracker.expected_row_count,
+        expected_rows_per_operation=tracker.expected_rows_per_operation,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def verify_sampled_implicit_promotion_matrix(
+    *,
+    registry: SurfaceCSGSolverRegistryRecord | None = None,
+    operations: Iterable[SurfaceBooleanOperation] = SURFACE_BOOLEAN_OPERATIONS,
+    allowed_targets: Sequence[SurfaceSampledImplicitPromotionTargetFamily] = (
+        "implicit",
+        "subdivision",
+        "nurbs",
+        "bspline",
+        "representation-refusal",
+        "non-csg-replacement",
+    ),
+) -> SurfaceSampledImplicitPromotionMatrixReport:
+    """Verify sampled/implicit CSG rows have final non-mesh route targets."""
+
+    report = build_sampled_implicit_promotion_matrix(
+        registry=registry,
+        operations=operations,
+        allowed_targets=allowed_targets,
+    )
+    diagnostics = list(report.diagnostics)
+    for row in report.rows:
+        if row.route_status == "in-progress" or row.target_family is None:
+            diagnostics.append(
+                SurfaceSampledImplicitPromotionDiagnostic(
+                    code="incomplete-route",
+                    operation=row.operation,
+                    left_family=row.left_family,
+                    right_family=row.right_family,
+                    message="Sampled/implicit CSG row remains in-progress after promotion selection.",
+                )
+            )
+        if row.mesh_fallback_attempted:
+            diagnostics.append(
+                SurfaceSampledImplicitPromotionDiagnostic(
+                    code="mesh-fallback",
+                    operation=row.operation,
+                    left_family=row.left_family,
+                    right_family=row.right_family,
+                    message="Sampled/implicit CSG promotion matrix attempted mesh fallback.",
+                )
+            )
+    return SurfaceSampledImplicitPromotionMatrixReport(
+        rows=report.rows,
+        expected_row_count=report.expected_row_count,
+        expected_rows_per_operation=report.expected_rows_per_operation,
         diagnostics=tuple(diagnostics),
     )
 
