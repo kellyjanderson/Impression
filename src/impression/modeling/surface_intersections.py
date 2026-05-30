@@ -16,8 +16,10 @@ from .surface import (
     RevolutionSurfacePatch,
     RuledSurfacePatch,
     SubdivisionSurfacePatch,
+    SweepSurfacePatch,
     SurfacePatch,
     assess_implicit_field_security,
+    evaluate_path_frame,
 )
 
 SurfaceIntersectionSupportState = Literal["exact", "declared-tolerance", "adapter", "unsupported"]
@@ -53,6 +55,189 @@ class SurfaceIntersectionTolerancePolicy:
 
 
 DEFAULT_SURFACE_INTERSECTION_TOLERANCE_POLICY = SurfaceIntersectionTolerancePolicy()
+
+
+@dataclass(frozen=True)
+class SurfaceSweepCSGEventSeedRecord:
+    """Deterministic event seed emitted by a sweep patch for CSG routing."""
+
+    seed_id: str
+    kind: Literal["path-endpoint", "profile-vertex", "frame-sample"]
+    parameter: tuple[float, float]
+    point: tuple[float, float, float]
+    source_reference: str | None = None
+
+    def __post_init__(self) -> None:
+        seed_id = str(self.seed_id).strip()
+        if not seed_id:
+            raise ValueError("SurfaceSweepCSGEventSeedRecord.seed_id must be non-empty.")
+        parameter = tuple(float(value) for value in self.parameter)
+        point = tuple(float(value) for value in self.point)
+        if len(parameter) != 2 or any(not np.isfinite(value) for value in parameter):
+            raise ValueError("SurfaceSweepCSGEventSeedRecord.parameter must be a finite UV pair.")
+        if len(point) != 3 or any(not np.isfinite(value) for value in point):
+            raise ValueError("SurfaceSweepCSGEventSeedRecord.point must be a finite 3D point.")
+        object.__setattr__(self, "seed_id", seed_id)
+        object.__setattr__(self, "parameter", parameter)
+        object.__setattr__(self, "point", point)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "seed_id": self.seed_id,
+            "kind": self.kind,
+            "parameter": self.parameter,
+            "point": self.point,
+            "source_reference": self.source_reference,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSweepCSGFrameEventDiagnostic:
+    """Frame or authoring diagnostic emitted while adapting a sweep patch for CSG."""
+
+    code: Literal["frame-singularity", "repeated-event", "invalid-sweep"]
+    message: str
+    parameter: tuple[float, float] | None = None
+    blocking: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "blocking": self.blocking,
+            "code": self.code,
+            "message": self.message,
+            "parameter": self.parameter,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSweepCSGEvaluatorAdapter:
+    """CSG-ready wrapper around a sweep patch evaluator and deterministic event seeds."""
+
+    patch: SweepSurfacePatch
+    event_seeds: tuple[SurfaceSweepCSGEventSeedRecord, ...]
+    diagnostics: tuple[SurfaceSweepCSGFrameEventDiagnostic, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return bool(self.event_seeds) and not any(diagnostic.blocking for diagnostic in self.diagnostics)
+
+    def point_at(self, u: float, v: float) -> np.ndarray:
+        return self.patch.point_at(float(u), float(v))
+
+    def derivatives_at(self, u: float, v: float) -> tuple[np.ndarray, np.ndarray]:
+        return self.patch.derivatives_at(float(u), float(v))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "family": self.patch.family,
+            "supported": self.supported,
+            "profile_reference": self.patch.profile_reference,
+            "path_reference": self.patch.path_reference,
+            "event_seeds": [seed.canonical_payload() for seed in self.event_seeds],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+def collect_sweep_csg_event_seeds(
+    patch: SweepSurfacePatch,
+    *,
+    frame_sample_count: int = 5,
+) -> tuple[SurfaceSweepCSGEventSeedRecord, ...]:
+    """Collect deterministic path/profile/frame event seeds for a sweep CSG route."""
+
+    if not isinstance(patch, SweepSurfacePatch):
+        raise TypeError("collect_sweep_csg_event_seeds requires a SweepSurfacePatch.")
+    u0, u1 = patch.domain.u_range
+    v0, v1 = patch.domain.v_range
+    seeds: list[SurfaceSweepCSGEventSeedRecord] = []
+    for index, u in enumerate((u0, u1)):
+        for v in (v0, v1):
+            point = _safe_sweep_event_point(patch, float(u), float(v))
+            seeds.append(
+                SurfaceSweepCSGEventSeedRecord(
+                    seed_id=f"path-endpoint-{index}-{len(seeds)}",
+                    kind="path-endpoint",
+                    parameter=(float(u), float(v)),
+                    point=tuple(float(component) for component in point),
+                    source_reference=patch.path_reference,
+                )
+            )
+    for index, profile_point in enumerate(patch.profile_points_uv):
+        v_norm = 0.0 if len(patch.profile_points_uv) == 1 else index / max(1, len(patch.profile_points_uv) - 1)
+        v = float(v0 + (v1 - v0) * v_norm)
+        u = float(u0)
+        point = _safe_sweep_event_point(patch, u, v)
+        seeds.append(
+            SurfaceSweepCSGEventSeedRecord(
+                seed_id=f"profile-vertex-{index}",
+                kind="profile-vertex",
+                parameter=(u, v),
+                point=tuple(float(component) for component in point),
+                source_reference=patch.profile_reference,
+            )
+        )
+    for index, u_norm in enumerate(np.linspace(0.0, 1.0, max(2, int(frame_sample_count)))):
+        u = float(u0 + (u1 - u0) * float(u_norm))
+        v = float((v0 + v1) * 0.5)
+        point = _safe_sweep_event_point(patch, u, v)
+        seeds.append(
+            SurfaceSweepCSGEventSeedRecord(
+                seed_id=f"frame-sample-{index}",
+                kind="frame-sample",
+                parameter=(u, v),
+                point=tuple(float(component) for component in point),
+                source_reference=patch.path_reference,
+            )
+        )
+    return tuple(sorted(seeds, key=lambda seed: (seed.parameter, seed.kind, seed.seed_id)))
+
+
+def _safe_sweep_event_point(patch: SweepSurfacePatch, u: float, v: float) -> tuple[float, float, float]:
+    try:
+        point = patch.point_at(float(u), float(v))
+    except ValueError:
+        point = np.zeros(3, dtype=float)
+    return tuple(float(component) for component in point)
+
+
+def make_sweep_csg_evaluator_adapter(
+    patch: SweepSurfacePatch,
+    *,
+    frame_sample_count: int = 5,
+) -> SurfaceSweepCSGEvaluatorAdapter:
+    """Build a CSG-ready sweep evaluator adapter with frame-event diagnostics."""
+
+    if not isinstance(patch, SweepSurfacePatch):
+        raise TypeError("make_sweep_csg_evaluator_adapter requires a SweepSurfacePatch.")
+    diagnostics: list[SurfaceSweepCSGFrameEventDiagnostic] = []
+    for u_norm in np.linspace(0.0, 1.0, max(2, int(frame_sample_count))):
+        frame = evaluate_path_frame(patch.path, float(u_norm), patch.frame_policy)
+        for diagnostic in frame.diagnostics:
+            diagnostics.append(
+                SurfaceSweepCSGFrameEventDiagnostic(
+                    code="frame-singularity",
+                    message=diagnostic.message,
+                    parameter=(float(u_norm), 0.0),
+                )
+            )
+    seeds = collect_sweep_csg_event_seeds(patch, frame_sample_count=frame_sample_count)
+    seen_parameters: set[tuple[float, float]] = set()
+    for seed in seeds:
+        if seed.parameter in seen_parameters:
+            diagnostics.append(
+                SurfaceSweepCSGFrameEventDiagnostic(
+                    code="repeated-event",
+                    message="Sweep CSG event seed repeats an authored parameter location.",
+                    parameter=seed.parameter,
+                    blocking=False,
+                )
+            )
+        seen_parameters.add(seed.parameter)
+    return SurfaceSweepCSGEvaluatorAdapter(
+        patch=patch,
+        event_seeds=seeds,
+        diagnostics=tuple(diagnostics),
+    )
 
 
 @dataclass(frozen=True)

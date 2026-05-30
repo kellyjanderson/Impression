@@ -566,7 +566,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 342: Analytic To NURBS CSG Intersections (v1.0)](../specifications/surface-342-analytic-to-nurbs-csg-intersections-v1_0.md)
 - [x] [Surface Spec 343: Spline And NURBS Pair Curve Intersections (v1.0)](../specifications/surface-343-spline-and-nurbs-pair-curve-intersections-v1_0.md)
 - [x] [Surface Spec 344: Spline And NURBS Coincident Region CSG Intersections (v1.0)](../specifications/surface-344-spline-and-nurbs-coincident-region-csg-intersections-v1_0.md)
-- [ ] [Surface Spec 345: Sweep CSG Evaluator And Event Adapter (v1.0)](../specifications/surface-345-sweep-csg-evaluator-and-event-adapter-v1_0.md)
+- [x] [Surface Spec 345: Sweep CSG Evaluator And Event Adapter (v1.0)](../specifications/surface-345-sweep-csg-evaluator-and-event-adapter-v1_0.md)
 - [ ] [Surface Spec 346: Sweep Pair CSG Intersections (v1.0)](../specifications/surface-346-sweep-pair-csg-intersections-v1_0.md)
 - [ ] [Surface Spec 347: Subdivision CSG Refined Chart Adapter (v1.0)](../specifications/surface-347-subdivision-csg-refined-chart-adapter-v1_0.md)
 - [ ] [Surface Spec 348: Subdivision Pair CSG Intersections (v1.0)](../specifications/surface-348-subdivision-pair-csg-intersections-v1_0.md)
