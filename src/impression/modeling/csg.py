@@ -38,6 +38,7 @@ from .surface import (
     make_surface_body,
     make_surface_shell,
     validate_nurbs_weights,
+    adapt_surface_patch_to_implicit_field,
     build_implicit_field_safety_validation_report,
     implicit_difference_field,
     implicit_intersection_field,
@@ -3079,6 +3080,55 @@ class SurfaceCSGPairFixtureEvidenceReport:
 
 
 @dataclass(frozen=True)
+class SurfaceImplicitCSGFixtureRow:
+    """One implicit-preserving/promoted CSG route evidence row."""
+
+    fixture_id: str
+    route_kind: Literal["success", "unsafe-refusal", "adapter-refusal", "persistence", "no-mesh-fallback"]
+    passed: bool
+    operation: SurfaceBooleanOperation
+    left_family: str
+    right_family: str
+    message: str
+    mesh_fallback_attempted: bool = False
+    reference_state: Literal["clean", "dirty", "missing"] = "clean"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "fixture_id": self.fixture_id,
+            "route_kind": self.route_kind,
+            "passed": self.passed,
+            "operation": self.operation,
+            "left_family": self.left_family,
+            "right_family": self.right_family,
+            "message": self.message,
+            "mesh_fallback_attempted": self.mesh_fallback_attempted,
+            "reference_state": self.reference_state,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceImplicitCSGEvidenceReport:
+    """Evidence matrix for implicit CSG route completion."""
+
+    rows: tuple[SurfaceImplicitCSGFixtureRow, ...]
+    required_route_kinds: tuple[str, ...] = ("success", "unsafe-refusal", "adapter-refusal", "persistence", "no-mesh-fallback")
+    diagnostics: tuple[SurfaceCSGRouteSupportDiagnostic, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return bool(self.rows) and not self.diagnostics and all(row.passed for row in self.rows)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "passed": self.passed,
+            "required_route_kinds": self.required_route_kinds,
+            "rows": [row.canonical_payload() for row in self.rows],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceSampledImplicitCSGUnsupportedRow:
     """Tracked sampled/implicit CSG row that still needs route promotion."""
 
@@ -3401,6 +3451,139 @@ def verify_higher_order_csg_pair_fixture_matrix(
         required_pair_classes=required,
         diagnostics=tuple(diagnostics),
     )
+
+
+def enumerate_implicit_csg_fixture_rows() -> tuple[SurfaceImplicitCSGFixtureRow, ...]:
+    """Build deterministic implicit CSG success/refusal/persistence evidence rows."""
+
+    rows: list[SurfaceImplicitCSGFixtureRow] = []
+    left = adapt_surface_patch_to_implicit_field(
+        PlanarSurfacePatch(family="planar"),
+        bounds=(-1.0, 1.0, -1.0, 1.0, -0.1, 0.1),
+    )
+    right = adapt_surface_patch_to_implicit_field(
+        PlanarSurfacePatch(family="planar", origin=np.array([0.0, 0.0, 0.5], dtype=float)),
+        bounds=(-1.0, 1.0, -1.0, 1.0, 0.4, 0.6),
+    )
+    success = compose_implicit_field_csg_result("union", (left, right), samples=(3, 3, 3), max_sample_count=27)
+    rows.append(
+        SurfaceImplicitCSGFixtureRow(
+            fixture_id="implicit-csg/success-union",
+            route_kind="success",
+            passed=success.supported and success.patch is not None and success.patch.field.kind == "union",
+            operation="union",
+            left_family=left.family,
+            right_family=right.family,
+            message="Implicit CSG union produced a surface-native implicit result.",
+        )
+    )
+    unsafe = compose_implicit_field_csg_result("union", (left, right), samples=(4, 4, 4), max_sample_count=4)
+    rows.append(
+        SurfaceImplicitCSGFixtureRow(
+            fixture_id="implicit-csg/unsafe-budget-refusal",
+            route_kind="unsafe-refusal",
+            passed=not unsafe.supported and bool(unsafe.diagnostics) and unsafe.diagnostics[0].code == "unsafe-result",
+            operation="union",
+            left_family=left.family,
+            right_family=right.family,
+            message="" if not unsafe.diagnostics else unsafe.diagnostics[0].message,
+        )
+    )
+    refused_adapter = ImplicitOperandFieldAdapterRecord(
+        family="unsupported-field",
+        patch_id="unsupported-fixture",
+        adapter_kind="refused",
+        supported=False,
+        diagnostics=(
+            ImplicitOperandFieldAdapterRefusalDiagnostic(
+                code="unsupported-family",
+                message="No field adapter exists; no mesh fallback was attempted.",
+                family="unsupported-field",
+                patch_id="unsupported-fixture",
+            ),
+        ),
+    )
+    adapter_refusal = compose_implicit_field_csg_result("intersection", (left, refused_adapter))
+    rows.append(
+        SurfaceImplicitCSGFixtureRow(
+            fixture_id="implicit-csg/adapter-refusal",
+            route_kind="adapter-refusal",
+            passed=not adapter_refusal.supported and bool(adapter_refusal.diagnostics),
+            operation="intersection",
+            left_family=left.family,
+            right_family=refused_adapter.family,
+            message="" if not adapter_refusal.diagnostics else adapter_refusal.diagnostics[0].message,
+        )
+    )
+    if success.body is None:
+        persistence_passed = False
+        persistence_message = "Implicit CSG success fixture produced no body."
+    else:
+        from impression.io import verify_implicit_csg_impress_round_trip
+
+        persistence = verify_implicit_csg_impress_round_trip(success.body)
+        persistence_passed = persistence.supported
+        persistence_message = persistence.message
+    rows.append(
+        SurfaceImplicitCSGFixtureRow(
+            fixture_id="implicit-csg/impress-persistence",
+            route_kind="persistence",
+            passed=persistence_passed,
+            operation="union",
+            left_family=left.family,
+            right_family=right.family,
+            message=persistence_message,
+        )
+    )
+    no_mesh_passed = all(not row.mesh_fallback_attempted for row in rows) and any(
+        "mesh fallback" in row.message.lower() for row in rows
+    )
+    rows.append(
+        SurfaceImplicitCSGFixtureRow(
+            fixture_id="implicit-csg/no-mesh-fallback",
+            route_kind="no-mesh-fallback",
+            passed=no_mesh_passed,
+            operation="union",
+            left_family="implicit",
+            right_family="implicit",
+            message="Implicit CSG fixture matrix contains no mesh fallback attempts.",
+            mesh_fallback_attempted=False,
+        )
+    )
+    return tuple(rows)
+
+
+def verify_implicit_csg_fixture_evidence_matrix() -> SurfaceImplicitCSGEvidenceReport:
+    """Return a clean evidence report for implicit-preserving CSG routes."""
+
+    rows = enumerate_implicit_csg_fixture_rows()
+    diagnostics: list[SurfaceCSGRouteSupportDiagnostic] = []
+    by_kind = {kind: [row for row in rows if row.route_kind == kind] for kind in SurfaceImplicitCSGEvidenceReport(()).required_route_kinds}
+    for route_kind, kind_rows in by_kind.items():
+        if not kind_rows:
+            diagnostics.append(
+                SurfaceCSGRouteSupportDiagnostic(
+                    code="missing-route",
+                    operation="union",
+                    left_family="implicit",
+                    right_family="implicit",
+                    pair_class="sampled-boundary",
+                    message=f"Implicit CSG evidence matrix is missing route kind {route_kind}.",
+                )
+            )
+        for row in kind_rows:
+            if not row.passed or row.mesh_fallback_attempted or row.reference_state != "clean":
+                diagnostics.append(
+                    SurfaceCSGRouteSupportDiagnostic(
+                        code="non-executable-route",
+                        operation=row.operation,
+                        left_family=row.left_family,
+                        right_family=row.right_family,
+                        pair_class="sampled-boundary",
+                        message=f"Implicit CSG fixture {row.fixture_id} is not clean evidence: {row.message}",
+                    )
+                )
+    return SurfaceImplicitCSGEvidenceReport(rows=rows, diagnostics=tuple(diagnostics))
 
 
 def enumerate_sampled_implicit_csg_unsupported_rows(
