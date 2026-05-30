@@ -577,7 +577,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 351: Implicit Field Expression Graph (v1.0)](../specifications/surface-351-implicit-field-expression-graph-v1_0.md)
 - [x] [Surface Spec 352: Implicit Operand Field Adapters (v1.0)](../specifications/surface-352-implicit-operand-field-adapters-v1_0.md)
 - [x] [Surface Spec 353: Implicit Field Safety Validation (v1.0)](../specifications/surface-353-implicit-field-safety-validation-v1_0.md)
-- [ ] [Surface Spec 354: Implicit Composition Operation Semantics (v1.0)](../specifications/surface-354-implicit-composition-operation-semantics-v1_0.md)
+- [x] [Surface Spec 354: Implicit Composition Operation Semantics (v1.0)](../specifications/surface-354-implicit-composition-operation-semantics-v1_0.md)
 - [ ] [Surface Spec 355: Implicit CSG Impress Payload Persistence (v1.0)](../specifications/surface-355-implicit-csg-impress-payload-persistence-v1_0.md)
 - [ ] [Surface Spec 356: Implicit CSG Fixture And Evidence Matrix (v1.0)](../specifications/surface-356-implicit-csg-fixture-and-evidence-matrix-v1_0.md)
 - [ ] [Surface Spec 357: Heightmap Projection And Grid Alignment (v1.0)](../specifications/surface-357-heightmap-projection-and-grid-alignment-v1_0.md)

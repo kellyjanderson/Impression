@@ -16,6 +16,12 @@ from ._color import get_mesh_color, set_mesh_color
 from ._legacy_mesh_deprecation import warn_mesh_primary_api
 from .surface import (
     BSplineSurfacePatch,
+    ImplicitFieldExpressionGraph,
+    ImplicitFieldNode,
+    ImplicitFieldSafetyValidationReport,
+    ImplicitOperandFieldAdapterRecord,
+    ImplicitOperandFieldAdapterRefusalDiagnostic,
+    ImplicitSurfacePatch,
     NURBSSurfacePatch,
     NURBSWeightValidationDiagnostic,
     PATCH_FAMILY_CAPABILITY_MATRIX,
@@ -32,6 +38,10 @@ from .surface import (
     make_surface_body,
     make_surface_shell,
     validate_nurbs_weights,
+    build_implicit_field_safety_validation_report,
+    implicit_difference_field,
+    implicit_intersection_field,
+    implicit_union_field,
 )
 from .surface_intersections import (
     SurfaceAnalyticSplineResidualReport,
@@ -106,6 +116,268 @@ class SurfaceBooleanExecutionUnavailableError(BooleanOperationError):
         super().__init__(
             f"Surface boolean {operation} execution is not implemented yet after canonical input preparation."
         )
+
+
+@dataclass(frozen=True)
+class ImplicitCompositionOperandSignPolicy:
+    """Operand sign treatment for hard implicit Boolean composition."""
+
+    operation: SurfaceBooleanOperation
+    operand_index: int
+    role: Literal["base", "cutter", "member"]
+    sign: Literal["preserve", "negate"]
+
+    def __post_init__(self) -> None:
+        operation = str(self.operation)
+        role = str(self.role)
+        sign = str(self.sign)
+        if operation not in SURFACE_BOOLEAN_OPERATIONS:
+            raise ValueError("Implicit composition sign policy operation is unsupported.")
+        if role not in {"base", "cutter", "member"}:
+            raise ValueError("Implicit composition sign policy role is unsupported.")
+        if sign not in {"preserve", "negate"}:
+            raise ValueError("Implicit composition sign policy sign is unsupported.")
+        operand_index = int(self.operand_index)
+        if operand_index < 0:
+            raise ValueError("Implicit composition operand_index must be non-negative.")
+        object.__setattr__(self, "operation", operation)
+        object.__setattr__(self, "operand_index", operand_index)
+        object.__setattr__(self, "role", role)
+        object.__setattr__(self, "sign", sign)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "operand_index": self.operand_index,
+            "role": self.role,
+            "sign": self.sign,
+        }
+
+
+@dataclass(frozen=True)
+class ImplicitCompositionDiagnostic:
+    """Deterministic refusal or warning for implicit CSG composition."""
+
+    code: Literal["invalid-operation", "insufficient-operands", "unsupported-adapter", "unsafe-result"]
+    message: str
+    operand_index: int | None = None
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "operand_index": self.operand_index,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class ImplicitCompositionOperationRecord:
+    """Hard Boolean implicit composition operation record."""
+
+    operation: SurfaceBooleanOperation
+    operand_ids: tuple[str, ...]
+    sign_policies: tuple[ImplicitCompositionOperandSignPolicy, ...]
+    result_graph: ImplicitFieldExpressionGraph | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "operand_ids": self.operand_ids,
+            "sign_policies": [policy.canonical_payload() for policy in self.sign_policies],
+            "result_graph": None if self.result_graph is None else self.result_graph.canonical_payload(),
+        }
+
+
+@dataclass(frozen=True)
+class ImplicitCompositionResult:
+    """Surface-native implicit CSG composition result."""
+
+    operation: SurfaceBooleanOperation
+    supported: bool
+    operation_record: ImplicitCompositionOperationRecord
+    body: SurfaceBody | None = None
+    patch: ImplicitSurfacePatch | None = None
+    safety: ImplicitFieldSafetyValidationReport | None = None
+    diagnostics: tuple[ImplicitCompositionDiagnostic, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "supported": self.supported,
+            "operation_record": self.operation_record.canonical_payload(),
+            "body_id": None if self.body is None else self.body.stable_identity,
+            "patch_id": None if self.patch is None else self.patch.stable_identity,
+            "safety": None if self.safety is None else self.safety.canonical_payload(),
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+def implicit_composition_operand_sign_policies(
+    operation: SurfaceBooleanOperation,
+    operand_count: int,
+) -> tuple[ImplicitCompositionOperandSignPolicy, ...]:
+    """Return deterministic sign policy for hard implicit Boolean composition."""
+
+    if operation not in SURFACE_BOOLEAN_OPERATIONS:
+        raise ValueError("Implicit composition operation must be union, difference, or intersection.")
+    count = int(operand_count)
+    if count < 2:
+        raise ValueError("Implicit composition requires at least two operands.")
+    policies: list[ImplicitCompositionOperandSignPolicy] = []
+    for index in range(count):
+        if operation == "difference":
+            role: Literal["base", "cutter", "member"] = "base" if index == 0 else "cutter"
+            sign: Literal["preserve", "negate"] = "preserve" if index == 0 else "negate"
+        else:
+            role = "member"
+            sign = "preserve"
+        policies.append(
+            ImplicitCompositionOperandSignPolicy(
+                operation=operation,
+                operand_index=index,
+                role=role,
+                sign=sign,
+            )
+        )
+    return tuple(policies)
+
+
+def _implicit_composition_bounds(
+    graphs: Sequence[ImplicitFieldExpressionGraph],
+) -> tuple[float, float, float, float, float, float]:
+    mins = np.asarray([[graph.bounds[0], graph.bounds[2], graph.bounds[4]] for graph in graphs], dtype=float)
+    maxs = np.asarray([[graph.bounds[1], graph.bounds[3], graph.bounds[5]] for graph in graphs], dtype=float)
+    lower = mins.min(axis=0)
+    upper = maxs.max(axis=0)
+    return (float(lower[0]), float(upper[0]), float(lower[1]), float(upper[1]), float(lower[2]), float(upper[2]))
+
+
+def _compose_implicit_root(
+    operation: SurfaceBooleanOperation,
+    roots: Sequence[ImplicitFieldNode],
+) -> ImplicitFieldNode:
+    if operation == "union":
+        return implicit_union_field(tuple(roots))
+    if operation == "intersection":
+        return implicit_intersection_field(tuple(roots))
+    if operation == "difference":
+        return implicit_difference_field(roots[0], tuple(roots[1:]))
+    raise ValueError("Implicit composition operation must be union, difference, or intersection.")
+
+
+def compose_implicit_field_csg_result(
+    operation: SurfaceBooleanOperation,
+    adapters: Sequence[ImplicitOperandFieldAdapterRecord],
+    *,
+    samples: tuple[int, int, int] = (8, 8, 8),
+    max_sample_count: int = 262144,
+) -> ImplicitCompositionResult:
+    """Compose implicit operand adapters into a surface-native implicit CSG result."""
+
+    adapter_tuple = tuple(adapters)
+    operand_ids = tuple(adapter.patch_id for adapter in adapter_tuple)
+    try:
+        sign_policies = implicit_composition_operand_sign_policies(operation, len(adapter_tuple))
+    except ValueError as exc:
+        diagnostic = ImplicitCompositionDiagnostic(
+            code="insufficient-operands" if len(adapter_tuple) < 2 else "invalid-operation",
+            message=f"{exc}; no mesh fallback was attempted.",
+        )
+        record = ImplicitCompositionOperationRecord(operation=operation, operand_ids=operand_ids, sign_policies=())
+        return ImplicitCompositionResult(operation=operation, supported=False, operation_record=record, diagnostics=(diagnostic,))
+
+    unsupported: list[ImplicitCompositionDiagnostic] = []
+    graphs: list[ImplicitFieldExpressionGraph] = []
+    roots: list[ImplicitFieldNode] = []
+    for index, adapter in enumerate(adapter_tuple):
+        if not adapter.supported or adapter.graph is None:
+            message = (
+                f"Implicit CSG operand {index} cannot be composed because its field adapter is unsupported; "
+                "no mesh fallback was attempted."
+            )
+            if adapter.diagnostics:
+                message = adapter.diagnostics[0].message
+            unsupported.append(
+                ImplicitCompositionDiagnostic(
+                    code="unsupported-adapter",
+                    message=message,
+                    operand_index=index,
+                )
+            )
+            continue
+        graphs.append(adapter.graph)
+        roots.append(adapter.graph.root)
+
+    if unsupported:
+        record = ImplicitCompositionOperationRecord(operation=operation, operand_ids=operand_ids, sign_policies=sign_policies)
+        return ImplicitCompositionResult(
+            operation=operation,
+            supported=False,
+            operation_record=record,
+            diagnostics=tuple(unsupported),
+        )
+
+    bounds = _implicit_composition_bounds(graphs)
+    root = _compose_implicit_root(operation, roots)
+    result_graph = ImplicitFieldExpressionGraph(
+        root=root,
+        bounds=bounds,
+        provenance={
+            "operation": f"implicit-csg-{operation}",
+            "source_family": "implicit-composition",
+            "source_ids": operand_ids,
+            "route_id": "surface-csg.implicit-composition",
+        },
+    )
+    safety = build_implicit_field_safety_validation_report(
+        result_graph,
+        samples=samples,
+        max_sample_count=max_sample_count,
+    )
+    record = ImplicitCompositionOperationRecord(
+        operation=operation,
+        operand_ids=operand_ids,
+        sign_policies=sign_policies,
+        result_graph=result_graph,
+    )
+    if not safety.accepted:
+        diagnostic = ImplicitCompositionDiagnostic(
+            code="unsafe-result",
+            message="Implicit CSG composition result failed safety validation; no mesh fallback was attempted.",
+        )
+        return ImplicitCompositionResult(
+            operation=operation,
+            supported=False,
+            operation_record=record,
+            safety=safety,
+            diagnostics=(diagnostic,),
+        )
+    patch = ImplicitSurfacePatch(
+        family="implicit",
+        field=result_graph.root,
+        bounds=result_graph.bounds,
+        metadata={
+            "kernel": {
+                "operation": f"implicit-csg-{operation}",
+                "surface_family": "implicit",
+                "authoring_boundary": "surface-native",
+                "source_operand_ids": operand_ids,
+                "no_mesh_fallback": True,
+            }
+        },
+    )
+    shell = make_surface_shell((patch,), connected=True, metadata={"kernel": {"operation": f"implicit-csg-{operation}"}})
+    body = make_surface_body((shell,), metadata={"kernel": {"operation": f"implicit-csg-{operation}", "surface_family": "implicit"}})
+    return ImplicitCompositionResult(
+        operation=operation,
+        supported=True,
+        operation_record=record,
+        body=body,
+        patch=patch,
+        safety=safety,
+    )
 
 
 @dataclass(frozen=True)
