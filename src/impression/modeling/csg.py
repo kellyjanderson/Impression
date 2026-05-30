@@ -5067,6 +5067,57 @@ class SurfaceSampledImplicitReconstructionFeasibilityReport:
         }
 
 
+@dataclass(frozen=True)
+class SurfaceSampledImplicitPromotionFixtureRow:
+    """One evidence row for sampled/implicit promotion routes."""
+
+    fixture_id: str
+    route_kind: Literal["promotion-target", "criteria", "persistence", "refusal", "no-mesh-fallback"]
+    passed: bool
+    target_family: SurfaceSampledImplicitPromotionTargetFamily | None
+    message: str
+    mesh_fallback_attempted: bool = False
+    reference_state: Literal["clean", "dirty", "missing"] = "clean"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "fixture_id": self.fixture_id,
+            "route_kind": self.route_kind,
+            "passed": self.passed,
+            "target_family": self.target_family,
+            "message": self.message,
+            "mesh_fallback_attempted": self.mesh_fallback_attempted,
+            "reference_state": self.reference_state,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceSampledImplicitPromotionEvidenceReport:
+    """Clean evidence report for sampled/implicit promotion and no-mesh fixtures."""
+
+    rows: tuple[SurfaceSampledImplicitPromotionFixtureRow, ...]
+    required_route_kinds: tuple[str, ...] = (
+        "promotion-target",
+        "criteria",
+        "persistence",
+        "refusal",
+        "no-mesh-fallback",
+    )
+    diagnostics: tuple[SurfaceSampledImplicitPromotionDiagnostic, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return bool(self.rows) and not self.diagnostics and all(row.passed for row in self.rows)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "passed": self.passed,
+            "required_route_kinds": self.required_route_kinds,
+            "rows": [row.canonical_payload() for row in self.rows],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
 _SURFACE_BOOLEAN_EXECUTABLE_FAMILY_PAIRS: frozenset[tuple[str, str]] = frozenset(
     (
         {
@@ -6336,6 +6387,143 @@ def build_sampled_implicit_reconstruction_refusal(
     if report.supported:
         return ()
     return report.diagnostics
+
+
+def _sampled_implicit_promotion_fixture_body(row: SurfaceSampledImplicitPromotionPolicyRow) -> SurfaceBody:
+    provenance = build_sampled_implicit_promotion_provenance_record(row, operand_ids=("fixture-left", "fixture-right"))
+    metadata = {"kernel": {"sampled_implicit_promotion": provenance.canonical_payload()}}
+    if row.target_family == "implicit":
+        patch: SurfacePatch = ImplicitSurfacePatch(
+            family="implicit",
+            field=ImplicitFieldNode("sphere"),
+            bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+        )
+    elif row.target_family == "subdivision":
+        patch = SubdivisionSurfacePatch(family="subdivision")
+    elif row.target_family == "nurbs":
+        patch = NURBSSurfacePatch(family="nurbs")
+    elif row.target_family == "bspline":
+        patch = BSplineSurfacePatch(family="bspline")
+    else:
+        patch = PlanarSurfacePatch(family="planar")
+    return make_surface_body((make_surface_shell((patch,), connected=False),), metadata=metadata)
+
+
+def enumerate_sampled_implicit_promotion_fixture_rows() -> tuple[SurfaceSampledImplicitPromotionFixtureRow, ...]:
+    """Build clean evidence rows for sampled/implicit promotion routes."""
+
+    rows: list[SurfaceSampledImplicitPromotionFixtureRow] = []
+    matrix = verify_sampled_implicit_promotion_matrix(operations=("union",))
+    for target_family in ("implicit", "subdivision", "nurbs", "bspline"):
+        row = next(matrix_row for matrix_row in matrix.rows if matrix_row.target_family == target_family)
+        provenance = build_sampled_implicit_promotion_provenance_record(row, operand_ids=("fixture-left", "fixture-right"))
+        feasibility = evaluate_sampled_implicit_reconstruction_feasibility(
+            provenance,
+            estimated_sample_count=16,
+            residual=0.0,
+        )
+        rows.append(
+            SurfaceSampledImplicitPromotionFixtureRow(
+                fixture_id=f"sampled-implicit-promotion/{target_family}-target",
+                route_kind="promotion-target",
+                passed=provenance.supported and provenance.target_family == target_family,
+                target_family=target_family,
+                message=f"Sampled/implicit promotion selected {target_family} without mesh source truth.",
+            )
+        )
+        rows.append(
+            SurfaceSampledImplicitPromotionFixtureRow(
+                fixture_id=f"sampled-implicit-promotion/{target_family}-criteria",
+                route_kind="criteria",
+                passed=feasibility.supported,
+                target_family=target_family,
+                message=(
+                    "Sampled/implicit promotion reconstruction criteria accepted the target."
+                    if feasibility.supported
+                    else "; ".join(diagnostic.message for diagnostic in feasibility.diagnostics)
+                ),
+            )
+        )
+        body = _sampled_implicit_promotion_fixture_body(row)
+        from impression.io import verify_sampled_implicit_promotion_impress_round_trip
+
+        persistence = verify_sampled_implicit_promotion_impress_round_trip(body)
+        rows.append(
+            SurfaceSampledImplicitPromotionFixtureRow(
+                fixture_id=f"sampled-implicit-promotion/{target_family}-persistence",
+                route_kind="persistence",
+                passed=persistence.supported,
+                target_family=target_family,
+                message=persistence.message,
+            )
+        )
+
+    refused = build_sampled_implicit_promotion_matrix(operations=("union",), allowed_targets=("subdivision",))
+    rows.append(
+        SurfaceSampledImplicitPromotionFixtureRow(
+            fixture_id="sampled-implicit-promotion/missing-target-refusal",
+            route_kind="refusal",
+            passed=not refused.passed and any(diagnostic.code == "missing-target" for diagnostic in refused.diagnostics),
+            target_family=None,
+            message="Sampled/implicit promotion missing-target fixture refused deterministically without mesh fallback.",
+        )
+    )
+    no_mesh_passed = all(not row.mesh_fallback_attempted for row in rows) and any(
+        "mesh" in row.message.lower() for row in rows
+    )
+    rows.append(
+        SurfaceSampledImplicitPromotionFixtureRow(
+            fixture_id="sampled-implicit-promotion/no-mesh-fallback",
+            route_kind="no-mesh-fallback",
+            passed=no_mesh_passed,
+            target_family=None,
+            message="Sampled/implicit promotion fixture matrix contains no mesh fallback attempts.",
+            mesh_fallback_attempted=False,
+        )
+    )
+    return tuple(rows)
+
+
+def verify_sampled_implicit_promotion_fixture_evidence_matrix() -> SurfaceSampledImplicitPromotionEvidenceReport:
+    """Return clean promotion fixture evidence and reject dirty or mesh-backed rows."""
+
+    rows = enumerate_sampled_implicit_promotion_fixture_rows()
+    diagnostics: list[SurfaceSampledImplicitPromotionDiagnostic] = []
+    required = SurfaceSampledImplicitPromotionEvidenceReport(()).required_route_kinds
+    by_kind = {kind: [row for row in rows if row.route_kind == kind] for kind in required}
+    for route_kind, kind_rows in by_kind.items():
+        if not kind_rows:
+            diagnostics.append(
+                SurfaceSampledImplicitPromotionDiagnostic(
+                    code="incomplete-route",
+                    operation="union",
+                    left_family="sampled-implicit-promotion",
+                    right_family="sampled-implicit-promotion",
+                    message=f"Sampled/implicit promotion evidence is missing route kind {route_kind}.",
+                )
+            )
+        for row in kind_rows:
+            if row.mesh_fallback_attempted:
+                diagnostics.append(
+                    SurfaceSampledImplicitPromotionDiagnostic(
+                        code="mesh-fallback",
+                        operation="union",
+                        left_family=str(row.target_family or "promotion"),
+                        right_family=str(row.target_family or "promotion"),
+                        message=f"Sampled/implicit promotion fixture {row.fixture_id} attempted mesh fallback.",
+                    )
+                )
+            if not row.passed or row.reference_state != "clean":
+                diagnostics.append(
+                    SurfaceSampledImplicitPromotionDiagnostic(
+                        code="incomplete-route",
+                        operation="union",
+                        left_family=str(row.target_family or "promotion"),
+                        right_family=str(row.target_family or "promotion"),
+                        message=f"Sampled/implicit promotion fixture {row.fixture_id} is not clean evidence: {row.message}",
+                    )
+                )
+    return SurfaceSampledImplicitPromotionEvidenceReport(rows=rows, diagnostics=tuple(diagnostics))
 
 
 def _surface_csg_fixture_category(pair_class: SurfaceCSGRoutePairClass) -> Literal[
