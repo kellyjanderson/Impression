@@ -21,6 +21,7 @@ from tests.reference_images import (
 )
 from impression.modeling import (
     BooleanOperationError,
+    BSplineSurfacePatch,
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
@@ -32,6 +33,7 @@ from impression.modeling import (
     SurfaceBooleanResult,
     SurfaceBooleanSplitRecord,
     SurfaceBooleanTrimmedPatchFragment,
+    SurfaceCSGAnalyticBSplineIntersectionRecord,
     SurfaceCSGAnalyticIntersectionRecord,
     SurfaceCSGArrangementDiagnostic,
     SurfaceCSGBoundaryExposureDiagnostic,
@@ -126,6 +128,7 @@ from impression.modeling import (
     classify_surface_csg_fragments_against_body,
     classify_surface_csg_fragment_against_body,
     classify_surface_csg_point_against_bounds,
+    intersect_analytic_bspline_patch_pair,
     intersect_axis_compatible_revolution_pair,
     intersect_planar_linear_patch_pair,
     intersect_planar_revolution_patch_pair,
@@ -318,6 +321,97 @@ def test_surface_csg_curve_mapping_requires_both_affected_patches() -> None:
     assert result.diagnostics
     assert result.diagnostics[-1].code == "ambiguous-curve"
     assert "both affected patches" in result.diagnostics[-1].message
+
+
+def test_analytic_bspline_csg_intersection_emits_patch_local_curves() -> None:
+    plane = PlanarSurfacePatch(
+        family="planar",
+        origin=(0.5, 0.0, 0.0),
+        u_axis=(0.0, 1.0, 0.0),
+        v_axis=(0.0, 0.0, 1.0),
+    )
+    spline = BSplineSurfacePatch(family="bspline")
+
+    result = intersect_analytic_bspline_patch_pair(
+        SurfaceBooleanPatchRef(0, 0),
+        plane,
+        SurfaceBooleanPatchRef(1, 0),
+        spline,
+        sample_count=5,
+    )
+
+    assert isinstance(result, SurfaceCSGAnalyticBSplineIntersectionRecord)
+    assert result.supported is True
+    assert result.intersection.quality == "within-tolerance"
+    assert result.residual_report.converged is True
+    assert result.curves[0].kind == "sampled"
+    assert len(result.patch_local_curves) == 2
+    assert {curve.patch for curve in result.patch_local_curves} == {
+        SurfaceBooleanPatchRef(0, 0),
+        SurfaceBooleanPatchRef(1, 0),
+    }
+    spline_curve = next(curve for curve in result.patch_local_curves if curve.patch == SurfaceBooleanPatchRef(1, 0))
+    assert spline_curve.points_uv
+    assert result.canonical_payload()["supported"] is True
+
+
+def test_analytic_bspline_csg_intersection_covers_ruled_and_revolution_pairs() -> None:
+    ruled = RuledSurfacePatch(family="ruled")
+    revolution = RevolutionSurfacePatch(
+        family="revolution",
+        profile_curve=((1.0, 0.0, 0.0), (1.0, 0.0, 1.0)),
+    )
+    vertical_spline = BSplineSurfacePatch(
+        family="bspline",
+        control_net=[
+            [(1.0, 0.0, 0.0), (1.0, 0.0, 1.0)],
+            [(1.0, 0.0, 0.0), (1.0, 0.0, 1.0)],
+        ],
+    )
+
+    ruled_result = intersect_analytic_bspline_patch_pair(
+        SurfaceBooleanPatchRef(0, 0),
+        ruled,
+        SurfaceBooleanPatchRef(1, 0),
+        BSplineSurfacePatch(family="bspline"),
+        sample_count=5,
+    )
+    revolution_result = intersect_analytic_bspline_patch_pair(
+        SurfaceBooleanPatchRef(0, 0),
+        revolution,
+        SurfaceBooleanPatchRef(1, 0),
+        vertical_spline,
+        sample_count=5,
+    )
+
+    assert ruled_result.supported is True
+    assert revolution_result.supported is True
+    assert len(ruled_result.patch_local_curves) == 2
+    assert len(revolution_result.patch_local_curves) == 2
+
+
+def test_analytic_bspline_csg_intersection_reports_non_convergence_without_mesh() -> None:
+    plane = PlanarSurfacePatch(
+        family="planar",
+        origin=(10.0, 0.0, 0.0),
+        u_axis=(0.0, 1.0, 0.0),
+        v_axis=(0.0, 0.0, 1.0),
+    )
+    spline = BSplineSurfacePatch(family="bspline")
+
+    result = intersect_analytic_bspline_patch_pair(
+        SurfaceBooleanPatchRef(0, 0),
+        plane,
+        SurfaceBooleanPatchRef(1, 0),
+        spline,
+        sample_count=5,
+    )
+
+    assert result.supported is False
+    assert result.diagnostics
+    assert result.diagnostics[0].code == "unsupported-family-pair"
+    assert "mesh" not in result.diagnostics[0].message.lower()
+    assert result.residual_report.converged is False
 
 
 def test_surface_csg_coincident_region_loop_maps_to_patch_local_trim_space() -> None:

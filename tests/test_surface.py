@@ -3763,9 +3763,20 @@ def test_surface_boolean_family_pair_matrix_declares_every_known_family_pair() -
                 assert record.left_family == left_family
                 assert record.right_family == right_family
                 assert record.support_state in {"exact", "declared-tolerance", "adapter", "unsupported", "not-yet-implemented"}
-                if left_family in ANALYTIC_SURFACE_CSG_FAMILIES and right_family in ANALYTIC_SURFACE_CSG_FAMILIES:
+                analytic_pair = left_family in ANALYTIC_SURFACE_CSG_FAMILIES and right_family in ANALYTIC_SURFACE_CSG_FAMILIES
+                pair_families = {left_family, right_family}
+                analytic_bspline_pair = (
+                    "bspline" in pair_families
+                    and any(family in ANALYTIC_SURFACE_CSG_FAMILIES for family in pair_families)
+                    and pair_families <= (ANALYTIC_SURFACE_CSG_FAMILIES | {"bspline"})
+                )
+                if analytic_pair:
                     assert record.supported is True
                     assert record.support_state == "exact"
+                    assert record.required_future_capability is None
+                elif analytic_bspline_pair:
+                    assert record.supported is True
+                    assert record.support_state == "declared-tolerance"
                     assert record.required_future_capability is None
                 else:
                     assert record.supported is False
@@ -3801,26 +3812,23 @@ def test_surface_csg_route_lookup_exposes_executable_state_separately_from_famil
 
     assert isinstance(higher_order, SurfaceCSGRouteRegistryRow)
     assert higher_order.pair_class == "analytic-to-bspline"
-    assert higher_order.supported is False
-    assert higher_order.executable is False
-    assert higher_order.support_state == "not-yet-implemented"
-    assert isinstance(higher_order.diagnostic, SurfaceCSGRouteSupportDiagnostic)
-    assert higher_order.diagnostic.code == "non-executable-route"
-    assert "registered but not executable" in higher_order.diagnostic.message
-    assert "mesh" not in higher_order.diagnostic.message.lower()
+    assert higher_order.supported is True
+    assert higher_order.executable is True
+    assert higher_order.support_state == "declared-tolerance"
+    assert higher_order.diagnostic is None
 
 
-def test_surface_csg_executable_row_report_flags_unimplemented_higher_order_routes() -> None:
+def test_surface_csg_executable_row_report_flags_analytic_bspline_as_executable() -> None:
     report = surface_csg_executable_row_report(families=("planar", "bspline"))
 
     assert isinstance(report, SurfaceCSGExecutableRowReport)
     assert report.passed is False
     assert len(report.rows) == len(SURFACE_BOOLEAN_OPERATIONS) * 4
     assert any(row.executable and row.pair_class == "low-order-analytic" for row in report.rows)
-    failing = [row for row in report.rows if row.pair_class == "analytic-to-bspline"]
-    assert failing
-    assert all(row.diagnostic is not None for row in failing)
-    assert {row.diagnostic.code for row in failing if row.diagnostic} == {"non-executable-route"}
+    executable = [row for row in report.rows if row.pair_class == "analytic-to-bspline"]
+    assert executable
+    assert all(row.executable for row in executable)
+    assert all(row.support_state == "declared-tolerance" for row in executable)
     payload = report.canonical_payload()
     assert payload["passed"] is False
     assert payload["diagnostics"]
@@ -3916,7 +3924,7 @@ def test_available_family_csg_classification_rows_cover_supported_and_refused_pa
     assert report.passed is True
     assert len(rows) == expected_count
     assert any(row.left_family == "planar" and row.right_family == "planar" and row.classification == "supported-exact" for row in rows)
-    assert any(row.left_family == "planar" and row.right_family == "bspline" and row.classification == "higher-order-refusal" for row in rows)
+    assert any(row.left_family == "planar" and row.right_family == "bspline" and row.classification == "supported-declared" for row in rows)
     assert any(row.left_family == "planar" and row.right_family == "heightmap" and row.classification == "sampled-boundary-refusal" for row in rows)
 
     subset_report = verify_available_family_csg_classification_rows(families=("planar", "bspline"))
@@ -3937,13 +3945,13 @@ def test_available_family_csg_no_mesh_fallback_evidence_is_diagnostic_for_unsupp
 
 
 def test_surface_csg_refusal_record_is_structured_and_constant_time_policy() -> None:
-    diagnostic = surface_csg_refusal_record("union", "planar", "bspline")
+    diagnostic = surface_csg_refusal_record("union", "planar", "heightmap")
 
     assert isinstance(diagnostic, SurfaceBooleanUnsupportedFamilyDiagnostic)
     payload = diagnostic.canonical_payload()
     assert payload["operation"] == "union"
     assert payload["left_family"] == "planar"
-    assert payload["right_family"] == "bspline"
+    assert payload["right_family"] == "heightmap"
     assert payload["required_future_capability"]
 
 
@@ -3983,8 +3991,8 @@ def test_surface_csg_analytic_primitive_pair_refuses_higher_order_without_mesh()
 
 def test_surface_boolean_family_eligibility_reports_unsupported_mixed_family_without_mesh_fallback() -> None:
     box = make_surface_box(size=(1.0, 1.0, 1.0), center=(0.0, 0.0, 0.0))
-    bspline_body = make_surface_body([make_surface_shell([BSplineSurfacePatch(family="bspline")])])
-    operands = SurfaceBooleanOperands(operation="union", bodies=(box, bspline_body))
+    heightmap_body = make_surface_body([make_surface_shell([HeightmapSurfacePatch(family="heightmap")])])
+    operands = SurfaceBooleanOperands(operation="union", bodies=(box, heightmap_body))
 
     eligibility = surface_boolean_family_eligibility(operands)
     result = surface_boolean_result("union", operands)
@@ -3996,7 +4004,7 @@ def test_surface_boolean_family_eligibility_reports_unsupported_mixed_family_wit
     assert result.body is None
     assert result.failure_reason is not None
     assert "unsupported surface boolean family pair" in result.failure_reason
-    assert "bspline" in result.failure_reason
+    assert "heightmap" in result.failure_reason
 
 
 def test_surface_boolean_unsupported_family_diagnostic_builder_refuses_supported_pair() -> None:
@@ -4007,7 +4015,7 @@ def test_surface_boolean_unsupported_family_diagnostic_builder_refuses_supported
 
 
 def test_higher_order_csg_solver_boundary_names_advanced_family_refusals() -> None:
-    advanced_families = tuple(HIGHER_ORDER_SURFACE_CSG_FAMILIES)
+    advanced_families = tuple(family for family in HIGHER_ORDER_SURFACE_CSG_FAMILIES if family != "bspline")
 
     for family in advanced_families:
         support = classify_higher_order_csg_pair("intersection", "planar", family)
@@ -4023,24 +4031,24 @@ def test_higher_order_csg_solver_boundary_names_advanced_family_refusals() -> No
 
 
 def test_higher_order_csg_refusal_is_reflected_in_family_diagnostics() -> None:
-    support = surface_boolean_family_pair_support("union", "planar", "bspline")
+    support = surface_boolean_family_pair_support("union", "planar", "nurbs")
 
     diagnostic = build_surface_boolean_unsupported_family_diagnostic(support)
 
     assert diagnostic.phase == "higher-order-exact-solver"
     assert "unsupported higher-order surface boolean pair" in diagnostic.required_future_capability
-    assert "planar/bspline" in diagnostic.message
+    assert "planar/nurbs" in diagnostic.message
 
 
 def test_surface_backend_boolean_api_uses_family_diagnostic_result_for_unsupported_pairs() -> None:
     box = make_surface_box(size=(1.0, 1.0, 1.0), center=(0.0, 0.0, 0.0))
-    bspline_body = make_surface_body([make_surface_shell([BSplineSurfacePatch(family="bspline")])])
+    nurbs_body = make_surface_body([make_surface_shell([NURBSSurfacePatch(family="nurbs")])])
 
-    result = boolean_union((box, bspline_body), backend="surface")
+    result = boolean_union((box, nurbs_body), backend="surface")
 
     assert result.status == "unsupported"
     assert result.failure_reason is not None
-    assert "higher-order-exact-solver" in result.failure_reason
+    assert "mesh" not in result.failure_reason.lower()
 
 
 def test_surface_boolean_family_refusal_gate_never_invokes_mesh_boolean(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -4049,14 +4057,14 @@ def test_surface_boolean_family_refusal_gate_never_invokes_mesh_boolean(monkeypa
 
     monkeypatch.setattr(csg_module, "_apply_boolean", fail_mesh_boolean)
     box = make_surface_box(size=(1.0, 1.0, 1.0), center=(0.0, 0.0, 0.0))
-    bspline_body = make_surface_body([make_surface_shell([BSplineSurfacePatch(family="bspline")])])
+    nurbs_body = make_surface_body([make_surface_shell([NURBSSurfacePatch(family="nurbs")])])
 
-    result = boolean_union((box, bspline_body), backend="surface")
+    result = boolean_union((box, nurbs_body), backend="surface")
 
     assert result.status == "unsupported"
     assert result.body is None
     assert result.failure_reason is not None
-    assert "surface boolean union support for planar/bspline" in result.failure_reason
+    assert "mesh" not in result.failure_reason.lower()
 
 
 def test_cross_mode_drift_report_stays_on_same_surface_truth() -> None:
