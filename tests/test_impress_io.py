@@ -14,6 +14,8 @@ from impression.io import (
     ImpressSaveOptions,
     ImpressUnits,
     ImpressWholeStoreFixtureCoverageReport,
+    ImplicitCSGImpressPayloadRecord,
+    ImplicitCSGImpressRoundTripDiagnostic,
     InvalidSurfaceWrapperDiagnostic,
     IMPRESS_DIAGNOSTIC_METADATA_FIELDS,
     SurfaceBodyStore,
@@ -32,6 +34,7 @@ from impression.io import (
     decode_trim_loop_payload,
     decode_impress_document_payload,
     dumps_impress_json,
+    encode_implicit_csg_impress_payload,
     encode_surface_adjacency_payload,
     encode_surface_boundary_ref_payload,
     encode_surface_body_payload,
@@ -46,12 +49,14 @@ from impression.io import (
     inspect_impress_patch_family_dispatch,
     inspect_impress_patch_codec_coverage,
     inspect_impress_whole_store_fixture_coverage,
+    implicit_csg_impress_payload_record,
     load_impress,
     loads_impress_json,
     validate_impress_units,
     validate_impress_document_root,
     validate_surface_patch_serialization_guard,
     validate_surface_body_store,
+    verify_implicit_csg_impress_round_trip,
     save_impress,
     write_impress_json,
 )
@@ -77,6 +82,10 @@ from impression.modeling.surface import (
     make_surface_body,
     make_surface_shell,
     make_implicit_field_node,
+)
+from impression.modeling import (
+    adapt_surface_patch_to_implicit_field,
+    compose_implicit_field_csg_result,
 )
 from tests.reference_images import (
     ExpectedDiagnosticKeyRecord,
@@ -1271,6 +1280,57 @@ def test_decode_implicit_surface_patch_payload_preserves_metadata_domain_and_ide
     assert decoded.stable_identity == patch.stable_identity
     assert decoded.domain == patch.domain
     assert decoded.metadata == patch.metadata
+
+
+def test_implicit_csg_impress_payload_round_trips_composed_field_and_provenance() -> None:
+    left = adapt_surface_patch_to_implicit_field(
+        PlanarSurfacePatch(family="planar"),
+        bounds=(-1.0, 1.0, -1.0, 1.0, -0.1, 0.1),
+    )
+    right = adapt_surface_patch_to_implicit_field(
+        PlanarSurfacePatch(family="planar", origin=(0.0, 0.0, 0.5)),
+        bounds=(-1.0, 1.0, -1.0, 1.0, 0.4, 0.6),
+    )
+    result = compose_implicit_field_csg_result("union", (left, right), samples=(3, 3, 3), max_sample_count=27)
+
+    payload = encode_implicit_csg_impress_payload(result)
+    loaded = decode_impress_document_payload(payload)
+    diagnostic = verify_implicit_csg_impress_round_trip(result)
+
+    assert len(loaded.bodies) == 1
+    assert isinstance(diagnostic, ImplicitCSGImpressRoundTripDiagnostic)
+    assert diagnostic.supported is True
+    assert diagnostic.before == diagnostic.after
+    assert diagnostic.before is not None
+    assert isinstance(diagnostic.before, ImplicitCSGImpressPayloadRecord)
+    assert diagnostic.before.operation == "implicit-csg-union"
+    assert diagnostic.before.field_root_kind == "union"
+    assert diagnostic.before.no_mesh_fallback is True
+    assert payload["metadata"]["surface_csg_payload"]["kind"] == "implicit-csg"
+
+
+def test_implicit_csg_impress_payload_refuses_malformed_or_mesh_truth_metadata() -> None:
+    patch = ImplicitSurfacePatch(
+        family="implicit",
+        field=make_implicit_field_node("sphere"),
+        bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+        metadata={
+            "kernel": {
+                "operation": "implicit-csg-union",
+                "source_operand_ids": ("a",),
+                "no_mesh_fallback": False,
+            }
+        },
+    )
+    body = make_surface_body((make_surface_shell((patch,), connected=True),))
+
+    diagnostic = verify_implicit_csg_impress_round_trip(body)
+
+    assert diagnostic.supported is False
+    assert diagnostic.code == "implicit-csg-impress-roundtrip-failed"
+    assert "no_mesh_fallback=true" in diagnostic.message
+    with pytest.raises(ImpressFormatError, match="no_mesh_fallback=true"):
+        implicit_csg_impress_payload_record(body)
 
 
 def test_decode_implicit_surface_patch_payload_reports_path_specific_unknown_node() -> None:
