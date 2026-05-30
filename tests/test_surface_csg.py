@@ -91,6 +91,8 @@ from impression.modeling import (
     SurfaceDisplacementCSGEvidenceReport,
     SurfaceDisplacementCSGFixtureRow,
     SurfaceSampledImplicitPromotionDecision,
+    SurfaceSampledImplicitPromotionEvidenceReport,
+    SurfaceSampledImplicitPromotionFixtureRow,
     SurfaceSampledImplicitPromotionLossinessRecord,
     SurfaceSampledImplicitPromotionMatrixReport,
     SurfaceSampledImplicitPromotionPolicyRow,
@@ -167,9 +169,11 @@ from impression.modeling import (
     build_sampled_implicit_promotion_provenance_record,
     build_sampled_implicit_reconstruction_refusal,
     evaluate_sampled_implicit_reconstruction_feasibility,
+    enumerate_sampled_implicit_promotion_fixture_rows,
     sampled_implicit_reconstruction_criteria,
     sampled_implicit_promotion_metadata_payload,
     select_sampled_implicit_promotion_target,
+    verify_sampled_implicit_promotion_fixture_evidence_matrix,
     intersect_analytic_bspline_patch_pair,
     intersect_analytic_nurbs_patch_pair,
     intersect_axis_compatible_revolution_pair,
@@ -1431,6 +1435,26 @@ def test_sampled_implicit_reconstruction_criteria_refuses_budget_residual_and_in
 
     assert incomplete_report.supported is False
     assert any(diagnostic.code == "incomplete-provenance" for diagnostic in incomplete_report.diagnostics)
+
+
+def test_sampled_implicit_promotion_fixture_evidence_matrix_covers_targets_persistence_refusal_and_no_mesh() -> None:
+    rows = enumerate_sampled_implicit_promotion_fixture_rows()
+    report = verify_sampled_implicit_promotion_fixture_evidence_matrix()
+
+    assert isinstance(report, SurfaceSampledImplicitPromotionEvidenceReport)
+    assert report.passed is True
+    assert report.diagnostics == ()
+    assert set(report.required_route_kinds) <= {row.route_kind for row in rows}
+    assert all(isinstance(row, SurfaceSampledImplicitPromotionFixtureRow) for row in rows)
+    assert all(row.reference_state == "clean" for row in rows)
+    assert all(not row.mesh_fallback_attempted for row in rows)
+    assert all(row.passed for row in rows)
+    target_rows = [row for row in rows if row.route_kind == "promotion-target"]
+    assert {row.target_family for row in target_rows} == {"implicit", "subdivision", "nurbs", "bspline"}
+    assert any(row.route_kind == "refusal" and row.target_family is None for row in rows)
+    assert any(row.route_kind == "persistence" and row.message.endswith("without mesh truth.") for row in rows)
+    assert "no mesh fallback" in next(row.message for row in rows if row.route_kind == "no-mesh-fallback").lower()
+    assert report.canonical_payload()["passed"] is True
 
 
 def test_implicit_composition_operation_sign_policies_are_deterministic() -> None:

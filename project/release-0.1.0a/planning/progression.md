@@ -596,7 +596,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 370: Promotion Provenance And Lossiness Records (v1.0)](../specifications/surface-370-promotion-provenance-and-lossiness-records-v1_0.md)
 - [x] [Surface Spec 371: Promotion Target Reconstruction Criteria (v1.0)](../specifications/surface-371-promotion-target-reconstruction-criteria-v1_0.md)
 - [x] [Surface Spec 372: Promotion Persistence Coverage (v1.0)](../specifications/surface-372-promotion-persistence-coverage-v1_0.md)
-- [ ] [Surface Spec 373: Promotion Fixture And No-Mesh Evidence (v1.0)](../specifications/surface-373-promotion-fixture-and-no-mesh-evidence-v1_0.md)
+- [x] [Surface Spec 373: Promotion Fixture And No-Mesh Evidence (v1.0)](../specifications/surface-373-promotion-fixture-and-no-mesh-evidence-v1_0.md)
 - [ ] [Surface Spec 374: Representation Refusal And Non-CSG Replacement Contract (v1.0)](../specifications/surface-374-representation-refusal-and-non-csg-replacement-contract-v1_0.md)
 - [ ] [Surface Spec 375: Sampled Implicit CSG Codec Coverage (v1.0)](../specifications/surface-375-sampled-implicit-csg-codec-coverage-v1_0.md)
 - [ ] [Surface Spec 376: Sampled Implicit Reference Fixture Promotion (v1.0)](../specifications/surface-376-sampled-implicit-reference-fixture-promotion-v1_0.md)
