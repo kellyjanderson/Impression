@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from impression.modeling import (
+    ADVANCED_PATCH_FAMILIES,
     BSplineSurfacePatch,
     DisplacementSurfacePatch,
     HeightmapSurfacePatch,
@@ -25,14 +26,17 @@ from impression.modeling import (
     SurfaceShell,
     SweepSurfacePatch,
     TessellationRequest,
+    assert_advanced_patch_family_promotion_gate,
     assert_patch_family_capability_matrix,
     assert_patch_family_operation_coverage,
     assess_patch_family_availability_promotion,
+    evaluate_advanced_patch_family_promotion_gate,
     TrimLoop,
     make_surface_body,
     make_surface_shell,
     normalize_tessellation_request,
     tessellate_surface_body,
+    run_advanced_patch_family_promotion_gate,
     run_patch_family_availability_promotion_pass,
     validate_patch_family_availability_gate,
 )
@@ -220,7 +224,7 @@ def test_patch_family_capability_matrix_satisfies_availability_gates() -> None:
         "displacement",
     }
     available = {record.family for record in gate_records if record.available}
-    assert available == {"planar", "ruled", "revolution"}
+    assert available == {record.family for record in gate_records}
 
 
 def test_patch_family_availability_gate_reports_missing_available_evidence() -> None:
@@ -255,18 +259,29 @@ def test_patch_family_availability_gate_allows_planned_families_without_full_evi
     assert gate.diagnostics == ()
 
 
+def test_patch_family_availability_gate_accepts_implemented_as_non_available_phase() -> None:
+    record = PatchFamilyCapabilityRecord(
+        family="bspline",
+        support_phase="implemented",
+        operations=("surface-record", "evaluation"),
+    )
+
+    gate = validate_patch_family_availability_gate("bspline", record)
+
+    assert gate.support_phase == "implemented"
+    assert gate.available is False
+    assert gate.diagnostics == ()
+
+
 def test_patch_family_availability_promotion_pass_reports_unpromoted_families() -> None:
     evidence = run_patch_family_availability_promotion_pass()
 
     by_family = {record.family: record for record in evidence}
     assert by_family["planar"].promoted_phase == "available"
-    assert by_family["bspline"].promoted_phase == "planned"
-    assert any(
-        diagnostic.code == "missing-availability-operation"
-        for diagnostic in by_family["bspline"].diagnostics
-    )
-    assert by_family["bspline"].operation_support[0].operation == "surface-store"
-    assert by_family["bspline"].operation_support[0].supported is False
+    assert by_family["implicit"].promoted_phase == "available"
+    assert by_family["implicit"].diagnostics == ()
+    assert by_family["implicit"].operation_support[0].operation == "surface-store"
+    assert by_family["implicit"].operation_support[0].supported is True
 
 
 def test_patch_family_availability_promotion_promotes_complete_evidence_record() -> None:
@@ -289,6 +304,59 @@ def test_patch_family_operation_coverage_assertion_names_missing_operations() ->
 
     with pytest.raises(ValueError, match="source-surface-reference"):
         assert_patch_family_operation_coverage("planar", ("surface-store", "source-surface-reference"))
+
+
+def test_advanced_patch_family_promotion_gate_reports_all_planned_gaps() -> None:
+    report = run_advanced_patch_family_promotion_gate()
+
+    by_family = {record.family: record for record in report.evidence}
+    assert set(by_family) == set(ADVANCED_PATCH_FAMILIES)
+    assert report.passed is True
+    assert by_family["bspline"].promoted_phase == "available"
+    assert by_family["bspline"].diagnostics == ()
+    assert by_family["nurbs"].promoted_phase == "available"
+    assert by_family["nurbs"].diagnostics == ()
+    assert by_family["sweep"].promoted_phase == "available"
+    assert by_family["sweep"].diagnostics == ()
+    assert by_family["subdivision"].promoted_phase == "available"
+    assert by_family["subdivision"].diagnostics == ()
+    assert by_family["implicit"].promoted_phase == "available"
+    assert by_family["implicit"].diagnostics == ()
+
+
+def test_advanced_patch_family_promotion_gate_promotes_complete_evidence_to_implemented() -> None:
+    record = PatchFamilyCapabilityRecord(
+        family="bspline",
+        support_phase="planned",
+        operations=(
+            "surface-record",
+            "evaluation",
+            "tessellation",
+            ".impress",
+            "caps",
+            "loft",
+            "diagnostics",
+        ),
+    )
+
+    evidence = evaluate_advanced_patch_family_promotion_gate("bspline", record)
+
+    assert evidence.current_phase == "planned"
+    assert evidence.promoted_phase == "implemented"
+    assert evidence.promoted is True
+    assert evidence.diagnostics == ()
+    assert_advanced_patch_family_promotion_gate("bspline", record)
+
+
+def test_advanced_patch_family_promotion_gate_refuses_non_advanced_family() -> None:
+    record = PatchFamilyCapabilityRecord(
+        family="planar",
+        support_phase="available",
+        operations=PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS + ("planar-primitives",),
+    )
+
+    with pytest.raises(ValueError, match="not an advanced patch family"):
+        assert_advanced_patch_family_promotion_gate("planar", record)
 
 
 def test_surface_body_store_accepts_every_patch_family_as_surface_truth() -> None:

@@ -134,7 +134,7 @@ def test_impress_patch_codec_coverage_inventory_covers_available_families() -> N
     assert by_family["ruled"].patch_kind == "RuledSurfacePatch"
     assert by_family["revolution"].patch_kind == "RevolutionSurfacePatch"
     assert by_family["planar"].required_for_available is True
-    assert by_family["heightmap"].required_for_available is False
+    assert by_family["heightmap"].required_for_available is True
     assert by_family["heightmap"].covered is True
     assert by_family["displacement"].covered is True
 

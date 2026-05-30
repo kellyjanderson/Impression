@@ -6,9 +6,13 @@ import pytest
 from impression.modeling import (
     LoftControlNetConstructionRecord,
     SplineBasisEvaluationRecord,
+    SplineBasisDerivativeEvaluationRecord,
+    SplineControlNetRecord,
     SplineKnotPolicyRecord,
     build_loft_control_net,
+    canonicalize_spline_control_net,
     evaluate_bspline_basis,
+    evaluate_bspline_basis_derivative,
     make_clamped_knot_vector,
     validate_clamped_knot_vector,
 )
@@ -27,6 +31,38 @@ def test_clamped_knot_policy_and_basis_partition_are_deterministic() -> None:
     assert len(basis.basis) == 3
     assert basis.partition_error < 1e-12
     assert basis.canonical_payload()["span"] == basis.span
+
+
+def test_bspline_basis_derivative_record_is_deterministic_and_conservative() -> None:
+    knots = make_clamped_knot_vector(control_point_count=4, degree=2)
+
+    derivative = evaluate_bspline_basis_derivative(
+        degree=2,
+        knots=knots,
+        control_point_count=4,
+        parameter=0.5,
+    )
+
+    assert isinstance(derivative, SplineBasisDerivativeEvaluationRecord)
+    assert len(derivative.derivatives) == 3
+    assert abs(derivative.derivative_sum) < 1e-12
+    assert derivative.canonical_payload()["derivatives"] == derivative.derivatives
+
+
+def test_spline_control_net_canonicalizer_records_shape_and_refuses_meshy_payloads() -> None:
+    record = canonicalize_spline_control_net(
+        [
+            [(0.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            [(1.0, 0.0, 0.0), (1.0, 1.0, 0.0)],
+        ]
+    )
+
+    assert isinstance(record, SplineControlNetRecord)
+    assert record.shape == (2, 2, 3)
+    assert record.canonical_payload()["point_count_u"] == 2
+
+    with pytest.raises(ValueError, match="control_net"):
+        canonicalize_spline_control_net([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)])
 
 
 def test_spline_knot_validation_refuses_unclamped_and_invalid_inputs() -> None:

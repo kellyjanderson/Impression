@@ -20,6 +20,7 @@ from .surface import (
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
+    SurfacePatch,
     SurfaceBody,
     SurfaceSeam,
     TrimLoop,
@@ -37,6 +38,18 @@ SurfaceBooleanPatchRelation = Literal["inside", "outside", "on"]
 SurfaceBooleanSplitRole = Literal["survive", "cut_cap", "discard"]
 SurfaceBooleanUnsupportedPhase = Literal["operand-family-eligibility", "intersection-kernel"]
 SurfaceBooleanSupportState = Literal["exact", "declared-tolerance", "adapter", "unsupported", "not-yet-implemented"]
+SurfaceCSGRoutePairClass = Literal[
+    "low-order-analytic",
+    "analytic-to-bspline",
+    "analytic-to-nurbs",
+    "analytic-to-sweep",
+    "analytic-to-subdivision",
+    "spline-nurbs-pair",
+    "sweep-pair",
+    "subdivision-pair",
+    "sampled-boundary",
+    "unsupported-family",
+]
 SurfaceCSGCurveKind = Literal["line", "arc", "conic", "sampled"]
 SurfaceCSGToleranceDiagnosticCode = Literal[
     "invalid-tolerance",
@@ -456,6 +469,103 @@ class SurfaceCSGPatchLocalCurveMappingResult:
     def supported(self) -> bool:
         return self.curve is not None and not self.diagnostics
 
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "source_curve": self.source_curve.canonical_payload(),
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+            "supported": self.supported,
+            "curve": None if self.curve is None else self.curve.canonical_payload(),
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGPatchLocalRegionLoop:
+    """Coincident or overlap region represented in one patch parameter domain."""
+
+    source_region_id: str
+    patch: SurfaceBooleanPatchRef
+    loop: TrimLoop
+    source_curve_digests: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        source_region_id = str(self.source_region_id).strip()
+        if not source_region_id:
+            raise ValueError("SurfaceCSGPatchLocalRegionLoop.source_region_id must be non-empty.")
+        object.__setattr__(self, "source_region_id", source_region_id)
+        object.__setattr__(self, "loop", self.loop.normalized())
+        object.__setattr__(self, "source_curve_digests", tuple(str(item) for item in self.source_curve_digests))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "source_region_id": self.source_region_id,
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+            "loop": self.loop.canonical_payload(),
+            "source_curve_digests": self.source_curve_digests,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGPatchLocalRegionMappingResult:
+    """Result of mapping a coincident or overlap region into patch-local trim space."""
+
+    source_region_id: str
+    patch: SurfaceBooleanPatchRef
+    region_loop: SurfaceCSGPatchLocalRegionLoop | None = None
+    diagnostics: tuple[SurfaceCSGCurveMappingDiagnostic, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return self.region_loop is not None and not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "source_region_id": self.source_region_id,
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+            "supported": self.supported,
+            "region_loop": None if self.region_loop is None else self.region_loop.canonical_payload(),
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGIntersectionMappingResult:
+    """Aggregate mapping result for all patches affected by one intersection output."""
+
+    curve_mappings: tuple[SurfaceCSGPatchLocalCurveMappingResult, ...] = ()
+    region_mappings: tuple[SurfaceCSGPatchLocalRegionMappingResult, ...] = ()
+
+    @property
+    def diagnostics(self) -> tuple[SurfaceCSGCurveMappingDiagnostic, ...]:
+        return tuple(
+            diagnostic
+            for mapping in (*self.curve_mappings, *self.region_mappings)
+            for diagnostic in mapping.diagnostics
+        )
+
+    @property
+    def supported(self) -> bool:
+        return bool(self.curve_mappings or self.region_mappings) and not self.diagnostics and all(
+            mapping.supported for mapping in (*self.curve_mappings, *self.region_mappings)
+        )
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "supported": self.supported,
+            "curve_mappings": [mapping.canonical_payload() for mapping in self.curve_mappings],
+            "region_mappings": [mapping.canonical_payload() for mapping in self.region_mappings],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
 
 @dataclass(frozen=True)
 class SurfaceCSGPlanarRelationDiagnostic:
@@ -628,17 +738,107 @@ class SurfaceCSGSplitTrimLoopRecord:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGArrangementVertex:
+    """One deterministic vertex in a patch-local CSG arrangement graph."""
+
+    vertex_id: str
+    patch: SurfaceBooleanPatchRef
+    point_uv: tuple[float, float]
+    source: Literal["trim-loop", "cut-curve", "coincident-region"] = "trim-loop"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "point_uv", _normalize_curve_point_uv(self.point_uv))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "vertex_id": self.vertex_id,
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+            "point_uv": self.point_uv,
+            "source": self.source,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGArrangementEdge:
+    """One oriented edge in a patch-local CSG arrangement graph."""
+
+    edge_id: str
+    patch: SurfaceBooleanPatchRef
+    start_vertex_id: str
+    end_vertex_id: str
+    source: Literal["trim-loop", "cut-curve", "coincident-region"] = "trim-loop"
+    cut_curve_ids: tuple[str, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "edge_id": self.edge_id,
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+            "start_vertex_id": self.start_vertex_id,
+            "end_vertex_id": self.end_vertex_id,
+            "source": self.source,
+            "cut_curve_ids": self.cut_curve_ids,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGArrangementFaceCandidate:
+    """One candidate face induced by trim loops and CSG cut curves."""
+
+    face_id: str
+    patch: SurfaceBooleanPatchRef
+    loop: TrimLoop
+    source_category: str
+    cut_curve_ids: tuple[str, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "face_id": self.face_id,
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+            "loop": self.loop.canonical_payload(),
+            "source_category": self.source_category,
+            "cut_curve_ids": self.cut_curve_ids,
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceCSGPatchLocalArrangementGraph:
     """Patch-local arrangement of intersection curves and split trim loops."""
 
     patch: SurfaceBooleanPatchRef
     patch_local_curves: tuple[SurfaceCSGPatchLocalCurve, ...]
     split_loops: tuple[SurfaceCSGSplitTrimLoopRecord, ...]
+    vertices: tuple[SurfaceCSGArrangementVertex, ...] = ()
+    edges: tuple[SurfaceCSGArrangementEdge, ...] = ()
+    face_candidates: tuple[SurfaceCSGArrangementFaceCandidate, ...] = ()
     diagnostics: tuple[SurfaceCSGArrangementDiagnostic, ...] = ()
 
     @property
     def supported(self) -> bool:
         return not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+            "supported": self.supported,
+            "patch_local_curves": [curve.canonical_payload() for curve in self.patch_local_curves],
+            "split_loops": [loop.canonical_payload() for loop in self.split_loops],
+            "vertices": [vertex.canonical_payload() for vertex in self.vertices],
+            "edges": [edge.canonical_payload() for edge in self.edges],
+            "face_candidates": [face.canonical_payload() for face in self.face_candidates],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
 
 
 @dataclass(frozen=True)
@@ -713,6 +913,163 @@ class SurfaceCSGFragmentClassificationRecord:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGSurfaceFragment:
+    """One surface-native fragment built from a patch-local arrangement face."""
+
+    fragment_id: str
+    source_patch: SurfaceBooleanPatchRef
+    patch: PlanarSurfacePatch
+    loop: TrimLoop
+    source_face_id: str
+    cut_curve_ids: tuple[str, ...] = ()
+
+    @property
+    def sample_uv(self) -> tuple[float, float]:
+        return select_surface_csg_fragment_sample(self.patch, trim_loop=self.loop)
+
+    @property
+    def sample_point(self) -> tuple[float, float, float]:
+        point = self.patch.point_at(*self.sample_uv)
+        return (float(point[0]), float(point[1]), float(point[2]))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cut_curve_ids": self.cut_curve_ids,
+            "fragment_id": self.fragment_id,
+            "loop": self.loop.canonical_payload(),
+            "sample_point": self.sample_point,
+            "sample_uv": self.sample_uv,
+            "source_face_id": self.source_face_id,
+            "source_patch": {
+                "operand_index": self.source_patch.operand_index,
+                "patch_index": self.source_patch.patch_index,
+            },
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGFragmentBuildDiagnostic:
+    """Diagnostic emitted while converting arrangement faces into fragments."""
+
+    code: Literal["invalid-arrangement", "missing-face-candidate", "invalid-fragment-loop"]
+    message: str
+    patch: SurfaceBooleanPatchRef
+    face_id: str | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "face_id": self.face_id,
+            "message": self.message,
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGFragmentBuildResult:
+    """Surface-native fragment builder result for one arrangement graph."""
+
+    arrangement: SurfaceCSGPatchLocalArrangementGraph
+    fragments: tuple[SurfaceCSGSurfaceFragment, ...] = ()
+    diagnostics: tuple[SurfaceCSGFragmentBuildDiagnostic, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return bool(self.fragments) and not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "arrangement": self.arrangement.canonical_payload(),
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "fragments": [fragment.canonical_payload() for fragment in self.fragments],
+            "supported": self.supported,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGCoincidentOwnershipDiagnostic:
+    """Diagnostic emitted when a boundary/coincident fragment ownership decision is ambiguous."""
+
+    code: Literal["missing-cut-provenance", "ambiguous-coincident-owner"]
+    message: str
+    fragment_id: str
+    patch: SurfaceBooleanPatchRef
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "fragment_id": self.fragment_id,
+            "message": self.message,
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGCoincidentOwnershipRecord:
+    """Resolved ownership witness for a fragment classified on the opposing boundary."""
+
+    fragment_id: str
+    patch: SurfaceBooleanPatchRef
+    relation: SurfaceBooleanPatchRelation
+    owner_patch: SurfaceBooleanPatchRef | None = None
+    policy: str = "not-coincident"
+    diagnostics: tuple[SurfaceCSGCoincidentOwnershipDiagnostic, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        owner_payload = None
+        if self.owner_patch is not None:
+            owner_payload = {
+                "operand_index": self.owner_patch.operand_index,
+                "patch_index": self.owner_patch.patch_index,
+            }
+        return {
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "fragment_id": self.fragment_id,
+            "owner_patch": owner_payload,
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+            "policy": self.policy,
+            "relation": self.relation,
+            "supported": self.supported,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGClassifiedFragmentSet:
+    """Classified surface-native fragments and boundary ownership diagnostics."""
+
+    fragments: tuple[SurfaceCSGSurfaceFragment, ...]
+    classifications: tuple[SurfaceCSGFragmentClassificationRecord, ...]
+    coincident_ownership: tuple[SurfaceCSGCoincidentOwnershipRecord, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return all(classification.supported for classification in self.classifications) and all(
+            ownership.supported for ownership in self.coincident_ownership
+        )
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "classifications": [classification.canonical_payload() for classification in self.classifications],
+            "coincident_ownership": [ownership.canonical_payload() for ownership in self.coincident_ownership],
+            "fragments": [fragment.canonical_payload() for fragment in self.fragments],
+            "supported": self.supported,
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceCSGCutCapRequirementRecord:
     """Operation-specific indication that a classified fragment contributes a cut cap."""
 
@@ -764,6 +1121,75 @@ class SurfaceCSGOperationSelectionRecord:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGOperationSelectionDiagnostic:
+    """Diagnostic emitted while converting classified fragments into operation selections."""
+
+    code: Literal["unsupported-classification", "ambiguous-coincident-ownership"]
+    message: str
+    patch: SurfaceBooleanPatchRef
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "patch": {
+                "operand_index": self.patch.operand_index,
+                "patch_index": self.patch.patch_index,
+            },
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGCapEligibilityRecord:
+    """Surface-native cap eligibility decision for one operation-selected fragment."""
+
+    selection: SurfaceCSGOperationSelectionRecord
+    required: bool
+    eligible: bool
+    cap_family: str | None = None
+    reason: str = ""
+    diagnostics: tuple[SurfaceCSGUnsupportedCapDiagnostic, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cap_family": self.cap_family,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "eligible": self.eligible,
+            "reason": self.reason,
+            "required": self.required,
+            "selection": self.selection.canonical_payload(),
+            "supported": self.supported,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGOperationFragmentSelectionSet:
+    """Operation selection result for a classified fragment set."""
+
+    operation: SurfaceBooleanOperation
+    selections: tuple[SurfaceCSGOperationSelectionRecord, ...]
+    cap_eligibility: tuple[SurfaceCSGCapEligibilityRecord, ...] = ()
+    diagnostics: tuple[SurfaceCSGOperationSelectionDiagnostic, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return not self.diagnostics and all(record.supported for record in self.cap_eligibility)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cap_eligibility": [record.canonical_payload() for record in self.cap_eligibility],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "operation": self.operation,
+            "selections": [selection.canonical_payload() for selection in self.selections],
+            "supported": self.supported,
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceBooleanSplitRecord:
     """One deterministic surfaced split-selection record for a source patch fragment."""
 
@@ -780,6 +1206,44 @@ class SurfaceBooleanTrimmedPatchFragment:
     source_patch: SurfaceBooleanPatchRef
     patch: PlanarSurfacePatch
     cut_curve_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class SurfaceCSGOrientedFragmentRecord:
+    """Selected fragment with operation-specific orientation applied."""
+
+    source_patch: SurfaceBooleanPatchRef
+    patch: PlanarSurfacePatch
+    role: SurfaceBooleanSplitRole
+    orientation: Literal["preserve", "reverse"]
+    operation: SurfaceBooleanOperation
+    cut_curve_ids: tuple[str, ...] = ()
+
+    @property
+    def included(self) -> bool:
+        return self.role in {"survive", "cut_cap"}
+
+    def to_trimmed_fragment(self) -> SurfaceBooleanTrimmedPatchFragment | None:
+        if not self.included:
+            return None
+        return SurfaceBooleanTrimmedPatchFragment(
+            source_patch=self.source_patch,
+            patch=self.patch,
+            cut_curve_ids=self.cut_curve_ids,
+        )
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cut_curve_ids": self.cut_curve_ids,
+            "included": self.included,
+            "operation": self.operation,
+            "orientation": self.orientation,
+            "role": self.role,
+            "source_patch": {
+                "operand_index": self.source_patch.operand_index,
+                "patch_index": self.source_patch.patch_index,
+            },
+        }
 
 
 @dataclass(frozen=True)
@@ -932,10 +1396,57 @@ class SurfaceCSGSeamRebuildRecord:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGContinuityHandoffDiagnostic:
+    """Diagnostic for requested continuity that seam adjacency cannot enforce."""
+
+    code: Literal["unsupported-continuity-enforcement", "invalid-seam-rebuild"]
+    message: str
+    continuity: str | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "continuity": self.continuity,
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGContinuityHandoffRecord:
+    """Continuity handoff from CSG seam adjacency to continuity enforcement."""
+
+    seam_rebuild: SurfaceCSGSeamRebuildRecord
+    requested_continuity: tuple[str, ...]
+    enforceable_continuity: tuple[str, ...]
+    diagnostics: tuple[SurfaceCSGContinuityHandoffDiagnostic, ...] = ()
+
+    @property
+    def supported(self) -> bool:
+        return not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "enforceable_continuity": self.enforceable_continuity,
+            "requested_continuity": self.requested_continuity,
+            "seam_rebuild": self.seam_rebuild.canonical_payload(),
+            "supported": self.supported,
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceCSGValidityDiagnostic:
     """Diagnostic emitted by the final CSG validity/provenance gate."""
 
-    code: Literal["invalid-shell", "non-closed-result", "healing-failed"]
+    code: Literal[
+        "invalid-shell",
+        "non-closed-result",
+        "healing-failed",
+        "dangling-trim",
+        "mesh-backed-fragment",
+        "non-surface-result",
+        "unresolved-diagnostic",
+    ]
     message: str
 
     def canonical_payload(self) -> dict[str, object]:
@@ -973,6 +1484,110 @@ class SurfaceCSGValidityGateRecord:
     @property
     def accepted(self) -> bool:
         return self.status == "succeeded" and self.body is not None and not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "accepted": self.accepted,
+            "body_id": None if self.body is None else self.body.stable_identity,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "provenance": None if self.provenance is None else self.provenance.canonical_payload(),
+            "status": self.status,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGRuntimeValidityReport:
+    """Runtime validity report for the final object returned by surface CSG."""
+
+    operation: SurfaceBooleanOperation
+    status: SurfaceBooleanStatus
+    result: SurfaceBody | None = None
+    diagnostics: tuple[SurfaceCSGValidityDiagnostic, ...] = ()
+    validity_gate: SurfaceCSGValidityGateRecord | None = None
+
+    @property
+    def accepted(self) -> bool:
+        return self.status == "succeeded" and self.result is not None and not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "accepted": self.accepted,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "operation": self.operation,
+            "result_id": None if self.result is None else self.result.stable_identity,
+            "status": self.status,
+            "validity_gate": None if self.validity_gate is None else self.validity_gate.canonical_payload(),
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGPersistenceEvidenceRecord:
+    """Evidence that a CSG surface body survives `.impress` persistence."""
+
+    fixture_id: str
+    passed: bool
+    body_id: str
+    loaded_body_id: str | None = None
+    message: str = ""
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "body_id": self.body_id,
+            "fixture_id": self.fixture_id,
+            "loaded_body_id": self.loaded_body_id,
+            "message": self.message,
+            "passed": self.passed,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGTessellationBoundaryEvidenceRecord:
+    """Evidence that CSG tessellation occurs only after a surface result exists."""
+
+    fixture_id: str
+    passed: bool
+    body_id: str
+    face_count: int = 0
+    message: str = ""
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "body_id": self.body_id,
+            "face_count": self.face_count,
+            "fixture_id": self.fixture_id,
+            "message": self.message,
+            "passed": self.passed,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGReferencePromotionReport:
+    """Reference evidence report for a CSG fixture."""
+
+    fixture_id: str
+    persistence: SurfaceCSGPersistenceEvidenceRecord
+    tessellation: SurfaceCSGTessellationBoundaryEvidenceRecord
+    reference_state: Literal["clean", "dirty", "missing"] = "missing"
+    diagnostics: tuple[str, ...] = ()
+
+    @property
+    def promoted(self) -> bool:
+        return (
+            self.persistence.passed
+            and self.tessellation.passed
+            and self.reference_state == "clean"
+            and not self.diagnostics
+        )
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "diagnostics": self.diagnostics,
+            "fixture_id": self.fixture_id,
+            "persistence": self.persistence.canonical_payload(),
+            "promoted": self.promoted,
+            "reference_state": self.reference_state,
+            "tessellation": self.tessellation.canonical_payload(),
+        }
 
 
 @dataclass(frozen=True)
@@ -1517,6 +2132,196 @@ class SurfaceCSGSolverRegistryRecord:
 
 
 @dataclass(frozen=True)
+class SurfaceCSGRouteSupportDiagnostic:
+    """Route-registry diagnostic for a CSG operation/family pair."""
+
+    code: Literal["missing-route", "non-executable-route", "unknown-family", "route-key-mismatch"]
+    message: str
+    operation: SurfaceBooleanOperation
+    left_family: str
+    right_family: str
+    pair_class: SurfaceCSGRoutePairClass | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "operation": self.operation,
+            "left_family": self.left_family,
+            "right_family": self.right_family,
+            "pair_class": self.pair_class,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGRouteRegistryRow:
+    """Executable-route taxonomy row for one CSG operation/family pair."""
+
+    operation: SurfaceBooleanOperation
+    left_family: str
+    right_family: str
+    pair_class: SurfaceCSGRoutePairClass
+    route_id: str
+    supported: bool
+    support_state: SurfaceBooleanSupportState
+    phase: str
+    required_future_capability: str | None = None
+    diagnostic: SurfaceCSGRouteSupportDiagnostic | None = None
+
+    @property
+    def executable(self) -> bool:
+        return self.supported and self.diagnostic is None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "left_family": self.left_family,
+            "right_family": self.right_family,
+            "pair_class": self.pair_class,
+            "route_id": self.route_id,
+            "supported": self.supported,
+            "executable": self.executable,
+            "support_state": self.support_state,
+            "phase": self.phase,
+            "required_future_capability": self.required_future_capability,
+            "diagnostic": None if self.diagnostic is None else self.diagnostic.canonical_payload(),
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGExecutableRowReport:
+    """Report of route-registry executability for CSG operation/family rows."""
+
+    rows: tuple[SurfaceCSGRouteRegistryRow, ...]
+
+    @property
+    def diagnostics(self) -> tuple[SurfaceCSGRouteSupportDiagnostic, ...]:
+        return tuple(row.diagnostic for row in self.rows if row.diagnostic is not None)
+
+    @property
+    def passed(self) -> bool:
+        return not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "passed": self.passed,
+            "rows": [row.canonical_payload() for row in self.rows],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGResidualRecord:
+    """Declared-tolerance residual witness for a higher-order CSG route."""
+
+    route_id: str
+    operation: SurfaceBooleanOperation
+    left_family: str
+    right_family: str
+    max_residual: float
+    tolerance: float
+    iteration_count: int
+    converged: bool
+    patch_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        route_id = str(self.route_id).strip()
+        if not route_id:
+            raise ValueError("SurfaceCSGResidualRecord.route_id must be non-empty.")
+        max_residual = float(self.max_residual)
+        tolerance = float(self.tolerance)
+        iteration_count = int(self.iteration_count)
+        if not np.isfinite(max_residual) or max_residual < 0.0:
+            raise ValueError("SurfaceCSGResidualRecord.max_residual must be finite and non-negative.")
+        if not np.isfinite(tolerance) or tolerance <= 0.0:
+            raise ValueError("SurfaceCSGResidualRecord.tolerance must be positive and finite.")
+        if iteration_count < 0:
+            raise ValueError("SurfaceCSGResidualRecord.iteration_count must be non-negative.")
+        object.__setattr__(self, "route_id", route_id)
+        object.__setattr__(self, "max_residual", max_residual)
+        object.__setattr__(self, "tolerance", tolerance)
+        object.__setattr__(self, "iteration_count", iteration_count)
+        object.__setattr__(self, "patch_ids", tuple(str(patch_id) for patch_id in self.patch_ids))
+
+    @property
+    def within_tolerance(self) -> bool:
+        return self.converged and self.max_residual <= self.tolerance
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "route_id": self.route_id,
+            "operation": self.operation,
+            "left_family": self.left_family,
+            "right_family": self.right_family,
+            "max_residual": self.max_residual,
+            "tolerance": self.tolerance,
+            "iteration_count": self.iteration_count,
+            "converged": self.converged,
+            "within_tolerance": self.within_tolerance,
+            "patch_ids": self.patch_ids,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGDegeneracyRecord:
+    """Classified higher-order CSG degeneracy or route-quality issue."""
+
+    code: Literal[
+        "non-convergence",
+        "ambiguous-route",
+        "overlap",
+        "singularity",
+        "budget-refusal",
+        "high-residual",
+    ]
+    message: str
+    route_id: str
+    operation: SurfaceBooleanOperation
+    left_family: str
+    right_family: str
+    residual: float | None = None
+    blocking: bool = True
+    location: str | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "route_id": self.route_id,
+            "operation": self.operation,
+            "left_family": self.left_family,
+            "right_family": self.right_family,
+            "residual": self.residual,
+            "blocking": self.blocking,
+            "location": self.location,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGAmbiguityDiagnostic:
+    """Blocking authored-ambiguity diagnostic for a higher-order CSG route."""
+
+    route_id: str
+    operation: SurfaceBooleanOperation
+    left_family: str
+    right_family: str
+    message: str
+    location: str | None = None
+    blocking: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "route_id": self.route_id,
+            "operation": self.operation,
+            "left_family": self.left_family,
+            "right_family": self.right_family,
+            "message": self.message,
+            "location": self.location,
+            "blocking": self.blocking,
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceCSGPrimitiveAnalyticPairRecord:
     """Analytic primitive CSG support declaration for one operation/family pair."""
 
@@ -1569,19 +2374,361 @@ class SurfaceBooleanFamilyEligibilityResult:
         }
 
 
+@dataclass(frozen=True)
+class SurfaceCSGFamilyClassificationRow:
+    """One explicit CSG classification row for an operation/family pair."""
+
+    operation: SurfaceBooleanOperation
+    left_family: str
+    right_family: str
+    supported: bool
+    classification: str
+    support_state: SurfaceBooleanSupportState
+    diagnostic: str = ""
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "left_family": self.left_family,
+            "right_family": self.right_family,
+            "supported": self.supported,
+            "classification": self.classification,
+            "support_state": self.support_state,
+            "diagnostic": self.diagnostic,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGFamilyClassificationReport:
+    """CSG classification matrix completeness report."""
+
+    passed: bool
+    rows: tuple[SurfaceCSGFamilyClassificationRow, ...]
+    diagnostics: tuple[SurfaceCSGSolverRegistryDiagnostic, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "passed": self.passed,
+            "rows": [row.canonical_payload() for row in self.rows],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGNoMeshFallbackEvidenceRecord:
+    """Regression evidence that CSG rows refuse instead of falling back to mesh."""
+
+    operation: SurfaceBooleanOperation
+    left_family: str
+    right_family: str
+    result_kind: Literal["supported-surface", "diagnostic-refusal"]
+    message: str
+    mesh_fallback_attempted: bool = False
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "left_family": self.left_family,
+            "right_family": self.right_family,
+            "result_kind": self.result_kind,
+            "message": self.message,
+            "mesh_fallback_attempted": self.mesh_fallback_attempted,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGNoMeshFallbackReport:
+    """CSG no-hidden-mesh-fallback regression report."""
+
+    passed: bool
+    evidence: tuple[SurfaceCSGNoMeshFallbackEvidenceRecord, ...]
+    diagnostics: tuple[SurfaceCSGPlanDiagnostic, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "passed": self.passed,
+            "evidence": [record.canonical_payload() for record in self.evidence],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
 _SURFACE_BOOLEAN_EXECUTABLE_FAMILY_PAIRS: frozenset[tuple[str, str]] = frozenset(
     {
         tuple(sorted((left_family, right_family)))
         for left_family, left_capability in PATCH_FAMILY_CAPABILITY_MATRIX.items()
         for right_family, right_capability in PATCH_FAMILY_CAPABILITY_MATRIX.items()
         if left_capability.support_phase == "available" and right_capability.support_phase == "available"
+        and left_family in {"planar", "ruled", "revolution"}
+        and right_family in {"planar", "ruled", "revolution"}
     }
 )
 ANALYTIC_SURFACE_CSG_FAMILIES: frozenset[str] = frozenset({"planar", "ruled", "revolution"})
 SAMPLED_SURFACE_CSG_FAMILIES: frozenset[str] = frozenset({"implicit", "heightmap", "displacement"})
+PARAMETRIC_HIGHER_ORDER_SURFACE_CSG_FAMILIES: frozenset[str] = frozenset(
+    {"bspline", "nurbs", "sweep", "subdivision"}
+)
 HIGHER_ORDER_SURFACE_CSG_FAMILIES: frozenset[str] = frozenset(
     {"bspline", "nurbs", "sweep", "subdivision", "implicit", "heightmap", "displacement", "torus"}
 )
+
+SURFACE_CSG_ROUTE_ID_BY_PAIR_CLASS: dict[SurfaceCSGRoutePairClass, str] = {
+    "low-order-analytic": "surface-csg.low-order-analytic.exact",
+    "analytic-to-bspline": "surface-csg.analytic-to-bspline.declared-tolerance",
+    "analytic-to-nurbs": "surface-csg.analytic-to-nurbs.declared-tolerance",
+    "analytic-to-sweep": "surface-csg.analytic-to-sweep.declared-tolerance",
+    "analytic-to-subdivision": "surface-csg.analytic-to-subdivision.declared-tolerance",
+    "spline-nurbs-pair": "surface-csg.spline-nurbs-pair.declared-tolerance",
+    "sweep-pair": "surface-csg.sweep-pair.declared-tolerance",
+    "subdivision-pair": "surface-csg.subdivision-pair.declared-tolerance",
+    "sampled-boundary": "surface-csg.sampled-boundary.refusal",
+    "unsupported-family": "surface-csg.unsupported-family.refusal",
+}
+
+
+def classify_surface_csg_route_pair_class(left_family: str, right_family: str) -> SurfaceCSGRoutePairClass:
+    """Classify one CSG family pair into the route taxonomy used by the registry."""
+
+    known_families = set(PATCH_FAMILY_CAPABILITY_MATRIX)
+    if left_family not in known_families or right_family not in known_families:
+        return "unsupported-family"
+    if left_family in SAMPLED_SURFACE_CSG_FAMILIES or right_family in SAMPLED_SURFACE_CSG_FAMILIES:
+        return "sampled-boundary"
+    if left_family in ANALYTIC_SURFACE_CSG_FAMILIES and right_family in ANALYTIC_SURFACE_CSG_FAMILIES:
+        return "low-order-analytic"
+    families = {left_family, right_family}
+    analytic_pair = left_family in ANALYTIC_SURFACE_CSG_FAMILIES or right_family in ANALYTIC_SURFACE_CSG_FAMILIES
+    if analytic_pair and "bspline" in families:
+        return "analytic-to-bspline"
+    if analytic_pair and "nurbs" in families:
+        return "analytic-to-nurbs"
+    if analytic_pair and "sweep" in families:
+        return "analytic-to-sweep"
+    if analytic_pair and "subdivision" in families:
+        return "analytic-to-subdivision"
+    if families.issubset({"bspline", "nurbs"}):
+        return "spline-nurbs-pair"
+    if "sweep" in families:
+        return "sweep-pair"
+    if "subdivision" in families:
+        return "subdivision-pair"
+    return "unsupported-family"
+
+
+def surface_csg_route_lookup(
+    operation: SurfaceBooleanOperation,
+    left_family: str,
+    right_family: str,
+    *,
+    registry: SurfaceCSGSolverRegistryRecord | None = None,
+) -> SurfaceCSGRouteRegistryRow:
+    """Return the route-taxonomy row for one CSG operation/family pair."""
+
+    source = registry if registry is not None else SURFACE_CSG_SOLVER_REGISTRY
+    support = source.support_for(operation, left_family, right_family)
+    pair_class = classify_surface_csg_route_pair_class(left_family, right_family)
+    route_id = SURFACE_CSG_ROUTE_ID_BY_PAIR_CLASS[pair_class]
+    diagnostic: SurfaceCSGRouteSupportDiagnostic | None = None
+    if pair_class == "unsupported-family":
+        diagnostic = SurfaceCSGRouteSupportDiagnostic(
+            code="unknown-family",
+            operation=operation,
+            left_family=left_family,
+            right_family=right_family,
+            pair_class=pair_class,
+            message=f"Surface CSG route registry does not know family pair {left_family}/{right_family}.",
+        )
+    elif not support.supported:
+        diagnostic = SurfaceCSGRouteSupportDiagnostic(
+            code="non-executable-route",
+            operation=operation,
+            left_family=left_family,
+            right_family=right_family,
+            pair_class=pair_class,
+            message=(
+                f"Surface CSG route {route_id} for {operation} {left_family}/{right_family} "
+                f"is registered but not executable: {support.required_future_capability}."
+            ),
+        )
+    return SurfaceCSGRouteRegistryRow(
+        operation=operation,
+        left_family=left_family,
+        right_family=right_family,
+        pair_class=pair_class,
+        route_id=route_id,
+        supported=support.supported,
+        support_state=support.support_state,
+        phase=support.phase,
+        required_future_capability=support.required_future_capability,
+        diagnostic=diagnostic,
+    )
+
+
+def surface_csg_executable_row_report(
+    *,
+    registry: SurfaceCSGSolverRegistryRecord | None = None,
+    families: Iterable[str] | None = None,
+    operations: Iterable[SurfaceBooleanOperation] = SURFACE_BOOLEAN_OPERATIONS,
+) -> SurfaceCSGExecutableRowReport:
+    """Return route-taxonomy rows and diagnostics for requested CSG matrix cells."""
+
+    family_keys = tuple(sorted(PATCH_FAMILY_CAPABILITY_MATRIX if families is None else tuple(families)))
+    rows = tuple(
+        surface_csg_route_lookup(operation, left_family, right_family, registry=registry)
+        for operation in operations
+        for left_family in family_keys
+        for right_family in family_keys
+    )
+    return SurfaceCSGExecutableRowReport(rows=rows)
+
+
+def collect_higher_order_csg_residual(
+    route: SurfaceCSGRouteRegistryRow,
+    *,
+    max_residual: float,
+    tolerance: float,
+    iteration_count: int,
+    converged: bool,
+    patch_ids: Iterable[str] = (),
+) -> SurfaceCSGResidualRecord:
+    """Collect a declared-tolerance residual witness without re-solving the route."""
+
+    return SurfaceCSGResidualRecord(
+        route_id=route.route_id,
+        operation=route.operation,
+        left_family=route.left_family,
+        right_family=route.right_family,
+        max_residual=max_residual,
+        tolerance=tolerance,
+        iteration_count=iteration_count,
+        converged=bool(converged),
+        patch_ids=tuple(patch_ids),
+    )
+
+
+def classify_higher_order_csg_degeneracies(
+    residual: SurfaceCSGResidualRecord,
+    *,
+    ambiguous: bool = False,
+    overlap: bool = False,
+    singularity: bool = False,
+    budget_exhausted: bool = False,
+    location: str | None = None,
+) -> tuple[SurfaceCSGDegeneracyRecord, ...]:
+    """Classify residual and authored-route state into deterministic diagnostics."""
+
+    records: list[SurfaceCSGDegeneracyRecord] = []
+    base = {
+        "route_id": residual.route_id,
+        "operation": residual.operation,
+        "left_family": residual.left_family,
+        "right_family": residual.right_family,
+        "location": location,
+    }
+    if not residual.converged:
+        records.append(
+            SurfaceCSGDegeneracyRecord(
+                code="non-convergence",
+                message="Higher-order CSG route did not converge within its declared iteration budget.",
+                residual=residual.max_residual,
+                **base,
+            )
+        )
+    elif residual.max_residual > residual.tolerance:
+        records.append(
+            SurfaceCSGDegeneracyRecord(
+                code="high-residual",
+                message="Higher-order CSG route residual exceeds declared tolerance.",
+                residual=residual.max_residual,
+                **base,
+            )
+        )
+    if ambiguous:
+        records.append(
+            SurfaceCSGDegeneracyRecord(
+                code="ambiguous-route",
+                message="Higher-order CSG route has unresolved authored ambiguity.",
+                **base,
+            )
+        )
+    if overlap:
+        records.append(
+            SurfaceCSGDegeneracyRecord(
+                code="overlap",
+                message="Higher-order CSG route produced an overlap or coincident-region condition.",
+                blocking=False,
+                **base,
+            )
+        )
+    if singularity:
+        records.append(
+            SurfaceCSGDegeneracyRecord(
+                code="singularity",
+                message="Higher-order CSG route encountered a singular evaluator or local parameter event.",
+                **base,
+            )
+        )
+    if budget_exhausted:
+        records.append(
+            SurfaceCSGDegeneracyRecord(
+                code="budget-refusal",
+                message="Higher-order CSG route exhausted its declared safety or refinement budget.",
+                residual=residual.max_residual,
+                **base,
+            )
+        )
+    return tuple(records)
+
+
+def format_higher_order_csg_route_diagnostics(
+    route: SurfaceCSGRouteRegistryRow,
+    *,
+    residual: SurfaceCSGResidualRecord | None = None,
+    degeneracies: Iterable[SurfaceCSGDegeneracyRecord] = (),
+) -> tuple[SurfaceCSGRouteSupportDiagnostic | SurfaceCSGAmbiguityDiagnostic, ...]:
+    """Format route, residual, and degeneracy state into user-facing diagnostics."""
+
+    diagnostics: list[SurfaceCSGRouteSupportDiagnostic | SurfaceCSGAmbiguityDiagnostic] = []
+    if route.diagnostic is not None:
+        diagnostics.append(route.diagnostic)
+    if residual is not None and not residual.within_tolerance:
+        diagnostics.append(
+            SurfaceCSGRouteSupportDiagnostic(
+                code="non-executable-route",
+                operation=route.operation,
+                left_family=route.left_family,
+                right_family=route.right_family,
+                pair_class=route.pair_class,
+                message=(
+                    f"Surface CSG route {route.route_id} residual {residual.max_residual} "
+                    f"exceeds tolerance {residual.tolerance} or did not converge."
+                ),
+            )
+        )
+    for degeneracy in degeneracies:
+        if degeneracy.code == "ambiguous-route":
+            diagnostics.append(
+                SurfaceCSGAmbiguityDiagnostic(
+                    route_id=degeneracy.route_id,
+                    operation=degeneracy.operation,
+                    left_family=degeneracy.left_family,
+                    right_family=degeneracy.right_family,
+                    message=degeneracy.message,
+                    location=degeneracy.location,
+                    blocking=degeneracy.blocking,
+                )
+            )
+        elif degeneracy.blocking:
+            diagnostics.append(
+                SurfaceCSGRouteSupportDiagnostic(
+                    code="non-executable-route",
+                    operation=degeneracy.operation,
+                    left_family=degeneracy.left_family,
+                    right_family=degeneracy.right_family,
+                    pair_class=route.pair_class,
+                    message=degeneracy.message,
+                )
+            )
+    return tuple(diagnostics)
 
 
 def _surface_boolean_required_future_capability(
@@ -1622,13 +2769,15 @@ def _surface_boolean_support_record(
         required_future_capability = _surface_boolean_required_future_capability(
             operation, left_family, right_family
         )
+    elif left_family in SAMPLED_SURFACE_CSG_FAMILIES or right_family in SAMPLED_SURFACE_CSG_FAMILIES:
+        phase = "operand-family-eligibility"
+        support_state = "unsupported"
+        required_future_capability = _surface_boolean_required_future_capability(
+            operation, left_family, right_family
+        )
     elif left_capability.support_phase == "planned" or right_capability.support_phase == "planned":
         phase = "operand-family-eligibility"
-        support_state = (
-            "unsupported"
-            if left_family in SAMPLED_SURFACE_CSG_FAMILIES or right_family in SAMPLED_SURFACE_CSG_FAMILIES
-            else "not-yet-implemented"
-        )
+        support_state = "not-yet-implemented"
         required_future_capability = _surface_boolean_required_future_capability(
             operation, left_family, right_family
         )
@@ -2097,6 +3246,78 @@ def map_surface_csg_curve_to_patch_local(
             diagnostics=domain_diagnostics,
         )
     return SurfaceCSGPatchLocalCurveMappingResult(source_curve=curve, patch=patch_ref, curve=local_curve)
+
+
+def map_surface_csg_curve_to_affected_patches(
+    curve: SurfaceCSGCurvePrimitive,
+    patch_bindings: Sequence[tuple[SurfaceBooleanPatchRef, PlanarSurfacePatch | RevolutionSurfacePatch]],
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> SurfaceCSGIntersectionMappingResult:
+    """Map one intersection curve into every affected patch-local domain."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    mappings = tuple(
+        map_surface_csg_curve_to_patch_local(curve, patch_ref, patch, policy=normalized_policy)
+        for patch_ref, patch in patch_bindings
+    )
+    diagnostics: list[SurfaceCSGCurveMappingDiagnostic] = []
+    if len(mappings) < 2:
+        patch_ref = patch_bindings[0][0] if patch_bindings else SurfaceBooleanPatchRef(operand_index=-1, patch_index=-1)
+        diagnostics.append(
+            _surface_csg_mapping_diagnostic(
+                "ambiguous-curve",
+                "CSG intersection curve mapping requires both affected patches.",
+                patch_ref=patch_ref,
+                curve=curve,
+                policy=normalized_policy,
+            )
+        )
+    if diagnostics:
+        failed = SurfaceCSGPatchLocalCurveMappingResult(
+            source_curve=curve,
+            patch=diagnostics[0].patch,
+            diagnostics=tuple(diagnostics),
+        )
+        return SurfaceCSGIntersectionMappingResult(curve_mappings=(*mappings, failed))
+    return SurfaceCSGIntersectionMappingResult(curve_mappings=mappings)
+
+
+def map_surface_csg_coincident_region_loop(
+    source_region_id: str,
+    patch_ref: SurfaceBooleanPatchRef,
+    patch: SurfacePatch,
+    points_uv: Sequence[Sequence[float]],
+    *,
+    source_curve_digests: Sequence[str] = (),
+) -> SurfaceCSGPatchLocalRegionMappingResult:
+    """Map a coincident region loop into one patch-local trim domain."""
+
+    try:
+        loop = TrimLoop(points_uv, category="outer").normalized()
+        loop.validate_against_domain(patch.domain)
+    except ValueError as exc:
+        diagnostic = SurfaceCSGCurveMappingDiagnostic(
+            code="outside-domain" if "outside" in str(exc).lower() else "degenerate-curve",
+            message=f"Coincident CSG region {source_region_id!r} could not be mapped to patch-local trim space: {exc}",
+            patch=patch_ref,
+            source_curve_digest=str(source_region_id),
+        )
+        return SurfaceCSGPatchLocalRegionMappingResult(
+            source_region_id=str(source_region_id),
+            patch=patch_ref,
+            diagnostics=(diagnostic,),
+        )
+    return SurfaceCSGPatchLocalRegionMappingResult(
+        source_region_id=str(source_region_id),
+        patch=patch_ref,
+        region_loop=SurfaceCSGPatchLocalRegionLoop(
+            source_region_id=str(source_region_id),
+            patch=patch_ref,
+            loop=loop,
+            source_curve_digests=tuple(source_curve_digests),
+        ),
+    )
 
 
 def _surface_csg_planar_relation_diagnostic(
@@ -2755,6 +3976,171 @@ def surface_csg_completion_support_matrix() -> tuple[SurfaceBooleanFamilyPairSup
     return SURFACE_CSG_SOLVER_REGISTRY.support_records
 
 
+def _surface_csg_classification_for_support(support: SurfaceBooleanFamilyPairSupport) -> str:
+    if support.supported:
+        if support.support_state == "exact":
+            return "supported-exact"
+        return "supported-declared"
+    if support.left_family not in PATCH_FAMILY_CAPABILITY_MATRIX or support.right_family not in PATCH_FAMILY_CAPABILITY_MATRIX:
+        return "unsupported-family"
+    higher_order = classify_higher_order_csg_pair(support.operation, support.left_family, support.right_family)
+    if higher_order.solver_boundary == "higher-order-exact-solver":
+        return "higher-order-refusal"
+    if higher_order.solver_boundary == "sampled-tessellation-boundary":
+        return "sampled-boundary-refusal"
+    return "non-csg-or-unsupported"
+
+
+def available_family_csg_classification_rows(
+    *,
+    registry: SurfaceCSGSolverRegistryRecord | None = None,
+    families: Iterable[str] | None = None,
+) -> tuple[SurfaceCSGFamilyClassificationRow, ...]:
+    """Return explicit CSG classification rows for every requested family pair."""
+
+    source = registry if registry is not None else SURFACE_CSG_SOLVER_REGISTRY
+    family_keys = tuple(sorted(PATCH_FAMILY_CAPABILITY_MATRIX if families is None else tuple(families)))
+    rows: list[SurfaceCSGFamilyClassificationRow] = []
+    for operation in SURFACE_BOOLEAN_OPERATIONS:
+        for left_family in family_keys:
+            for right_family in family_keys:
+                support = source.support_for(operation, left_family, right_family)
+                classification = _surface_csg_classification_for_support(support)
+                diagnostic = "" if support.supported else build_surface_boolean_unsupported_family_diagnostic(support).message
+                rows.append(
+                    SurfaceCSGFamilyClassificationRow(
+                        operation=operation,
+                        left_family=left_family,
+                        right_family=right_family,
+                        supported=support.supported,
+                        classification=classification,
+                        support_state=support.support_state,
+                        diagnostic=diagnostic,
+                    )
+                )
+    return tuple(rows)
+
+
+def verify_available_family_csg_classification_rows(
+    *,
+    registry: SurfaceCSGSolverRegistryRecord | None = None,
+    families: Iterable[str] | None = None,
+) -> SurfaceCSGFamilyClassificationReport:
+    """Verify complete CSG classification rows for every operation/family pair."""
+
+    source = registry if registry is not None else SURFACE_CSG_SOLVER_REGISTRY
+    family_keys = tuple(sorted(PATCH_FAMILY_CAPABILITY_MATRIX if families is None else tuple(families)))
+    support_matrix = {
+        (record.operation, record.left_family, record.right_family): record
+        for record in source.support_records
+        if record.left_family in family_keys and record.right_family in family_keys
+    }
+    registry_report = build_surface_csg_solver_registry(
+        support_matrix=support_matrix,
+        family_capability_matrix={family: PATCH_FAMILY_CAPABILITY_MATRIX.get(family) for family in family_keys},
+    )
+    rows = available_family_csg_classification_rows(registry=source, families=family_keys)
+    diagnostics = list(registry_report.diagnostics)
+    expected_count = len(SURFACE_BOOLEAN_OPERATIONS) * len(family_keys) * len(family_keys)
+    if len(rows) != expected_count:
+        diagnostics.append(
+            SurfaceCSGSolverRegistryDiagnostic(
+                code="missing-pair",
+                operation="union",
+                left_family="availability-report",
+                right_family="availability-report",
+                message=f"CSG classification row count {len(rows)} did not match expected {expected_count}.",
+            )
+        )
+    missing_classification = [row for row in rows if not row.classification]
+    for row in missing_classification:
+        diagnostics.append(
+            SurfaceCSGSolverRegistryDiagnostic(
+                code="missing-future-capability",
+                operation=row.operation,
+                left_family=row.left_family,
+                right_family=row.right_family,
+                message=f"CSG classification row {row.operation} {row.left_family}/{row.right_family} is empty.",
+            )
+        )
+    return SurfaceCSGFamilyClassificationReport(
+        passed=not diagnostics,
+        rows=rows,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def collect_surface_csg_no_mesh_fallback_evidence(
+    *,
+    registry: SurfaceCSGSolverRegistryRecord | None = None,
+    families: Iterable[str] | None = None,
+) -> tuple[SurfaceCSGNoMeshFallbackEvidenceRecord, ...]:
+    """Collect CSG evidence proving unsupported pairs refuse rather than mesh fallback."""
+
+    rows = available_family_csg_classification_rows(registry=registry, families=families)
+    evidence: list[SurfaceCSGNoMeshFallbackEvidenceRecord] = []
+    for row in rows:
+        if row.supported:
+            evidence.append(
+                SurfaceCSGNoMeshFallbackEvidenceRecord(
+                    operation=row.operation,
+                    left_family=row.left_family,
+                    right_family=row.right_family,
+                    result_kind="supported-surface",
+                    message="Surface CSG row is supported by the surface solver registry.",
+                )
+            )
+            continue
+        evidence.append(
+            SurfaceCSGNoMeshFallbackEvidenceRecord(
+                operation=row.operation,
+                left_family=row.left_family,
+                right_family=row.right_family,
+                result_kind="diagnostic-refusal",
+                message=row.diagnostic,
+                mesh_fallback_attempted=False,
+            )
+        )
+    return tuple(evidence)
+
+
+def verify_surface_csg_no_mesh_fallback_evidence(
+    *,
+    registry: SurfaceCSGSolverRegistryRecord | None = None,
+    families: Iterable[str] | None = None,
+) -> SurfaceCSGNoMeshFallbackReport:
+    """Verify CSG unsupported rows expose diagnostics and never hidden mesh fallback."""
+
+    evidence = collect_surface_csg_no_mesh_fallback_evidence(registry=registry, families=families)
+    diagnostics: list[SurfaceCSGPlanDiagnostic] = []
+    for record in evidence:
+        if record.mesh_fallback_attempted:
+            diagnostics.append(
+                SurfaceCSGPlanDiagnostic(
+                    code="unsupported-family-pair",
+                    operation=record.operation,
+                    left_family=record.left_family,
+                    right_family=record.right_family,
+                    message="CSG evidence recorded a hidden mesh fallback attempt.",
+                )
+            )
+        if record.result_kind == "diagnostic-refusal" and not record.message:
+            diagnostics.append(
+                SurfaceCSGPlanDiagnostic(
+                    code="unsupported-family-pair",
+                    operation=record.operation,
+                    left_family=record.left_family,
+                    right_family=record.right_family,
+                    message="Unsupported CSG evidence requires an explicit diagnostic message.",
+                )
+            )
+    return SurfaceCSGNoMeshFallbackReport(
+        passed=not diagnostics,
+        evidence=evidence,
+        diagnostics=tuple(diagnostics),
+    )
+
+
 def surface_csg_refusal_record(
     operation: SurfaceBooleanOperation,
     left_family: str,
@@ -3306,9 +4692,68 @@ def rebuild_surface_csg_shell_seams(shell: SurfaceShell) -> SurfaceCSGSeamRebuil
     )
 
 
+def record_surface_csg_continuity_handoff(
+    seam_rebuild: SurfaceCSGSeamRebuildRecord,
+    *,
+    requested_continuity: Sequence[str] = ("C0", "G0"),
+) -> SurfaceCSGContinuityHandoffRecord:
+    """Record the continuity level seam rebuild can honestly hand to enforcement."""
+
+    normalized_requested = tuple(str(item).upper() for item in requested_continuity)
+    enforceable = tuple(item for item in normalized_requested if item in {"C0", "G0"})
+    diagnostics: list[SurfaceCSGContinuityHandoffDiagnostic] = []
+    if not seam_rebuild.supported:
+        diagnostics.append(
+            SurfaceCSGContinuityHandoffDiagnostic(
+                code="invalid-seam-rebuild",
+                message="Surface CSG continuity handoff requires a supported seam rebuild.",
+            )
+        )
+    diagnostics.extend(
+        SurfaceCSGContinuityHandoffDiagnostic(
+            code="unsupported-continuity-enforcement",
+            continuity=item,
+            message=(
+                f"Surface CSG seam adjacency records {item} as requested, but "
+                "that continuity level requires the dedicated continuity enforcement route."
+            ),
+        )
+        for item in normalized_requested
+        if item not in {"C0", "G0"}
+    )
+    return SurfaceCSGContinuityHandoffRecord(
+        seam_rebuild=seam_rebuild,
+        requested_continuity=normalized_requested,
+        enforceable_continuity=enforceable,
+        diagnostics=tuple(diagnostics),
+    )
+
+
 def _surface_boolean_cleanup_body(body: SurfaceBody) -> SurfaceBody:
     cleaned_shells = tuple(rebuild_surface_csg_shell_seams(shell).shell for shell in body.iter_shells(world=True))
     return make_surface_body(cleaned_shells, metadata=body.metadata)
+
+
+def detect_surface_csg_dangling_trims(body: SurfaceBody) -> tuple[SurfaceCSGValidityDiagnostic, ...]:
+    """Detect trim loops that cannot be validated against their owning patch domain."""
+
+    diagnostics: list[SurfaceCSGValidityDiagnostic] = []
+    for shell_index, shell in enumerate(body.iter_shells(world=True)):
+        for patch_index, patch in enumerate(shell.iter_patches(world=True)):
+            for loop_index, trim_loop in enumerate(getattr(patch, "trim_loops", ())):
+                try:
+                    trim_loop.validate_against_domain(patch.domain)
+                except ValueError as exc:
+                    diagnostics.append(
+                        SurfaceCSGValidityDiagnostic(
+                            code="dangling-trim",
+                            message=(
+                                "Surface CSG runtime validity found dangling trim loop "
+                                f"{loop_index} on shell {shell_index} patch {patch_index}: {exc}"
+                            ),
+                        )
+                    )
+    return tuple(diagnostics)
 
 
 def finalize_surface_csg_validity_gate(
@@ -3324,6 +4769,7 @@ def finalize_surface_csg_validity_gate(
     )
     cleaned_body = _surface_boolean_cleanup_body(body)
     diagnostics: list[SurfaceCSGValidityDiagnostic] = []
+    diagnostics.extend(detect_surface_csg_dangling_trims(cleaned_body))
 
     for shell in cleaned_body.iter_shells(world=True):
         invalid_reason = _surface_boolean_shell_invalid_reason(shell)
@@ -3356,6 +4802,136 @@ def finalize_surface_csg_validity_gate(
         status="succeeded",
         body=cleaned_body,
         provenance=provenance,
+    )
+
+
+def check_surface_csg_runtime_result_validity(
+    operation: SurfaceBooleanOperation,
+    operands: SurfaceBooleanOperands,
+    result: object,
+    *,
+    unresolved_diagnostics: Sequence[object] = (),
+) -> SurfaceCSGRuntimeValidityReport:
+    """Validate the object crossing the runtime CSG return boundary."""
+
+    diagnostics: list[SurfaceCSGValidityDiagnostic] = []
+    diagnostics.extend(
+        SurfaceCSGValidityDiagnostic(
+            code="unresolved-diagnostic",
+            message=f"Surface CSG runtime result has unresolved diagnostic: {diagnostic}",
+        )
+        for diagnostic in unresolved_diagnostics
+    )
+    if isinstance(result, (Mesh, MeshGroup)):
+        diagnostics.append(
+            SurfaceCSGValidityDiagnostic(
+                code="mesh-backed-fragment",
+                message="Surface CSG runtime result attempted to return a mesh-backed fragment.",
+            )
+        )
+        return SurfaceCSGRuntimeValidityReport(
+            operation=operation,
+            status="invalid",
+            diagnostics=tuple(diagnostics),
+        )
+    if not isinstance(result, SurfaceBody):
+        diagnostics.append(
+            SurfaceCSGValidityDiagnostic(
+                code="non-surface-result",
+                message="Surface CSG runtime result must be a SurfaceBody.",
+            )
+        )
+        return SurfaceCSGRuntimeValidityReport(
+            operation=operation,
+            status="invalid",
+            diagnostics=tuple(diagnostics),
+        )
+    diagnostics.extend(detect_surface_csg_dangling_trims(result))
+    if diagnostics:
+        return SurfaceCSGRuntimeValidityReport(
+            operation=operation,
+            status="invalid",
+            diagnostics=tuple(diagnostics),
+        )
+    gate = finalize_surface_csg_validity_gate(operation, operands, result)
+    if not gate.accepted:
+        diagnostics.extend(gate.diagnostics)
+    if diagnostics:
+        return SurfaceCSGRuntimeValidityReport(
+            operation=operation,
+            status="invalid",
+            diagnostics=tuple(diagnostics),
+            validity_gate=gate,
+        )
+    return SurfaceCSGRuntimeValidityReport(
+        operation=operation,
+        status="succeeded",
+        result=gate.body,
+        validity_gate=gate,
+    )
+
+
+def verify_surface_csg_persistence_tessellation_evidence(
+    body: SurfaceBody,
+    *,
+    fixture_id: str,
+    reference_state: Literal["clean", "dirty", "missing"] = "missing",
+) -> SurfaceCSGReferencePromotionReport:
+    """Verify `.impress`, tessellation-boundary, and reference promotion evidence."""
+
+    from impression.io import dumps_impress_json, loads_impress_json, make_impress_document_payload
+    from .tessellation import export_tessellation_request, tessellate_surface_body
+
+    diagnostics: list[str] = []
+    try:
+        payload = make_impress_document_payload([body])
+        loaded = loads_impress_json(dumps_impress_json(payload))
+        loaded_body = loaded.bodies[0]
+        persistence = SurfaceCSGPersistenceEvidenceRecord(
+            fixture_id=fixture_id,
+            passed=loaded_body.patch_count == body.patch_count,
+            body_id=body.stable_identity,
+            loaded_body_id=loaded_body.stable_identity,
+            message="CSG surface body round-tripped through `.impress`.",
+        )
+        if not persistence.passed:
+            diagnostics.append("CSG `.impress` round trip changed body patch count.")
+    except Exception as exc:
+        persistence = SurfaceCSGPersistenceEvidenceRecord(
+            fixture_id=fixture_id,
+            passed=False,
+            body_id=body.stable_identity,
+            message=f"CSG `.impress` round trip failed: {exc}",
+        )
+        diagnostics.append(persistence.message)
+    try:
+        tessellation = tessellate_surface_body(body, export_tessellation_request(require_watertight=False))
+        face_count = int(tessellation.mesh.n_faces)
+        tessellation_evidence = SurfaceCSGTessellationBoundaryEvidenceRecord(
+            fixture_id=fixture_id,
+            passed=face_count > 0,
+            body_id=body.stable_identity,
+            face_count=face_count,
+            message="CSG surface body tessellated at the explicit boundary.",
+        )
+        if not tessellation_evidence.passed:
+            diagnostics.append("CSG tessellation boundary produced no faces.")
+    except Exception as exc:
+        tessellation_evidence = SurfaceCSGTessellationBoundaryEvidenceRecord(
+            fixture_id=fixture_id,
+            passed=False,
+            body_id=body.stable_identity,
+            message=f"CSG tessellation boundary failed: {exc}",
+        )
+        diagnostics.append(tessellation_evidence.message)
+    if reference_state != "clean":
+        diagnostics.append(f"CSG reference fixture {fixture_id!r} is {reference_state}; clean evidence is required.")
+    return SurfaceCSGReferencePromotionReport(
+        fixture_id=fixture_id,
+        persistence=persistence,
+        tessellation=tessellation_evidence,
+        reference_state=reference_state,
+        diagnostics=tuple(diagnostics),
     )
 
 
@@ -4397,6 +5973,126 @@ def classify_surface_csg_fragment_against_body(
     )
 
 
+def build_surface_csg_fragments_from_arrangement(
+    arrangement: SurfaceCSGPatchLocalArrangementGraph,
+    patch: PlanarSurfacePatch,
+) -> SurfaceCSGFragmentBuildResult:
+    """Convert arrangement face candidates into explicit surface-native fragments."""
+
+    diagnostics: list[SurfaceCSGFragmentBuildDiagnostic] = []
+    diagnostics.extend(
+        SurfaceCSGFragmentBuildDiagnostic(
+            code="invalid-arrangement",
+            message=diagnostic.message,
+            patch=diagnostic.patch,
+        )
+        for diagnostic in arrangement.diagnostics
+    )
+    if not arrangement.face_candidates:
+        diagnostics.append(
+            SurfaceCSGFragmentBuildDiagnostic(
+                code="missing-face-candidate",
+                message="Surface CSG fragment builder requires at least one arrangement face candidate.",
+                patch=arrangement.patch,
+            )
+        )
+    fragments: list[SurfaceCSGSurfaceFragment] = []
+    for index, candidate in enumerate(arrangement.face_candidates):
+        try:
+            candidate.loop.validate_against_domain(patch.domain)
+        except ValueError as exc:
+            diagnostics.append(
+                SurfaceCSGFragmentBuildDiagnostic(
+                    code="invalid-fragment-loop",
+                    message=f"Surface CSG fragment loop is invalid for patch domain: {exc}",
+                    patch=candidate.patch,
+                    face_id=candidate.face_id,
+                )
+            )
+            continue
+        fragments.append(
+            SurfaceCSGSurfaceFragment(
+                fragment_id=f"{candidate.face_id}:fragment{index}",
+                source_patch=candidate.patch,
+                patch=replace(patch, trim_loops=(candidate.loop,)),
+                loop=candidate.loop,
+                source_face_id=candidate.face_id,
+                cut_curve_ids=tuple(sorted(candidate.cut_curve_ids)),
+            )
+        )
+    return SurfaceCSGFragmentBuildResult(
+        arrangement=arrangement,
+        fragments=tuple(fragments),
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def resolve_surface_csg_coincident_fragment_ownership(
+    fragment: SurfaceCSGSurfaceFragment,
+    classification: SurfaceCSGFragmentClassificationRecord,
+) -> SurfaceCSGCoincidentOwnershipRecord:
+    """Resolve ownership for fragments classified on the opposing boundary."""
+
+    if classification.relation != "on":
+        return SurfaceCSGCoincidentOwnershipRecord(
+            fragment_id=fragment.fragment_id,
+            patch=fragment.source_patch,
+            relation=classification.relation,
+        )
+    if not classification.cut_curve_ids:
+        diagnostic = SurfaceCSGCoincidentOwnershipDiagnostic(
+            code="missing-cut-provenance",
+            message=(
+                "Surface CSG coincident fragment ownership requires cut-curve "
+                "provenance for boundary-classified fragments."
+            ),
+            fragment_id=fragment.fragment_id,
+            patch=fragment.source_patch,
+        )
+        return SurfaceCSGCoincidentOwnershipRecord(
+            fragment_id=fragment.fragment_id,
+            patch=fragment.source_patch,
+            relation=classification.relation,
+            policy="refuse-without-cut-provenance",
+            diagnostics=(diagnostic,),
+        )
+    return SurfaceCSGCoincidentOwnershipRecord(
+        fragment_id=fragment.fragment_id,
+        patch=fragment.source_patch,
+        relation=classification.relation,
+        owner_patch=fragment.source_patch,
+        policy="source-patch-with-cut-provenance",
+    )
+
+
+def classify_surface_csg_fragments_against_body(
+    fragments: Sequence[SurfaceCSGSurfaceFragment],
+    opposing_body: SurfaceBody,
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> SurfaceCSGClassifiedFragmentSet:
+    """Classify arrangement-built fragments and collect coincident ownership records."""
+
+    classifications: list[SurfaceCSGFragmentClassificationRecord] = []
+    ownership: list[SurfaceCSGCoincidentOwnershipRecord] = []
+    for fragment in fragments:
+        classification = classify_surface_csg_fragment_against_body(
+            fragment.source_patch,
+            fragment.patch,
+            opposing_body,
+            trim_loop=fragment.loop,
+            cut_curve_ids=fragment.cut_curve_ids,
+            policy=policy,
+        )
+        classifications.append(classification)
+        ownership.append(resolve_surface_csg_coincident_fragment_ownership(fragment, classification))
+    return SurfaceCSGClassifiedFragmentSet(
+        fragments=tuple(fragments),
+        classifications=tuple(classifications),
+        coincident_ownership=tuple(ownership),
+    )
+
+
 def _surface_boolean_split_role(
     operation: SurfaceBooleanOperation,
     *,
@@ -4465,6 +6161,109 @@ def select_surface_csg_operation_fragments(
             (select_surface_csg_operation_fragment(operation, classification) for classification in classifications),
             key=lambda record: (record.patch.operand_index, record.patch.patch_index, record.relation, record.role),
         )
+    )
+
+
+def classify_surface_csg_cap_eligibility(
+    selection: SurfaceCSGOperationSelectionRecord,
+    source_patch: SurfacePatch | None = None,
+) -> SurfaceCSGCapEligibilityRecord:
+    """Classify whether a selected fragment can generate a surface-native cap."""
+
+    if not selection.cut_cap.required:
+        return SurfaceCSGCapEligibilityRecord(
+            selection=selection,
+            required=False,
+            eligible=True,
+            reason="operation selection does not require a cut cap",
+        )
+    if source_patch is None:
+        diagnostic = SurfaceCSGUnsupportedCapDiagnostic(
+            code="missing-source-patch",
+            patch=selection.patch,
+            message=(
+                "Surface CSG cap eligibility requires the source patch for "
+                f"operand {selection.patch.operand_index} patch {selection.patch.patch_index}."
+            ),
+        )
+        return SurfaceCSGCapEligibilityRecord(
+            selection=selection,
+            required=True,
+            eligible=False,
+            reason="missing source patch",
+            diagnostics=(diagnostic,),
+        )
+    if not isinstance(source_patch, PlanarSurfacePatch):
+        diagnostic = SurfaceCSGUnsupportedCapDiagnostic(
+            code="unsupported-cap-family",
+            patch=selection.patch,
+            cap_family=source_patch.family,
+            message=(
+                f"Surface CSG cap eligibility supports planar cap payloads; "
+                f"source family {source_patch.family!r} requires a surface-native cap producer."
+            ),
+        )
+        return SurfaceCSGCapEligibilityRecord(
+            selection=selection,
+            required=True,
+            eligible=False,
+            cap_family=source_patch.family,
+            reason="unsupported cap family",
+            diagnostics=(diagnostic,),
+        )
+    return SurfaceCSGCapEligibilityRecord(
+        selection=selection,
+        required=True,
+        eligible=True,
+        cap_family="planar",
+        reason="planar source patch can generate a surface-native cap",
+    )
+
+
+def select_surface_csg_operation_fragment_set(
+    operation: SurfaceBooleanOperation,
+    classified_fragments: SurfaceCSGClassifiedFragmentSet,
+    *,
+    source_patches: Mapping[SurfaceBooleanPatchRef, SurfacePatch] | None = None,
+) -> SurfaceCSGOperationFragmentSelectionSet:
+    """Select operation fragments and classify cap policy for a classified fragment set."""
+
+    diagnostics: list[SurfaceCSGOperationSelectionDiagnostic] = []
+    for classification in classified_fragments.classifications:
+        if not classification.supported:
+            diagnostics.append(
+                SurfaceCSGOperationSelectionDiagnostic(
+                    code="unsupported-classification",
+                    message=(
+                        "Surface CSG operation selection cannot execute while "
+                        "fragment classification has blocking diagnostics."
+                    ),
+                    patch=classification.patch,
+                )
+            )
+    for ownership in classified_fragments.coincident_ownership:
+        if not ownership.supported:
+            diagnostics.append(
+                SurfaceCSGOperationSelectionDiagnostic(
+                    code="ambiguous-coincident-ownership",
+                    message=(
+                        "Surface CSG operation selection cannot execute while "
+                        "coincident fragment ownership is unresolved."
+                    ),
+                    patch=ownership.patch,
+                )
+            )
+    selections = select_surface_csg_operation_fragments(operation, classified_fragments.classifications)
+    patch_lookup = source_patches or {}
+    cap_eligibility = tuple(
+        classify_surface_csg_cap_eligibility(selection, patch_lookup.get(selection.patch))
+        for selection in selections
+    )
+    return SurfaceCSGOperationFragmentSelectionSet(
+        operation=operation,
+        selections=selections,
+        cap_eligibility=cap_eligibility,
+        diagnostics=tuple(diagnostics),
     )
 
 
@@ -4619,6 +6418,39 @@ def _arrangement_diagnostic(
     )
 
 
+def _arrangement_vertices_and_edges(
+    patch_ref: SurfaceBooleanPatchRef,
+    points_uv: Sequence[Sequence[float]],
+    *,
+    source: Literal["trim-loop", "cut-curve", "coincident-region"],
+    prefix: str,
+    cut_curve_ids: tuple[str, ...] = (),
+    closed: bool,
+) -> tuple[tuple[SurfaceCSGArrangementVertex, ...], tuple[SurfaceCSGArrangementEdge, ...]]:
+    vertices = tuple(
+        SurfaceCSGArrangementVertex(
+            vertex_id=f"{prefix}:v{index}",
+            patch=patch_ref,
+            point_uv=(float(point[0]), float(point[1])),
+            source=source,
+        )
+        for index, point in enumerate(points_uv)
+    )
+    edge_count = len(vertices) if closed and len(vertices) > 1 else max(0, len(vertices) - 1)
+    edges = tuple(
+        SurfaceCSGArrangementEdge(
+            edge_id=f"{prefix}:e{index}",
+            patch=patch_ref,
+            start_vertex_id=vertices[index].vertex_id,
+            end_vertex_id=vertices[(index + 1) % len(vertices)].vertex_id,
+            source=source,
+            cut_curve_ids=cut_curve_ids,
+        )
+        for index in range(edge_count)
+    )
+    return vertices, edges
+
+
 def build_surface_csg_patch_arrangement(
     patch_ref: SurfaceBooleanPatchRef,
     patch: PlanarSurfacePatch,
@@ -4654,12 +6486,26 @@ def build_surface_csg_patch_arrangement(
                     cut_curve_ids=tuple(cut_curve_ids),
                 )
             )
+    vertices: list[SurfaceCSGArrangementVertex] = []
+    edges: list[SurfaceCSGArrangementEdge] = []
+    for curve_index, curve in enumerate(local_curves):
+        curve_vertices, curve_edges = _arrangement_vertices_and_edges(
+            patch_ref,
+            curve.points_uv,
+            source="cut-curve",
+            prefix=f"curve{curve_index}:{curve.source_curve_digest}",
+            cut_curve_ids=(curve.source_curve_digest,),
+            closed=False,
+        )
+        vertices.extend(curve_vertices)
+        edges.extend(curve_edges)
     loops = tuple(trim_loops)
     if generated_loop is not None:
         loops = (*loops, generated_loop)
     if not loops:
         loops = patch.trim_loops
     split_loops: list[SurfaceCSGSplitTrimLoopRecord] = []
+    face_candidates: list[SurfaceCSGArrangementFaceCandidate] = []
     for loop in loops:
         normalized_loop = loop.normalized()
         if _trim_loop_min_edge_length(normalized_loop) <= normalized_policy.degeneracy_tolerance:
@@ -4672,8 +6518,28 @@ def build_surface_csg_patch_arrangement(
                 )
             )
             continue
+        loop_index = len(split_loops)
+        loop_vertices, loop_edges = _arrangement_vertices_and_edges(
+            patch_ref,
+            normalized_loop.points_uv,
+            source="trim-loop",
+            prefix=f"loop{loop_index}:{normalized_loop.category}",
+            cut_curve_ids=tuple(sorted(cut_curve_ids)),
+            closed=True,
+        )
+        vertices.extend(loop_vertices)
+        edges.extend(loop_edges)
         split_loops.append(
             SurfaceCSGSplitTrimLoopRecord(
+                patch=patch_ref,
+                loop=normalized_loop,
+                source_category=normalized_loop.category,
+                cut_curve_ids=tuple(sorted(cut_curve_ids)),
+            )
+        )
+        face_candidates.append(
+            SurfaceCSGArrangementFaceCandidate(
+                face_id=f"face{loop_index}:{normalized_loop.category}",
                 patch=patch_ref,
                 loop=normalized_loop,
                 source_category=normalized_loop.category,
@@ -4684,6 +6550,9 @@ def build_surface_csg_patch_arrangement(
         patch=patch_ref,
         patch_local_curves=local_curves,
         split_loops=tuple(split_loops),
+        vertices=tuple(vertices),
+        edges=tuple(edges),
+        face_candidates=tuple(face_candidates),
         diagnostics=tuple(diagnostics),
     )
 
@@ -5230,6 +7099,64 @@ def _surface_csg_patch_for_ref(operands: SurfaceBooleanOperands, patch_ref: Surf
         return shell.iter_patches(world=True)[patch_ref.patch_index]
     except (IndexError, TypeError):
         return None
+
+
+def orient_surface_csg_selected_fragment(
+    operation: SurfaceBooleanOperation,
+    fragment: SurfaceBooleanTrimmedPatchFragment,
+    selection: SurfaceCSGOperationSelectionRecord,
+) -> SurfaceCSGOrientedFragmentRecord:
+    """Apply operation-specific orientation metadata to one selected fragment."""
+
+    orientation: Literal["preserve", "reverse"] = "preserve"
+    if operation == "difference" and selection.patch.operand_index != 0 and selection.role == "cut_cap":
+        orientation = "reverse"
+    metadata = dict(fragment.patch.metadata)
+    kernel = dict(fragment.patch.kernel_metadata())
+    consumer = dict(fragment.patch.consumer_metadata())
+    kernel.update(
+        {
+            "boolean_operation": operation,
+            "csg_fragment_orientation": orientation,
+            "csg_fragment_role": selection.role,
+            "source_operand_index": fragment.source_patch.operand_index,
+            "source_patch_index": fragment.source_patch.patch_index,
+            "cut_curve_ids": tuple(sorted(fragment.cut_curve_ids)),
+        }
+    )
+    metadata["kernel"] = kernel
+    if consumer:
+        metadata["consumer"] = consumer
+    return SurfaceCSGOrientedFragmentRecord(
+        source_patch=fragment.source_patch,
+        patch=replace(fragment.patch, metadata=metadata),
+        role=selection.role,
+        orientation=orientation,
+        operation=operation,
+        cut_curve_ids=tuple(sorted(fragment.cut_curve_ids)),
+    )
+
+
+def orient_surface_csg_selected_fragments(
+    operation: SurfaceBooleanOperation,
+    fragments: Sequence[SurfaceBooleanTrimmedPatchFragment],
+    selections: Sequence[SurfaceCSGOperationSelectionRecord],
+) -> tuple[SurfaceCSGOrientedFragmentRecord, ...]:
+    """Apply orientation to all fragments that have matching operation selections."""
+
+    selection_by_patch = {selection.patch: selection for selection in selections}
+    oriented: list[SurfaceCSGOrientedFragmentRecord] = []
+    for fragment in fragments:
+        selection = selection_by_patch.get(fragment.source_patch)
+        if selection is None:
+            continue
+        oriented.append(orient_surface_csg_selected_fragment(operation, fragment, selection))
+    return tuple(
+        sorted(
+            oriented,
+            key=lambda record: (*_surface_csg_patch_ref_sort_key(record.source_patch), record.role, record.orientation),
+        )
+    )
 
 
 def _surface_csg_generated_cap_metadata(

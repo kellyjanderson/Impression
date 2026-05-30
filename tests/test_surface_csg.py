@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import warnings
 
+from impression.mesh import Mesh
 from tests.csg_reference_fixtures import (
     build_csg_difference_slot_fixture,
     build_csg_union_box_post_fixture,
@@ -38,19 +39,34 @@ from impression.modeling import (
     SurfaceCSGCapConstructionRecord,
     SurfaceCSGCallerInventoryRecord,
     SurfaceCSGConicDiagnostic,
+    SurfaceCSGContinuityHandoffDiagnostic,
+    SurfaceCSGContinuityHandoffRecord,
     SurfaceCSGCutCapRequirementRecord,
     SurfaceCSGCutBoundaryRecord,
     SurfaceCSGCurvePrimitive,
     SurfaceCSGCurveMappingDiagnostic,
     SurfaceCSGFeatureGateDiagnostic,
+    SurfaceCSGCapEligibilityRecord,
+    SurfaceCSGClassifiedFragmentSet,
+    SurfaceCSGCoincidentOwnershipDiagnostic,
+    SurfaceCSGCoincidentOwnershipRecord,
+    SurfaceCSGFragmentBuildDiagnostic,
+    SurfaceCSGFragmentBuildResult,
     SurfaceCSGFragmentClassificationDiagnostic,
     SurfaceCSGFragmentClassificationEdgeRecord,
     SurfaceCSGFragmentGraphDiagnostic,
     SurfaceCSGFragmentGraphRecord,
     SurfaceCSGFragmentClassificationRecord,
+    SurfaceCSGSurfaceFragment,
     SurfaceCSGFragmentProvenanceRecord,
     SurfaceCSGGeneratedCapPatchPayloadRecord,
+    SurfaceCSGArrangementVertex,
+    SurfaceCSGArrangementEdge,
+    SurfaceCSGArrangementFaceCandidate,
+    SurfaceCSGOperationFragmentSelectionSet,
     SurfaceCSGOperationPlan,
+    SurfaceCSGOperationSelectionDiagnostic,
+    SurfaceCSGOrientedFragmentRecord,
     SurfaceCSGOperandOrderingNormalizationRecord,
     SurfaceCSGSolverRegistryDiagnostic,
     SurfaceCSGSolverRegistryRecord,
@@ -59,19 +75,26 @@ from impression.modeling import (
     SurfaceCSGPatchLocalCurve,
     SurfaceCSGPatchLocalArrangementGraph,
     SurfaceCSGPatchLocalCurveMappingResult,
+    SurfaceCSGPatchLocalRegionLoop,
+    SurfaceCSGPatchLocalRegionMappingResult,
+    SurfaceCSGIntersectionMappingResult,
     SurfaceCSGPlanarRelationDiagnostic,
     SurfaceCSGPlanDiagnostic,
     SurfaceCSGPostReconstructionValidityDiagnostic,
+    SurfaceCSGPersistenceEvidenceRecord,
     SurfaceCSGProvenanceMetadataRecord,
     SurfaceCSGProvenanceDiagnostic,
     SurfaceCSGReconstructionDiagnostic,
+    SurfaceCSGReferencePromotionReport,
     SurfaceCSGResultPatchProvenanceRecord,
     SurfaceCSGResultProvenanceMap,
+    SurfaceCSGRuntimeValidityReport,
     SurfaceCSGRevolutionIntersectionRecord,
     SurfaceCSGShellAssemblyRecord,
     SurfaceCSGShellOrderingRecord,
     SurfaceCSGSeamRebuildRecord,
     SurfaceCSGSplitTrimLoopRecord,
+    SurfaceCSGTessellationBoundaryEvidenceRecord,
     SurfaceCSGToleranceDiagnostic,
     SurfaceCSGTolerancePolicy,
     SurfaceCSGTrimAttachmentRecord,
@@ -94,15 +117,22 @@ from impression.modeling import (
     assemble_surface_csg_shells_from_fragments,
     build_surface_csg_cap_patches,
     build_surface_csg_cut_boundary_trims,
+    build_surface_csg_fragments_from_arrangement,
     build_surface_csg_fragment_graph,
     build_surface_csg_patch_arrangement,
     build_surface_csg_result_provenance_map,
+    check_surface_csg_runtime_result_validity,
+    classify_surface_csg_cap_eligibility,
+    classify_surface_csg_fragments_against_body,
     classify_surface_csg_fragment_against_body,
     classify_surface_csg_point_against_bounds,
     intersect_axis_compatible_revolution_pair,
     intersect_planar_linear_patch_pair,
     intersect_planar_revolution_patch_pair,
     finalize_surface_csg_validity_gate,
+    detect_surface_csg_dangling_trims,
+    map_surface_csg_coincident_region_loop,
+    map_surface_csg_curve_to_affected_patches,
     map_surface_csg_curve_to_patch_local,
     make_surface_csg_curve,
     make_surface_csg_line_curve,
@@ -112,11 +142,15 @@ from impression.modeling import (
     make_surface_body,
     make_surface_shell,
     normalize_surface_csg_operand_ordering,
+    orient_surface_csg_selected_fragment,
+    orient_surface_csg_selected_fragments,
     plan_prepared_surface_csg_operation,
     plan_surface_csg_operation,
     prepare_surface_boolean_difference_operands,
     prepare_surface_boolean_operands,
+    resolve_surface_csg_coincident_fragment_ownership,
     rebuild_surface_csg_shell_seams,
+    record_surface_csg_continuity_handoff,
     sort_surface_csg_curves,
     surface_csg_caller_inventory,
     surface_csg_curve_digest,
@@ -129,11 +163,13 @@ from impression.modeling import (
     surface_boolean_result,
     select_surface_csg_fragment_sample,
     select_surface_csg_operation_fragment,
+    select_surface_csg_operation_fragment_set,
     select_surface_csg_operation_fragments,
     surface_csg_selection_is_empty,
     validate_surface_csg_curve,
     validate_surface_csg_patch_local_curve_domain,
     validate_surface_csg_result_handoff,
+    verify_surface_csg_persistence_tessellation_evidence,
 )
 from impression.modeling.surface import PATCH_FAMILY_CAPABILITY_MATRIX
 
@@ -248,6 +284,70 @@ def test_surface_csg_curve_maps_to_revolution_patch_local_domain() -> None:
     assert validate_surface_csg_patch_local_curve_domain(result.curve) == ()
 
 
+def test_surface_csg_curve_maps_to_all_affected_patch_local_domains() -> None:
+    first_patch = PlanarSurfacePatch(family="planar", origin=(0.0, 0.0, 0.0), u_axis=(2.0, 0.0, 0.0), v_axis=(0.0, 2.0, 0.0))
+    second_patch = PlanarSurfacePatch(family="planar", origin=(0.0, 0.0, 0.0), u_axis=(0.0, 2.0, 0.0), v_axis=(2.0, 0.0, 0.0))
+    curve = make_surface_csg_line_curve((0.5, 0.25, 0.0), (1.5, 1.75, 0.0))
+
+    result = map_surface_csg_curve_to_affected_patches(
+        curve,
+        (
+            (SurfaceBooleanPatchRef(0, 0), first_patch),
+            (SurfaceBooleanPatchRef(1, 3), second_patch),
+        ),
+    )
+
+    assert isinstance(result, SurfaceCSGIntersectionMappingResult)
+    assert result.supported is True
+    assert result.diagnostics == ()
+    assert len(result.curve_mappings) == 2
+    assert all(isinstance(mapping.curve, SurfaceCSGPatchLocalCurve) for mapping in result.curve_mappings)
+    assert result.curve_mappings[0].curve is not None
+    assert result.curve_mappings[1].curve is not None
+    assert np.allclose(result.curve_mappings[0].curve.points_uv, ((0.25, 0.125), (0.75, 0.875)))
+    assert np.allclose(result.curve_mappings[1].curve.points_uv, ((0.125, 0.25), (0.875, 0.75)))
+
+
+def test_surface_csg_curve_mapping_requires_both_affected_patches() -> None:
+    patch = PlanarSurfacePatch(family="planar")
+    curve = make_surface_csg_line_curve((0.25, 0.25, 0.0), (0.75, 0.75, 0.0))
+
+    result = map_surface_csg_curve_to_affected_patches(curve, ((SurfaceBooleanPatchRef(0, 0), patch),))
+
+    assert result.supported is False
+    assert result.diagnostics
+    assert result.diagnostics[-1].code == "ambiguous-curve"
+    assert "both affected patches" in result.diagnostics[-1].message
+
+
+def test_surface_csg_coincident_region_loop_maps_to_patch_local_trim_space() -> None:
+    patch = PlanarSurfacePatch(family="planar")
+    patch_ref = SurfaceBooleanPatchRef(0, 1)
+
+    result = map_surface_csg_coincident_region_loop(
+        "overlap-1",
+        patch_ref,
+        patch,
+        ((0.25, 0.25), (0.75, 0.25), (0.75, 0.75), (0.25, 0.75)),
+        source_curve_digests=("cut-a", "cut-b"),
+    )
+    outside = map_surface_csg_coincident_region_loop(
+        "overlap-outside",
+        patch_ref,
+        patch,
+        ((1.25, 0.25), (1.75, 0.25), (1.75, 0.75), (1.25, 0.75)),
+    )
+
+    assert isinstance(result, SurfaceCSGPatchLocalRegionMappingResult)
+    assert result.supported is True
+    assert isinstance(result.region_loop, SurfaceCSGPatchLocalRegionLoop)
+    assert result.region_loop.source_curve_digests == ("cut-a", "cut-b")
+    assert result.region_loop.loop.category == "outer"
+    assert result.canonical_payload()["supported"] is True
+    assert outside.supported is False
+    assert outside.diagnostics[0].code == "outside-domain"
+
+
 def test_surface_csg_patch_arrangement_preserves_loop_category_orientation_and_cut_ids() -> None:
     patch = PlanarSurfacePatch(family="planar")
     patch_ref = SurfaceBooleanPatchRef(0, 0)
@@ -268,6 +368,12 @@ def test_surface_csg_patch_arrangement_preserves_loop_category_orientation_and_c
     assert graph.supported is True
     assert len(graph.patch_local_curves) == 1
     assert len(graph.split_loops) == 1
+    assert all(isinstance(vertex, SurfaceCSGArrangementVertex) for vertex in graph.vertices)
+    assert all(isinstance(edge, SurfaceCSGArrangementEdge) for edge in graph.edges)
+    assert all(isinstance(face, SurfaceCSGArrangementFaceCandidate) for face in graph.face_candidates)
+    assert len(graph.face_candidates) == 1
+    assert graph.face_candidates[0].source_category == "outer"
+    assert graph.canonical_payload()["supported"] is True
     split = graph.split_loops[0]
     assert isinstance(split, SurfaceCSGSplitTrimLoopRecord)
     assert split.source_category == "outer"
@@ -299,6 +405,108 @@ def test_surface_csg_patch_arrangement_reports_zero_length_fragments_and_outside
     assert graph.supported is False
     assert all(isinstance(diagnostic, SurfaceCSGArrangementDiagnostic) for diagnostic in graph.diagnostics)
     assert {diagnostic.code for diagnostic in graph.diagnostics} == {"outside-domain", "zero-length-fragment"}
+
+
+def test_surface_csg_fragment_builder_promotes_arrangement_faces_to_surface_fragments() -> None:
+    patch = PlanarSurfacePatch(family="planar")
+    patch_ref = SurfaceBooleanPatchRef(0, 0)
+    loop = TrimLoop(((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)), category="outer")
+    graph = build_surface_csg_patch_arrangement(
+        patch_ref,
+        patch,
+        generated_loop=loop,
+        cut_curve_ids=("cut-b", "cut-a"),
+    )
+
+    result = build_surface_csg_fragments_from_arrangement(graph, patch)
+
+    assert isinstance(result, SurfaceCSGFragmentBuildResult)
+    assert result.supported is True
+    assert result.diagnostics == ()
+    assert len(result.fragments) == 1
+    fragment = result.fragments[0]
+    assert isinstance(fragment, SurfaceCSGSurfaceFragment)
+    assert fragment.source_patch == patch_ref
+    assert fragment.cut_curve_ids == ("cut-a", "cut-b")
+    assert fragment.sample_uv == pytest.approx((0.5, 0.5))
+    assert len(fragment.patch.trim_loops) == 1
+    assert np.allclose(fragment.patch.trim_loops[0].points_uv, loop.points_uv)
+    assert result.canonical_payload()["supported"] is True
+
+
+def test_surface_csg_fragment_builder_reports_invalid_arrangement_and_missing_faces() -> None:
+    patch = PlanarSurfacePatch(family="planar")
+    patch_ref = SurfaceBooleanPatchRef(0, 0)
+    outside_curve = SurfaceCSGPatchLocalCurve(
+        source_curve_digest="outside",
+        patch=patch_ref,
+        points_uv=((0.5, 0.5), (1.5, 0.5)),
+        domain_bounds=(0.0, 1.0, 0.0, 1.0),
+    )
+    graph = build_surface_csg_patch_arrangement(
+        patch_ref,
+        patch,
+        patch_local_curves=(outside_curve,),
+    )
+
+    result = build_surface_csg_fragments_from_arrangement(graph, patch)
+
+    assert result.supported is False
+    assert all(isinstance(diagnostic, SurfaceCSGFragmentBuildDiagnostic) for diagnostic in result.diagnostics)
+    assert {diagnostic.code for diagnostic in result.diagnostics} == {
+        "invalid-arrangement",
+        "missing-face-candidate",
+    }
+
+
+def test_surface_csg_fragment_classifier_collects_classifications_and_coincident_ownership() -> None:
+    opposing = make_box(size=(2.0, 2.0, 2.0), backend="surface")
+    patch = PlanarSurfacePatch(
+        family="planar",
+        origin=(-0.5, -0.5, 1.0),
+        u_axis=(1.0, 0.0, 0.0),
+        v_axis=(0.0, 1.0, 0.0),
+    )
+    patch_ref = SurfaceBooleanPatchRef(0, 0)
+    loop = TrimLoop(((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)), category="outer")
+    graph = build_surface_csg_patch_arrangement(
+        patch_ref,
+        patch,
+        generated_loop=loop,
+        cut_curve_ids=("cut-on-boundary",),
+    )
+    fragments = build_surface_csg_fragments_from_arrangement(graph, patch).fragments
+
+    classified = classify_surface_csg_fragments_against_body(fragments, opposing)
+
+    assert isinstance(classified, SurfaceCSGClassifiedFragmentSet)
+    assert classified.supported is True
+    assert classified.classifications[0].relation == "on"
+    assert classified.classifications[0].cut_curve_ids == ("cut-on-boundary",)
+    assert isinstance(classified.coincident_ownership[0], SurfaceCSGCoincidentOwnershipRecord)
+    assert classified.coincident_ownership[0].owner_patch == patch_ref
+    assert classified.canonical_payload()["supported"] is True
+
+
+def test_surface_csg_coincident_ownership_refuses_boundary_fragments_without_cut_provenance() -> None:
+    opposing = make_box(size=(2.0, 2.0, 2.0), backend="surface")
+    patch = PlanarSurfacePatch(
+        family="planar",
+        origin=(-0.5, -0.5, 1.0),
+        u_axis=(1.0, 0.0, 0.0),
+        v_axis=(0.0, 1.0, 0.0),
+    )
+    patch_ref = SurfaceBooleanPatchRef(0, 0)
+    loop = TrimLoop(((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)), category="outer")
+    graph = build_surface_csg_patch_arrangement(patch_ref, patch, generated_loop=loop)
+    fragment = build_surface_csg_fragments_from_arrangement(graph, patch).fragments[0]
+    classification = classify_surface_csg_fragment_against_body(patch_ref, patch, opposing, trim_loop=loop)
+
+    ownership = resolve_surface_csg_coincident_fragment_ownership(fragment, classification)
+
+    assert ownership.supported is False
+    assert isinstance(ownership.diagnostics[0], SurfaceCSGCoincidentOwnershipDiagnostic)
+    assert ownership.diagnostics[0].code == "missing-cut-provenance"
 
 
 def test_surface_csg_fragment_classification_distinguishes_inside_outside_and_on_boundary() -> None:
@@ -404,6 +612,115 @@ def test_surface_csg_operation_selection_reports_empty_result() -> None:
 
     assert surface_csg_selection_is_empty(discarded) is True
     assert discarded[0].survives is False
+
+
+def test_surface_csg_operation_selection_set_reports_classification_and_ownership_blockers() -> None:
+    patch_ref = SurfaceBooleanPatchRef(0, 0)
+    fragment = SurfaceCSGSurfaceFragment(
+        fragment_id="face-0:fragment0",
+        source_patch=patch_ref,
+        patch=PlanarSurfacePatch(family="planar", origin=(-0.5, -0.5, 1.0)),
+        loop=TrimLoop(((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)), category="outer"),
+        source_face_id="face-0",
+    )
+    classification = SurfaceCSGFragmentClassificationRecord(
+        patch=patch_ref,
+        relation="on",
+        sample_uv=(0.5, 0.5),
+        sample_point=(0.0, 0.0, 1.0),
+        diagnostics=(
+            SurfaceCSGFragmentClassificationDiagnostic(
+                code="ambiguous-boundary",
+                message="ambiguous",
+                patch=patch_ref,
+                sample_point=(0.0, 0.0, 1.0),
+            ),
+        ),
+    )
+    ownership = resolve_surface_csg_coincident_fragment_ownership(fragment, classification)
+    classified = SurfaceCSGClassifiedFragmentSet(
+        fragments=(fragment,),
+        classifications=(classification,),
+        coincident_ownership=(ownership,),
+    )
+
+    selection_set = select_surface_csg_operation_fragment_set("difference", classified)
+
+    assert isinstance(selection_set, SurfaceCSGOperationFragmentSelectionSet)
+    assert selection_set.supported is False
+    assert all(isinstance(diagnostic, SurfaceCSGOperationSelectionDiagnostic) for diagnostic in selection_set.diagnostics)
+    assert {diagnostic.code for diagnostic in selection_set.diagnostics} == {
+        "unsupported-classification",
+        "ambiguous-coincident-ownership",
+    }
+
+
+def test_surface_csg_cap_eligibility_distinguishes_planar_missing_and_non_planar_caps() -> None:
+    patch_ref = SurfaceBooleanPatchRef(1, 0)
+    selection = select_surface_csg_operation_fragment(
+        "difference",
+        SurfaceCSGFragmentClassificationRecord(
+            patch=patch_ref,
+            relation="inside",
+            sample_uv=(0.5, 0.5),
+            sample_point=(0.0, 0.0, 0.0),
+            cut_curve_ids=("cut-0",),
+        ),
+    )
+
+    missing = classify_surface_csg_cap_eligibility(selection)
+    planar = classify_surface_csg_cap_eligibility(selection, PlanarSurfacePatch(family="planar"))
+    non_planar = classify_surface_csg_cap_eligibility(
+        selection,
+        RevolutionSurfacePatch(
+            family="revolution",
+            profile_curve=((1.0, 0.0, 0.0), (1.0, 0.0, 1.0)),
+        ),
+    )
+
+    assert isinstance(planar, SurfaceCSGCapEligibilityRecord)
+    assert missing.supported is False
+    assert missing.diagnostics[0].code == "missing-source-patch"
+    assert planar.supported is True
+    assert planar.cap_family == "planar"
+    assert non_planar.supported is False
+    assert non_planar.diagnostics[0].code == "unsupported-cap-family"
+
+
+def test_surface_csg_operation_selection_set_classifies_required_caps() -> None:
+    patch_ref = SurfaceBooleanPatchRef(1, 0)
+    fragment = SurfaceCSGSurfaceFragment(
+        fragment_id="face-0:fragment0",
+        source_patch=patch_ref,
+        patch=PlanarSurfacePatch(family="planar"),
+        loop=TrimLoop(((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)), category="outer"),
+        source_face_id="face-0",
+        cut_curve_ids=("cut-0",),
+    )
+    classified = SurfaceCSGClassifiedFragmentSet(
+        fragments=(fragment,),
+        classifications=(
+            SurfaceCSGFragmentClassificationRecord(
+                patch=patch_ref,
+                relation="inside",
+                sample_uv=(0.5, 0.5),
+                sample_point=(0.0, 0.0, 0.0),
+                cut_curve_ids=("cut-0",),
+            ),
+        ),
+    )
+
+    selection_set = select_surface_csg_operation_fragment_set(
+        "difference",
+        classified,
+        source_patches={patch_ref: fragment.patch},
+    )
+
+    assert selection_set.supported is True
+    assert selection_set.selections[0].role == "cut_cap"
+    assert selection_set.cap_eligibility[0].required is True
+    assert selection_set.cap_eligibility[0].eligible is True
+    assert selection_set.canonical_payload()["supported"] is True
 
 
 def test_surface_csg_caller_inventory_names_surface_and_explicit_mesh_routes() -> None:
@@ -654,6 +971,80 @@ def test_surface_csg_shell_assembly_represents_empty_and_multi_shell_results() -
     assert tuple(record.result_shell_index for record in multi.provenance) == (0, 1)
 
 
+def test_surface_csg_orients_selected_difference_cut_cap_fragments_without_mutating_source() -> None:
+    source_patch = PlanarSurfacePatch(family="planar")
+    fragment = SurfaceBooleanTrimmedPatchFragment(
+        source_patch=SurfaceBooleanPatchRef(1, 0),
+        patch=source_patch,
+        cut_curve_ids=("cut-0",),
+    )
+    selection = select_surface_csg_operation_fragment(
+        "difference",
+        SurfaceCSGFragmentClassificationRecord(
+            patch=SurfaceBooleanPatchRef(1, 0),
+            relation="inside",
+            sample_uv=(0.5, 0.5),
+            sample_point=(0.0, 0.0, 0.0),
+            cut_curve_ids=("cut-0",),
+        ),
+    )
+
+    oriented = orient_surface_csg_selected_fragment("difference", fragment, selection)
+
+    assert isinstance(oriented, SurfaceCSGOrientedFragmentRecord)
+    assert oriented.orientation == "reverse"
+    assert oriented.included is True
+    assert oriented.patch.kernel_metadata()["csg_fragment_orientation"] == "reverse"
+    assert source_patch.kernel_metadata().get("csg_fragment_orientation") is None
+    assert oriented.to_trimmed_fragment() is not None
+    assert oriented.canonical_payload()["orientation"] == "reverse"
+
+
+def test_surface_csg_orients_selected_fragment_collection_in_patch_order() -> None:
+    fragments = (
+        SurfaceBooleanTrimmedPatchFragment(
+            source_patch=SurfaceBooleanPatchRef(1, 1),
+            patch=PlanarSurfacePatch(family="planar"),
+        ),
+        SurfaceBooleanTrimmedPatchFragment(
+            source_patch=SurfaceBooleanPatchRef(0, 0),
+            patch=PlanarSurfacePatch(family="planar"),
+        ),
+    )
+    selections = (
+        SurfaceCSGOperationSelectionRecord(
+            operation="union",
+            patch=SurfaceBooleanPatchRef(1, 1),
+            relation="outside",
+            role="survive",
+            cut_cap=SurfaceCSGCutCapRequirementRecord(
+                patch=SurfaceBooleanPatchRef(1, 1),
+                required=False,
+                reason="test",
+            ),
+        ),
+        SurfaceCSGOperationSelectionRecord(
+            operation="union",
+            patch=SurfaceBooleanPatchRef(0, 0),
+            relation="outside",
+            role="survive",
+            cut_cap=SurfaceCSGCutCapRequirementRecord(
+                patch=SurfaceBooleanPatchRef(0, 0),
+                required=False,
+                reason="test",
+            ),
+        ),
+    )
+
+    oriented = orient_surface_csg_selected_fragments("union", fragments, selections)
+
+    assert tuple(record.source_patch for record in oriented) == (
+        SurfaceBooleanPatchRef(0, 0),
+        SurfaceBooleanPatchRef(1, 1),
+    )
+    assert all(record.orientation == "preserve" for record in oriented)
+
+
 def test_surface_csg_seam_rebuild_deduplicates_seams_and_records_boundary_uses() -> None:
     body = make_box(size=(1.0, 1.0, 1.0), backend="surface")
     shell = body.iter_shells(world=True)[0]
@@ -680,6 +1071,34 @@ def test_surface_csg_seam_rebuild_reports_open_boundaries() -> None:
     assert record.supported is False
     assert "missing seam coverage" in record.diagnostics[0]
     assert any(boundary_use.use_count == 0 for boundary_use in record.boundary_uses)
+
+
+def test_surface_csg_continuity_handoff_records_enforceable_c0_g0_only() -> None:
+    shell = make_box(size=(1.0, 1.0, 1.0), backend="surface").iter_shells(world=True)[0]
+    seam_rebuild = rebuild_surface_csg_shell_seams(shell)
+
+    handoff = record_surface_csg_continuity_handoff(
+        seam_rebuild,
+        requested_continuity=("C0", "G0", "G1", "C2"),
+    )
+
+    assert isinstance(handoff, SurfaceCSGContinuityHandoffRecord)
+    assert handoff.supported is False
+    assert handoff.enforceable_continuity == ("C0", "G0")
+    assert all(isinstance(diagnostic, SurfaceCSGContinuityHandoffDiagnostic) for diagnostic in handoff.diagnostics)
+    assert {diagnostic.continuity for diagnostic in handoff.diagnostics} == {"G1", "C2"}
+    assert handoff.canonical_payload()["supported"] is False
+
+
+def test_surface_csg_continuity_handoff_reports_invalid_seam_rebuild() -> None:
+    shell = make_box(size=(1.0, 1.0, 1.0), backend="surface").iter_shells(world=True)[0]
+    open_shell = replace(shell, seams=shell.seams[:-1])
+    seam_rebuild = rebuild_surface_csg_shell_seams(open_shell)
+
+    handoff = record_surface_csg_continuity_handoff(seam_rebuild)
+
+    assert handoff.supported is False
+    assert handoff.diagnostics[0].code == "invalid-seam-rebuild"
 
 
 def test_surface_csg_validity_gate_accepts_closed_body_and_records_provenance() -> None:
@@ -717,6 +1136,96 @@ def test_surface_csg_validity_gate_rejects_open_shell_with_diagnostics() -> None
     assert all(isinstance(diagnostic, SurfaceCSGValidityDiagnostic) for diagnostic in gate.diagnostics)
     assert gate.diagnostics[0].code == "invalid-shell"
     assert "missing seam coverage" in gate.diagnostics[0].message
+
+
+def test_surface_csg_runtime_validity_report_rejects_mesh_results_and_unresolved_diagnostics() -> None:
+    operands = prepare_surface_boolean_operands(
+        "union",
+        [
+            make_box(size=(1.0, 1.0, 1.0), backend="surface"),
+            make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0), backend="surface"),
+        ],
+    )
+    mesh = Mesh(
+        vertices=np.array(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))),
+        faces=np.array(((0, 1, 2),)),
+    )
+
+    report = check_surface_csg_runtime_result_validity(
+        "union",
+        operands,
+        mesh,
+        unresolved_diagnostics=("ambiguous fragment",),
+    )
+
+    assert isinstance(report, SurfaceCSGRuntimeValidityReport)
+    assert report.accepted is False
+    assert report.status == "invalid"
+    assert {diagnostic.code for diagnostic in report.diagnostics} == {
+        "mesh-backed-fragment",
+        "unresolved-diagnostic",
+    }
+
+
+def test_surface_csg_runtime_validity_report_detects_dangling_trims() -> None:
+    operands = prepare_surface_boolean_operands(
+        "union",
+        [
+            make_box(size=(1.0, 1.0, 1.0), backend="surface"),
+            make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0), backend="surface"),
+        ],
+    )
+    dangling_patch = PlanarSurfacePatch(family="planar")
+    object.__setattr__(
+        dangling_patch,
+        "trim_loops",
+        (TrimLoop(((0.0, 0.0), (2.0, 0.0), (0.0, 2.0)), category="outer"),),
+    )
+    body = make_surface_body((make_surface_shell((dangling_patch,)),))
+
+    trim_diagnostics = detect_surface_csg_dangling_trims(body)
+    report = check_surface_csg_runtime_result_validity("union", operands, body)
+
+    assert trim_diagnostics[0].code == "dangling-trim"
+    assert report.accepted is False
+    assert any(diagnostic.code == "dangling-trim" for diagnostic in report.diagnostics)
+    assert report.canonical_payload()["accepted"] is False
+
+
+def test_surface_csg_persistence_tessellation_evidence_promotes_clean_reference() -> None:
+    body = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+
+    report = verify_surface_csg_persistence_tessellation_evidence(
+        body,
+        fixture_id="csg/clean-box",
+        reference_state="clean",
+    )
+
+    assert isinstance(report, SurfaceCSGReferencePromotionReport)
+    assert report.promoted is True
+    assert isinstance(report.persistence, SurfaceCSGPersistenceEvidenceRecord)
+    assert report.persistence.passed is True
+    assert report.persistence.loaded_body_id is not None
+    assert isinstance(report.tessellation, SurfaceCSGTessellationBoundaryEvidenceRecord)
+    assert report.tessellation.passed is True
+    assert report.tessellation.face_count > 0
+    assert report.diagnostics == ()
+    assert report.canonical_payload()["promoted"] is True
+
+
+def test_surface_csg_persistence_tessellation_evidence_rejects_dirty_reference() -> None:
+    body = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+
+    report = verify_surface_csg_persistence_tessellation_evidence(
+        body,
+        fixture_id="csg/dirty-box",
+        reference_state="dirty",
+    )
+
+    assert report.promoted is False
+    assert report.persistence.passed is True
+    assert report.tessellation.passed is True
+    assert "dirty" in report.diagnostics[0]
 
 
 def test_surface_csg_validity_handoff_accepts_assembled_closed_shell_candidate() -> None:

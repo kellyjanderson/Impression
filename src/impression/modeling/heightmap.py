@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Sequence
 
@@ -14,13 +14,128 @@ from impression.mesh_quality import MeshQuality, apply_lod
 from ._legacy_mesh_deprecation import warn_mesh_primary_api
 
 if TYPE_CHECKING:
-    from .surface import SurfaceBody
+    from .surface import HeightmapSurfacePatch, SurfaceBody
 
 
 ArrayLike = np.ndarray
 Backend = Literal["mesh", "surface"]
 
 _HEIGHTMAP_CACHE = LRUCache(max_size=32)
+
+
+@dataclass(frozen=True)
+class HeightmapAuthoringRequest:
+    """Validated native finite-grid heightmap authoring request."""
+
+    height_samples: np.ndarray
+    alpha_mask: np.ndarray | None = None
+    alpha_mode: Literal["mask", "ignore"] = "mask"
+    xy_scale: float | Sequence[float] = 1.0
+    center: Sequence[float] = (0.0, 0.0, 0.0)
+    height_scale: float = 1.0
+    metadata: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        samples = validate_heightmap_finite_samples(self.height_samples)
+        mask = np.ones(samples.shape, dtype=bool) if self.alpha_mask is None else np.asarray(self.alpha_mask, dtype=bool)
+        if mask.shape != samples.shape:
+            raise ValueError("HeightmapAuthoringRequest.alpha_mask must match height_samples shape.")
+        alpha_mode = str(self.alpha_mode)
+        if alpha_mode not in {"mask", "ignore"}:
+            raise ValueError("HeightmapAuthoringRequest.alpha_mode must be 'mask' or 'ignore'.")
+        height_scale = float(self.height_scale)
+        if not np.isfinite(height_scale):
+            raise ValueError("HeightmapAuthoringRequest.height_scale must be finite.")
+        object.__setattr__(self, "height_samples", samples)
+        object.__setattr__(self, "alpha_mask", mask)
+        object.__setattr__(self, "alpha_mode", alpha_mode)
+        object.__setattr__(self, "xy_scale", _as_scale(self.xy_scale))
+        object.__setattr__(self, "center", tuple(float(value) for value in np.asarray(self.center, dtype=float).reshape(3)))
+        object.__setattr__(self, "height_scale", height_scale)
+        object.__setattr__(self, "metadata", dict(self.metadata))
+
+
+@dataclass(frozen=True)
+class HeightmapSampleGridProvenanceRecord:
+    """Inspectable provenance for an embedded native heightmap sample grid."""
+
+    family: str
+    operation: str
+    sample_shape: tuple[int, int]
+    masked_sample_count: int
+    total_sample_count: int
+    authoring_boundary: str = "surface-native"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "family": self.family,
+            "operation": self.operation,
+            "sample_shape": self.sample_shape,
+            "masked_sample_count": self.masked_sample_count,
+            "total_sample_count": self.total_sample_count,
+            "authoring_boundary": self.authoring_boundary,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapNoDataDiagnostic:
+    """Diagnostic for mask/no-data behavior in a finite heightmap grid."""
+
+    code: str
+    message: str
+    valid: bool
+    masked_sample_count: int
+    total_sample_count: int
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "valid": self.valid,
+            "masked_sample_count": self.masked_sample_count,
+            "total_sample_count": self.total_sample_count,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapImportRequest:
+    """Optional image/array import request that embeds samples as surface truth."""
+
+    source: str | Path | Image.Image | ArrayLike
+    height: float = 1.0
+    xy_scale: float | Sequence[float] = 1.0
+    center: Sequence[float] = (0.0, 0.0, 0.0)
+    alpha_mode: Literal["mask", "ignore"] = "mask"
+    quality: MeshQuality | None = None
+    embed_samples: bool = True
+    max_sample_count: int = 1_000_000
+    metadata: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        max_sample_count = int(self.max_sample_count)
+        if max_sample_count <= 0:
+            raise ValueError("HeightmapImportRequest.max_sample_count must be positive.")
+        object.__setattr__(self, "max_sample_count", max_sample_count)
+        object.__setattr__(self, "embed_samples", bool(self.embed_samples))
+        object.__setattr__(self, "metadata", dict(self.metadata))
+
+
+@dataclass(frozen=True)
+class HeightmapImportDiagnostic:
+    """Diagnostic for optional heightmap import dependency and payload checks."""
+
+    code: str
+    message: str
+    supported: bool
+    source_kind: str
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "supported": self.supported,
+            "source_kind": self.source_kind,
+        }
 
 
 @dataclass(frozen=True)
@@ -116,6 +231,32 @@ class HeightmapSampleCoordinateRecord:
                 float(np.min(self.v_normalized)) if self.v_normalized.size else 0.0,
                 float(np.max(self.v_normalized)) if self.v_normalized.size else 0.0,
             ),
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapEvaluationDiagnostic:
+    code: str
+    message: str
+    sample: tuple[float, float]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {"code": self.code, "message": self.message, "sample": self.sample}
+
+
+@dataclass(frozen=True)
+class HeightmapMaskTessellationRecord:
+    alpha_mode: Literal["mask", "ignore"]
+    cell_count: int
+    emitted_face_count: int
+    skipped_cell_count: int
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "alpha_mode": self.alpha_mode,
+            "cell_count": self.cell_count,
+            "emitted_face_count": self.emitted_face_count,
+            "skipped_cell_count": self.skipped_cell_count,
         }
 
 
@@ -328,6 +469,218 @@ def heightmap_sample_coordinate_record(
         v=v,
         u_normalized=u_norm,
         v_normalized=v_norm,
+    )
+
+
+def estimate_heightmap_normal(
+    patch: "HeightmapSurfacePatch",
+    u: float,
+    v: float,
+) -> tuple[np.ndarray, HeightmapEvaluationDiagnostic]:
+    du, dv = patch.derivatives_at(float(u), float(v))
+    normal = np.cross(du, dv)
+    norm = float(np.linalg.norm(normal))
+    if norm == 0.0:
+        diagnostic = HeightmapEvaluationDiagnostic(
+            code="degenerate-heightmap-normal",
+            message="Heightmap normal estimate has zero length at the requested sample.",
+            sample=(float(u), float(v)),
+        )
+        return np.array([0.0, 0.0, 1.0], dtype=float), diagnostic
+    return normal / norm, HeightmapEvaluationDiagnostic(
+        code="heightmap-normal-estimated",
+        message="Heightmap normal estimated from finite surface derivatives.",
+        sample=(float(u), float(v)),
+    )
+
+
+def heightmap_mask_tessellation_record(patch: "HeightmapSurfacePatch") -> HeightmapMaskTessellationRecord:
+    rows, cols = patch.height_samples.shape
+    cell_count = int(max(rows - 1, 0) * max(cols - 1, 0))
+    skipped = 0
+    if patch.alpha_mode == "mask":
+        for row in range(rows - 1):
+            for col in range(cols - 1):
+                if not (
+                    patch.alpha_mask[row, col]
+                    and patch.alpha_mask[row, col + 1]
+                    and patch.alpha_mask[row + 1, col]
+                    and patch.alpha_mask[row + 1, col + 1]
+                ):
+                    skipped += 1
+    emitted = (cell_count - skipped) * 2
+    return HeightmapMaskTessellationRecord(
+        alpha_mode=patch.alpha_mode,
+        cell_count=cell_count,
+        emitted_face_count=int(emitted),
+        skipped_cell_count=int(skipped),
+    )
+
+
+def validate_heightmap_finite_samples(samples: ArrayLike) -> np.ndarray:
+    """Normalize embedded height samples and refuse non-finite grids."""
+
+    grid = np.asarray(samples, dtype=float)
+    if grid.ndim != 2:
+        raise ValueError("Heightmap finite-grid samples must be a 2D array.")
+    if grid.shape[0] < 2 or grid.shape[1] < 2:
+        raise ValueError("Heightmap finite-grid samples must be at least 2x2.")
+    if not np.all(np.isfinite(grid)):
+        raise ValueError("Heightmap finite-grid samples must be finite.")
+    return grid
+
+
+def build_heightmap_mask_no_data_diagnostic(
+    request: HeightmapAuthoringRequest,
+) -> HeightmapNoDataDiagnostic:
+    """Return an explicit mask/no-data diagnostic for a native heightmap grid."""
+
+    mask = np.asarray(request.alpha_mask, dtype=bool)
+    total = int(mask.size)
+    masked = int(total - np.count_nonzero(mask))
+    if request.alpha_mode == "mask" and masked == total:
+        return HeightmapNoDataDiagnostic(
+            code="heightmap-all-samples-masked",
+            message="Heightmap native grid masks every sample and cannot emit visible sampled surface cells.",
+            valid=False,
+            masked_sample_count=masked,
+            total_sample_count=total,
+        )
+    return HeightmapNoDataDiagnostic(
+        code="heightmap-mask-valid",
+        message="Heightmap native grid mask is valid for finite-grid authoring.",
+        valid=True,
+        masked_sample_count=masked,
+        total_sample_count=total,
+    )
+
+
+def heightmap_sample_grid_provenance_record(
+    request: HeightmapAuthoringRequest,
+) -> HeightmapSampleGridProvenanceRecord:
+    """Return producer provenance for an embedded heightmap sample grid."""
+
+    mask = np.asarray(request.alpha_mask, dtype=bool)
+    total = int(mask.size)
+    return HeightmapSampleGridProvenanceRecord(
+        family="heightmap",
+        operation="heightmap-finite-grid-authoring",
+        sample_shape=tuple(int(value) for value in request.height_samples.shape),
+        masked_sample_count=int(total - np.count_nonzero(mask)),
+        total_sample_count=total,
+    )
+
+
+def make_heightmap_surface_from_grid(request: HeightmapAuthoringRequest) -> "SurfaceBody":
+    """Create a surface body from an embedded finite heightmap grid."""
+
+    diagnostic = build_heightmap_mask_no_data_diagnostic(request)
+    if not diagnostic.valid:
+        raise ValueError(diagnostic.message)
+    from .surface import HeightmapSurfacePatch, make_surface_body, make_surface_shell
+
+    provenance = heightmap_sample_grid_provenance_record(request).canonical_payload()
+    kernel_metadata = {
+        "producer": "heightmap",
+        "operation": "heightmap-finite-grid-authoring",
+        "sample_shape": tuple(int(value) for value in request.height_samples.shape),
+    }
+    kernel_metadata.update({"producer_provenance": provenance, **dict(request.metadata.get("kernel", {}))})
+    patch = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=request.height_samples,
+        alpha_mask=request.alpha_mask,
+        alpha_mode=request.alpha_mode,
+        xy_scale=request.xy_scale,
+        center=request.center,
+        height_scale=request.height_scale,
+        metadata={"kernel": kernel_metadata},
+    )
+    return make_surface_body(
+        (make_surface_shell((patch,), connected=False, metadata={"kernel": {"surface_family": "heightmap", "producer_provenance": provenance}}),),
+        metadata={"kernel": {"surface_family": "heightmap", "authoring_boundary": "surface-native", "producer_provenance": provenance}},
+    )
+
+
+def heightmap_import_dependency_boundary() -> HeightmapImportDiagnostic:
+    """Report optional image import availability without making it required for native grids."""
+
+    supported = Image is not None
+    return HeightmapImportDiagnostic(
+        code="heightmap-import-dependency-available" if supported else "heightmap-import-dependency-unavailable",
+        message=(
+            "Heightmap optional import adapter can load images and arrays into embedded grids."
+            if supported
+            else "Heightmap optional import adapter is unavailable; use embedded finite grids."
+        ),
+        supported=supported,
+        source_kind="dependency",
+    )
+
+
+def build_heightmap_import_diagnostic(request: HeightmapImportRequest) -> HeightmapImportDiagnostic:
+    """Inspect a heightmap import request before producing surface truth."""
+
+    source_kind = type(request.source).__name__
+    if not request.embed_samples:
+        return HeightmapImportDiagnostic(
+            code="heightmap-import-external-reference-refused",
+            message="Heightmap imports must embed finite samples; external references are not surface truth.",
+            supported=False,
+            source_kind=source_kind,
+        )
+    dependency = heightmap_import_dependency_boundary()
+    if not dependency.supported:
+        return dependency
+    try:
+        heights, _mask = _load_heightmap(request.source)
+        sample_count = int(heights.size)
+        if sample_count > request.max_sample_count:
+            raise ValueError(
+                f"heightmap import sample count {sample_count} exceeds max_sample_count={request.max_sample_count}"
+            )
+        validate_heightmap_finite_samples(heights)
+    except Exception as exc:
+        return HeightmapImportDiagnostic(
+            code="heightmap-import-invalid-payload",
+            message=f"Heightmap import payload is invalid: {exc}",
+            supported=False,
+            source_kind=source_kind,
+        )
+    return HeightmapImportDiagnostic(
+        code="heightmap-import-supported",
+        message="Heightmap import can be normalized into an embedded finite grid.",
+        supported=True,
+        source_kind=source_kind,
+    )
+
+
+def import_heightmap_surface(request: HeightmapImportRequest) -> "SurfaceBody":
+    """Import an image or array into an embedded native heightmap surface body."""
+
+    diagnostic = build_heightmap_import_diagnostic(request)
+    if not diagnostic.supported:
+        raise ValueError(diagnostic.message)
+    heights, mask = _load_heightmap(request.source)
+    if request.quality is not None:
+        quality = apply_lod(request.quality)
+        if quality.lod == "preview":
+            heights = heights[::2, ::2]
+            mask = mask[::2, ::2]
+    metadata = dict(request.metadata)
+    kernel = dict(metadata.get("kernel", {})) if isinstance(metadata.get("kernel"), dict) else {}
+    kernel.update({"operation": "heightmap-import", "import_source_kind": diagnostic.source_kind})
+    metadata["kernel"] = kernel
+    return make_heightmap_surface_from_grid(
+        HeightmapAuthoringRequest(
+            height_samples=heights,
+            alpha_mask=mask,
+            alpha_mode=request.alpha_mode,
+            xy_scale=request.xy_scale,
+            center=request.center,
+            height_scale=request.height,
+            metadata=metadata,
+        )
     )
 
 
@@ -873,16 +1226,32 @@ def _heightmap_cache_key(
 
 __all__ = [
     "HeightmapAlphaMaskPolicy",
+    "HeightmapAuthoringRequest",
     "HeightmapCacheKeyRecord",
     "HeightmapMeshCompatibilityResult",
+    "HeightmapEvaluationDiagnostic",
+    "HeightmapImportDiagnostic",
+    "HeightmapImportRequest",
+    "HeightmapMaskTessellationRecord",
+    "HeightmapNoDataDiagnostic",
     "HeightmapProjectionBoundsPolicy",
+    "HeightmapSampleGridProvenanceRecord",
     "HeightmapSampleCoordinateRecord",
+    "build_heightmap_mask_no_data_diagnostic",
+    "build_heightmap_import_diagnostic",
     "heightmap",
     "displace_heightmap",
     "heightmap_cache_key_record",
+    "heightmap_import_dependency_boundary",
     "heightmap_mesh_compatibility_result",
+    "estimate_heightmap_normal",
+    "heightmap_mask_tessellation_record",
+    "heightmap_sample_grid_provenance_record",
     "heightmap_sample_coordinate_record",
+    "import_heightmap_surface",
+    "make_heightmap_surface_from_grid",
     "make_heightmap_surface_patch",
     "resolve_heightmap_projection_bounds_policy",
     "resolve_heightmap_alpha_mask_policy",
+    "validate_heightmap_finite_samples",
 ]

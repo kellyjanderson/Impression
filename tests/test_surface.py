@@ -99,6 +99,7 @@ def _seam_continuity_negative_fixture(
     )
 from impression.modeling._surface_ops import make_surface_linear_extrude, make_surface_rotate_extrude
 from impression.modeling import (
+    ADVANCED_PATCH_FAMILIES,
     PATCH_FAMILY_CAPABILITY_MATRIX,
     PATCH_FAMILY_FEATURE_COVERAGE,
     PATCH_FAMILY_PROMOTION_CRITERIA,
@@ -114,26 +115,68 @@ from impression.modeling import (
     BSplineSurfacePatch,
     boolean_union,
     build_higher_order_csg_refusal_diagnostic,
+    build_available_family_completion_report,
+    build_available_family_missing_evidence_diagnostic,
+    build_available_family_no_hidden_mesh_fallback_diagnostic,
+    build_dirty_available_family_reference_diagnostic,
     build_surface_boolean_unsupported_family_diagnostic,
     classify_higher_order_csg_pair,
+    available_family_csg_classification_rows,
+    available_family_producer_path_rows,
+    available_family_seam_loft_rows,
+    available_family_storage_tessellation_rows,
     compare_tessellation_modes,
+    collect_available_family_reference_evidence,
+    collect_surface_csg_no_mesh_fallback_evidence,
+    DisplacementAuthoringRequest,
+    DisplacementDomainMappingRecord,
+    DisplacementEvaluationDiagnostic,
+    DisplacementLossinessMetadataRecord,
+    DisplacementPayloadDiagnostic,
     DisplacementSurfacePatch,
+    DisplacementIdentityDiagnostic,
+    DisplacementSourcePatchReferenceRecord,
+    DisplacementSourceProvenanceRecord,
+    DisplacementSourceResolutionResult,
     export_tessellation_request,
     feature_surface_handoff_diagnostic,
     FeatureSurfaceHandoffDiagnostic,
     FeatureSurfaceHandoffRecord,
     flatten_surface_scene,
+    FrameTransportPolicyRecord,
     handoff_surface_scene,
+    build_heightmap_mask_no_data_diagnostic,
+    build_heightmap_import_diagnostic,
+    build_displacement_payload_diagnostic,
+    estimate_heightmap_normal,
+    HeightmapAuthoringRequest,
+    HeightmapEvaluationDiagnostic,
+    HeightmapImportDiagnostic,
+    HeightmapImportRequest,
+    HeightmapMaskTessellationRecord,
+    HeightmapNoDataDiagnostic,
+    HeightmapSampleGridProvenanceRecord,
+    heightmap_import_dependency_boundary,
+    heightmap_sample_grid_provenance_record,
+    heightmap_mask_tessellation_record,
     HeightmapSurfacePatch,
     IMPLICIT_FIELD_NODE_KINDS,
+    ImplicitBoundsDiagnostic,
+    ImplicitBudgetDiagnostic,
+    ImplicitExtractionBudgetRecord,
     ImplicitApproximationMetadata,
+    ImplicitFieldAuthoringRequest,
     ImplicitFieldEvaluationDomain,
     ImplicitFieldEvaluationResult,
     ImplicitFieldNode,
+    ImplicitFieldProvenanceRecord,
+    ImplicitRejectedNodeLocator,
     ImplicitFieldSafetyPolicy,
     ImplicitFieldValidationDiagnostic,
+    ImplicitResidualClassificationRecord,
     ImplicitSurfacePatch,
     ImplicitTessellationBoundsDiagnostic,
+    ImplicitUnsafeAuthoringDiagnostic,
     make_surface_consumer_collection,
     make_surface_composition,
     make_surface_mesh_adapter,
@@ -141,14 +184,35 @@ from impression.modeling import (
     make_surface_scene_node,
     make_surface_to_mesh_adapter_record,
     mesh_from_surface_body,
+    NURBSConicConstructionDiagnostic,
+    NURBSConicConstructionRequest,
+    NURBSConicProfilePayload,
+    NURBSRationalEvaluationMetadata,
     NURBSSurfacePatch,
+    NURBSWeightValidationDiagnostic,
     normalize_tessellation_request,
     ParameterDomain,
     Path3D,
+    PathFrameDegeneracyDiagnostic,
+    PathFrameSampleRecord,
     PlanarSurfacePatch,
     preview_tessellation_request,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
+    validate_nurbs_weights,
+    build_nurbs_circular_arc_control_net,
+    build_nurbs_exact_conic_profile_payload,
+    build_subdivision_approximation_diagnostic,
+    classify_implicit_residual,
+    evaluate_implicit_field_gradient,
+    implicit_box_field,
+    implicit_difference_field,
+    implicit_field_provenance_record,
+    implicit_sphere_field,
+    implicit_union_field,
+    evaluate_path_frame,
+    interpolate_path_twist_scale,
+    make_implicit_extraction_budget,
     SurfaceAdjacencyRecord,
     SurfaceBody,
     SurfaceBoundaryDescriptor,
@@ -182,6 +246,7 @@ from impression.modeling import (
     SurfaceCollectionTessellationResult,
     SurfaceFamilyTessellationAdapter,
     SurfaceFamilyTessellationAdapterCoverageRecord,
+    SurfaceFamilyBoundarySupportRecord,
     SURFACE_FAMILY_TESSELLATION_ADAPTERS,
     SUPPORTED_SEAM_CONTINUITY_CLASSES,
     SurfaceBooleanFamilyEligibilityResult,
@@ -190,18 +255,33 @@ from impression.modeling import (
     SurfaceBooleanSupportState,
     SurfaceBooleanUnsupportedFamilyDiagnostic,
     SurfaceUnsupportedContinuityDiagnostic,
+    surface_family_boundary_support_matrix,
+    SurfaceCSGAmbiguityDiagnostic,
+    SurfaceCSGDegeneracyRecord,
+    SurfaceCSGExecutableRowReport,
     SurfaceCSGHigherOrderRefusalDiagnostic,
     SurfaceCSGHigherOrderSupportRecord,
     SurfaceCSGPrimitiveAnalyticPairRecord,
+    SurfaceCSGResidualRecord,
+    SurfaceCSGRouteRegistryRow,
+    SurfaceCSGRouteSupportDiagnostic,
     SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX,
     SURFACE_BOOLEAN_OPERATIONS,
     ANALYTIC_SURFACE_CSG_FAMILIES,
     HIGHER_ORDER_SURFACE_CSG_FAMILIES,
+    PARAMETRIC_HIGHER_ORDER_SURFACE_CSG_FAMILIES,
     SAMPLED_SURFACE_CSG_FAMILIES,
     SurfaceSeamParticipationRecord,
     SurfaceSeamValidationResult,
+    SubdivisionApproximationDiagnostic,
+    SubdivisionAuthoringRequest,
+    SubdivisionCageDiagnostic,
     SubdivisionCrease,
+    SubdivisionImportDiagnostic,
+    SubdivisionImportRequest,
+    SubdivisionProducerProvenanceRecord,
     SubdivisionRefinementResult,
+    SubdivisionSchemeRecord,
     SubdivisionSurfacePatch,
     SurfaceMeshAdapter,
     SurfaceSceneGroup,
@@ -225,44 +305,75 @@ from impression.modeling import (
     build_surface_unsupported_continuity_diagnostic,
     classify_surface_seam_continuity,
     evaluate_surface_body_completion_gate,
+    evaluate_available_family_reference_evidence_gate,
     evaluate_surface_body_completion_reference_evidence_matrix,
     evaluate_surface_boundary_derivatives,
     compute_surface_continuity_residual_metrics,
     classify_surface_continuity_residuals,
     validate_higher_order_surface_continuity,
     build_surface_continuity_violation_locators,
+    build_implicit_bounds_diagnostic,
+    build_implicit_budget_diagnostic,
+    build_implicit_unsafe_authoring_diagnostic,
+    build_subdivision_cage_diagnostic,
+    build_subdivision_import_diagnostic,
     format_surface_continuity_violation_diagnostic,
     check_surface_continuity_enforcement_eligibility,
     validate_surface_continuity_enforcement_result,
     evaluate_implicit_field,
     evaluate_implicit_field_domain,
     extract_surface_boundary_descriptor,
+    displacement_lossiness_metadata_record,
     inspect_surface_family_tessellation_adapter_coverage,
     load_surface_reference_requirement_matrix,
     make_surface_body_completion_evidence_from_capabilities,
+    make_available_family_promoted_reference_evidence,
     make_surface_body,
     make_surface_shell,
     make_implicit_surface,
+    make_heightmap_surface_from_grid,
+    make_displacement_surface,
+    import_heightmap_surface,
     make_subdivision_surface,
+    import_subdivision_cage,
     make_implicit_field_node,
+    resolve_displacement_source_identity,
     normalize_surface_seam_continuity_constraint,
     prepare_surface_boolean_operands,
     assess_implicit_field_security,
     refine_subdivision_control_cage,
+    normalize_subdivision_cage_import_payload,
+    subdivision_producer_provenance_record,
     surface_adjacency_from_seams,
     surface_boolean_family_eligibility,
     surface_boolean_family_pair_support,
+    classify_surface_csg_route_pair_class,
+    classify_higher_order_csg_degeneracies,
+    collect_higher_order_csg_residual,
+    format_higher_order_csg_route_diagnostics,
+    surface_csg_executable_row_report,
+    surface_csg_route_lookup,
     surface_boolean_result,
     surface_body_completion_reference_evidence_matrix,
     surface_reference_artifact_classes,
     surface_reference_fixture_contracts,
+    snapshot_available_family_completion_report,
+    summarize_available_family_missing_evidence,
+    summarize_available_family_producer_paths,
     surface_continuity_support,
     surface_csg_analytic_primitive_pair_support,
     surface_csg_completion_support_matrix,
     surface_csg_refusal_record,
+    verify_available_family_csg_classification_rows,
+    verify_available_family_producer_path_rows,
+    verify_available_family_seam_loft_rows,
+    verify_available_family_storage_tessellation_rows,
+    verify_surface_csg_no_mesh_fallback_evidence,
     surface_composition_to_consumer_collection,
     surface_group,
     validate_feature_surface_handoff,
+    validate_implicit_authoring_safety,
+    validate_implicit_extraction_budget,
     validate_implicit_field_security,
     validate_surface_seam_continuity_constraint,
     validate_surface_seam_participation,
@@ -855,7 +966,11 @@ def test_private_surface_builders_do_not_leak_through_public_modeling_namespace(
 def test_patch_family_scope_constants_are_explicit() -> None:
     assert REQUIRED_V1_PATCH_FAMILIES == ("planar", "ruled", "revolution")
     assert "nurbs" in SUPPORTED_SURFACE_PATCH_FAMILIES
-    assert PATCH_FAMILY_CAPABILITY_MATRIX["nurbs"].support_phase == "planned"
+    assert PATCH_FAMILY_CAPABILITY_MATRIX["bspline"].support_phase == "available"
+    assert PATCH_FAMILY_CAPABILITY_MATRIX["nurbs"].support_phase == "available"
+    assert PATCH_FAMILY_CAPABILITY_MATRIX["implicit"].support_phase == "available"
+    assert PATCH_FAMILY_CAPABILITY_MATRIX["heightmap"].support_phase == "available"
+    assert PATCH_FAMILY_CAPABILITY_MATRIX["displacement"].support_phase == "available"
     assert PATCH_FAMILY_CAPABILITY_MATRIX["planar"].support_phase == "available"
     assert "architecturally deferred" in SURFACE_SPEC_66_RETIREMENT_NOTE
     assert PATCH_FAMILY_FEATURE_COVERAGE["planar"] == (
@@ -868,6 +983,8 @@ def test_patch_family_scope_constants_are_explicit() -> None:
         "diagnostics",
         "no-hidden-fallback",
     )
+    assert "no-hidden-fallback" in PATCH_FAMILY_FEATURE_COVERAGE["bspline"]
+    assert "no-hidden-fallback" in PATCH_FAMILY_FEATURE_COVERAGE["nurbs"]
 
 
 def test_surface_body_completion_gate_requires_explicit_non_documentation_evidence() -> None:
@@ -994,6 +1111,137 @@ def test_surface_body_completion_reference_evidence_matrix_rejects_missing_and_d
     )
 
 
+def test_available_family_producer_path_rows_cover_every_supported_family() -> None:
+    rows = available_family_producer_path_rows()
+    report = verify_available_family_producer_path_rows(rows)
+    grouped = summarize_available_family_producer_paths(rows)
+
+    assert report.passed is True
+    assert set(grouped) == set(SUPPORTED_SURFACE_PATCH_FAMILIES)
+    assert all(any(row.supported for row in family_rows) for family_rows in grouped.values())
+
+    broken = tuple(row for row in rows if row.family != "heightmap")
+    broken_report = verify_available_family_producer_path_rows(broken)
+    assert broken_report.passed is False
+    assert any(diagnostic.family == "heightmap" and diagnostic.code == "missing-operation-row" for diagnostic in broken_report.diagnostics)
+
+    diagnostic = build_available_family_missing_evidence_diagnostic("implicit", "producer-path", operation="field-node-payload")
+    assert diagnostic.family == "implicit"
+    assert diagnostic.operation == "field-node-payload"
+
+
+def test_available_family_storage_and_tessellation_rows_are_registry_backed() -> None:
+    rows = available_family_storage_tessellation_rows()
+    report = verify_available_family_storage_tessellation_rows(rows)
+
+    assert report.passed is True
+    assert {
+        (row.family, row.operation)
+        for row in rows
+        if row.family in SUPPORTED_SURFACE_PATCH_FAMILIES
+    } >= {
+        (family, operation)
+        for family in SUPPORTED_SURFACE_PATCH_FAMILIES
+        for operation in (".impress", "tessellation")
+    }
+
+    broken = tuple(row for row in rows if not (row.family == "implicit" and row.operation == ".impress"))
+    broken_report = verify_available_family_storage_tessellation_rows(broken)
+    assert broken_report.passed is False
+    assert any(diagnostic.family == "implicit" and diagnostic.operation == ".impress" for diagnostic in broken_report.diagnostics)
+
+
+def test_available_family_seam_loft_rows_make_non_applicable_loft_explicit() -> None:
+    rows = available_family_seam_loft_rows()
+    report = verify_available_family_seam_loft_rows(rows)
+
+    assert report.passed is True
+    assert any(row.family == "implicit" and row.operation == "loft" and row.supported is False for row in rows)
+    assert any(row.family == "planar" and row.operation == "no-hidden-fallback" and row.supported for row in rows)
+
+    broken = tuple(row for row in rows if not (row.family == "heightmap" and row.operation == "no-hidden-fallback"))
+    broken_report = verify_available_family_seam_loft_rows(broken)
+    assert broken_report.passed is False
+    assert any(diagnostic.family == "heightmap" and diagnostic.code == "missing-operation-row" for diagnostic in broken_report.diagnostics)
+
+    diagnostic = build_available_family_no_hidden_mesh_fallback_diagnostic("heightmap", "loft")
+    assert diagnostic.code == "missing-no-hidden-mesh-fallback"
+    assert "heightmap" in diagnostic.message
+
+
+def test_available_family_reference_evidence_gate_rejects_missing_and_dirty_artifacts() -> None:
+    evidence = tuple(
+        SurfaceBodyCompletionEvidenceRecord(
+            track=requirement.track,
+            state="verified",
+            spec=f"{requirement.track}:{evidence_type}",
+            implementation_owner="tests/test_surface.py",
+            evidence_type=evidence_type,
+        )
+        for requirement in SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS
+        for evidence_type in requirement.required_evidence_types
+    )
+
+    summaries = collect_available_family_reference_evidence(evidence)
+    report = evaluate_available_family_reference_evidence_gate(evidence)
+
+    assert report.passed is True
+    assert all(summary.passed for summary in summaries)
+
+    dirty = SurfaceBodyCompletionEvidenceRecord(
+        track="primitive",
+        state="verified",
+        spec="dirty:primitive-reference",
+        implementation_owner="project/reference-artifacts/dirty",
+        evidence_type="tessellation-artifact",
+        source="dirty-artifact",
+    )
+    dirty_report = evaluate_available_family_reference_evidence_gate((dirty,))
+    dirty_diagnostic = build_dirty_available_family_reference_diagnostic(dirty)
+
+    assert dirty_report.passed is False
+    assert dirty_diagnostic.code == "dirty-reference-artifact"
+    assert any(diagnostic.code == "dirty-reference-artifact" for diagnostic in dirty_report.diagnostics)
+
+
+def test_available_family_completion_report_is_deterministic_and_evidence_based() -> None:
+    promoted_evidence = make_available_family_promoted_reference_evidence()
+    promoted_report = build_available_family_completion_report()
+    assert promoted_report.passed is True
+    assert {
+        (record.track, record.evidence_type)
+        for record in promoted_evidence
+    } == {
+        (requirement.track, evidence_type)
+        for requirement in SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS
+        for evidence_type in requirement.required_evidence_types
+    }
+
+    evidence = tuple(
+        SurfaceBodyCompletionEvidenceRecord(
+            track=requirement.track,
+            state="verified",
+            spec=f"{requirement.track}:{evidence_type}",
+            implementation_owner="tests/test_surface.py",
+            evidence_type=evidence_type,
+        )
+        for requirement in SURFACE_BODY_REFERENCE_EVIDENCE_REQUIREMENTS
+        for evidence_type in requirement.required_evidence_types
+    )
+
+    report = build_available_family_completion_report(evidence=evidence)
+    snapshot = snapshot_available_family_completion_report(report)
+
+    assert report.passed is True
+    assert report.families == tuple(sorted(SUPPORTED_SURFACE_PATCH_FAMILIES))
+    assert snapshot.canonical_payload() == snapshot_available_family_completion_report(report).canonical_payload()
+    assert summarize_available_family_missing_evidence(report.operation_reports, report.reference_report) == ()
+
+    missing_reference_report = build_available_family_completion_report(evidence=())
+    assert missing_reference_report.passed is False
+    assert snapshot_available_family_completion_report(missing_reference_report).diagnostic_count > 0
+
+
 def test_patch_family_promotion_readiness_audits_each_criterion_separately() -> None:
     records = audit_all_patch_family_promotion_readiness()
     by_family = {record.family: record for record in records}
@@ -1003,8 +1251,16 @@ def test_patch_family_promotion_readiness_audits_each_criterion_separately() -> 
         gap.criterion for gap in by_family["planar"].gaps
     )
     assert by_family["planar"].promotable is True
-    assert by_family["bspline"].promotable is False
-    assert {gap.criterion for gap in by_family["bspline"].gaps} >= {"csg", "loft", "diagnostics"}
+    assert by_family["bspline"].promotable is True
+    assert by_family["bspline"].current_phase == "available"
+    assert by_family["nurbs"].promotable is True
+    assert by_family["nurbs"].current_phase == "available"
+    assert by_family["sweep"].promotable is True
+    assert by_family["sweep"].current_phase == "available"
+    assert by_family["subdivision"].promotable is True
+    assert by_family["subdivision"].current_phase == "available"
+    assert by_family["implicit"].promotable is True
+    assert by_family["implicit"].gaps == ()
 
 
 def test_patch_family_promotion_readiness_reports_missing_family_record() -> None:
@@ -1265,6 +1521,11 @@ def test_nurbs_surface_patch_evaluates_rational_points_and_derivatives() -> None
 
     point = patch.point_at(0.5, 0.5)
     assert np.allclose(point, (5.0 / 7.0, 5.0 / 7.0, 0.0))
+    metadata = patch.rational_evaluation_metadata(0.5, 0.5)
+    assert isinstance(metadata, NURBSRationalEvaluationMetadata)
+    assert metadata.denominator > 0.0
+    assert metadata.weight_shape == (2, 2)
+    assert metadata.canonical_payload()["point"] == pytest.approx(point.tolist())
 
     du, dv = patch.derivatives_at(0.5, 0.5)
     epsilon = 1e-6
@@ -1287,18 +1548,89 @@ def test_nurbs_surface_patch_with_unit_weights_matches_bspline_patch() -> None:
     assert np.allclose(nurbs.derivatives_at(0.25, 0.75)[1], bspline.derivatives_at(0.25, 0.75)[1])
 
 
+def test_nurbs_weight_validator_reports_all_malformed_weight_diagnostics() -> None:
+    diagnostics = validate_nurbs_weights(
+        [[1.0, float("nan")], [0.0, 1.0]],
+        control_net_shape=(2, 2),
+    )
+
+    assert all(isinstance(diagnostic, NURBSWeightValidationDiagnostic) for diagnostic in diagnostics)
+    assert {diagnostic.code for diagnostic in diagnostics} == {"nonfinite-weight", "nonpositive-weight"}
+    assert diagnostics[0].canonical_payload()["shape"] == (2, 2)
+
+
+def test_nurbs_exact_conic_helpers_build_circle_and_arc_payloads() -> None:
+    circle = build_nurbs_exact_conic_profile_payload(
+        NURBSConicConstructionRequest(conic_kind="circle", radius=2.0)
+    )
+    arc = build_nurbs_circular_arc_control_net(radius=1.5, start_angle_deg=0.0, end_angle_deg=90.0)
+
+    assert isinstance(circle, NURBSConicProfilePayload)
+    assert circle.supported is True
+    assert circle.degree == 2
+    assert circle.control_points_uv.shape == (9, 2)
+    assert circle.weights.shape == (9,)
+    assert circle.knots == (0.0, 0.0, 0.0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1.0, 1.0, 1.0)
+    assert circle.metadata["exact_rational_conic"] is True
+    assert arc.control_points_uv.shape == (3, 2)
+    assert arc.weights[1] == pytest.approx(np.sqrt(0.5))
+
+
+def test_nurbs_exact_conic_helpers_build_ellipse_and_report_unsupported_requests() -> None:
+    ellipse = build_nurbs_exact_conic_profile_payload(
+        NURBSConicConstructionRequest(conic_kind="ellipse", radii=(3.0, 1.5), metadata={"profile_id": "outer"})
+    )
+    unsupported = build_nurbs_exact_conic_profile_payload(NURBSConicConstructionRequest(conic_kind="parabola"))
+    invalid = build_nurbs_exact_conic_profile_payload(NURBSConicConstructionRequest(conic_kind="circle", radius=0.0))
+
+    assert ellipse.supported is True
+    assert ellipse.metadata["profile_id"] == "outer"
+    assert np.max(np.abs(ellipse.control_points_uv[:, 0])) == pytest.approx(3.0)
+    assert isinstance(unsupported.diagnostics[0], NURBSConicConstructionDiagnostic)
+    assert unsupported.supported is False
+    assert unsupported.diagnostics[0].code == "unsupported-conic-kind"
+    assert invalid.diagnostics[0].code == "invalid-radius"
+
+
 @pytest.mark.parametrize(
     "kwargs, message",
     [
         ({"family": "bspline"}, "family must be 'nurbs'"),
-        ({"family": "nurbs", "weights": [[1.0, 1.0]]}, "weights must match"),
-        ({"family": "nurbs", "weights": [[1.0, 0.0], [1.0, 1.0]]}, "finite and positive"),
-        ({"family": "nurbs", "weights": [[1.0, float("nan")], [1.0, 1.0]]}, "finite and positive"),
+        ({"family": "nurbs", "weights": [[1.0, 1.0]]}, "weight-shape-mismatch"),
+        ({"family": "nurbs", "weights": [[1.0, 0.0], [1.0, 1.0]]}, "nonpositive-weight"),
+        ({"family": "nurbs", "weights": [[1.0, float("nan")], [1.0, 1.0]]}, "nonfinite-weight"),
     ],
 )
 def test_nurbs_surface_patch_rejects_invalid_weight_inputs(kwargs: dict[str, object], message: str) -> None:
     with pytest.raises(ValueError, match=message):
         NURBSSurfacePatch(**kwargs)
+
+
+def test_path_frame_transport_policy_evaluates_twist_scale_and_frame_samples() -> None:
+    path = Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.0, 2.0)])
+    policy = FrameTransportPolicyRecord(policy="parallel_transport", twist_degrees=(0.0, 90.0), scale=(1.0, 2.0))
+
+    frame = evaluate_path_frame(path, 0.5, policy)
+    twist, scale = interpolate_path_twist_scale(policy, 0.5)
+
+    assert isinstance(frame, PathFrameSampleRecord)
+    assert frame.diagnostics == ()
+    assert twist == pytest.approx(45.0)
+    assert scale == pytest.approx(1.5)
+    assert frame.twist_degrees == pytest.approx(45.0)
+    assert frame.scale == pytest.approx(1.5)
+    assert np.linalg.norm(frame.u_axis) == pytest.approx(1.0)
+    assert np.dot(frame.u_axis, frame.w_axis) == pytest.approx(0.0)
+    assert frame.canonical_payload()["parameter"] == pytest.approx(0.5)
+
+
+def test_path_frame_transport_policy_reports_degenerate_tangent() -> None:
+    path = Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.0, 0.0)])
+
+    frame = evaluate_path_frame(path, 0.5)
+
+    assert isinstance(frame.diagnostics[0], PathFrameDegeneracyDiagnostic)
+    assert frame.diagnostics[0].code == "degenerate-tangent"
 
 
 def test_sweep_surface_patch_owns_profile_path_and_frame_policy() -> None:
@@ -1390,6 +1722,30 @@ def test_subdivision_surface_patch_owns_control_cage_and_creases() -> None:
     assert payload["creases"] == [{"edge": (0, 1), "sharpness": 2.5}]
     assert patch.bounds_estimate() == (0.0, 2.0, 0.0, 1.0, 0.0, 0.0)
     assert isinstance(patch.stable_identity, str)
+
+
+def test_subdivision_scheme_record_and_approximation_diagnostic_are_inspectable() -> None:
+    patch = SubdivisionSurfacePatch(
+        family="subdivision",
+        creases=(SubdivisionCrease((0, 1), sharpness=1.0),),
+        subdivision_level=2,
+    )
+
+    scheme = patch.scheme_record()
+    diagnostic = patch.approximation_diagnostic()
+    explicit = build_subdivision_approximation_diagnostic(patch)
+
+    assert isinstance(scheme, SubdivisionSchemeRecord)
+    assert scheme.canonical_payload() == {
+        "scheme": "catmull_clark",
+        "level": 2,
+        "crease_count": 1,
+        "approximation": "finite_catmull_clark",
+    }
+    assert isinstance(diagnostic, SubdivisionApproximationDiagnostic)
+    assert diagnostic.code == "finite-subdivision-approximation"
+    assert "not hidden mesh fallback" in diagnostic.message
+    assert explicit.canonical_payload()["level"] == 2
 
 
 @pytest.mark.parametrize(
@@ -1508,6 +1864,113 @@ def test_subdivision_surface_public_helper_wraps_valid_cage_as_surface_body() ->
     assert patch.family == "subdivision"
     assert patch.metadata["kernel"]["authoring_boundary"] == "surface-native"
     assert patch.creases[0].sharpness == pytest.approx(2.0)
+    provenance = subdivision_producer_provenance_record(patch)
+    assert isinstance(provenance, SubdivisionProducerProvenanceRecord)
+    assert provenance.family == "subdivision"
+    assert provenance.cage_vertex_count == 4
+    assert body.metadata["kernel"]["producer_provenance"]["patch_id"] == patch.stable_identity
+
+
+def test_subdivision_authoring_request_and_cage_diagnostic_are_surface_native() -> None:
+    request = SubdivisionAuthoringRequest(
+        control_points=[
+            (0.0, 0.0, 0.0),
+            (1.0, 0.0, 0.0),
+            (1.0, 1.0, 0.0),
+            (0.0, 1.0, 0.0),
+        ],
+        faces=((0, 1, 2, 3),),
+        creases=(SubdivisionCrease((1, 0), sharpness=1.5),),
+        metadata={"kernel": {"producer": "unit-test"}},
+    )
+
+    body = make_subdivision_surface(request=request)
+    diagnostic = build_subdivision_cage_diagnostic(request)
+    invalid = build_subdivision_cage_diagnostic(
+        {
+            "control_points": [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0)],
+            "faces": ((0, 1, 4),),
+        }
+    )
+
+    assert request.cage_vertex_count == 4
+    assert request.cage_face_count == 1
+    assert isinstance(diagnostic, SubdivisionCageDiagnostic)
+    assert diagnostic.valid is True
+    assert invalid.valid is False
+    assert "outside the cage" in invalid.message
+    assert isinstance(body.shells[0].patches[0], SubdivisionSurfacePatch)
+    assert body.shells[0].patches[0].metadata["kernel"]["producer"] == "unit-test"
+
+
+def test_subdivision_cage_import_adapter_normalizes_native_payload_without_mesh_fallback() -> None:
+    request = SubdivisionImportRequest(
+        payload={
+            "control_points": [
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (0.0, 1.0, 0.0),
+            ],
+            "faces": ((0, 1, 2, 3),),
+            "creases": ({"edge": (0, 1), "sharpness": 2.0},),
+            "subdivision_level": 1,
+        },
+        source_format="author-cage-json",
+        source_id="fixture:cage",
+    )
+
+    normalized = normalize_subdivision_cage_import_payload(request)
+    diagnostic = build_subdivision_import_diagnostic(request)
+    body = import_subdivision_cage(request)
+    patch = body.shells[0].patches[0]
+
+    assert normalized.source_format == "author-cage-json"
+    assert isinstance(diagnostic, SubdivisionImportDiagnostic)
+    assert diagnostic.supported is True
+    assert isinstance(patch, SubdivisionSurfacePatch)
+    assert patch.creases == (SubdivisionCrease((0, 1), sharpness=2.0),)
+    assert patch.metadata["kernel"]["operation"] == "subdivision-cage-import"
+    assert patch.metadata["kernel"]["import_source_id"] == "fixture:cage"
+
+
+def test_subdivision_cage_import_adapter_refuses_mesh_shaped_or_unsupported_payloads() -> None:
+    mesh_diagnostic = build_subdivision_import_diagnostic(
+        SubdivisionImportRequest(
+            payload={"vertices": [(0.0, 0.0, 0.0)], "faces": ((0, 1, 2),)},
+            source_format="mesh",
+        )
+    )
+    unsupported_scheme = build_subdivision_import_diagnostic(
+        {
+            "control_points": [
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+            ],
+            "faces": ((0, 1, 2),),
+            "scheme": "loop",
+        }
+    )
+
+    assert mesh_diagnostic.supported is False
+    assert "no mesh fallback" in mesh_diagnostic.message
+    assert unsupported_scheme.supported is False
+    assert "scheme" in unsupported_scheme.message
+    with pytest.raises(ValueError, match="max_control_points"):
+        normalize_subdivision_cage_import_payload(
+            SubdivisionImportRequest(
+                payload={
+                    "control_points": [
+                        (0.0, 0.0, 0.0),
+                        (1.0, 0.0, 0.0),
+                        (1.0, 1.0, 0.0),
+                    ],
+                    "faces": ((0, 1, 2),),
+                },
+                max_control_points=2,
+            )
+        )
 
 
 def test_subdivision_surface_public_helper_refuses_invalid_cage_or_crease() -> None:
@@ -1657,6 +2120,26 @@ def test_implicit_field_security_refuses_unsafe_payloads(
         validate_implicit_field_security(node, policy=policy)
 
 
+def test_implicit_unsafe_authoring_diagnostic_reports_rejected_path() -> None:
+    node = make_implicit_field_node(
+        "union",
+        children=(
+            make_implicit_field_node("sphere", parameters={"radius": 1.0}),
+            make_implicit_field_node("sphere", parameters={"label": "__import__('os')"}),
+        ),
+    )
+
+    diagnostic = build_implicit_unsafe_authoring_diagnostic(node)
+
+    assert isinstance(diagnostic, ImplicitUnsafeAuthoringDiagnostic)
+    assert diagnostic.safe is False
+    assert isinstance(diagnostic.locator, ImplicitRejectedNodeLocator)
+    assert diagnostic.locator.path == "field.children[1].parameters.label"
+    assert diagnostic.locator.node_kind == "sphere"
+    with pytest.raises(ValueError, match=r"field\.children\[1\]\.parameters\.label"):
+        validate_implicit_authoring_safety(node)
+
+
 def test_implicit_surface_patch_constructor_runs_security_validator() -> None:
     with pytest.raises(ValueError, match="Unsafe implicit field payload"):
         ImplicitSurfacePatch(family="implicit", field=make_implicit_field_node("sphere", parameters={"eval": "boom"}))
@@ -1692,6 +2175,63 @@ def test_implicit_field_domain_evaluator_samples_bounded_grid() -> None:
     assert values.shape == (4, 2, 3)
     assert values[0, 0, 0] == pytest.approx(-2.0)
     assert values[-1, -1, -1] == pytest.approx(2.0)
+
+
+def test_implicit_gradient_budget_and_residual_records_are_inspectable() -> None:
+    node = make_implicit_field_node("sphere", parameters={"radius": 1.0})
+    budget = make_implicit_extraction_budget(bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0), samples=(4, 4, 4))
+    gradient = evaluate_implicit_field_gradient(node, (1.0, 0.0, 0.0))
+    surface = classify_implicit_residual(5e-7, tolerance=1e-6)
+    outside = classify_implicit_residual(0.25, tolerance=1e-6)
+
+    assert isinstance(budget, ImplicitExtractionBudgetRecord)
+    assert budget.sample_count == 64
+    assert budget.evaluation_domain().samples == (4, 4, 4)
+    assert budget.canonical_payload()["sample_count"] == 64
+    assert gradient == pytest.approx((1.0, 0.0, 0.0), abs=1e-5)
+    assert isinstance(surface, ImplicitResidualClassificationRecord)
+    assert surface.classification == "surface"
+    assert outside.classification == "outside"
+
+    with pytest.raises(ValueError, match="exceeds max_sample_count"):
+        make_implicit_extraction_budget(
+            bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+            samples=(10, 10, 10),
+            max_sample_count=999,
+        )
+
+
+def test_implicit_budget_and_bounds_diagnostics_refuse_before_extraction() -> None:
+    valid_bounds = build_implicit_bounds_diagnostic((-1.0, 1.0, -1.0, 1.0, -1.0, 1.0))
+    invalid_bounds = build_implicit_bounds_diagnostic((0.0, 0.0, -1.0, 1.0, -1.0, 1.0))
+    valid_budget = build_implicit_budget_diagnostic(
+        bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+        samples=(4, 4, 4),
+    )
+    invalid_budget = build_implicit_budget_diagnostic(
+        bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+        samples=(10, 10, 10),
+        max_sample_count=999,
+    )
+
+    assert isinstance(valid_bounds, ImplicitBoundsDiagnostic)
+    assert valid_bounds.bounded is True
+    assert invalid_bounds.bounded is False
+    assert invalid_bounds.locator == "bounds"
+    assert isinstance(valid_budget, ImplicitBudgetDiagnostic)
+    assert valid_budget.executable is True
+    assert invalid_budget.executable is False
+    assert invalid_budget.locator == "max_sample_count"
+    assert validate_implicit_extraction_budget(
+        bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+        samples=(2, 2, 2),
+    ).sample_count == 8
+    with pytest.raises(ValueError, match="max_sample_count"):
+        validate_implicit_extraction_budget(
+            bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+            samples=(10, 10, 10),
+            max_sample_count=999,
+        )
 
 
 def test_implicit_surface_patch_exposes_field_value_and_domain_helpers() -> None:
@@ -1756,6 +2296,37 @@ def test_implicit_surface_public_helper_wraps_safe_bounded_field() -> None:
     assert patch.family == "implicit"
     assert patch.metadata["kernel"]["authoring_boundary"] == "surface-native"
     assert patch.bounds == (-1.0, 1.0, -1.0, 1.0, -1.0, 1.0)
+    provenance = implicit_field_provenance_record(patch)
+    assert isinstance(provenance, ImplicitFieldProvenanceRecord)
+    assert provenance.node_count == 1
+    assert body.metadata["kernel"]["producer_provenance"]["patch_id"] == patch.stable_identity
+
+
+def test_implicit_field_authoring_request_and_named_helpers_build_safe_graphs() -> None:
+    field = implicit_difference_field(
+        implicit_union_field(
+            (
+                implicit_sphere_field(radius=1.0),
+                implicit_box_field(center=(0.25, 0.0, 0.0), half_extents=(0.5, 0.5, 0.5)),
+            )
+        ),
+        cutters=(implicit_sphere_field(radius=0.25),),
+    )
+    request = ImplicitFieldAuthoringRequest(
+        field=field,
+        bounds=(-1.5, 1.5, -1.5, 1.5, -1.5, 1.5),
+        metadata={"kernel": {"producer": "unit-test"}},
+    )
+
+    body = make_implicit_surface(request=request)
+    patch = body.shells[0].patches[0]
+    value = evaluate_implicit_field(patch.field, (2.0, 0.0, 0.0))
+
+    assert isinstance(patch, ImplicitSurfacePatch)
+    assert patch.metadata["kernel"]["producer"] == "unit-test"
+    assert patch.metadata["kernel"]["operation"] == "implicit-authoring"
+    assert request.canonical_payload()["field"]["kind"] == "difference"
+    assert value.value > 0.0
 
 
 def test_implicit_surface_public_helper_refuses_unsafe_or_malformed_fields() -> None:
@@ -1896,6 +2467,235 @@ def test_sampled_surface_tessellation_adapters_preserve_payload_identity_and_los
         assert mesh.metadata["tessellation_adapter_boundary"] == "tessellation"
     assert meshes[1].metadata["displacement_source_family"] == "planar"
     assert meshes[1].metadata["displacement_source_patch_id"] == source.stable_identity
+
+
+def test_displacement_source_identity_policy_records_embedded_source_payload() -> None:
+    source = PlanarSurfacePatch(family="planar", metadata={"kernel": {"source": "displacement-base"}})
+    patch = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+    )
+
+    reference = patch.source_reference_record()
+    diagnostic = patch.source_identity_diagnostic()
+
+    assert isinstance(reference, DisplacementSourcePatchReferenceRecord)
+    assert reference.source_family == "planar"
+    assert reference.source_patch_id == source.stable_identity
+    assert reference.embedded is True
+    assert isinstance(diagnostic, DisplacementIdentityDiagnostic)
+    assert diagnostic.code == "embedded-source-payload"
+    assert "mesh" in diagnostic.message
+
+
+def test_displacement_source_identity_resolver_reports_embedded_in_body_and_missing_sources() -> None:
+    source = PlanarSurfacePatch(family="planar", metadata={"kernel": {"source": "displacement-base"}})
+    embedded = resolve_displacement_source_identity(source_patch=source)
+    in_body = resolve_displacement_source_identity(source_patch_id=source.stable_identity, candidate_patches=(source,))
+    missing = resolve_displacement_source_identity(source_patch_id="external:patch", candidate_patches=(source,))
+
+    assert isinstance(embedded, DisplacementSourceResolutionResult)
+    assert embedded.resolved is True
+    assert isinstance(embedded.provenance, DisplacementSourceProvenanceRecord)
+    assert embedded.provenance.relationship == "embedded"
+    assert in_body.resolved is True
+    assert in_body.provenance is not None
+    assert in_body.provenance.relationship == "in-body"
+    assert missing.resolved is False
+    assert missing.diagnostic.code == "external-source-refused"
+    assert "cross-body" in missing.diagnostic.message
+
+
+def test_displacement_payload_authoring_builder_creates_sampled_surface_body() -> None:
+    source = PlanarSurfacePatch(family="planar", domain=ParameterDomain((0.0, 1.0), (0.0, 1.0)))
+    request = DisplacementAuthoringRequest(
+        source_patch=source,
+        displacement_samples=np.asarray([[0.0, 0.1], [0.2, 0.3]], dtype=float),
+        direction="z",
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        metadata={"kernel": {"producer": "unit-test"}},
+    )
+
+    diagnostic = build_displacement_payload_diagnostic(request)
+    body = make_displacement_surface(request)
+    patch = body.shells[0].patches[0]
+
+    assert isinstance(diagnostic, DisplacementPayloadDiagnostic)
+    assert diagnostic.valid is True
+    assert isinstance(patch, DisplacementSurfacePatch)
+    assert isinstance(patch.metadata["kernel"]["lossiness"], dict)
+    assert patch.metadata["kernel"]["producer"] == "unit-test"
+    assert patch.metadata["kernel"]["source_resolution"]["resolved"] is True
+    assert isinstance(displacement_lossiness_metadata_record(), DisplacementLossinessMetadataRecord)
+
+
+def test_displacement_payload_authoring_builder_refuses_callable_and_invalid_payloads() -> None:
+    source = PlanarSurfacePatch(family="planar", domain=ParameterDomain((0.0, 1.0), (0.0, 1.0)))
+    callable_diagnostic = build_displacement_payload_diagnostic(
+        DisplacementAuthoringRequest(
+            source_patch=source,
+            displacement_samples=lambda _u, _v: 0.0,  # type: ignore[arg-type]
+            projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        )
+    )
+    invalid_diagnostic = build_displacement_payload_diagnostic(
+        DisplacementAuthoringRequest(
+            source_patch=source,
+            displacement_samples=np.asarray([[0.0, np.nan], [0.2, 0.3]], dtype=float),
+            projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        )
+    )
+
+    assert callable_diagnostic.valid is False
+    assert "Callable displacement" in callable_diagnostic.message
+    assert invalid_diagnostic.valid is False
+    assert "finite" in invalid_diagnostic.message
+    with pytest.raises(ValueError, match="Callable displacement"):
+        make_displacement_surface(
+            DisplacementAuthoringRequest(
+                source_patch=source,
+                displacement_samples=lambda _u, _v: 0.0,  # type: ignore[arg-type]
+                projection_bounds=(0.0, 1.0, 0.0, 1.0),
+            )
+        )
+
+
+def test_displacement_domain_mapping_and_evaluation_diagnostic_are_inspectable() -> None:
+    source = PlanarSurfacePatch(family="planar", domain=ParameterDomain((0.0, 2.0), (-1.0, 1.0)))
+    patch = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
+        projection_bounds=(0.0, 2.0, -1.0, 1.0),
+    )
+
+    mapping = patch.domain_mapping_record()
+    diagnostic = patch.evaluation_diagnostic()
+    point = patch.point_at(1.0, 0.0)
+    du, dv = patch.derivatives_at(1.0, 0.0)
+
+    assert isinstance(mapping, DisplacementDomainMappingRecord)
+    assert mapping.source_domain == ((0.0, 2.0), (-1.0, 1.0))
+    assert mapping.displacement_domain == mapping.source_domain
+    assert mapping.projection_bounds == (0.0, 2.0, -1.0, 1.0)
+    assert isinstance(diagnostic, DisplacementEvaluationDiagnostic)
+    assert diagnostic.code == "finite-difference-displacement-derivatives"
+    assert np.all(np.isfinite(point))
+    assert np.all(np.isfinite(du))
+    assert np.all(np.isfinite(dv))
+
+
+def test_heightmap_evaluation_normal_and_mask_tessellation_records_are_inspectable() -> None:
+    patch = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
+        alpha_mask=np.asarray([[True, True], [False, True]], dtype=bool),
+        alpha_mode="mask",
+    )
+
+    normal, diagnostic = estimate_heightmap_normal(patch, 0.5, 0.5)
+    record = heightmap_mask_tessellation_record(patch)
+    mesh = tessellate_surface_patch(patch, preview_tessellation_request())
+
+    assert isinstance(diagnostic, HeightmapEvaluationDiagnostic)
+    assert diagnostic.code == "heightmap-normal-estimated"
+    assert np.linalg.norm(normal) == pytest.approx(1.0)
+    assert isinstance(record, HeightmapMaskTessellationRecord)
+    assert record.cell_count == 1
+    assert record.skipped_cell_count == 1
+    assert record.emitted_face_count == 0
+    assert record.canonical_payload()["alpha_mode"] == "mask"
+    assert mesh.faces.shape[0] == record.emitted_face_count
+
+
+def test_heightmap_native_finite_grid_builder_records_provenance_and_mask_diagnostics() -> None:
+    request = HeightmapAuthoringRequest(
+        height_samples=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
+        alpha_mask=np.asarray([[True, True], [False, True]], dtype=bool),
+        alpha_mode="mask",
+        xy_scale=(0.5, 0.25),
+        center=(1.0, 2.0, 3.0),
+        height_scale=2.0,
+        metadata={"kernel": {"producer": "unit-test"}},
+    )
+
+    diagnostic = build_heightmap_mask_no_data_diagnostic(request)
+    provenance = heightmap_sample_grid_provenance_record(request)
+    body = make_heightmap_surface_from_grid(request)
+    patch = body.shells[0].patches[0]
+
+    assert isinstance(diagnostic, HeightmapNoDataDiagnostic)
+    assert diagnostic.valid is True
+    assert diagnostic.masked_sample_count == 1
+    assert isinstance(provenance, HeightmapSampleGridProvenanceRecord)
+    assert provenance.sample_shape == (2, 2)
+    assert isinstance(patch, HeightmapSurfacePatch)
+    assert patch.metadata["kernel"]["producer"] == "unit-test"
+    assert patch.metadata["kernel"]["producer_provenance"]["operation"] == "heightmap-finite-grid-authoring"
+    assert body.metadata["kernel"]["authoring_boundary"] == "surface-native"
+
+
+def test_heightmap_native_finite_grid_builder_refuses_malformed_or_empty_masks() -> None:
+    with pytest.raises(ValueError, match="finite"):
+        HeightmapAuthoringRequest(height_samples=np.asarray([[0.0, np.nan], [0.5, 0.25]], dtype=float))
+    request = HeightmapAuthoringRequest(
+        height_samples=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
+        alpha_mask=np.zeros((2, 2), dtype=bool),
+        alpha_mode="mask",
+    )
+    diagnostic = build_heightmap_mask_no_data_diagnostic(request)
+
+    assert diagnostic.valid is False
+    assert diagnostic.masked_sample_count == 4
+    with pytest.raises(ValueError, match="masks every sample"):
+        make_heightmap_surface_from_grid(request)
+
+
+def test_heightmap_optional_import_adapter_embeds_arrays_as_native_grid() -> None:
+    request = HeightmapImportRequest(
+        source=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
+        height=2.0,
+        xy_scale=(0.5, 0.5),
+        metadata={"kernel": {"producer": "unit-test-import"}},
+    )
+
+    dependency = heightmap_import_dependency_boundary()
+    diagnostic = build_heightmap_import_diagnostic(request)
+    body = import_heightmap_surface(request)
+    patch = body.shells[0].patches[0]
+
+    assert isinstance(dependency, HeightmapImportDiagnostic)
+    assert dependency.supported is True
+    assert diagnostic.supported is True
+    assert isinstance(patch, HeightmapSurfacePatch)
+    assert patch.height_samples.shape == (2, 2)
+    assert patch.metadata["kernel"]["operation"] == "heightmap-import"
+    assert patch.metadata["kernel"]["producer_provenance"]["operation"] == "heightmap-finite-grid-authoring"
+    assert patch.metadata["kernel"]["producer"] == "unit-test-import"
+    assert patch.metadata["kernel"]["import_source_kind"] == "ndarray"
+
+
+def test_heightmap_optional_import_adapter_refuses_external_references_and_over_budget_inputs() -> None:
+    external = HeightmapImportRequest(
+        source=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
+        embed_samples=False,
+    )
+    over_budget = HeightmapImportRequest(
+        source=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
+        max_sample_count=3,
+    )
+
+    external_diagnostic = build_heightmap_import_diagnostic(external)
+    over_budget_diagnostic = build_heightmap_import_diagnostic(over_budget)
+
+    assert external_diagnostic.supported is False
+    assert "external references" in external_diagnostic.message
+    assert over_budget_diagnostic.supported is False
+    assert "max_sample_count" in over_budget_diagnostic.message
+    with pytest.raises(ValueError, match="external references"):
+        import_heightmap_surface(external)
 
 
 def test_spline_surface_tessellation_adapters_preserve_control_payloads_and_boundary_metadata() -> None:
@@ -2456,15 +3256,50 @@ def test_surface_continuity_enforcement_rejects_operation_owned_failed_output() 
 
 def test_subdivision_boundary_descriptor_records_approximation_and_implicit_seams_refuse() -> None:
     descriptor = extract_surface_boundary_descriptor(SubdivisionSurfacePatch(family="subdivision"), "left")
+    heightmap_descriptor = extract_surface_boundary_descriptor(
+        HeightmapSurfacePatch(family="heightmap", height_samples=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float)),
+        "left",
+    )
+    displacement_descriptor = extract_surface_boundary_descriptor(
+        DisplacementSurfacePatch(
+            family="displacement",
+            source_patch=PlanarSurfacePatch(family="planar"),
+            displacement_samples=np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float),
+            projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        ),
+        "left",
+    )
 
     assert descriptor.exact is False
     assert descriptor.approximation_metadata["method"] == "finite_subdivision_boundary"
+    assert heightmap_descriptor.exact is False
+    assert heightmap_descriptor.approximation_metadata["method"] == "sampled_heightmap_boundary"
+    assert heightmap_descriptor.approximation_metadata["heightmap_shape"] == (2, 2)
+    assert displacement_descriptor.exact is False
+    assert displacement_descriptor.approximation_metadata["method"] == "sampled_displacement_boundary"
+    assert displacement_descriptor.approximation_metadata["sample_shape"] == (2, 2)
 
     with pytest.raises(ValueError, match="cannot participate in parametric seams"):
         SurfaceShell(
             patches=(ImplicitSurfacePatch(family="implicit"), PlanarSurfacePatch(family="planar")),
             seams=(SurfaceSeam("implicit-planar", (SurfaceBoundaryRef(0, "right"), SurfaceBoundaryRef(1, "left"))),),
         )
+
+
+def test_advanced_family_boundary_support_matrix_names_exact_approximate_and_refusal_states() -> None:
+    records = surface_family_boundary_support_matrix()
+    by_family = {record.family: record for record in records}
+
+    assert all(isinstance(record, SurfaceFamilyBoundarySupportRecord) for record in records)
+    assert set(by_family) == set(ADVANCED_PATCH_FAMILIES)
+    assert by_family["bspline"].boundary_support == "exact"
+    assert by_family["nurbs"].higher_order_residuals is True
+    assert by_family["subdivision"].boundary_support == "approximate"
+    assert by_family["subdivision"].approximation_method == "finite_subdivision_boundary"
+    assert by_family["heightmap"].approximation_method == "sampled_heightmap_boundary"
+    assert by_family["displacement"].approximation_method == "sampled_displacement_boundary"
+    assert by_family["implicit"].boundary_support == "unsupported"
+    assert "no canonical parametric seam boundary" in by_family["implicit"].diagnostic
 
 
 def test_planar_patch_rejects_collinear_axes_and_multiple_outer_trims() -> None:
@@ -2928,16 +3763,177 @@ def test_surface_boolean_family_pair_matrix_declares_every_known_family_pair() -
                 assert record.left_family == left_family
                 assert record.right_family == right_family
                 assert record.support_state in {"exact", "declared-tolerance", "adapter", "unsupported", "not-yet-implemented"}
-                if (
-                    PATCH_FAMILY_CAPABILITY_MATRIX[left_family].support_phase == "available"
-                    and PATCH_FAMILY_CAPABILITY_MATRIX[right_family].support_phase == "available"
-                ):
+                if left_family in ANALYTIC_SURFACE_CSG_FAMILIES and right_family in ANALYTIC_SURFACE_CSG_FAMILIES:
                     assert record.supported is True
                     assert record.support_state == "exact"
                     assert record.required_future_capability is None
                 else:
                     assert record.supported is False
                     assert record.required_future_capability
+
+
+def test_surface_csg_route_taxonomy_classifies_higher_order_parametric_pairs() -> None:
+    assert PARAMETRIC_HIGHER_ORDER_SURFACE_CSG_FAMILIES == frozenset(
+        {"bspline", "nurbs", "sweep", "subdivision"}
+    )
+    assert classify_surface_csg_route_pair_class("planar", "ruled") == "low-order-analytic"
+    assert classify_surface_csg_route_pair_class("planar", "bspline") == "analytic-to-bspline"
+    assert classify_surface_csg_route_pair_class("revolution", "nurbs") == "analytic-to-nurbs"
+    assert classify_surface_csg_route_pair_class("ruled", "sweep") == "analytic-to-sweep"
+    assert classify_surface_csg_route_pair_class("planar", "subdivision") == "analytic-to-subdivision"
+    assert classify_surface_csg_route_pair_class("bspline", "nurbs") == "spline-nurbs-pair"
+    assert classify_surface_csg_route_pair_class("sweep", "nurbs") == "sweep-pair"
+    assert classify_surface_csg_route_pair_class("subdivision", "bspline") == "subdivision-pair"
+    assert classify_surface_csg_route_pair_class("heightmap", "bspline") == "sampled-boundary"
+    assert classify_surface_csg_route_pair_class("planar", "unknown") == "unsupported-family"
+
+
+def test_surface_csg_route_lookup_exposes_executable_state_separately_from_family_availability() -> None:
+    analytic = surface_csg_route_lookup("union", "planar", "ruled")
+    higher_order = surface_csg_route_lookup("union", "planar", "bspline")
+
+    assert isinstance(analytic, SurfaceCSGRouteRegistryRow)
+    assert analytic.pair_class == "low-order-analytic"
+    assert analytic.route_id == "surface-csg.low-order-analytic.exact"
+    assert analytic.supported is True
+    assert analytic.executable is True
+    assert analytic.diagnostic is None
+
+    assert isinstance(higher_order, SurfaceCSGRouteRegistryRow)
+    assert higher_order.pair_class == "analytic-to-bspline"
+    assert higher_order.supported is False
+    assert higher_order.executable is False
+    assert higher_order.support_state == "not-yet-implemented"
+    assert isinstance(higher_order.diagnostic, SurfaceCSGRouteSupportDiagnostic)
+    assert higher_order.diagnostic.code == "non-executable-route"
+    assert "registered but not executable" in higher_order.diagnostic.message
+    assert "mesh" not in higher_order.diagnostic.message.lower()
+
+
+def test_surface_csg_executable_row_report_flags_unimplemented_higher_order_routes() -> None:
+    report = surface_csg_executable_row_report(families=("planar", "bspline"))
+
+    assert isinstance(report, SurfaceCSGExecutableRowReport)
+    assert report.passed is False
+    assert len(report.rows) == len(SURFACE_BOOLEAN_OPERATIONS) * 4
+    assert any(row.executable and row.pair_class == "low-order-analytic" for row in report.rows)
+    failing = [row for row in report.rows if row.pair_class == "analytic-to-bspline"]
+    assert failing
+    assert all(row.diagnostic is not None for row in failing)
+    assert {row.diagnostic.code for row in failing if row.diagnostic} == {"non-executable-route"}
+    payload = report.canonical_payload()
+    assert payload["passed"] is False
+    assert payload["diagnostics"]
+
+
+def test_higher_order_csg_residual_collector_records_declared_tolerance_metadata() -> None:
+    route = surface_csg_route_lookup("intersection", "planar", "bspline")
+
+    residual = collect_higher_order_csg_residual(
+        route,
+        max_residual=5e-7,
+        tolerance=1e-6,
+        iteration_count=4,
+        converged=True,
+        patch_ids=("left:0", "right:2"),
+    )
+
+    assert isinstance(residual, SurfaceCSGResidualRecord)
+    assert residual.within_tolerance is True
+    assert residual.route_id == route.route_id
+    assert residual.patch_ids == ("left:0", "right:2")
+    assert residual.canonical_payload()["within_tolerance"] is True
+    with pytest.raises(ValueError, match="positive and finite"):
+        collect_higher_order_csg_residual(route, max_residual=0.0, tolerance=0.0, iteration_count=0, converged=True)
+
+
+def test_higher_order_csg_degeneracy_classifier_reports_blocking_and_nonblocking_states() -> None:
+    route = surface_csg_route_lookup("union", "sweep", "nurbs")
+    residual = collect_higher_order_csg_residual(
+        route,
+        max_residual=2e-4,
+        tolerance=1e-6,
+        iteration_count=12,
+        converged=False,
+    )
+
+    degeneracies = classify_higher_order_csg_degeneracies(
+        residual,
+        ambiguous=True,
+        overlap=True,
+        singularity=True,
+        budget_exhausted=True,
+        location="body:left patch:0 u=0.5",
+    )
+
+    assert all(isinstance(record, SurfaceCSGDegeneracyRecord) for record in degeneracies)
+    assert {record.code for record in degeneracies} == {
+        "non-convergence",
+        "ambiguous-route",
+        "overlap",
+        "singularity",
+        "budget-refusal",
+    }
+    overlap = next(record for record in degeneracies if record.code == "overlap")
+    assert overlap.blocking is False
+    assert "mesh" not in " ".join(record.message.lower() for record in degeneracies)
+
+
+def test_higher_order_csg_route_diagnostic_formatter_preserves_ambiguity_as_blocking_payload() -> None:
+    route = surface_csg_route_lookup("difference", "sweep", "subdivision")
+    residual = collect_higher_order_csg_residual(
+        route,
+        max_residual=1e-2,
+        tolerance=1e-6,
+        iteration_count=8,
+        converged=False,
+    )
+    degeneracies = classify_higher_order_csg_degeneracies(
+        residual,
+        ambiguous=True,
+        location="route:sweep/subdivision station:0",
+    )
+
+    diagnostics = format_higher_order_csg_route_diagnostics(
+        route,
+        residual=residual,
+        degeneracies=degeneracies,
+    )
+
+    assert diagnostics
+    assert any(isinstance(diagnostic, SurfaceCSGRouteSupportDiagnostic) for diagnostic in diagnostics)
+    ambiguity = next(diagnostic for diagnostic in diagnostics if isinstance(diagnostic, SurfaceCSGAmbiguityDiagnostic))
+    assert ambiguity.blocking is True
+    assert ambiguity.location == "route:sweep/subdivision station:0"
+    assert "authored ambiguity" in ambiguity.message
+
+
+def test_available_family_csg_classification_rows_cover_supported_and_refused_pairs() -> None:
+    rows = available_family_csg_classification_rows()
+    report = verify_available_family_csg_classification_rows()
+    expected_count = len(SURFACE_BOOLEAN_OPERATIONS) * len(PATCH_FAMILY_CAPABILITY_MATRIX) ** 2
+
+    assert report.passed is True
+    assert len(rows) == expected_count
+    assert any(row.left_family == "planar" and row.right_family == "planar" and row.classification == "supported-exact" for row in rows)
+    assert any(row.left_family == "planar" and row.right_family == "bspline" and row.classification == "higher-order-refusal" for row in rows)
+    assert any(row.left_family == "planar" and row.right_family == "heightmap" and row.classification == "sampled-boundary-refusal" for row in rows)
+
+    subset_report = verify_available_family_csg_classification_rows(families=("planar", "bspline"))
+    assert subset_report.passed is True
+    assert len(subset_report.rows) == len(SURFACE_BOOLEAN_OPERATIONS) * 4
+
+
+def test_available_family_csg_no_mesh_fallback_evidence_is_diagnostic_for_unsupported_pairs() -> None:
+    evidence = collect_surface_csg_no_mesh_fallback_evidence(families=("planar", "heightmap"))
+    report = verify_surface_csg_no_mesh_fallback_evidence(families=("planar", "heightmap"))
+
+    assert report.passed is True
+    assert any(record.result_kind == "supported-surface" for record in evidence)
+    sampled_refusals = [record for record in evidence if record.result_kind == "diagnostic-refusal"]
+    assert sampled_refusals
+    assert all(record.mesh_fallback_attempted is False for record in sampled_refusals)
+    assert all("mesh fallback" not in record.message.lower() for record in sampled_refusals)
 
 
 def test_surface_csg_refusal_record_is_structured_and_constant_time_policy() -> None:
@@ -2968,11 +3964,21 @@ def test_surface_csg_analytic_primitive_pair_support_uses_declared_tolerances() 
 
 def test_surface_csg_analytic_primitive_pair_refuses_higher_order_without_mesh() -> None:
     record = surface_csg_analytic_primitive_pair_support("difference", "planar", "implicit")
+    heightmap_record = surface_csg_analytic_primitive_pair_support("union", "planar", "heightmap")
+    displacement_record = surface_csg_analytic_primitive_pair_support("intersection", "planar", "displacement")
 
     assert record.supported is False
     assert record.support_state == "unsupported"
     assert "sampled-tessellation-boundary" in record.diagnostic
     assert "mesh" not in record.diagnostic.lower()
+    assert heightmap_record.supported is False
+    assert heightmap_record.support_state == "unsupported"
+    assert "sampled-tessellation-boundary" in heightmap_record.diagnostic
+    assert "mesh" not in heightmap_record.diagnostic.lower()
+    assert displacement_record.supported is False
+    assert displacement_record.support_state == "unsupported"
+    assert "sampled-tessellation-boundary" in displacement_record.diagnostic
+    assert "mesh" not in displacement_record.diagnostic.lower()
 
 
 def test_surface_boolean_family_eligibility_reports_unsupported_mixed_family_without_mesh_fallback() -> None:

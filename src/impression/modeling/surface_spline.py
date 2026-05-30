@@ -9,6 +9,16 @@ from .surface import _bspline_basis_functions, _find_bspline_span, _normalize_de
 
 
 @dataclass(frozen=True)
+class SplineDiagnostic:
+    code: str
+    message: str
+    name: str
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {"code": self.code, "message": self.message, "name": self.name}
+
+
+@dataclass(frozen=True)
 class SplineBasisEvaluationRecord:
     degree: int
     knots: tuple[float, ...]
@@ -30,6 +40,56 @@ class SplineBasisEvaluationRecord:
             "span": self.span,
             "basis": self.basis,
             "partition_error": self.partition_error,
+        }
+
+
+@dataclass(frozen=True)
+class SplineBasisDerivativeEvaluationRecord:
+    degree: int
+    knots: tuple[float, ...]
+    control_point_count: int
+    parameter: float
+    span: int
+    derivatives: tuple[float, ...]
+
+    @property
+    def derivative_sum(self) -> float:
+        return float(sum(self.derivatives))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "degree": self.degree,
+            "knots": self.knots,
+            "control_point_count": self.control_point_count,
+            "parameter": self.parameter,
+            "span": self.span,
+            "derivatives": self.derivatives,
+            "derivative_sum": self.derivative_sum,
+        }
+
+
+@dataclass(frozen=True)
+class SplineControlNetRecord:
+    control_net: np.ndarray
+    dimensions: int
+    point_count_u: int
+    point_count_v: int
+    diagnostics: tuple[SplineDiagnostic, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "control_net", np.asarray(self.control_net, dtype=float))
+
+    @property
+    def shape(self) -> tuple[int, int, int]:
+        return tuple(int(value) for value in self.control_net.shape)  # type: ignore[return-value]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "dimensions": self.dimensions,
+            "point_count_u": self.point_count_u,
+            "point_count_v": self.point_count_v,
+            "shape": self.shape,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
         }
 
 
@@ -152,6 +212,124 @@ def evaluate_bspline_basis(
     )
 
 
+def _cox_de_boor_basis_value(
+    *,
+    index: int,
+    degree: int,
+    parameter: float,
+    knots: tuple[float, ...],
+    control_point_count: int,
+) -> float:
+    if degree == 0:
+        in_span = knots[index] <= parameter < knots[index + 1]
+        at_final = index == control_point_count - 1 and np.isclose(parameter, knots[index + 1])
+        return 1.0 if in_span or at_final else 0.0
+
+    left_denominator = knots[index + degree] - knots[index]
+    right_denominator = knots[index + degree + 1] - knots[index + 1]
+    left = 0.0
+    right = 0.0
+    if left_denominator != 0.0:
+        left = ((parameter - knots[index]) / left_denominator) * _cox_de_boor_basis_value(
+            index=index,
+            degree=degree - 1,
+            parameter=parameter,
+            knots=knots,
+            control_point_count=control_point_count,
+        )
+    if right_denominator != 0.0:
+        right = ((knots[index + degree + 1] - parameter) / right_denominator) * _cox_de_boor_basis_value(
+            index=index + 1,
+            degree=degree - 1,
+            parameter=parameter,
+            knots=knots,
+            control_point_count=control_point_count,
+        )
+    return float(left + right)
+
+
+def evaluate_bspline_basis_derivative(
+    *,
+    degree: int,
+    knots: Sequence[float],
+    control_point_count: int,
+    parameter: float,
+) -> SplineBasisDerivativeEvaluationRecord:
+    """Evaluate first derivatives for the non-zero B-spline basis functions."""
+
+    basis_record = evaluate_bspline_basis(
+        degree=degree,
+        knots=knots,
+        control_point_count=control_point_count,
+        parameter=parameter,
+    )
+    if basis_record.degree == 0:
+        derivatives = (0.0,)
+    else:
+        first_index = basis_record.span - basis_record.degree
+        derivative_values: list[float] = []
+        for local_index in range(basis_record.degree + 1):
+            index = first_index + local_index
+            left_denominator = basis_record.knots[index + basis_record.degree] - basis_record.knots[index]
+            right_denominator = (
+                basis_record.knots[index + basis_record.degree + 1] - basis_record.knots[index + 1]
+            )
+            left = 0.0
+            right = 0.0
+            if left_denominator != 0.0:
+                left = (basis_record.degree / left_denominator) * _cox_de_boor_basis_value(
+                    index=index,
+                    degree=basis_record.degree - 1,
+                    parameter=basis_record.parameter,
+                    knots=basis_record.knots,
+                    control_point_count=basis_record.control_point_count,
+                )
+            if right_denominator != 0.0:
+                right = (basis_record.degree / right_denominator) * _cox_de_boor_basis_value(
+                    index=index + 1,
+                    degree=basis_record.degree - 1,
+                    parameter=basis_record.parameter,
+                    knots=basis_record.knots,
+                    control_point_count=basis_record.control_point_count,
+                )
+            derivative_values.append(float(left - right))
+        derivatives = tuple(derivative_values)
+    return SplineBasisDerivativeEvaluationRecord(
+        degree=basis_record.degree,
+        knots=basis_record.knots,
+        control_point_count=basis_record.control_point_count,
+        parameter=basis_record.parameter,
+        span=basis_record.span,
+        derivatives=derivatives,
+    )
+
+
+def canonicalize_spline_control_net(
+    value: Sequence[Sequence[Sequence[float]]] | np.ndarray,
+    *,
+    dimensions: int = 3,
+    name: str = "control_net",
+) -> SplineControlNetRecord:
+    """Canonicalize a tensor-product spline control net and record validation details."""
+
+    resolved_dimensions = int(dimensions)
+    if resolved_dimensions < 1:
+        raise ValueError("dimensions must be positive.")
+    control_net = np.asarray(value, dtype=float)
+    if control_net.ndim != 3 or control_net.shape[2] != resolved_dimensions:
+        raise ValueError(f"{name} must have shape (u_count, v_count, {resolved_dimensions}).")
+    if control_net.shape[0] < 2 or control_net.shape[1] < 2:
+        raise ValueError(f"{name} must contain at least a 2x2 control lattice.")
+    if not np.all(np.isfinite(control_net)):
+        raise ValueError(f"{name} must contain only finite values.")
+    return SplineControlNetRecord(
+        control_net=control_net,
+        dimensions=resolved_dimensions,
+        point_count_u=int(control_net.shape[0]),
+        point_count_v=int(control_net.shape[1]),
+    )
+
+
 def build_loft_control_net(
     station_profiles: Sequence[Sequence[Sequence[float]] | np.ndarray],
     *,
@@ -189,9 +367,14 @@ def build_loft_control_net(
 __all__ = [
     "LoftControlNetConstructionRecord",
     "SplineBasisEvaluationRecord",
+    "SplineBasisDerivativeEvaluationRecord",
+    "SplineControlNetRecord",
+    "SplineDiagnostic",
     "SplineKnotPolicyRecord",
     "build_loft_control_net",
+    "canonicalize_spline_control_net",
     "evaluate_bspline_basis",
+    "evaluate_bspline_basis_derivative",
     "make_clamped_knot_vector",
     "validate_clamped_knot_vector",
 ]
