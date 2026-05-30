@@ -132,6 +132,9 @@ from impression.modeling import (
     collect_surface_csg_no_mesh_fallback_evidence,
     collect_sweep_csg_event_seeds,
     DisplacementAuthoringRequest,
+    DisplacementCompositionDiagnostic,
+    DisplacementCompositionRecord,
+    DisplacementCompositionResult,
     DisplacementDomainMappingRecord,
     DisplacementDomainOverlapRecord,
     DisplacementEvaluationDiagnostic,
@@ -372,6 +375,7 @@ from impression.modeling import (
     resolve_displacement_csg_source_identity,
     displacement_source_compatibility_report,
     plan_displacement_domain_resampling,
+    compose_displacement_csg_result,
     normalize_surface_seam_continuity_constraint,
     prepare_surface_boolean_operands,
     assess_implicit_field_security,
@@ -3015,6 +3019,77 @@ def test_displacement_domain_resampling_refuses_frame_and_budget_without_mesh_fa
     assert budget_plan.supported is False
     assert budget_plan.diagnostics[0].code == "resampling-budget-exceeded"
     assert "mesh fallback" in budget_plan.diagnostics[0].message
+
+
+def test_displacement_composition_operators_preserve_source_and_offsets() -> None:
+    source = PlanarSurfacePatch(family="planar")
+    left = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.asarray([[0.0, 1.0], [2.0, 3.0]], dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        direction="z",
+    )
+    right = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.asarray([[1.0, 0.5], [1.5, 4.0]], dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        direction="z",
+    )
+
+    union = compose_displacement_csg_result("union", left, right)
+    intersection = compose_displacement_csg_result("intersection", left, right)
+    difference = compose_displacement_csg_result("difference", left, right)
+
+    assert isinstance(union, DisplacementCompositionResult)
+    assert isinstance(union.operation_record, DisplacementCompositionRecord)
+    assert union.supported is True
+    assert union.patch is not None and union.body is not None
+    assert union.patch.source_patch.stable_identity == source.stable_identity
+    assert np.allclose(union.patch.displacement_samples, [[1.0, 1.0], [2.0, 4.0]])
+    assert np.allclose(intersection.patch.displacement_samples, [[0.0, 0.5], [1.5, 3.0]])
+    assert np.allclose(difference.patch.displacement_samples, [[0.0, 0.5], [0.5, 0.0]])
+    assert union.operation_record.no_mesh_fallback is True
+    assert union.patch.metadata["kernel"]["displacement_csg_composition"]["operation"] == "union"
+
+
+def test_displacement_composition_resamples_and_refuses_domain_failures_without_mesh_fallback() -> None:
+    source = PlanarSurfacePatch(family="planar")
+    left = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.asarray([[0.0, 0.0], [2.0, 2.0]], dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        direction="z",
+    )
+    fine = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.ones((3, 3), dtype=float),
+        alpha_mask=np.ones((3, 3), dtype=bool),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        direction="z",
+    )
+    frame_mismatch = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.ones((2, 2), dtype=float),
+        projection_bounds=(0.0, 1.0, 0.0, 1.0),
+        direction="x",
+    )
+
+    resampled = compose_displacement_csg_result("union", left, fine)
+    refused = compose_displacement_csg_result("union", left, frame_mismatch)
+
+    assert resampled.supported is True
+    assert resampled.operation_record.resampling.resample_kernel == "bilinear"
+    assert resampled.operation_record.resampling.lossiness == "sampled-reconstruction"
+    assert refused.supported is False
+    assert isinstance(refused.diagnostics[0], DisplacementCompositionDiagnostic)
+    assert refused.diagnostics[0].code == "domain-refusal"
+    assert refused.diagnostics[0].no_mesh_fallback is True
+    assert "mesh fallback" in refused.diagnostics[0].message
 
 
 def test_displacement_payload_authoring_builder_creates_sampled_surface_body() -> None:

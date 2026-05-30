@@ -588,7 +588,7 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 362: Heightmap CSG Fixture And Evidence Matrix (v1.0)](../specifications/surface-362-heightmap-csg-fixture-and-evidence-matrix-v1_0.md)
 - [x] [Surface Spec 363: Displacement Source Identity Resolution (v1.0)](../specifications/surface-363-displacement-source-identity-resolution-v1_0.md)
 - [x] [Surface Spec 364: Displacement Domain And Sample Resampling (v1.0)](../specifications/surface-364-displacement-domain-and-sample-resampling-v1_0.md)
-- [ ] [Surface Spec 365: Displacement Offset Composition Operators (v1.0)](../specifications/surface-365-displacement-offset-composition-operators-v1_0.md)
+- [x] [Surface Spec 365: Displacement Offset Composition Operators (v1.0)](../specifications/surface-365-displacement-offset-composition-operators-v1_0.md)
 - [ ] [Surface Spec 366: Displacement Source Mismatch Refusal (v1.0)](../specifications/surface-366-displacement-source-mismatch-refusal-v1_0.md)
 - [ ] [Surface Spec 367: Displacement Promotion Integration (v1.0)](../specifications/surface-367-displacement-promotion-integration-v1_0.md)
 - [ ] [Surface Spec 368: Displacement CSG Persistence And Fixtures (v1.0)](../specifications/surface-368-displacement-csg-persistence-and-fixtures-v1_0.md)
