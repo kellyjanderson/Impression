@@ -28,6 +28,7 @@ Architecture documents define:
 - [Higher-Order Parametric CSG Routes Architecture](higher-order-parametric-csg-routes-architecture.md)
 - [Surface CSG Trim Fragment Reconstruction Architecture](surface-csg-trim-fragment-reconstruction-architecture.md)
 - [Sampled and Implicit Surface CSG Support Architecture](sampled-implicit-surface-csg-support-architecture.md)
+- [Sampled and Implicit CSG Unsupported Row Implementation Architecture](sampled-implicit-csg-unsupported-row-implementation-architecture.md)
 - [Higher-Order Surface CSG Solver Architecture](higher-order-surface-csg-solver-architecture.md)
 - [Exact Surface Intersection Kernel Architecture](exact-surface-intersection-kernel-architecture.md)
 - [Higher-Order Seam Continuity Architecture](higher-order-seam-continuity-architecture.md)

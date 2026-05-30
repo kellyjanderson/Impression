@@ -14,12 +14,12 @@ execute.
 As of the current CSG matrix, each boolean operation has:
 
 - 9 exact executable analytic rows
-- 40 higher-order parametric rows marked `not-yet-implemented`
+- 40 higher-order parametric rows marked `declared-tolerance`
 - 51 sampled or implicit rows marked `unsupported`
 
-Across `union`, `difference`, and `intersection`, that means 273 non-executable
-operation/family rows still require solver work or an explicit supported
-surface-native operation policy.
+Across `union`, `difference`, and `intersection`, that means the remaining
+non-executable set is the 153 sampled/implicit operation/family rows now owned
+by the row-level implementation architecture.
 
 The target state is:
 
@@ -40,10 +40,11 @@ This document extends and sharpens:
 - [Surface Body Completion Architecture](surface-body-completion-architecture.md)
 - [Advanced Family Availability Producer Architecture](advanced-family-availability-producer-architecture.md)
 - [Sampled and Implicit Surface CSG Support Architecture](sampled-implicit-surface-csg-support-architecture.md)
+- [Sampled and Implicit CSG Unsupported Row Implementation Architecture](sampled-implicit-csg-unsupported-row-implementation-architecture.md)
 
 ## Current Non-Executable Row Classes
 
-### Higher-Order Parametric Rows
+### Resolved Higher-Order Parametric Rows
 
 Rows:
 
@@ -52,19 +53,19 @@ Rows:
 
 Current state:
 
-- `not-yet-implemented`
+- `declared-tolerance`
 - phase: `intersection-kernel`
 
-Why they are not executable:
+Why they are no longer part of the unsupported-row body of work:
 
-- no complete surface/surface intersection solver for these pair families
-- no guaranteed patch-local curve mapping for the resulting intersection curves
-- no robust overlap/coincident-region representation
-- no fragment graph for higher-order trim splitting
-- no result reconstruction that preserves higher-order source patches, trims,
-  seams, provenance, and validity
+- the higher-order route registry now declares executable routes for these
+  family pairs
+- analytic/B-spline, analytic/NURBS, spline/NURBS, sweep, and subdivision route
+  records have been implemented as declared-tolerance support
+- the higher-order fixture matrix verifies executable coverage without mesh
+  fallback evidence
 
-What makes them supported:
+What keeps them supported:
 
 - pair-specific exact or declared-tolerance intersection dispatch
 - bounded numeric residual and convergence records
@@ -509,6 +510,9 @@ Split decision:
 
 ## Change History
 
+- 2026-05-30: Updated current matrix language after higher-order CSG rows were
+  promoted to declared-tolerance support and linked the sampled/implicit
+  unsupported-row implementation architecture for the remaining 153 rows.
 - 2026-05-28: Created executable CSG completion architecture after the
   availability gates exposed that higher-order and sampled CSG rows were still
   diagnostic-only rather than executable.
