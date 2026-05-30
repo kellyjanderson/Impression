@@ -70,6 +70,27 @@ The audit looked for:
   without duplicate manifests where their new work is owned by the umbrella or
   component manifest listed above.
 
+## Deferral Signal Audit
+
+- [x] Searched architecture, specification, progression, code, and tests for
+  `deferred`, `not implemented`, `out of scope`, `excluded`, `not yet
+  supported`, `TODO`, `TBD`, and `stub` signals.
+- [x] Confirmed legacy Surface Specs 22, 66, and 67 still carry explicit
+  deferred/exclusion posture; they are tracked under Deferred Patch Family
+  Specs for replacement by the capability matrix.
+- [x] Confirmed code/test `not implemented yet` and `not-yet-implemented`
+  signals in CSG and higher-order seam continuity are covered by the
+  depth-completion architecture/specification set and are not acceptable final
+  completion states.
+- [x] Confirmed loft unsupported topology-transition diagnostics are covered by
+  authored-topology ambiguity and topology-completion work, not by mesh
+  fallback.
+- [x] Promoted NURBS exact conic producer helpers from an `out of scope` note to
+  an explicit advanced-family manifest candidate.
+- [x] Classified implicit external fields, heightmap external grids, and
+  displacement cross-body references as explicit refusal policies with embedded
+  canonical payloads, not uncaptured deferred work.
+
 ## Priority 0: Surface Body Completion Architecture Needed
 
 These items capture the new surface-body completion standard. They supersede
@@ -80,6 +101,10 @@ complete.
 
 - Status: `Specifications Written`
 - Architecture:
+  - [Surface CSG Executable Completion Architecture](surface-csg-executable-completion-architecture.md)
+  - [Higher-Order Parametric CSG Routes Architecture](higher-order-parametric-csg-routes-architecture.md)
+  - [Surface CSG Trim Fragment Reconstruction Architecture](surface-csg-trim-fragment-reconstruction-architecture.md)
+  - [Sampled and Implicit Surface CSG Support Architecture](sampled-implicit-surface-csg-support-architecture.md)
   - [Higher-Order Surface CSG Solver Architecture](higher-order-surface-csg-solver-architecture.md)
   - [Exact Surface Intersection Kernel Architecture](exact-surface-intersection-kernel-architecture.md)
   - [Higher-Order Seam Continuity Architecture](higher-order-seam-continuity-architecture.md)
@@ -93,6 +118,24 @@ complete.
 
 Architecture-defined work:
 
+- [ ] replace diagnostic-only CSG completion with an executable CSG coverage
+  gate that fails on `not-yet-implemented` and unresolved `unsupported` rows
+- [ ] split and implement higher-order parametric CSG routes for the 40
+  per-operation rows involving B-spline, NURBS, sweep, and subdivision
+- [ ] split and implement higher-order CSG row taxonomy, analytic/spline,
+  spline/NURBS pair, sweep, subdivision, route diagnostics, and fixture matrix
+  specs from the higher-order parametric CSG routes architecture
+- [ ] split and implement CSG patch-local mapping, trim arrangement, fragment
+  classification, operation selection, cap policy, shell assembly, seam rebuild,
+  and validity/persistence specs from the trim fragment reconstruction
+  architecture
+- [ ] split and implement sampled/implicit CSG policies for the 51 per-operation
+  rows involving implicit, heightmap, and displacement
+- [ ] distinguish sampled/implicit rows that are missing solver code from rows
+  that are mathematically unrepresentable in the requested result family
+- [ ] define result-family promotion policy for sampled CSG outputs, including
+  implicit, subdivision, NURBS/B-spline, and deliberate non-CSG replacement
+  workflows
 - [ ] promote CSG coverage from bounded analytic cases to a family-pair solver
   matrix covering every promoted patch-family pair
 - [ ] add CSG operation plans that accumulate unsupported/invalid diagnostics
@@ -201,6 +244,105 @@ Manifest notes:
   gates, primitive/feature integration, and verification evidence.
 - [x] Manifest reviewed through repeated rescore/split passes with no remaining
   candidate at `25+`.
+- [x] Final specification leaves added to
+  [Specifications README](../specifications/README.md) and
+  [Progression](../planning/progression.md).
+
+### Advanced Patch Family Implementation Completion
+
+- Status: `Manifest Promoted`
+- Architecture:
+  - [Advanced Patch Family Implementation Completion Architecture](advanced-patch-family-implementation-completion-architecture.md)
+- [x] Architecture document created for moving B-spline, NURBS, sweep,
+  subdivision, implicit, heightmap, and displacement from `planned` to
+  implemented with complete runtime, seam, CSG, loft, `.impress`,
+  tessellation, diagnostics, and evidence requirements.
+- [x] Specification manifest added using the project manifest shape and scoring
+  policy.
+- [x] Final specifications created for all 26 active manifest candidates.
+
+Architecture-defined work:
+
+- [ ] add an advanced-family promotion gate that separates `specified`,
+  `implemented`, and `available`
+- [ ] complete B-spline runtime, evaluation, derivatives, seams, tessellation,
+  `.impress`, CSG matrix, loft output, diagnostics, and evidence
+- [ ] complete NURBS rational evaluation, weight validation, exact conic
+  producer helpers, seams, tessellation, `.impress`, CSG matrix, loft output,
+  diagnostics, and evidence
+- [ ] complete sweep profile/path/frame evaluation, seams, tessellation,
+  `.impress`, CSG matrix, producer integration, diagnostics, and evidence
+- [ ] complete subdivision cage/crease evaluation, deterministic tessellation,
+  seam approximation, `.impress`, CSG matrix, diagnostics, and evidence
+- [ ] split and complete implicit field safety, extraction, CSG/intersection
+  policy, diagnostics, `.impress`, and evidence
+- [ ] split and complete heightmap `.impress`, seam/tessellation, CSG policy,
+  diagnostics, and evidence
+- [ ] split and complete displacement source-payload identity, evaluation,
+  tessellation, seam, CSG policy, diagnostics, `.impress`, and evidence
+- [ ] add advanced-family seam and boundary participation matrix
+- [ ] add advanced-family CSG support matrix and refusal policy
+- [ ] add advanced-family `.impress` whole-store coverage
+
+Manifest notes:
+
+- [x] Loop 1 review split the mandatory `25+` implicit, heightmap, and
+  displacement parent candidates.
+- [x] Loop 2 review split hidden shared spline basis and shared path frame
+  transport work from B-spline and sweep completion.
+- [x] Loop 3 review split advanced CSG support/refusal and advanced `.impress`
+  codec/evidence candidates despite scores below `25`.
+- [x] Loop 4 review split NURBS rational evaluation, subdivision scheme/cage
+  evaluation, heightmap evaluation/seam evidence, and displacement
+  evaluation/seam evidence despite scores below `25`.
+- [x] Deferred/not-implemented signal check promoted exact conic producer
+  helpers to their own NURBS candidate and clarified that external implicit,
+  heightmap, and displacement references are explicit refusal policies rather
+  than uncaptured deferred work.
+- [x] No active candidate remains at `25+` after the fourth critical
+  review/rescore/split loop.
+- [x] Final specification leaves added to
+  [Specifications README](../specifications/README.md) and
+  [Progression](../planning/progression.md).
+
+### Advanced Family Availability Producers And Operation Posture
+
+- Status: `Manifest Promoted`
+- Architecture:
+  - [Advanced Family Availability Producer Architecture](advanced-family-availability-producer-architecture.md)
+- [x] Architecture document created for the `implemented` to `available` gap in
+  subdivision, implicit, heightmap, and displacement families.
+- [x] Specification manifest added and split so no active candidate remains at
+  `25+`.
+- [x] Final specifications created for all 17 active manifest candidates.
+
+Architecture-defined work:
+
+- [ ] add availability-state fields separate from implementation-state fields
+- [ ] add a producer/import/payload authoring path registry
+- [ ] add subdivision native builder or cage import producer
+- [ ] add implicit declarative field builder and authoring safety diagnostics
+- [ ] add heightmap finite-grid builder and optional import adapter boundary
+- [ ] add displacement native authoring producer with source identity handling
+- [ ] add producer/storage/tessellation operation-row verification for available
+  families
+- [ ] add seam/loft and CSG operation-row verification for available families
+- [ ] add availability reference evidence gate and completion report builder
+- [ ] ensure available families cannot rely on class existence alone
+
+Manifest notes:
+
+- [x] Initial review split implicit authoring, heightmap producer, and
+  availability operation evidence candidates that scored `25+`.
+- [x] Four requested review/rescore/split loops completed:
+  subdivision native/import, implicit safety/budget diagnostics, displacement
+  source/payload authoring, and CSG classification/no-mesh-fallback evidence.
+- [x] Critical rescore split producer-path operation row verification from
+  storage/tessellation operation row verification.
+- [x] Active candidates now cover availability gates, subdivision producers,
+  implicit positive and negative authoring paths, heightmap native/import paths,
+  displacement authoring, operation rows, reference evidence, and completion
+  reporting.
 - [x] Final specification leaves added to
   [Specifications README](../specifications/README.md) and
   [Progression](../planning/progression.md).
@@ -626,6 +768,10 @@ When a new architecture document is added or materially updated:
 
 ## Change History
 
+- 2026-05-27: Added the Advanced Patch Family Implementation Completion
+  Architecture and tracker obligations for moving B-spline, NURBS, sweep,
+  subdivision, implicit, heightmap, and displacement from `planned` to
+  implemented.
 - 2026-05-27: Promoted the surface-body completion manifest and late split
   candidates into final specification leaves and added them to progression.
 - 2026-05-27: Recorded the extra critical manifest review that split
