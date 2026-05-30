@@ -10,6 +10,10 @@ from impression.modeling import (
     HeightmapAlphaMaskPolicy,
     HeightmapCacheKeyRecord,
     HeightmapMeshCompatibilityResult,
+    HeightmapClippingRecord,
+    HeightmapGridAlignmentRecord,
+    HeightmapProjectionDomainRecord,
+    HeightmapProjectionRefusalDiagnostic,
     HeightmapProjectionBoundsPolicy,
     HeightmapSampleCoordinateRecord,
     HeightmapSurfacePatch,
@@ -21,10 +25,12 @@ from impression.modeling import (
     displace_heightmap,
     heightmap_cache_key_record,
     heightmap_mesh_compatibility_result,
+    heightmap_projection_domain_record,
     heightmap_sample_coordinate_record,
     make_surface_body,
     make_surface_shell,
     make_heightmap_surface_patch,
+    plan_heightmap_grid_alignment,
     resolve_heightmap_alpha_mask_policy,
     resolve_heightmap_projection_bounds_policy,
     tessellate_surface_body,
@@ -182,6 +188,97 @@ def test_heightmap_projection_policy_refuses_degenerate_and_unsupported_projecti
 
     with pytest.raises(ValueError, match="plane must be"):
         resolve_heightmap_projection_bounds_policy(plane="uv", bounds=(0.0, 1.0, 0.0, 1.0))
+
+
+def test_heightmap_projection_domain_record_derives_xy_bounds_and_grid_spacing():
+    patch = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.zeros((3, 5), dtype=float),
+        alpha_mask=np.ones((3, 5), dtype=bool),
+        xy_scale=(0.5, 2.0),
+        center=(10.0, 20.0, 0.0),
+    )
+
+    record = heightmap_projection_domain_record(patch)
+
+    assert isinstance(record, HeightmapProjectionDomainRecord)
+    assert record.projection == "planar"
+    assert record.plane == "xy"
+    assert record.sample_shape == (3, 5)
+    assert record.sample_spacing == (0.5, 2.0)
+    assert record.bounds == (9.0, 11.0, 18.0, 22.0)
+    assert record.origin == (9.0, 18.0)
+
+
+def test_heightmap_grid_alignment_plans_aligned_overlap_and_clipping():
+    left = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.zeros((4, 4), dtype=float),
+        alpha_mask=np.ones((4, 4), dtype=bool),
+        xy_scale=(1.0, 1.0),
+        center=(0.0, 0.0, 0.0),
+    )
+    right = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.ones((4, 4), dtype=float),
+        alpha_mask=np.ones((4, 4), dtype=bool),
+        xy_scale=(1.0, 1.0),
+        center=(1.0, 0.0, 0.0),
+    )
+
+    plan = plan_heightmap_grid_alignment(left, right)
+
+    assert isinstance(plan, HeightmapGridAlignmentRecord)
+    assert plan.supported is True
+    assert plan.alignment == "aligned"
+    assert plan.resample_kernel == "none"
+    assert isinstance(plan.clipping, HeightmapClippingRecord)
+    assert plan.clipping.has_overlap is True
+    assert plan.clipping.overlap_bounds == (-0.5, 1.5, -1.5, 1.5)
+    assert plan.result_shape == (4, 3)
+    assert plan.diagnostics == ()
+
+
+def test_heightmap_grid_alignment_plans_bilinear_resampling_for_overlapping_misaligned_grids():
+    left = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.zeros((3, 3), dtype=float),
+        alpha_mask=np.ones((3, 3), dtype=bool),
+        xy_scale=(1.0, 1.0),
+        center=(0.0, 0.0, 0.0),
+    )
+    right = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.ones((5, 5), dtype=float),
+        alpha_mask=np.ones((5, 5), dtype=bool),
+        xy_scale=(0.5, 0.5),
+        center=(0.0, 0.0, 0.0),
+    )
+
+    plan = plan_heightmap_grid_alignment(left, right)
+
+    assert plan.supported is True
+    assert plan.alignment == "resample-required"
+    assert plan.resample_kernel == "bilinear"
+    assert plan.result_shape == (5, 5)
+    assert plan.clipping is not None and plan.clipping.has_overlap is True
+
+
+def test_heightmap_grid_alignment_refuses_disjoint_domains_and_projection_mismatch_without_mesh_fallback():
+    left = HeightmapSurfacePatch(family="heightmap", height_samples=np.zeros((2, 2), dtype=float), center=(0.0, 0.0, 0.0))
+    right = HeightmapSurfacePatch(family="heightmap", height_samples=np.ones((2, 2), dtype=float), center=(10.0, 0.0, 0.0))
+
+    disjoint = plan_heightmap_grid_alignment(left, right)
+    mismatch = plan_heightmap_grid_alignment(left, left, right_plane="xz")
+
+    assert disjoint.supported is False
+    assert disjoint.alignment == "refused"
+    assert isinstance(disjoint.diagnostics[0], HeightmapProjectionRefusalDiagnostic)
+    assert disjoint.diagnostics[0].code == "disjoint-domain"
+    assert disjoint.diagnostics[0].no_mesh_fallback is True
+    assert mismatch.supported is False
+    assert mismatch.diagnostics[0].code == "projection-mismatch"
+    assert "mesh fallback" in mismatch.diagnostics[0].message
 
 
 def test_displace_heightmap_surface_projection_planes_and_explicit_bounds():
