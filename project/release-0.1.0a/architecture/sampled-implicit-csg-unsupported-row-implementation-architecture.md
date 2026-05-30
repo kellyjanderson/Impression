@@ -255,25 +255,40 @@ The architecture branch is complete only when:
 
 ## Specification Manifest for Discovery
 
+## Manifest Review History
+
+- 2026-05-30 loop 1: Critical review found that implicit composition, heightmap CSG, displacement CSG, promotion, and persistence/evidence were too broad. Split candidates scoring 25 or more.
+- 2026-05-30 loop 2: Reviewed split leaves for hidden storage, safety, and route ownership. Split implicit work into expression graph, operand adapters, safety, operation semantics, persistence, and fixtures.
+- 2026-05-30 loop 3: Reviewed sampled-family leaves for representability gaps. Split heightmap and displacement work into domain planning, operation semantics, refusal, promotion, persistence, and fixtures.
+- 2026-05-30 loop 4: Reviewed promotion and evidence leaves for hidden work. Split promotion into matrix, provenance/lossiness, target reconstruction criteria, persistence, and no-mesh evidence.
+- 2026-05-30 loop 5: Final review rescored every leaf and confirmed no manifest candidate remains at 25 or more; 16-24 candidates carry explicit cohesion rationale.
+
+Final manifest result:
+
+- Initial candidates reviewed: 7
+- Final candidate specs: 29
+- Split-trigger candidates resolved: 5
+- Remaining candidates scoring 25 or more: 0
+- Unsupported operation rows represented: 153
+
 ### Candidate Spec: Sampled Implicit Unsupported Row Tracker
 
 Discovery purpose:
-- Add a durable row tracker that enumerates the 153 unsupported rows and fails
-  completion when a row lacks an in-progress or final route classification.
+- Add a durable tracker for the 153 unsupported sampled/implicit CSG rows and fail completion when any row lacks a current route classification.
 
 Responsibilities:
-- Functions/methods: row inventory builder, unsupported-row status verifier
-- Data structures/models: unsupported row tracking record, route status enum
-- Dependencies/services: CSG support matrix, patch family capability matrix
-- Returns/outputs/signals: unsupported row report, missing-route diagnostics
+- Functions/methods: row inventory builder; unsupported-row status verifier
+- Data structures/models: unsupported row tracking record; route status enum
+- Dependencies/services: CSG support matrix; patch family capability matrix
+- Returns/outputs/signals: unsupported row report; missing-route diagnostics
 - UI surfaces/components: none
 - UI fields/elements: none
 - Reusable code plan: extend existing CSG matrix reporting helpers
 - Database queries/tables/migrations: none
 - Async/concurrency behavior: none
 - Destructive/write behavior: none
-- Security/privacy-sensitive behavior: none
-- Performance-sensitive behavior: bounded matrix scan
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
 - Cross-screen reusable behavior: not applicable
 
 Project readiness fields:
@@ -286,393 +301,1485 @@ Project readiness fields:
 - Readiness blockers: none
 
 Score:
-- Functions/methods: 2 x 2 = 4
-- Data structures/models: 2 x 1 = 2
-- Dependencies/services: 2 x 1 = 2
-- Returns/outputs/signals: 2 x 1 = 2
-- UI surfaces/components: 0 x 2 = 0
-- UI fields/elements: 0 x 1 = 0
-- Existing reusable code reused as-is: 1 x 0.5 = 0.5
-- Adding code to an existing library/module: 1 x 1 = 1
-- Creating a new reusable library/module: 0 x 3 = 0
-- Database queries/tables/migrations: 0 x 2 = 0
-- Async/concurrency behavior: 0 x 1 = 0
-- Destructive/write behavior: 0 x 2 = 0
-- Security/privacy-sensitive behavior: 0 x 2 = 0
-- Performance-sensitive behavior: 1 x 1 = 1
-- Cross-screen reusable behavior: 0 x 1 = 0
-- Test scenarios/fixtures: 2 x 1 = 2
-- Readiness blockers: 0 x 2 = 0
+- Functions/methods: 2
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 0
+- Security/privacy-sensitive behavior: 0
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
 - Total: 16.5
 
 Split decision:
-- Keep cohesive. This spec only creates the tracker and gate for the known
-  unsupported rows.
+- Keep cohesive. This leaf only creates the tracker and gate for the known unsupported rows.
 
-### Candidate Spec: Implicit Composition Route
+### Candidate Spec: Implicit Field Expression Graph
 
 Discovery purpose:
-- Implement implicit-preserving and implicit-promoted CSG routes for rows where
-  an implicit result is the correct surface-native representation.
+- Define the implicit field expression graph used by implicit-preserving and implicit-promoted sampled/implicit CSG routes.
 
 Responsibilities:
-- Functions/methods: field adapter builder, field composition builder, safety
-  validator
-- Data structures/models: implicit expression graph, bounded field domain,
-  field provenance record
-- Dependencies/services: implicit payload builder, CSG route registry,
-  `.impress` implicit codec
-- Returns/outputs/signals: implicit result patch, unsafe-field diagnostic
+- Functions/methods: field node constructor; expression normalization; domain binder
+- Data structures/models: implicit field expression node; bounded field domain; composition provenance seed
+- Dependencies/services: implicit payload builder; CSG route registry
+- Returns/outputs/signals: normalized expression graph; invalid-expression diagnostic
 - UI surfaces/components: none
 - UI fields/elements: none
-- Reusable code plan: extend implicit family and CSG route modules
+- Reusable code plan: extend implicit family records and CSG route records
 - Database queries/tables/migrations: none
 - Async/concurrency behavior: none
-- Destructive/write behavior: creates new CSG result payloads
-- Security/privacy-sensitive behavior: validates untrusted field payloads before
-  composition
-- Performance-sensitive behavior: bounded evaluation domains and sample budgets
+- Destructive/write behavior: none
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
 - Cross-screen reusable behavior: not applicable
 
 Project readiness fields:
-- Implementation owner/module: `src/impression/modeling/csg.py`,
-  `src/impression/modeling/surface.py`, `src/impression/io/impress.py`
-- Chosen defaults / parameters: hard Boolean composition first; soft blending is
-  an explicit authored option
-- Test strategy: implicit/implicit, analytic/implicit, sampled/implicit,
-  unsafe-field refusal, `.impress` round trip
-- Data ownership: implicit payload owns field expression; CSG owns provenance
-- Routes: CSG planner to implicit route to result body
-- Open questions / nuance discovered: exact field adapters for arbitrary
-  higher-order operands may require declared-tolerance evaluator records
+- Implementation owner/module: `src/impression/modeling/surface.py`, `src/impression/modeling/csg.py`
+- Chosen defaults / parameters: hard Boolean field expression nodes are canonical; soft blends are explicit authored options
+- Test strategy: primitive expression nodes, nested composition, invalid domains, deterministic ids
+- Data ownership: implicit payload owns field expression; CSG owns operation provenance
+- Routes: CSG planner to expression graph builder
+- Open questions / nuance discovered: blend-node parameter vocabulary
 - Readiness blockers: implicit payload safety verifier
 
 Score:
-- Functions/methods: 3 x 2 = 6
-- Data structures/models: 3 x 1 = 3
-- Dependencies/services: 3 x 1 = 3
-- Returns/outputs/signals: 2 x 1 = 2
-- UI surfaces/components: 0 x 2 = 0
-- UI fields/elements: 0 x 1 = 0
-- Existing reusable code reused as-is: 1 x 0.5 = 0.5
-- Adding code to an existing library/module: 3 x 1 = 3
-- Creating a new reusable library/module: 0 x 3 = 0
-- Database queries/tables/migrations: 0 x 2 = 0
-- Async/concurrency behavior: 0 x 1 = 0
-- Destructive/write behavior: 1 x 2 = 2
-- Security/privacy-sensitive behavior: 1 x 2 = 2
-- Performance-sensitive behavior: 2 x 1 = 2
-- Cross-screen reusable behavior: 0 x 1 = 0
-- Test scenarios/fixtures: 5 x 1 = 5
-- Readiness blockers: 1 x 2 = 2
-- Total: 32.5
+- Functions/methods: 4
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 0
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 20.5
 
 Split decision:
-- Split required into field expression graph, operand field adapters, safety
-  validation, composition operation semantics, persistence, and fixtures.
+- Review for split. Cohesive because this leaf only defines expression representation, not adapters or execution.
 
-### Candidate Spec: Heightmap CSG Route
+### Candidate Spec: Implicit Operand Field Adapters
 
 Discovery purpose:
-- Implement heightmap-preserving CSG for 2.5D representable rows and route
-  non-representable rows to promotion or representation refusal.
+- Add operand-to-field adapters for analytic, spline, sweep, subdivision, heightmap, and displacement operands that can participate in implicit CSG routes.
 
 Responsibilities:
-- Functions/methods: projection-domain checker, grid resampler, height
-  composition operator, overhang detector
-- Data structures/models: heightmap CSG payload, grid alignment record,
-  heightmap representability diagnostic
-- Dependencies/services: heightmap payload builder, CSG route registry,
-  `.impress` heightmap codec
-- Returns/outputs/signals: heightmap result patch, promotion/refusal decision
+- Functions/methods: adapter selector; analytic field adapter; sampled evaluator adapter
+- Data structures/models: operand field adapter record; adapter residual record; adapter refusal diagnostic
+- Dependencies/services: field expression graph; family evaluators; CSG route registry
+- Returns/outputs/signals: field adapter payload; adapter refusal diagnostic
 - UI surfaces/components: none
 - UI fields/elements: none
-- Reusable code plan: extend heightmap family and CSG route modules
+- Reusable code plan: extend CSG route modules with reusable adapter records
 - Database queries/tables/migrations: none
 - Async/concurrency behavior: none
-- Destructive/write behavior: creates new CSG result payloads
-- Security/privacy-sensitive behavior: validates external grid/source payloads
-- Performance-sensitive behavior: bounded resampling and grid-size budgets
+- Destructive/write behavior: none
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
 - Cross-screen reusable behavior: not applicable
 
 Project readiness fields:
-- Implementation owner/module: `src/impression/modeling/csg.py`,
-  `src/impression/modeling/surface.py`, `src/impression/io/impress.py`
-- Chosen defaults / parameters: non-2.5D output refuses unless a promotion route
-  is declared
-- Test strategy: aligned grids, resampled grids, overhang refusal, promotion,
-  `.impress` round trip
-- Data ownership: heightmap payload owns grid data; CSG owns route decision
-- Routes: planner to heightmap route to result body or promotion route
-- Open questions / nuance discovered: default promotion target for overhangs
-- Readiness blockers: result-family promotion policy
+- Implementation owner/module: `src/impression/modeling/csg.py`, `src/impression/modeling/surface.py`
+- Chosen defaults / parameters: exact analytic adapters are preferred; higher-order and sampled adapters are declared-tolerance with bounded domains
+- Test strategy: analytic, spline, sweep, subdivision, heightmap, displacement adapter coverage plus unsupported adapter refusal
+- Data ownership: source family owns evaluation facts; CSG owns adapter route selection
+- Routes: operand family to adapter selector to implicit expression graph
+- Open questions / nuance discovered: which higher-order operands can expose exact signed fields
+- Readiness blockers: field expression graph
 
 Score:
-- Functions/methods: 4 x 2 = 8
-- Data structures/models: 3 x 1 = 3
-- Dependencies/services: 3 x 1 = 3
-- Returns/outputs/signals: 2 x 1 = 2
-- UI surfaces/components: 0 x 2 = 0
-- UI fields/elements: 0 x 1 = 0
-- Existing reusable code reused as-is: 1 x 0.5 = 0.5
-- Adding code to an existing library/module: 3 x 1 = 3
-- Creating a new reusable library/module: 0 x 3 = 0
-- Database queries/tables/migrations: 0 x 2 = 0
-- Async/concurrency behavior: 0 x 1 = 0
-- Destructive/write behavior: 1 x 2 = 2
-- Security/privacy-sensitive behavior: 1 x 2 = 2
-- Performance-sensitive behavior: 2 x 1 = 2
-- Cross-screen reusable behavior: 0 x 1 = 0
-- Test scenarios/fixtures: 5 x 1 = 5
-- Readiness blockers: 1 x 2 = 2
-- Total: 34.5
+- Functions/methods: 4
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 0
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 2
+- Total: 22.5
 
 Split decision:
-- Split required into projection/grid alignment, height composition,
-  representability/refusal, promotion integration, persistence, and fixtures.
+- Review for split. Cohesive because all adapters share one route contract and feed the same graph.
 
-### Candidate Spec: Displacement CSG Route
+### Candidate Spec: Implicit Field Safety Validation
 
 Discovery purpose:
-- Implement displacement-preserving CSG where source identity and domain rules
-  allow the result to remain a displacement surface.
+- Validate implicit field payloads before sampled/implicit CSG composition so unsafe or unbounded fields refuse deterministically.
 
 Responsibilities:
-- Functions/methods: source identity resolver, source-domain overlap checker,
-  displacement resampler, offset composition operator
-- Data structures/models: displacement CSG payload, source identity record,
-  source mismatch diagnostic
-- Dependencies/services: displacement payload builder, CSG route registry,
-  `.impress` displacement codec
-- Returns/outputs/signals: displacement result patch, promotion/refusal decision
+- Functions/methods: safety validator; bounded-domain checker; evaluation-budget checker
+- Data structures/models: field safety report; unsafe-field diagnostic
+- Dependencies/services: implicit payload builder; route planner
+- Returns/outputs/signals: accepted safety report; unsafe refusal diagnostic
 - UI surfaces/components: none
 - UI fields/elements: none
-- Reusable code plan: extend displacement family and CSG route modules
+- Reusable code plan: reuse existing implicit safety records and add CSG route integration
 - Database queries/tables/migrations: none
 - Async/concurrency behavior: none
-- Destructive/write behavior: creates new CSG result payloads
-- Security/privacy-sensitive behavior: rejects unsafe external or cross-body
-  source references
-- Performance-sensitive behavior: bounded resampling and source-domain checks
+- Destructive/write behavior: creates or updates surface-native CSG result payloads
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
 - Cross-screen reusable behavior: not applicable
 
 Project readiness fields:
-- Implementation owner/module: `src/impression/modeling/csg.py`,
-  `src/impression/modeling/surface.py`, `src/impression/io/impress.py`
-- Chosen defaults / parameters: source mismatch refuses unless promotion is
-  declared
-- Test strategy: same-source composition, source mismatch refusal, cross-domain
-  promotion, `.impress` round trip
-- Data ownership: displacement payload owns source reference; CSG owns route
-  decision
-- Routes: planner to displacement route to result body or promotion route
-- Open questions / nuance discovered: how much source-topology change can remain
-  displacement
-- Readiness blockers: source identity resolver and promotion policy
+- Implementation owner/module: `src/impression/modeling/surface.py`, `src/impression/modeling/csg.py`
+- Chosen defaults / parameters: unbounded or external executable fields refuse before composition
+- Test strategy: safe field, missing bounds, unsafe external payload, budget overflow
+- Data ownership: implicit payload owns safety facts; CSG consumes them before execution
+- Routes: field graph to safety validator to composition route
+- Open questions / nuance discovered: none
+- Readiness blockers: none
 
 Score:
-- Functions/methods: 4 x 2 = 8
-- Data structures/models: 3 x 1 = 3
-- Dependencies/services: 3 x 1 = 3
-- Returns/outputs/signals: 2 x 1 = 2
-- UI surfaces/components: 0 x 2 = 0
-- UI fields/elements: 0 x 1 = 0
-- Existing reusable code reused as-is: 1 x 0.5 = 0.5
-- Adding code to an existing library/module: 3 x 1 = 3
-- Creating a new reusable library/module: 0 x 3 = 0
-- Database queries/tables/migrations: 0 x 2 = 0
-- Async/concurrency behavior: 0 x 1 = 0
-- Destructive/write behavior: 1 x 2 = 2
-- Security/privacy-sensitive behavior: 1 x 2 = 2
-- Performance-sensitive behavior: 2 x 1 = 2
-- Cross-screen reusable behavior: 0 x 1 = 0
-- Test scenarios/fixtures: 4 x 1 = 4
-- Readiness blockers: 2 x 2 = 4
-- Total: 35.5
+- Functions/methods: 2
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 0
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 1
+- Total: 19.5
 
 Split decision:
-- Split required into source identity, domain/resampling, offset composition,
-  source mismatch refusal, promotion integration, persistence, and fixtures.
+- Keep cohesive. This is the shared security/safety gate.
 
-### Candidate Spec: Sampled Implicit Result Promotion Policy
+### Candidate Spec: Implicit Composition Operation Semantics
 
 Discovery purpose:
-- Define and implement promotion from sampled or implicit-involving rows into
-  implicit, subdivision, NURBS, or B-spline result families.
+- Implement hard Boolean field composition semantics for union, difference, and intersection implicit CSG results.
 
 Responsibilities:
-- Functions/methods: promotion selector, lossiness recorder, provenance builder
-- Data structures/models: promotion policy row, promotion provenance record,
-  lossiness metadata record
-- Dependencies/services: CSG route registry, target family payload codecs,
-  reference evidence gate
-- Returns/outputs/signals: promoted result patch, promotion diagnostic
+- Functions/methods: union composer; difference composer; intersection composer; residual annotator
+- Data structures/models: composition operation record; operand sign policy; composition diagnostic
+- Dependencies/services: field expression graph; safety validator; route registry
+- Returns/outputs/signals: implicit result patch; composition diagnostics
 - UI surfaces/components: none
 - UI fields/elements: none
-- Reusable code plan: extend CSG policy matrix and `.impress` payload dispatch
+- Reusable code plan: extend CSG route modules with reusable composition helpers
 - Database queries/tables/migrations: none
 - Async/concurrency behavior: none
-- Destructive/write behavior: changes result family for supported operations
-- Security/privacy-sensitive behavior: refuses unsafe payload promotion
-- Performance-sensitive behavior: bounded reconstruction and sample budgets
+- Destructive/write behavior: creates or updates surface-native CSG result payloads
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
 - Cross-screen reusable behavior: not applicable
 
 Project readiness fields:
-- Implementation owner/module: `src/impression/modeling/csg.py`,
-  `src/impression/io/impress.py`
-- Chosen defaults / parameters: implicit for volumetric predicate preservation;
-  subdivision for bounded reconstructed surfaces
-- Test strategy: promotion matrix, lossiness metadata, source provenance,
-  round-trip, no mesh fallback
+- Implementation owner/module: `src/impression/modeling/csg.py`
+- Chosen defaults / parameters: union uses min, intersection uses max, difference uses max(base, negated cutter)
+- Test strategy: implicit/implicit and adapter/implicit operation fixtures, operand order checks, sign policy checks
+- Data ownership: CSG owns operation semantics; implicit payload owns resulting graph
+- Routes: planner to composer to SurfaceBody result
+- Open questions / nuance discovered: soft Boolean composition is not default
+- Readiness blockers: field graph and safety validator
+
+Score:
+- Functions/methods: 5
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 2
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 23.5
+
+Split decision:
+- Review for split. Cohesive because all three operations share one composition policy and result shape.
+
+### Candidate Spec: Implicit CSG Impress Payload Persistence
+
+Discovery purpose:
+- Persist composed implicit CSG payloads and round-trip them through `.impress` without converting to mesh truth.
+
+Responsibilities:
+- Functions/methods: implicit CSG payload encoder; decoder; round-trip verifier
+- Data structures/models: implicit composition payload record; operation provenance payload
+- Dependencies/services: implicit field expression graph; `.impress` root codec
+- Returns/outputs/signals: serialized payload; round-trip diagnostics
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend existing `.impress` implicit codec dispatch
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: creates or updates surface-native CSG result payloads
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `src/impression/io/impress.py`, `src/impression/modeling/csg.py`
+- Chosen defaults / parameters: payload includes operation provenance and bounded domain
+- Test strategy: round-trip composed fields, malformed payload refusal, version compatibility
+- Data ownership: `.impress` owns serialization; CSG owns semantic payload
+- Routes: CSG result to codec to restored SurfaceBody
+- Open questions / nuance discovered: none
+- Readiness blockers: composition payload record
+
+Score:
+- Functions/methods: 3
+- Data structures/models: 2
+- Dependencies/services: 2
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 2
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 2
+- Readiness blockers: 0
+- Total: 18.5
+
+Split decision:
+- Keep cohesive. This leaf only covers implicit persistence.
+
+### Candidate Spec: Implicit CSG Fixture And Evidence Matrix
+
+Discovery purpose:
+- Add reference and diagnostic evidence for implicit-preserving and implicit-promoted CSG routes.
+
+Responsibilities:
+- Functions/methods: fixture enumerator; evidence collector; no-mesh assertion
+- Data structures/models: implicit CSG fixture row; evidence report; diagnostic snapshot
+- Dependencies/services: reference artifact lifecycle; implicit route records
+- Returns/outputs/signals: clean evidence report; dirty evidence diagnostic
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend existing reference evidence helpers
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: none
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `tests/test_surface_csg.py`, `project/release-0.1.0a/reference-artifacts/`
+- Chosen defaults / parameters: dirty artifacts never count as completion
+- Test strategy: success, unsafe refusal, adapter refusal, persistence, no-mesh fallback fixtures
+- Data ownership: tests own evidence; CSG owns route behavior
+- Routes: fixture builder to route execution to evidence promotion
+- Open questions / nuance discovered: fixture matrix size
+- Readiness blockers: implicit route payloads
+
+Score:
+- Functions/methods: 3
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 0
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 2
+- Total: 21.5
+
+Split decision:
+- Review for split. Cohesive because this leaf only proves implicit route evidence.
+
+### Candidate Spec: Heightmap Projection And Grid Alignment
+
+Discovery purpose:
+- Define projection-plane agreement, XY-domain overlap, clipping, and grid alignment for heightmap-preserving CSG.
+
+Responsibilities:
+- Functions/methods: projection checker; domain overlap checker; grid alignment planner
+- Data structures/models: projection domain record; grid alignment record; clipping record
+- Dependencies/services: heightmap payload builder; CSG route registry
+- Returns/outputs/signals: aligned grid plan; projection refusal diagnostic
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend heightmap family helpers and CSG route modules
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: none
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `src/impression/modeling/csg.py`, `src/impression/modeling/surface.py`
+- Chosen defaults / parameters: nonmatching projection frames refuse unless a promotion route is declared
+- Test strategy: aligned grids, resampled grids, disjoint domains, projection mismatch
+- Data ownership: heightmap owns grid facts; CSG owns route decision
+- Routes: planner to projection checker to grid plan
+- Open questions / nuance discovered: default resampling kernel
+- Readiness blockers: none
+
+Score:
+- Functions/methods: 6
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 0
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 22.5
+
+Split decision:
+- Review for split. Cohesive because this leaf produces the grid plan consumed by height composition.
+
+### Candidate Spec: Heightmap Composition Operators
+
+Discovery purpose:
+- Implement heightmap-preserving union, difference, and intersection operators over an aligned output grid.
+
+Responsibilities:
+- Functions/methods: height union operator; height intersection operator; height difference operator; operation diagnostic builder
+- Data structures/models: height composition record; sampled operation metadata
+- Dependencies/services: grid alignment plan; heightmap payload builder
+- Returns/outputs/signals: heightmap result patch; operation diagnostics
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend CSG route module with reusable height operators
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: creates or updates surface-native CSG result payloads
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `src/impression/modeling/csg.py`
+- Chosen defaults / parameters: operators only run after projection/grid alignment succeeds
+- Test strategy: same-grid, resampled-grid, operand-order, boundary clipping fixtures
+- Data ownership: CSG owns operation semantics; heightmap owns payload values
+- Routes: grid plan to height operator to result patch
+- Open questions / nuance discovered: difference semantics for non-solid height layers
+- Readiness blockers: grid alignment leaf
+
+Score:
+- Functions/methods: 5
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 2
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 23.5
+
+Split decision:
+- Review for split. Cohesive because all operators share the same aligned-grid execution shape.
+
+### Candidate Spec: Heightmap Representability And Refusal
+
+Discovery purpose:
+- Detect overhangs, multi-valued results, invalid projection states, and other non-2.5D outcomes before heightmap CSG executes as heightmap.
+
+Responsibilities:
+- Functions/methods: representability checker; overhang detector; refusal diagnostic builder
+- Data structures/models: heightmap representability report; overhang diagnostic
+- Dependencies/services: grid alignment plan; route planner
+- Returns/outputs/signals: representability verdict; supported refusal result
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend CSG diagnostics and heightmap helpers
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: none
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `src/impression/modeling/csg.py`, `src/impression/modeling/surface.py`
+- Chosen defaults / parameters: non-2.5D output refuses unless promotion is declared
+- Test strategy: overhang, multivalue, invalid projection, unsafe grid fixtures
+- Data ownership: heightmap owns representability facts; CSG owns refusal route
+- Routes: grid plan to representability check to operator or refusal
+- Open questions / nuance discovered: none
+- Readiness blockers: none
+
+Score:
+- Functions/methods: 4
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 0
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 20.5
+
+Split decision:
+- Keep cohesive. This is the heightmap refusal boundary.
+
+### Candidate Spec: Heightmap Promotion Integration
+
+Discovery purpose:
+- Route heightmap CSG results that cannot remain heightmaps into declared promotion targets.
+
+Responsibilities:
+- Functions/methods: promotion trigger; promotion target selector; promotion diagnostic builder
+- Data structures/models: heightmap promotion decision; promotion trigger record
+- Dependencies/services: heightmap representability report; sampled implicit promotion policy
+- Returns/outputs/signals: promotion decision; promoted route request
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend CSG promotion policy helpers
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: creates or updates surface-native CSG result payloads
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `src/impression/modeling/csg.py`
+- Chosen defaults / parameters: implicit is default for volumetric outcomes; subdivision is default for bounded reconstructed surfaces
+- Test strategy: overhang promotion, topology-change promotion, no-route refusal
+- Data ownership: CSG owns promotion; target family owns payload
+- Routes: heightmap refusal boundary to promotion selector
+- Open questions / nuance discovered: exact spline promotion criteria
+- Readiness blockers: promotion policy leaf
+
+Score:
+- Functions/methods: 2
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 2
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 20.5
+
+Split decision:
+- Review for split. Cohesive because this leaf only bridges heightmap refusal into shared promotion.
+
+### Candidate Spec: Heightmap CSG Impress Payload Persistence
+
+Discovery purpose:
+- Persist heightmap CSG payloads with grid alignment, resampling, operation provenance, and lossiness metadata.
+
+Responsibilities:
+- Functions/methods: heightmap CSG payload encoder; decoder; round-trip verifier
+- Data structures/models: heightmap CSG payload record; resampling metadata record
+- Dependencies/services: heightmap composition record; `.impress` codec
+- Returns/outputs/signals: serialized payload; round-trip diagnostics
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend existing heightmap `.impress` codec dispatch
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: creates or updates surface-native CSG result payloads
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `src/impression/io/impress.py`, `src/impression/modeling/csg.py`
+- Chosen defaults / parameters: payload records projection frame and resampling metadata
+- Test strategy: native heightmap round-trip, malformed payload refusal, version compatibility
+- Data ownership: `.impress` owns serialization; CSG owns semantic payload
+- Routes: heightmap result to codec to restored SurfaceBody
+- Open questions / nuance discovered: none
+- Readiness blockers: heightmap result payload
+
+Score:
+- Functions/methods: 3
+- Data structures/models: 2
+- Dependencies/services: 2
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 2
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 2
+- Readiness blockers: 0
+- Total: 18.5
+
+Split decision:
+- Keep cohesive. This leaf only covers heightmap persistence.
+
+### Candidate Spec: Heightmap CSG Fixture And Evidence Matrix
+
+Discovery purpose:
+- Add reference and diagnostic evidence for heightmap-preserving, promoted, and refused CSG routes.
+
+Responsibilities:
+- Functions/methods: fixture enumerator; evidence collector; no-mesh assertion
+- Data structures/models: heightmap CSG fixture row; evidence report
+- Dependencies/services: reference artifact lifecycle; heightmap route records
+- Returns/outputs/signals: clean evidence report; dirty evidence diagnostic
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend existing reference evidence helpers
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: none
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `tests/test_surface_csg.py`, `project/release-0.1.0a/reference-artifacts/`
+- Chosen defaults / parameters: dirty artifacts never count as completion
+- Test strategy: aligned-grid success, overhang refusal, promotion, persistence, no-mesh fixtures
+- Data ownership: tests own evidence; CSG owns route behavior
+- Routes: fixture builder to route execution to evidence promotion
+- Open questions / nuance discovered: fixture naming for 51-row set
+- Readiness blockers: heightmap route payloads
+
+Score:
+- Functions/methods: 3
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 0
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 2
+- Total: 21.5
+
+Split decision:
+- Review for split. Cohesive because this leaf only proves heightmap evidence.
+
+### Candidate Spec: Displacement Source Identity Resolution
+
+Discovery purpose:
+- Resolve and validate displacement source-surface identity for displacement-preserving CSG routes.
+
+Responsibilities:
+- Functions/methods: source resolver; source compatibility checker; source provenance normalizer
+- Data structures/models: source identity record; source compatibility report
+- Dependencies/services: displacement payload builder; surface identity records
+- Returns/outputs/signals: source identity verdict; source mismatch diagnostic
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: reuse displacement source resolver and extend CSG route integration
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: none
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `src/impression/modeling/csg.py`, `src/impression/modeling/surface.py`
+- Chosen defaults / parameters: source mismatch refuses unless promotion is declared
+- Test strategy: same-source, missing-source, cross-body source, transformed-source fixtures
+- Data ownership: displacement owns source reference; CSG owns route decision
+- Routes: planner to source resolver to domain checker
+- Open questions / nuance discovered: source topology equivalence threshold
+- Readiness blockers: none
+
+Score:
+- Functions/methods: 5
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 0
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 21.5
+
+Split decision:
+- Review for split. Cohesive because this leaf only establishes source identity.
+
+### Candidate Spec: Displacement Domain And Sample Resampling
+
+Discovery purpose:
+- Compute source-domain overlap, clipping, sample alignment, and resampling for displacement-preserving CSG.
+
+Responsibilities:
+- Functions/methods: source-domain overlap checker; displacement resampler; frame validator
+- Data structures/models: source-domain overlap record; displacement resampling record; tangent-frame diagnostic
+- Dependencies/services: source identity record; displacement payload builder
+- Returns/outputs/signals: aligned displacement sample plan; domain refusal diagnostic
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend displacement helpers and CSG route modules
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: none
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `src/impression/modeling/csg.py`, `src/impression/modeling/surface.py`
+- Chosen defaults / parameters: resampling is bounded and records lossiness
+- Test strategy: same-domain, partial overlap, incompatible frame, resampling budget fixtures
+- Data ownership: displacement owns sample values; CSG owns route plan
+- Routes: source identity to domain plan to offset composition
+- Open questions / nuance discovered: normal-frame mismatch policy
+- Readiness blockers: source identity leaf
+
+Score:
+- Functions/methods: 6
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 0
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 22.5
+
+Split decision:
+- Review for split. Cohesive because this leaf produces the domain/sample plan.
+
+### Candidate Spec: Displacement Offset Composition Operators
+
+Discovery purpose:
+- Implement displacement-preserving union, difference, and intersection offset composition over a compatible source domain.
+
+Responsibilities:
+- Functions/methods: offset union operator; offset difference operator; offset intersection operator; composition diagnostic builder
+- Data structures/models: offset composition record; source-frame operation metadata
+- Dependencies/services: domain/sample plan; displacement payload builder
+- Returns/outputs/signals: displacement result patch; operation diagnostics
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend CSG route module with reusable displacement operators
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: creates or updates surface-native CSG result payloads
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `src/impression/modeling/csg.py`
+- Chosen defaults / parameters: operators run only after source/domain compatibility passes
+- Test strategy: same-source composition, operand order, clipped-domain, budget fixtures
+- Data ownership: CSG owns operation semantics; displacement owns payload values
+- Routes: domain plan to offset operator to result patch
+- Open questions / nuance discovered: offset semantics for non-solid layers
+- Readiness blockers: domain/sample leaf
+
+Score:
+- Functions/methods: 5
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 2
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 23.5
+
+Split decision:
+- Review for split. Cohesive because all operators share the same source-domain execution shape.
+
+### Candidate Spec: Displacement Source Mismatch Refusal
+
+Discovery purpose:
+- Return supported refusal diagnostics for displacement CSG cases that cannot preserve source identity or source-domain compatibility.
+
+Responsibilities:
+- Functions/methods: source mismatch classifier; refusal diagnostic builder
+- Data structures/models: source mismatch refusal record; incompatible-domain diagnostic
+- Dependencies/services: source identity resolver; domain resampling plan
+- Returns/outputs/signals: supported refusal result; replacement hint
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend CSG diagnostics and displacement helpers
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: none
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `src/impression/modeling/csg.py`
+- Chosen defaults / parameters: missing solver code is not source mismatch refusal
+- Test strategy: cross-body, missing source, topology change, incompatible frame fixtures
+- Data ownership: family modules own mismatch facts; CSG owns refusal result
+- Routes: source/domain checks to supported refusal route
+- Open questions / nuance discovered: none
+- Readiness blockers: none
+
+Score:
+- Functions/methods: 2
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 0
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 18.5
+
+Split decision:
+- Keep cohesive. This is the displacement refusal boundary.
+
+### Candidate Spec: Displacement Promotion Integration
+
+Discovery purpose:
+- Route displacement CSG results that cannot preserve source identity into declared promotion targets.
+
+Responsibilities:
+- Functions/methods: promotion trigger; promotion target selector; promotion diagnostic builder
+- Data structures/models: displacement promotion decision; source-detach trigger record
+- Dependencies/services: source mismatch refusal; sampled implicit promotion policy
+- Returns/outputs/signals: promotion decision; promoted route request
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend CSG promotion policy helpers
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: creates or updates surface-native CSG result payloads
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `src/impression/modeling/csg.py`
+- Chosen defaults / parameters: source-detaching results promote or refuse; they never silently detach
+- Test strategy: source mismatch promotion, topology-change promotion, no-route refusal
+- Data ownership: CSG owns promotion; target family owns payload
+- Routes: displacement refusal boundary to promotion selector
+- Open questions / nuance discovered: exact spline promotion criteria
+- Readiness blockers: promotion policy leaf
+
+Score:
+- Functions/methods: 2
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 2
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 20.5
+
+Split decision:
+- Review for split. Cohesive because this leaf only bridges displacement refusal into shared promotion.
+
+### Candidate Spec: Displacement CSG Persistence And Fixtures
+
+Discovery purpose:
+- Persist displacement CSG payloads and add reference evidence for displacement-preserving, promoted, and refused routes.
+
+Responsibilities:
+- Functions/methods: payload encoder; decoder; fixture enumerator; no-mesh assertion
+- Data structures/models: displacement CSG payload record; source provenance payload; evidence report
+- Dependencies/services: displacement composition records; reference artifact lifecycle
+- Returns/outputs/signals: round-trip result; evidence gate report
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend displacement `.impress` codec and reference evidence helpers
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: creates or updates surface-native CSG result payloads
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `src/impression/io/impress.py`, `tests/test_surface_csg.py`, `project/release-0.1.0a/reference-artifacts/`
+- Chosen defaults / parameters: dirty artifacts never count as completion
+- Test strategy: same-source round-trip, source mismatch refusal, promotion, no-mesh fixtures
+- Data ownership: `.impress` owns serialization; tests own evidence; CSG owns route behavior
+- Routes: CSG result to codec and fixture evidence gate
+- Open questions / nuance discovered: fixture naming for source variants
+- Readiness blockers: route payload records
+
+Score:
+- Functions/methods: 4
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 2
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 2
+- Total: 24.5
+
+Split decision:
+- Review for split. Kept as one leaf because displacement persistence and evidence share the same source-provenance payload and remain below split threshold.
+
+### Candidate Spec: Sampled Implicit Promotion Matrix
+
+Discovery purpose:
+- Define the promotion matrix that maps sampled/implicit CSG route outcomes to implicit, subdivision, NURBS, B-spline, refusal, or non-CSG replacement.
+
+Responsibilities:
+- Functions/methods: promotion matrix builder; target selector; matrix verifier
+- Data structures/models: promotion policy row; target family decision record
+- Dependencies/services: CSG support matrix; patch family capability matrix
+- Returns/outputs/signals: promotion decision; missing-target diagnostic
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend CSG policy matrix helpers
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: creates or updates surface-native CSG result payloads
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `src/impression/modeling/csg.py`
+- Chosen defaults / parameters: implicit for volumetric predicate preservation; subdivision for bounded reconstructed surfaces
+- Test strategy: matrix coverage for all 153 rows and target/refusal classes
 - Data ownership: CSG owns promotion decision; target family owns payload
-- Routes: sampled/implicit route to promotion selector to target payload
-- Open questions / nuance discovered: exact NURBS/B-spline promotion criteria
-- Readiness blockers: target family reconstruction criteria
+- Routes: sampled/implicit route to promotion selector
+- Open questions / nuance discovered: NURBS/B-spline exactness thresholds
+- Readiness blockers: none
 
 Score:
-- Functions/methods: 3 x 2 = 6
-- Data structures/models: 3 x 1 = 3
-- Dependencies/services: 3 x 1 = 3
-- Returns/outputs/signals: 2 x 1 = 2
-- UI surfaces/components: 0 x 2 = 0
-- UI fields/elements: 0 x 1 = 0
-- Existing reusable code reused as-is: 1 x 0.5 = 0.5
-- Adding code to an existing library/module: 2 x 1 = 2
-- Creating a new reusable library/module: 0 x 3 = 0
-- Database queries/tables/migrations: 0 x 2 = 0
-- Async/concurrency behavior: 0 x 1 = 0
-- Destructive/write behavior: 1 x 2 = 2
-- Security/privacy-sensitive behavior: 1 x 2 = 2
-- Performance-sensitive behavior: 2 x 1 = 2
-- Cross-screen reusable behavior: 0 x 1 = 0
-- Test scenarios/fixtures: 5 x 1 = 5
-- Readiness blockers: 1 x 2 = 2
-- Total: 31.5
+- Functions/methods: 2
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 2
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 20.5
 
 Split decision:
-- Split required into promotion matrix, provenance/lossiness records,
-  target-family reconstruction criteria, persistence, and fixture evidence.
+- Review for split. Cohesive because this leaf only defines target selection.
+
+### Candidate Spec: Promotion Provenance And Lossiness Records
+
+Discovery purpose:
+- Record source operands, route decisions, tolerances, sampling, and lossiness for promoted sampled/implicit CSG results.
+
+Responsibilities:
+- Functions/methods: provenance builder; lossiness recorder; tolerance normalizer
+- Data structures/models: promotion provenance record; lossiness metadata record
+- Dependencies/services: promotion matrix; route payload records
+- Returns/outputs/signals: provenance payload; lossiness diagnostic
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend surface metadata/provenance helpers
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: none
+- Security/privacy-sensitive behavior: none
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `src/impression/modeling/csg.py`, `src/impression/modeling/surface.py`
+- Chosen defaults / parameters: every promoted result carries explicit source and lossiness metadata
+- Test strategy: lossless, declared-tolerance, resampled, reconstructed, refused-metadata fixtures
+- Data ownership: CSG owns route provenance; target family owns payload
+- Routes: promotion selector to provenance builder to result patch
+- Open questions / nuance discovered: metadata vocabulary for reconstruction types
+- Readiness blockers: promotion matrix
+
+Score:
+- Functions/methods: 2
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 2
+- Security/privacy-sensitive behavior: 0
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 18.5
+
+Split decision:
+- Keep cohesive. This leaf owns shared metadata only.
+
+### Candidate Spec: Promotion Target Reconstruction Criteria
+
+Discovery purpose:
+- Define criteria for when sampled/implicit CSG outputs may promote to implicit, subdivision, NURBS, or B-spline result families.
+
+Responsibilities:
+- Functions/methods: target criteria evaluator; reconstruction budget checker; target refusal builder
+- Data structures/models: target criteria record; reconstruction feasibility report
+- Dependencies/services: promotion matrix; target family payload builders
+- Returns/outputs/signals: target eligibility verdict; reconstruction refusal diagnostic
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend CSG promotion helpers and family payload checks
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: none
+- Security/privacy-sensitive behavior: none
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `src/impression/modeling/csg.py`, `src/impression/modeling/surface.py`
+- Chosen defaults / parameters: implicit and subdivision are default targets; spline targets require explicit criteria success
+- Test strategy: implicit, subdivision, NURBS, B-spline eligibility and refusal fixtures
+- Data ownership: target family owns payload criteria; CSG owns promotion selection
+- Routes: promotion matrix to target criteria to route request
+- Open questions / nuance discovered: spline fitting residual threshold
+- Readiness blockers: promotion provenance records
+
+Score:
+- Functions/methods: 5
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 2
+- Security/privacy-sensitive behavior: 0
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 2
+- Total: 23.5
+
+Split decision:
+- Review for split. Cohesive because this leaf only gates target eligibility.
+
+### Candidate Spec: Promotion Persistence Coverage
+
+Discovery purpose:
+- Persist promoted sampled/implicit CSG results across `.impress` with source route, target family, provenance, and lossiness metadata.
+
+Responsibilities:
+- Functions/methods: promotion payload encoder; decoder; round-trip verifier
+- Data structures/models: promotion persistence payload; target-family dispatch record
+- Dependencies/services: target family codecs; provenance/lossiness records
+- Returns/outputs/signals: round-trip result; payload refusal diagnostic
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend `.impress` payload dispatch
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: none
+- Security/privacy-sensitive behavior: none
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `src/impression/io/impress.py`, `src/impression/modeling/csg.py`
+- Chosen defaults / parameters: promoted result serializes as target family plus promotion metadata
+- Test strategy: implicit, subdivision, spline target round trips and malformed payload refusal
+- Data ownership: `.impress` owns serialization; CSG owns semantic metadata
+- Routes: promoted result to codec to restored SurfaceBody
+- Open questions / nuance discovered: none
+- Readiness blockers: target family payload records
+
+Score:
+- Functions/methods: 2
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 2
+- Security/privacy-sensitive behavior: 0
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 18.5
+
+Split decision:
+- Keep cohesive. This leaf only covers promotion persistence.
+
+### Candidate Spec: Promotion Fixture And No-Mesh Evidence
+
+Discovery purpose:
+- Add reference fixtures proving sampled/implicit promotion routes preserve surface truth and never use mesh source truth.
+
+Responsibilities:
+- Functions/methods: promotion fixture enumerator; no-mesh evidence collector; dirty evidence detector
+- Data structures/models: promotion fixture row; no-mesh proof record; evidence report
+- Dependencies/services: promotion routes; reference artifact lifecycle
+- Returns/outputs/signals: clean evidence report; dirty evidence diagnostic
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend existing evidence helpers
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: creates or updates surface-native CSG result payloads
+- Security/privacy-sensitive behavior: none
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `tests/test_surface_csg.py`, `project/release-0.1.0a/reference-artifacts/`
+- Chosen defaults / parameters: dirty artifacts never count as completion
+- Test strategy: implicit, subdivision, spline promotion, refusal, no-mesh fixtures
+- Data ownership: tests own evidence; CSG owns route behavior
+- Routes: fixture builder to promotion route to evidence gate
+- Open questions / nuance discovered: fixture count budget
+- Readiness blockers: promotion persistence coverage
+
+Score:
+- Functions/methods: 3
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 2
+- Security/privacy-sensitive behavior: 0
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 2
+- Total: 21.5
+
+Split decision:
+- Review for split. Cohesive because this leaf only proves promotion evidence.
 
 ### Candidate Spec: Representation Refusal And Non-CSG Replacement Contract
 
 Discovery purpose:
-- Make impossible sampled/implicit boolean outcomes supported explicit refusals
-  or deliberate non-CSG replacement workflows instead of raw unsupported rows.
+- Make impossible sampled/implicit boolean outcomes supported explicit refusals or deliberate non-CSG replacement workflows instead of raw unsupported rows.
 
 Responsibilities:
-- Functions/methods: representability failure classifier, replacement workflow
-  suggester, refusal diagnostic builder
-- Data structures/models: representation refusal record, non-CSG replacement
-  record, route diagnostic
-- Dependencies/services: CSG planner, family representability checks,
-  no-mesh-fallback evidence
-- Returns/outputs/signals: supported refusal result, replacement workflow hint
+- Functions/methods: representability failure classifier; replacement workflow suggester; refusal diagnostic builder
+- Data structures/models: representation refusal record; non-CSG replacement record; route diagnostic
+- Dependencies/services: CSG planner; family representability checks; no-mesh-fallback evidence
+- Returns/outputs/signals: supported refusal result; replacement workflow hint
 - UI surfaces/components: none
 - UI fields/elements: none
 - Reusable code plan: extend CSG diagnostics and operation planner records
 - Database queries/tables/migrations: none
 - Async/concurrency behavior: none
 - Destructive/write behavior: none
-- Security/privacy-sensitive behavior: refuses unsafe payloads before execution
-- Performance-sensitive behavior: bounded diagnostic generation
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
 - Cross-screen reusable behavior: not applicable
 
 Project readiness fields:
 - Implementation owner/module: `src/impression/modeling/csg.py`
-- Chosen defaults / parameters: missing solver code is not a representation
-  refusal
-- Test strategy: impossible heightmap overhang, displacement source mismatch,
-  unsafe implicit field, deliberate non-CSG replacement
+- Chosen defaults / parameters: missing solver code is not a representation refusal
+- Test strategy: heightmap overhang, displacement source mismatch, unsafe implicit field, deliberate non-CSG replacement
 - Data ownership: CSG owns refusal result; family modules own failure facts
 - Routes: representability check to supported refusal route
 - Open questions / nuance discovered: replacement workflow vocabulary
 - Readiness blockers: none
 
 Score:
-- Functions/methods: 3 x 2 = 6
-- Data structures/models: 3 x 1 = 3
-- Dependencies/services: 3 x 1 = 3
-- Returns/outputs/signals: 2 x 1 = 2
-- UI surfaces/components: 0 x 2 = 0
-- UI fields/elements: 0 x 1 = 0
-- Existing reusable code reused as-is: 1 x 0.5 = 0.5
-- Adding code to an existing library/module: 1 x 1 = 1
-- Creating a new reusable library/module: 0 x 3 = 0
-- Database queries/tables/migrations: 0 x 2 = 0
-- Async/concurrency behavior: 0 x 1 = 0
-- Destructive/write behavior: 0 x 2 = 0
-- Security/privacy-sensitive behavior: 1 x 2 = 2
-- Performance-sensitive behavior: 1 x 1 = 1
-- Cross-screen reusable behavior: 0 x 1 = 0
-- Test scenarios/fixtures: 4 x 1 = 4
-- Readiness blockers: 0 x 2 = 0
+- Functions/methods: 6
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 0
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
 - Total: 22.5
 
 Split decision:
-- Review for split. Keep cohesive because this spec owns the refusal contract
-  shared by all sampled/implicit routes.
+- Review for split. Keep cohesive because this leaf owns the shared refusal contract.
 
-### Candidate Spec: Sampled Implicit CSG Persistence And Reference Evidence
+### Candidate Spec: Sampled Implicit CSG Codec Coverage
 
 Discovery purpose:
-- Add `.impress` and reference-evidence coverage for native, promoted, and
-  refusal outcomes created by sampled/implicit CSG routes.
+- Add `.impress` codec coverage for sampled/implicit CSG native, promoted, and refusal payload records.
 
 Responsibilities:
-- Functions/methods: payload round-trip verifier, reference artifact promoter,
-  dirty evidence detector
-- Data structures/models: sampled/implicit CSG persistence record, reference
-  evidence row, no-mesh-fallback proof record
-- Dependencies/services: `.impress` codecs, reference artifact lifecycle, CSG
-  result records
-- Returns/outputs/signals: round-trip result, evidence gate report
+- Functions/methods: payload encoder; decoder; codec coverage verifier
+- Data structures/models: sampled/implicit CSG payload dispatch record; codec diagnostic
+- Dependencies/services: implicit, heightmap, displacement, promotion, refusal payload records
+- Returns/outputs/signals: round-trip result; unsupported payload diagnostic
 - UI surfaces/components: none
 - UI fields/elements: none
-- Reusable code plan: extend existing `.impress` and reference evidence helpers
+- Reusable code plan: extend existing `.impress` codec dispatch
 - Database queries/tables/migrations: none
 - Async/concurrency behavior: none
-- Destructive/write behavior: writes reference evidence artifacts
-- Security/privacy-sensitive behavior: refuses unsafe serialized payloads
-- Performance-sensitive behavior: fixture generation budget
+- Destructive/write behavior: creates or updates surface-native CSG result payloads
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
 - Cross-screen reusable behavior: not applicable
 
 Project readiness fields:
-- Implementation owner/module: `src/impression/io/impress.py`,
-  `src/impression/modeling/csg.py`
-- Chosen defaults / parameters: dirty evidence never counts as completion
-- Test strategy: native route round trips, promoted route round trips, refusal
-  serialization, no mesh fallback evidence
-- Data ownership: `.impress` owns serialization; CSG owns semantic payload
-- Routes: CSG result to persistence codec to reference evidence gate
-- Open questions / nuance discovered: fixture naming convention for 153 rows
-- Readiness blockers: route payload records must exist first
+- Implementation owner/module: `src/impression/io/impress.py`, `src/impression/modeling/csg.py`
+- Chosen defaults / parameters: codec refuses unknown or unsafe route payloads
+- Test strategy: native route, promoted route, refusal route, malformed payload round trips/refusals
+- Data ownership: `.impress` owns serialization; route modules own semantics
+- Routes: CSG result to payload codec to restored SurfaceBody
+- Open questions / nuance discovered: none
+- Readiness blockers: route payload records
 
 Score:
-- Functions/methods: 3 x 2 = 6
-- Data structures/models: 3 x 1 = 3
-- Dependencies/services: 3 x 1 = 3
-- Returns/outputs/signals: 2 x 1 = 2
-- UI surfaces/components: 0 x 2 = 0
-- UI fields/elements: 0 x 1 = 0
-- Existing reusable code reused as-is: 1 x 0.5 = 0.5
-- Adding code to an existing library/module: 2 x 1 = 2
-- Creating a new reusable library/module: 0 x 3 = 0
-- Database queries/tables/migrations: 0 x 2 = 0
-- Async/concurrency behavior: 0 x 1 = 0
-- Destructive/write behavior: 1 x 2 = 2
-- Security/privacy-sensitive behavior: 1 x 2 = 2
-- Performance-sensitive behavior: 1 x 1 = 1
-- Cross-screen reusable behavior: 0 x 1 = 0
-- Test scenarios/fixtures: 4 x 1 = 4
-- Readiness blockers: 1 x 2 = 2
-- Total: 27.5
+- Functions/methods: 2
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 2
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 20.5
 
 Split decision:
-- Split required into `.impress` codec coverage, reference fixture promotion,
-  no-mesh-fallback evidence, and dirty-evidence rejection.
+- Review for split. Cohesive because this leaf owns shared codec dispatch.
+
+### Candidate Spec: Sampled Implicit Reference Fixture Promotion
+
+Discovery purpose:
+- Promote clean reference fixtures for sampled/implicit CSG native, promoted, and refusal outcomes.
+
+Responsibilities:
+- Functions/methods: fixture promoter; fixture completeness verifier; fixture manifest updater
+- Data structures/models: reference fixture row; fixture promotion report
+- Dependencies/services: reference artifact lifecycle; route evidence reports
+- Returns/outputs/signals: clean fixture set; missing fixture diagnostics
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend reference artifact helpers
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: none
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `tests/test_surface_csg.py`, `project/release-0.1.0a/reference-artifacts/`
+- Chosen defaults / parameters: dirty or stale fixtures do not count as promoted
+- Test strategy: native, promoted, refusal, unsafe, malformed fixture promotion tests
+- Data ownership: tests own fixture evidence; CSG owns route behavior
+- Routes: route execution to fixture promoter to evidence gate
+- Open questions / nuance discovered: fixture naming convention for 153 rows
+- Readiness blockers: route payload records
+
+Score:
+- Functions/methods: 2
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 2
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 20.5
+
+Split decision:
+- Review for split. Cohesive because this leaf only promotes reference fixtures.
+
+### Candidate Spec: Sampled Implicit No-Mesh-Fallback Evidence Gate
+
+Discovery purpose:
+- Add a no-hidden-mesh-fallback evidence gate for all sampled/implicit CSG routes and supported refusals.
+
+Responsibilities:
+- Functions/methods: no-mesh evidence collector; fallback detector; gate assertion
+- Data structures/models: no-mesh proof record; fallback violation diagnostic
+- Dependencies/services: CSG route registry; reference evidence helpers
+- Returns/outputs/signals: pass/fail evidence gate; violation diagnostics
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend existing no-mesh fallback evidence helpers
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: none
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `src/impression/modeling/csg.py`, `tests/test_surface_csg.py`
+- Chosen defaults / parameters: sampling can create native payloads but cannot become mesh source truth
+- Test strategy: native route, promotion route, refusal route, forbidden mesh attempt fixtures
+- Data ownership: CSG owns route truth; tests own evidence
+- Routes: route registry to evidence collector to completion gate
+- Open questions / nuance discovered: none
+- Readiness blockers: route registry rows
+
+Score:
+- Functions/methods: 3
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 0
+- Security/privacy-sensitive behavior: 2
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 19.5
+
+Split decision:
+- Keep cohesive. This is the shared no-mesh gate.
+
+### Candidate Spec: Sampled Implicit Dirty Evidence Rejection
+
+Discovery purpose:
+- Reject dirty, stale, diagnostic-only, or under-evidenced sampled/implicit CSG artifacts from completion evidence.
+
+Responsibilities:
+- Functions/methods: dirty evidence detector; evidence state classifier; completion blocker builder
+- Data structures/models: dirty evidence diagnostic; evidence state record
+- Dependencies/services: reference artifact lifecycle; codec coverage; no-mesh evidence gate
+- Returns/outputs/signals: dirty evidence report; completion blocker diagnostic
+- UI surfaces/components: none
+- UI fields/elements: none
+- Reusable code plan: extend reference evidence helpers
+- Database queries/tables/migrations: none
+- Async/concurrency behavior: none
+- Destructive/write behavior: none
+- Security/privacy-sensitive behavior: validates unsafe or untrusted sampled/implicit payload states before execution
+- Performance-sensitive behavior: bounded matrix, route, sampling, or fixture work
+- Cross-screen reusable behavior: not applicable
+
+Project readiness fields:
+- Implementation owner/module: `tests/test_surface_csg.py`, `project/release-0.1.0a/reference-artifacts/`
+- Chosen defaults / parameters: dirty evidence never counts as completion
+- Test strategy: dirty, stale, missing, diagnostic-only, clean evidence fixtures
+- Data ownership: tests own evidence state; architecture tracker owns completion posture
+- Routes: artifact inventory to dirty detector to completion gate
+- Open questions / nuance discovered: none
+- Readiness blockers: reference fixture promotion
+
+Score:
+- Functions/methods: 2
+- Data structures/models: 3
+- Dependencies/services: 3
+- Returns/outputs/signals: 2
+- UI surfaces/components: 0
+- UI fields/elements: 0
+- Existing reusable code reused as-is: 0.5
+- Adding code to an existing library/module: 2
+- Creating a new reusable library/module: 0
+- Database queries/tables/migrations: 0
+- Async/concurrency behavior: 0
+- Destructive/write behavior: 0
+- Security/privacy-sensitive behavior: 1
+- Performance-sensitive behavior: 1
+- Cross-screen reusable behavior: 0
+- Test scenarios/fixtures: 3
+- Readiness blockers: 0
+- Total: 17.5
+
+Split decision:
+- Keep cohesive. This leaf only rejects bad evidence.
 
 ## Change History
 
-- 2026-05-30: Created the unsupported-row implementation architecture and
-  marked all 153 sampled/implicit CSG unsupported rows as architecture
-  `In Progress`.
+- 2026-05-30: Critically reviewed the specification manifest through five review/rescore/split loops and promoted the unsupported-row architecture into 29 final manifest leaves. Reason: broad sampled/implicit candidates hid route, representability, promotion, persistence, and evidence work.
+- 2026-05-30: Created the unsupported-row implementation architecture and marked all 153 sampled/implicit CSG unsupported rows as architecture `In Progress`.
