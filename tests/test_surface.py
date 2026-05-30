@@ -133,9 +133,11 @@ from impression.modeling import (
     collect_sweep_csg_event_seeds,
     DisplacementAuthoringRequest,
     DisplacementDomainMappingRecord,
+    DisplacementDomainOverlapRecord,
     DisplacementEvaluationDiagnostic,
     DisplacementLossinessMetadataRecord,
     DisplacementPayloadDiagnostic,
+    DisplacementResamplingRecord,
     DisplacementSurfacePatch,
     DisplacementIdentityDiagnostic,
     DisplacementSourceCompatibilityReport,
@@ -144,6 +146,7 @@ from impression.modeling import (
     DisplacementSourcePatchReferenceRecord,
     DisplacementSourceProvenanceRecord,
     DisplacementSourceResolutionResult,
+    DisplacementTangentFrameDiagnostic,
     export_tessellation_request,
     extract_subdivision_csg_refined_charts,
     feature_surface_handoff_diagnostic,
@@ -368,6 +371,7 @@ from impression.modeling import (
     resolve_displacement_source_identity,
     resolve_displacement_csg_source_identity,
     displacement_source_compatibility_report,
+    plan_displacement_domain_resampling,
     normalize_surface_seam_continuity_constraint,
     prepare_surface_boolean_operands,
     assess_implicit_field_security,
@@ -2917,6 +2921,100 @@ def test_displacement_csg_source_identity_report_refuses_transformed_source_fixt
     assert report.diagnostics[0].code == "transformed-source-mismatch"
     assert report.diagnostics[0].no_mesh_fallback is True
     assert report.source_records[0].source_patch_id == report.source_records[1].source_patch_id
+
+
+def test_displacement_domain_resampling_plans_aligned_partial_overlap() -> None:
+    source = PlanarSurfacePatch(family="planar")
+    left = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.zeros((4, 4), dtype=float),
+        alpha_mask=np.ones((4, 4), dtype=bool),
+        projection_bounds=(0.0, 3.0, 0.0, 3.0),
+    )
+    right = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.ones((4, 4), dtype=float),
+        alpha_mask=np.ones((4, 4), dtype=bool),
+        projection_bounds=(1.0, 4.0, 0.0, 3.0),
+    )
+
+    plan = plan_displacement_domain_resampling("union", left, right)
+
+    assert isinstance(plan, DisplacementResamplingRecord)
+    assert plan.supported is True
+    assert plan.alignment == "aligned"
+    assert plan.resample_kernel == "none"
+    assert plan.lossiness == "lossless"
+    assert isinstance(plan.overlap, DisplacementDomainOverlapRecord)
+    assert plan.overlap.overlap_bounds == (1.0, 3.0, 0.0, 3.0)
+    assert plan.result_shape == (4, 3)
+
+
+def test_displacement_domain_resampling_plans_bilinear_resample_for_misaligned_grid() -> None:
+    source = PlanarSurfacePatch(family="planar")
+    left = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.zeros((3, 3), dtype=float),
+        alpha_mask=np.ones((3, 3), dtype=bool),
+        projection_bounds=(0.0, 2.0, 0.0, 2.0),
+    )
+    right = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.ones((5, 5), dtype=float),
+        alpha_mask=np.ones((5, 5), dtype=bool),
+        projection_bounds=(0.0, 2.0, 0.0, 2.0),
+    )
+
+    plan = plan_displacement_domain_resampling("intersection", left, right)
+
+    assert plan.supported is True
+    assert plan.alignment == "resample-required"
+    assert plan.resample_kernel == "bilinear"
+    assert plan.lossiness == "sampled-reconstruction"
+    assert plan.result_shape == (5, 5)
+
+
+def test_displacement_domain_resampling_refuses_frame_and_budget_without_mesh_fallback() -> None:
+    source = PlanarSurfacePatch(family="planar")
+    left = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.zeros((3, 3), dtype=float),
+        alpha_mask=np.ones((3, 3), dtype=bool),
+        projection_bounds=(0.0, 2.0, 0.0, 2.0),
+        direction="z",
+    )
+    frame_mismatch = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.ones((3, 3), dtype=float),
+        alpha_mask=np.ones((3, 3), dtype=bool),
+        projection_bounds=(0.0, 2.0, 0.0, 2.0),
+        direction="x",
+    )
+    budgeted = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.ones((5, 5), dtype=float),
+        alpha_mask=np.ones((5, 5), dtype=bool),
+        projection_bounds=(0.0, 2.0, 0.0, 2.0),
+        direction="z",
+    )
+
+    frame_plan = plan_displacement_domain_resampling("difference", left, frame_mismatch)
+    budget_plan = plan_displacement_domain_resampling("difference", left, budgeted, max_sample_count=4)
+
+    assert frame_plan.supported is False
+    assert isinstance(frame_plan.diagnostics[0], DisplacementTangentFrameDiagnostic)
+    assert frame_plan.diagnostics[0].code == "frame-mismatch"
+    assert frame_plan.diagnostics[0].no_mesh_fallback is True
+    assert budget_plan.supported is False
+    assert budget_plan.diagnostics[0].code == "resampling-budget-exceeded"
+    assert "mesh fallback" in budget_plan.diagnostics[0].message
 
 
 def test_displacement_payload_authoring_builder_creates_sampled_surface_body() -> None:
