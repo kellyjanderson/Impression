@@ -102,6 +102,7 @@ from impression.modeling import (
     SurfaceCSGSplineCoincidentRegionRecord,
     SurfaceCSGSplinePairIntersectionRecord,
     SurfaceCSGSplitTrimLoopRecord,
+    SurfaceCSGSubdivisionPairIntersectionRecord,
     SurfaceCSGSweepPairIntersectionRecord,
     SurfaceCSGTessellationBoundaryEvidenceRecord,
     SurfaceCSGToleranceDiagnostic,
@@ -144,6 +145,7 @@ from impression.modeling import (
     intersect_planar_linear_patch_pair,
     intersect_planar_revolution_patch_pair,
     intersect_spline_nurbs_patch_pair,
+    intersect_subdivision_csg_patch_pair,
     intersect_sweep_csg_patch_pair,
     finalize_surface_csg_validity_gate,
     detect_surface_csg_dangling_trims,
@@ -672,6 +674,52 @@ def test_sweep_csg_patch_pair_intersection_reports_ambiguity_without_mesh() -> N
     assert result.ambiguity_diagnostics
     assert result.ambiguity_diagnostics[0].blocking is True
     assert "mesh" not in result.ambiguity_diagnostics[0].message.lower()
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    (
+        (PlanarSurfacePatch(family="planar"), SubdivisionSurfacePatch(family="subdivision")),
+        (BSplineSurfacePatch(family="bspline"), SubdivisionSurfacePatch(family="subdivision")),
+        (NURBSSurfacePatch(family="nurbs"), SubdivisionSurfacePatch(family="subdivision")),
+        (SubdivisionSurfacePatch(family="subdivision"), SubdivisionSurfacePatch(family="subdivision")),
+    ),
+)
+def test_subdivision_csg_patch_pair_intersection_emits_patch_local_curves(
+    first: SurfacePatch,
+    second: SurfacePatch,
+) -> None:
+    result = intersect_subdivision_csg_patch_pair(
+        SurfaceBooleanPatchRef(0, 0),
+        first,
+        SurfaceBooleanPatchRef(1, 0),
+        second,
+        sample_count=5,
+    )
+
+    assert isinstance(result, SurfaceCSGSubdivisionPairIntersectionRecord)
+    assert result.supported is True
+    assert result.adapter_report.converged is True
+    assert result.curves
+    assert len(result.patch_local_curves) == 2
+    assert result.canonical_payload()["supported"] is True
+
+
+def test_subdivision_csg_patch_pair_intersection_reports_budget_refusal_without_mesh() -> None:
+    subdivision = SubdivisionSurfacePatch(family="subdivision", subdivision_level=3)
+
+    result = intersect_subdivision_csg_patch_pair(
+        SurfaceBooleanPatchRef(0, 0),
+        subdivision,
+        SurfaceBooleanPatchRef(1, 0),
+        PlanarSurfacePatch(family="planar", origin=(10.0, 0.0, 0.0)),
+        sample_count=5,
+    )
+
+    assert result.supported is False
+    assert result.diagnostics
+    assert result.diagnostics[0].code == "budget-exhausted"
+    assert "mesh" not in result.diagnostics[0].message.lower()
 
 
 def test_surface_csg_coincident_region_loop_maps_to_patch_local_trim_space() -> None:
