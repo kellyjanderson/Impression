@@ -91,8 +91,10 @@ from impression.modeling import (
     SurfaceDisplacementCSGEvidenceReport,
     SurfaceDisplacementCSGFixtureRow,
     SurfaceSampledImplicitPromotionDecision,
+    SurfaceSampledImplicitPromotionLossinessRecord,
     SurfaceSampledImplicitPromotionMatrixReport,
     SurfaceSampledImplicitPromotionPolicyRow,
+    SurfaceSampledImplicitPromotionProvenanceRecord,
     SurfaceSampledImplicitCSGUnsupportedRow,
     SurfaceSampledImplicitCSGUnsupportedRowReport,
     SurfaceCSGPatchLocalCurve,
@@ -161,6 +163,8 @@ from impression.modeling import (
     enumerate_heightmap_csg_fixture_rows,
     enumerate_sampled_implicit_csg_unsupported_rows,
     build_sampled_implicit_promotion_matrix,
+    build_sampled_implicit_promotion_provenance_record,
+    sampled_implicit_promotion_metadata_payload,
     select_sampled_implicit_promotion_target,
     intersect_analytic_bspline_patch_pair,
     intersect_analytic_nurbs_patch_pair,
@@ -1317,6 +1321,55 @@ def test_sampled_implicit_promotion_matrix_detects_missing_target_policy() -> No
     assert report.passed is False
     assert any(diagnostic.code == "missing-target" for diagnostic in report.diagnostics)
     assert any(row.route_status == "in-progress" for row in report.rows)
+
+
+def test_sampled_implicit_promotion_provenance_records_sources_lossiness_and_tolerance() -> None:
+    report = verify_sampled_implicit_promotion_matrix(operations=("union",))
+    row = next(
+        row
+        for row in report.rows
+        if row.left_family == "heightmap" and row.right_family == "bspline"
+    )
+
+    provenance = build_sampled_implicit_promotion_provenance_record(
+        row,
+        operand_ids=("heightmap-a", "bspline-b"),
+        tolerance=2.5e-6,
+    )
+    payload = sampled_implicit_promotion_metadata_payload(row, operand_ids=("heightmap-a", "bspline-b"), tolerance=2.5e-6)
+
+    assert isinstance(provenance, SurfaceSampledImplicitPromotionProvenanceRecord)
+    assert provenance.supported is True
+    assert provenance.diagnostics == ()
+    assert provenance.source_families == ("heightmap", "bspline")
+    assert provenance.source_operand_ids == ("heightmap-a", "bspline-b")
+    assert provenance.target_family == "bspline"
+    assert isinstance(provenance.lossiness, SurfaceSampledImplicitPromotionLossinessRecord)
+    assert provenance.lossiness.lossiness == "exact-reconstruction"
+    assert provenance.lossiness.tolerance == pytest.approx(2.5e-6)
+    assert provenance.lossiness.reconstruction_kind == "bspline-fit"
+    assert provenance.lossiness.no_mesh_fallback is True
+    assert payload["supported"] is True
+    assert payload["lossiness"]["reconstruction_kind"] == "bspline-fit"
+
+
+def test_sampled_implicit_promotion_provenance_reports_invalid_tolerance_and_operands() -> None:
+    row = next(
+        row
+        for row in build_sampled_implicit_promotion_matrix(operations=("union",)).rows
+        if row.left_family == "implicit" and row.right_family == "planar"
+    )
+
+    provenance = build_sampled_implicit_promotion_provenance_record(
+        row,
+        operand_ids=("only-one",),
+        tolerance=-1.0,
+    )
+
+    assert provenance.supported is False
+    assert {diagnostic.code for diagnostic in provenance.diagnostics} == {"invalid-operands", "invalid-tolerance"}
+    assert all(diagnostic.no_mesh_fallback for diagnostic in provenance.diagnostics)
+    assert "no mesh fallback" in provenance.diagnostics[-1].message.lower()
 
 
 def test_implicit_composition_operation_sign_policies_are_deterministic() -> None:
