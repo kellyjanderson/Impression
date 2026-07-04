@@ -4,9 +4,17 @@ This document tracks the near-term roadmap for Impression’s modeling toolkit. 
 
 Current execution order is captured in [`feature-pipeline.md`](feature-pipeline.md) and should be reviewed each planning cycle.
 
-Version-specific planning containers may also live under:
+Inference and curve-fitting planning lives under:
 
-- [`0.1.0.a/`](0.1.0.a/README.md)
+- [`inference-and-curve-fitting-plan.md`](inference-and-curve-fitting-plan.md)
+- [`inference-and-curve-fitting-progression.md`](inference-and-curve-fitting-progression.md)
+- [`feature-list.md`](feature-list.md)
+- [`example-candidate-list.md`](example-candidate-list.md)
+- [`examples/`](examples/README.md)
+
+Reference Review Workbench planning lives under:
+
+- [`reference-review-workbench-progression.md`](reference-review-workbench-progression.md)
 
 Surface-body completion planning lives under:
 

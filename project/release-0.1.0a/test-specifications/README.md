@@ -1,5 +1,19 @@
 # Test Specifications
 
+## Inference And Curve Fitting Test Specs
+
+- [Feature Spec 01 Test: B-Spline Curve Support Program](feature-01-b-spline-curve-support-program-v1_0.md)
+- [Feature Spec 02 Test: Explicit Fit Policy and Diagnostics Program](feature-02-explicit-fit-policy-and-diagnostics-program-v1_0.md)
+- [Feature Spec 03 Test: Curve Fitting From Dense Loft Evidence Program](feature-03-curve-fitting-from-dense-loft-evidence-program-v1_0.md)
+- [Feature Spec 04 Test: Non-User-Facing Control Stations Program](feature-04-non-user-facing-control-stations-program-v1_0.md)
+- [Feature Spec 05 Test: Control-Station Inference Program](feature-05-control-station-inference-program-v1_0.md)
+- [Feature Spec 06 Test: Curve-Intent Inference Program](feature-06-curve-intent-inference-program-v1_0.md)
+- [Feature Spec 07 Test: Shared Trajectory Inference and Guidance Program](feature-07-shared-trajectory-inference-and-guidance-program-v1_0.md)
+- [Feature Spec 08 Test: Progression Model Upgrade Program](feature-08-progression-model-upgrade-program-v1_0.md)
+- [Feature Spec 09 Test: Inference Diagnostics and Explainability Program](feature-09-inference-diagnostics-and-explainability-program-v1_0.md)
+
+## Existing Test Specs
+
 - [Loft Spec 18 Test: Probabilistic Ambiguity Disambiguation](loft-18-probabilistic-disambiguation-v1_0.md)
 - [Loft Spec 19 Test: Global Fairness and Skeleton Optimization](loft-19-global-fairness-skeleton-optimization-v1_0.md)
 - [Loft Spec 20 Test: Interactive Branch Picking API](loft-20-interactive-branch-picking-v1_0.md)

@@ -26,7 +26,10 @@ project/releases/release-0.1.0a/
 
 ## Current Planning Areas
 
-- [0.1.0.a Planning](planning/0.1.0.a/README.md)
+- [Inference And Curve Fitting Planning](planning/inference-and-curve-fitting-plan.md)
+- [Inference And Curve Fitting Progression](planning/inference-and-curve-fitting-progression.md)
+- [Feature List](planning/feature-list.md)
+- [Example Candidate List](planning/example-candidate-list.md)
 - [Surface Body Families Planning](planning/surface-body-families/README.md)
 
 ## Durable Knowledge Boundary
