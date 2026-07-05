@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import sqlite3
 from pathlib import Path
@@ -26,6 +27,8 @@ def _write_source(root: Path, name: str = "model.py") -> Path:
 
 def test_source_model_record_normalizes_mapping_and_exposes_identity(tmp_path: Path) -> None:
     source = _write_source(tmp_path)
+    artifact = tmp_path / "dirty.stl"
+    artifact.write_text("solid dirty\nendsolid dirty\n")
 
     record = ReviewSourceModelRecord.from_mapping(
         {
@@ -36,6 +39,7 @@ def test_source_model_record_normalizes_mapping_and_exposes_identity(tmp_path: P
             "entrypoint": "build",
             "expected_output": "png",
             "parameters": [{"name": "width", "value": 12}],
+            "artifact_paths": [artifact.name],
         },
         base_dir=tmp_path,
     )
@@ -43,16 +47,19 @@ def test_source_model_record_normalizes_mapping_and_exposes_identity(tmp_path: P
     assert record.load_mode is ReviewSourceLoadMode.MODULE
     assert record.identity.key == ("demo/box", source.as_posix(), "build")
     assert record.parameters == (EntrypointParameterRecord("width", 12),)
+    assert record.artifact_paths == (artifact,)
 
 
 def test_validation_reports_multiple_blocking_diagnostics_without_importing(tmp_path: Path) -> None:
     outside = tmp_path.parent / "outside_model.py"
+    missing_artifact = tmp_path / "missing.stl"
     record = ReviewSourceModelRecord(
         fixture_id="demo/missing",
         feature_name="missing",
         source_path=outside,
         load_mode=ReviewSourceLoadMode.CALLABLE,
         entrypoint="build",
+        artifact_paths=(missing_artifact,),
     )
 
     result = validate_source_record(record, allowed_root=tmp_path)
@@ -62,6 +69,7 @@ def test_validation_reports_multiple_blocking_diagnostics_without_importing(tmp_
         "source-outside-root",
         "missing-source",
         "callable-entrypoint-not-qualified",
+        "missing-artifact",
     }
 
 
@@ -139,6 +147,38 @@ def test_committed_demo_fixture_file_loads(project_root: Path) -> None:
     assert summary.valid_items[0].record.fixture_id == "examples/hello-cube"
 
 
+def test_dirty_stl_fixture_file_covers_dirty_stl_inventory(project_root: Path) -> None:
+    fixture_file = project_root / "tests/reference_review_fixtures/dirty-stl-fixtures.json"
+    dirty_stls = sorted((project_root / "project/release-0.1.0a/reference-stl/dirty").rglob("*.stl"))
+
+    summary = load_source_records_from_file(fixture_file)
+    records = tuple(item.record for item in summary.valid_items)
+    artifact_paths = sorted(record.artifact_paths[0].resolve() for record in records)
+
+    assert not summary.diagnostics
+    assert len(records) == 15
+    assert artifact_paths == dirty_stls
+    assert all(record.source_path.name == "stl_review_sources.py" for record in records)
+
+
+def test_dirty_stl_fixture_entrypoints_build_reviewable_models(project_root: Path) -> None:
+    fixture_file = project_root / "tests/reference_review_fixtures/dirty-stl-fixtures.json"
+    summary = load_source_records_from_file(fixture_file)
+    module_path = project_root / "tests/reference_review_fixtures/stl_review_sources.py"
+    spec = importlib.util.spec_from_file_location("stl_review_sources_check", module_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    built_types = {
+        getattr(module, item.record.entrypoint)().__class__.__name__ for item in summary.valid_items
+    }
+
+    assert built_types <= {"SurfaceBody", "SurfaceConsumerCollection"}
+    assert len(built_types) == 2
+
+
 def test_review_context_payload_is_deterministic_and_omits_absolute_source_path(tmp_path: Path) -> None:
     source = _write_source(tmp_path, "candidate.py")
     record = ReviewSourceModelRecord(
@@ -155,6 +195,7 @@ def test_review_context_payload_is_deterministic_and_omits_absolute_source_path(
 
     assert first == second
     assert first["source_display_path"] == "candidate.py"
+    assert first["artifact_display_paths"] == []
     assert str(tmp_path) not in json.dumps(first)
 
 

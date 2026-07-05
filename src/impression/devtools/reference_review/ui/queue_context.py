@@ -13,6 +13,7 @@ class FixtureQueueItem:
     feature_name: str
     source_display_path: str
     expected_output: str | None
+    artifact_display_path: str | None = None
     status: str = "dirty"
 
     @classmethod
@@ -22,6 +23,7 @@ class FixtureQueueItem:
             feature_name=record.feature_name,
             source_display_path=record.identity.display_path,
             expected_output=record.expected_output,
+            artifact_display_path=record.artifact_paths[0].name if record.artifact_paths else None,
             status=status,
         )
 
@@ -32,11 +34,12 @@ class SelectedFixtureContext:
     feature_name: str | None
     source_display_path: str | None
     expected_output: str | None
+    artifact_display_paths: tuple[str, ...] = ()
     empty: bool = False
 
     @classmethod
     def empty_state(cls) -> "SelectedFixtureContext":
-        return cls(None, None, None, None, empty=True)
+        return cls(None, None, None, None, (), empty=True)
 
     @classmethod
     def from_payload(cls, payload: ReviewContextPayload) -> "SelectedFixtureContext":
@@ -45,6 +48,7 @@ class SelectedFixtureContext:
             payload.feature_name,
             payload.source_display_path,
             payload.expected_output,
+            payload.artifact_display_paths,
         )
 
 
@@ -108,4 +112,3 @@ class FixtureQueueViewModel:
             return self.selected_context
         self.selected_index = max(self.selected_index - 1, 0)
         return self.selected_context
-

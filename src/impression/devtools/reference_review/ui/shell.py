@@ -127,6 +127,7 @@ def _fixture_items_for_qml(queue: FixtureQueueViewModel) -> list[dict[str, str]]
             "feature_name": item.feature_name,
             "source_display_path": item.source_display_path,
             "expected_output": item.expected_output or "",
+            "artifact_display_path": item.artifact_display_path or "",
             "status": item.status,
         }
         for item in queue.items

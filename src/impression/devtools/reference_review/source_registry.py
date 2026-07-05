@@ -63,6 +63,7 @@ class ReviewSourceModelRecord:
     expected_output: str | None = None
     description: str | None = None
     parameters: tuple[EntrypointParameterRecord, ...] = ()
+    artifact_paths: tuple[Path, ...] = ()
     generated: bool = False
 
     def __post_init__(self) -> None:
@@ -74,6 +75,7 @@ class ReviewSourceModelRecord:
             raise ValueError("entrypoint must not be empty")
         object.__setattr__(self, "load_mode", ReviewSourceLoadMode(self.load_mode))
         object.__setattr__(self, "source_path", Path(self.source_path))
+        object.__setattr__(self, "artifact_paths", tuple(Path(path) for path in self.artifact_paths))
 
     @property
     def identity(self) -> SourceIdentity:
@@ -97,6 +99,11 @@ class ReviewSourceModelRecord:
             EntrypointParameterRecord(name=str(item["name"]), value=item.get("value"))
             for item in data.get("parameters", ())
         )
+        artifact_paths = tuple(Path(str(path)) for path in data.get("artifact_paths", ()))
+        if base_dir is not None:
+            artifact_paths = tuple(
+                path if path.is_absolute() else base_dir / path for path in artifact_paths
+            )
         return cls(
             fixture_id=str(data.get("fixture_id", "")),
             feature_name=str(data.get("feature_name", "")),
@@ -106,6 +113,7 @@ class ReviewSourceModelRecord:
             expected_output=data.get("expected_output"),
             description=data.get("description"),
             parameters=parameters,
+            artifact_paths=artifact_paths,
             generated=bool(data.get("generated", False)),
         )
 
@@ -170,6 +178,31 @@ def validate_source_record(
         diagnostics.append(
             SourceValidationDiagnostic("missing-entrypoint", "entrypoint is required", record.fixture_id)
         )
+    for artifact_path in record.artifact_paths:
+        if allowed_root is not None:
+            root = allowed_root.resolve()
+            try:
+                artifact_path.resolve().relative_to(root)
+            except ValueError:
+                diagnostics.append(
+                    SourceValidationDiagnostic(
+                        "artifact-outside-root",
+                        "artifact path is outside the configured reference root",
+                        record.fixture_id,
+                    )
+                )
+        if not artifact_path.exists():
+            diagnostics.append(
+                SourceValidationDiagnostic(
+                    "missing-artifact",
+                    sanitize_error_text(str(artifact_path)),
+                    record.fixture_id,
+                )
+            )
+        elif not artifact_path.is_file():
+            diagnostics.append(
+                SourceValidationDiagnostic("artifact-not-file", artifact_path.name, record.fixture_id)
+            )
     return SourceValidationResult(record=record, diagnostics=tuple(diagnostics))
 
 
@@ -303,6 +336,7 @@ class ReviewContextPayload:
     expected_output: str | None
     description: str | None
     parameters: tuple[EntrypointParameterRecord, ...] = ()
+    artifact_display_paths: tuple[str, ...] = ()
 
     def to_json_dict(self) -> dict[str, Any]:
         return {
@@ -315,6 +349,7 @@ class ReviewContextPayload:
             "parameters": [
                 {"name": item.name, "value": item.value} for item in self.parameters
             ],
+            "artifact_display_paths": list(self.artifact_display_paths),
         }
 
 
@@ -327,6 +362,7 @@ def build_review_context_payload(record: ReviewSourceModelRecord) -> ReviewConte
         expected_output=record.expected_output,
         description=record.description,
         parameters=record.parameters,
+        artifact_display_paths=tuple(path.name for path in record.artifact_paths),
     )
 
 

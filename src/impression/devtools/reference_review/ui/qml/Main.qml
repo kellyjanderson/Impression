@@ -116,7 +116,7 @@ ApplicationWindow {
                             }
                             Text {
                                 width: parent.width
-                                text: modelData.source_display_path
+                                text: modelData.artifact_display_path || modelData.source_display_path
                                 color: "#565a51"
                                 font.pixelSize: 11
                                 elide: Text.ElideMiddle
@@ -195,6 +195,7 @@ ApplicationWindow {
                     Layout.minimumHeight: 240
                     markdownText: root.hasFixture
                         ? "# " + root.currentFixture().fixture_id + "\n\nSource: `" + root.currentFixture().source_display_path + "`\n\nExpected: " + (root.currentFixture().expected_output || "not declared")
+                            + (root.currentFixture().artifact_display_path ? "\n\nArtifact: `" + root.currentFixture().artifact_display_path + "`" : "")
                         : "No fixture context loaded."
                 }
 
