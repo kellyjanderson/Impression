@@ -226,6 +226,9 @@ def load_source_records_from_file(path: Path) -> DiscoverySummary:
         return DiscoverySummary(
             diagnostics=(SourceValidationDiagnostic("invalid-fixture-file", str(exc)),)
         )
+    allowed_root = path.parent
+    if isinstance(payload, Mapping) and payload.get("allowed_root") is not None:
+        allowed_root = path.parent / str(payload["allowed_root"])
     rows = payload.get("fixtures", payload) if isinstance(payload, Mapping) else payload
     if isinstance(rows, Mapping):
         rows = (rows,)
@@ -238,7 +241,7 @@ def load_source_records_from_file(path: Path) -> DiscoverySummary:
                 ),
             )
         )
-    return _records_from_mappings(rows, base_dir=path.parent, allowed_root=path.parent)
+    return _records_from_mappings(rows, base_dir=path.parent, allowed_root=allowed_root)
 
 
 def load_source_records_from_database(path: Path) -> DiscoverySummary:

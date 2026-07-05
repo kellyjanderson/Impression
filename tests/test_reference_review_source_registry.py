@@ -129,6 +129,16 @@ def test_fixture_database_loads_review_source_records(tmp_path: Path) -> None:
     assert summary.valid_items[0].record.fixture_id == "demo/db"
 
 
+def test_committed_demo_fixture_file_loads(project_root: Path) -> None:
+    fixture_file = project_root / "tests/reference_review_fixtures/demo-fixtures.json"
+
+    summary = load_source_records_from_file(fixture_file)
+
+    assert not summary.diagnostics
+    assert len(summary.valid_items) == 1
+    assert summary.valid_items[0].record.fixture_id == "examples/hello-cube"
+
+
 def test_review_context_payload_is_deterministic_and_omits_absolute_source_path(tmp_path: Path) -> None:
     source = _write_source(tmp_path, "candidate.py")
     record = ReviewSourceModelRecord(
