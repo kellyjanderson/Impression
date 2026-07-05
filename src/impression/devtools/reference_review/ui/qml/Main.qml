@@ -60,11 +60,14 @@ ApplicationWindow {
             SplitView.fillWidth: true
             padding: 16
 
-            ColumnLayout {
+            GridLayout {
                 anchors.fill: parent
-                spacing: 12
+                columns: 2
+                columnSpacing: 12
+                rowSpacing: 12
 
                 RowLayout {
+                    Layout.columnSpan: 2
                     Layout.fillWidth: true
                     spacing: 8
 
@@ -86,6 +89,7 @@ ApplicationWindow {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    Layout.minimumHeight: 240
                     radius: 4
                     border.color: "#c9c8be"
                     color: "#ffffff"
@@ -98,6 +102,32 @@ ApplicationWindow {
                         wrapMode: Text.WordWrap
                         color: "#565a51"
                     }
+                }
+
+                Components.MarkdownPanel {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.minimumHeight: 240
+                    markdownText: "No fixture context loaded."
+                }
+
+                Components.ArtifactPanel {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 180
+                    artifactCount: 0
+                }
+
+                Components.NotesPanel {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 180
+                    noteText: ""
+                }
+
+                Components.CodexPanel {
+                    Layout.columnSpan: 2
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 220
+                    streamText: ""
                 }
             }
         }

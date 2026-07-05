@@ -20,7 +20,12 @@ class PackageResourceManifest:
     qml_root: Path
     required_files: tuple[str, ...] = (
         "Main.qml",
+        "ComponentGallery.qml",
         "qtquickcontrols2.conf",
+        "components/ArtifactPanel.qml",
+        "components/CodexPanel.qml",
+        "components/MarkdownPanel.qml",
+        "components/NotesPanel.qml",
         "components/StatusBadge.qml",
     )
 
@@ -73,4 +78,3 @@ def verify_qml_resource_layout(
         if not (manifest.qml_root / relative).is_file()
     ]
     return PackagingSmokeResult(valid=not diagnostics, diagnostics=tuple(diagnostics))
-

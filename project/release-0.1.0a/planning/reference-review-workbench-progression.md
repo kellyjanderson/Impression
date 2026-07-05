@@ -58,22 +58,22 @@ Review paired test specifications have not yet been created.
 - [x] [Reference Review Spec 29: Preview Load Binding](../specifications/reference-review-29-preview-load-binding-v1_0.md)
 - [x] [Reference Review Spec 30: Camera Controls](../specifications/reference-review-30-camera-controls-v1_0.md)
 - [x] [Reference Review Spec 31: Renderer Backend](../specifications/reference-review-31-renderer-backend-v1_0.md)
-- [ ] [Reference Review Spec 32: QML Panel/Link Policy](../specifications/reference-review-32-qml-panel-link-policy-v1_0.md)
-- [ ] [Reference Review Spec 33: Artifact Panel](../specifications/reference-review-33-artifact-panel-v1_0.md)
-- [ ] [Reference Review Spec 34: Notes Panel](../specifications/reference-review-34-notes-panel-v1_0.md)
-- [ ] [Reference Review Spec 35: Chat Stream Panel](../specifications/reference-review-35-chat-stream-panel-v1_0.md)
-- [ ] [Reference Review Spec 36: Candidate List/Adoption UI](../specifications/reference-review-36-candidate-list-adoption-ui-v1_0.md)
-- [ ] [Reference Review Spec 37: Refusal Display](../specifications/reference-review-37-refusal-display-v1_0.md)
+- [x] [Reference Review Spec 32: QML Panel/Link Policy](../specifications/reference-review-32-qml-panel-link-policy-v1_0.md)
+- [x] [Reference Review Spec 33: Artifact Panel](../specifications/reference-review-33-artifact-panel-v1_0.md)
+- [x] [Reference Review Spec 34: Notes Panel](../specifications/reference-review-34-notes-panel-v1_0.md)
+- [x] [Reference Review Spec 35: Chat Stream Panel](../specifications/reference-review-35-chat-stream-panel-v1_0.md)
+- [x] [Reference Review Spec 36: Candidate List/Adoption UI](../specifications/reference-review-36-candidate-list-adoption-ui-v1_0.md)
+- [x] [Reference Review Spec 37: Refusal Display](../specifications/reference-review-37-refusal-display-v1_0.md)
 
 ## UI Evidence And Review Quality
 
-- [ ] [Reference Review Spec 38: Component Gallery](../specifications/reference-review-38-component-gallery-v1_0.md)
-- [ ] [Reference Review Spec 39: Screenshot Runner](../specifications/reference-review-39-screenshot-runner-v1_0.md)
-- [ ] [Reference Review Spec 40: Accessibility/Overflow State Matrix](../specifications/reference-review-40-accessibility-overflow-state-matrix-v1_0.md)
+- [x] [Reference Review Spec 38: Component Gallery](../specifications/reference-review-38-component-gallery-v1_0.md)
+- [x] [Reference Review Spec 39: Screenshot Runner](../specifications/reference-review-39-screenshot-runner-v1_0.md)
+- [x] [Reference Review Spec 40: Accessibility/Overflow State Matrix](../specifications/reference-review-40-accessibility-overflow-state-matrix-v1_0.md)
 
 ## Architecture Governance
 
-- [ ] [Reference Review Spec 42: Reference Review Architecture Index And Domain Split](../specifications/reference-review-42-reference-review-architecture-index-and-domain-split-v1_0.md)
+- [x] [Reference Review Spec 42: Reference Review Architecture Index And Domain Split](../specifications/reference-review-42-reference-review-architecture-index-and-domain-split-v1_0.md)
 
 ## Ordering Rationale
 
@@ -85,7 +85,6 @@ after the component foundation and primary panels exist.
 
 ## Current Implementation Note
 
-2026-07-04: implementation is complete through Spec 31. Spec 32 and later
-remain unchecked because the next slice needs the QML Markdown panel surface,
-artifact/notes/Codex panel view models, and screenshot/accessibility evidence
-before those checkboxes can be honest truth markers.
+2026-07-04: implementation is complete through Spec 42. All Reference Review
+Workbench progression items in this document are checked with focused service,
+UI, evidence, and architecture-index verification.

@@ -22,6 +22,36 @@ ViewDown desktop-app work.
 - [Reference Review Promotion And Notes Lifecycle](reference-review-promotion-and-notes-lifecycle.md)
 - [Reference Review Codex Sandbox](reference-review-codex-sandbox.md)
 
+## Domain Ownership Index
+
+The parent architecture owns system map, domain boundaries, cross-document
+commitments, and release-level navigation. Child architecture documents own the
+implementation candidates in their domain.
+
+| Domain | Owning child architecture | Implementation candidate families |
+| --- | --- | --- |
+| Fixture/source records | [Reference Review Fixture Source Contract](reference-review-fixture-source-contract.md) | source record schema, validation, discovery, deterministic context payload, generated review module contract |
+| Responsive execution | [Reference Review Async Concurrency](reference-review-async-concurrency.md) | workbench message envelope, dispatcher policy, stale completion guards, durable write serialization, UI handoff, task audit events |
+| Review lifecycle | [Reference Review Promotion And Notes Lifecycle](reference-review-promotion-and-notes-lifecycle.md) | note store, state classifier, promotion validator, atomic promotion executor, provenance, release gate report |
+| Codex sidecar | [Reference Review Codex Sandbox](reference-review-codex-sandbox.md) | fixture context builder, tool broker, candidate model store, candidate note patches, regeneration route, sidecar audit boundary |
+| Qt workbench UI | [Reference Review Qt Workbench UI](reference-review-qt-workbench-ui.md) | QML shell, bridge registry, shared component framework, queue/context panels, preview bridge, Markdown panel, artifact/notes/Codex panels, screenshot and accessibility evidence |
+
+## Cross-Document Commitments
+
+- Child documents may add domain-specific details, but they may not bypass the
+  parent commitments below.
+- The fixture source contract owns source truth; UI panels and Codex context
+  consume source records instead of inventing fixture identity.
+- Async concurrency owns task ownership, request ids, stale completions, and
+  UI-thread handoff for every expensive operation.
+- Promotion and notes lifecycle owns durable review notes, promotion writes,
+  provenance, and release gate meaning.
+- Codex sandbox owns sidecar authority. UI surfaces display broker results and
+  refusals but do not grant shell, git, arbitrary filesystem, or promotion
+  authority.
+- Qt workbench UI owns visible state, layout, and evidence, while service
+  modules own durable writes and project mutations.
+
 ## Related Impression Architecture
 
 This workbench extends the active release reference evidence architecture:
