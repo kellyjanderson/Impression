@@ -5,6 +5,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QMetaObject, QObject
 
 from impression.devtools.reference_review.ui import (
     BridgeRecord,
@@ -87,3 +88,31 @@ def test_qml_shell_launches_offscreen_without_loading_fixture_on_ui_thread() -> 
 
     assert result.launched
     assert result.engine is not None
+
+
+def test_empty_shell_commands_give_immediate_visible_feedback() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    result = launch_workbench(offscreen=True)
+    assert result.launched
+    root = result.engine.rootObjects()[0]
+    refresh = root.findChild(QObject, "refreshQueueButton")
+    send = root.findChild(QObject, "sendPromptButton")
+
+    assert refresh is not None
+    assert send is not None
+    assert QMetaObject.invokeMethod(refresh, "clicked")
+    assert root.property("queueStatusText") == "No review sources found"
+    assert root.property("selectedMessageText") == "No fixture selected."
+    assert QMetaObject.invokeMethod(send, "clicked")
+    assert root.property("codexStreamText") == "No fixture selected."
+
+
+def test_status_badge_is_display_only_not_a_button_like_control(project_root: Path) -> None:
+    badge = (
+        project_root
+        / "src/impression/devtools/reference_review/ui/qml/components/StatusBadge.qml"
+    ).read_text()
+
+    assert "Rectangle {" in badge
+    assert "Control {" not in badge
+    assert "onClicked" not in badge

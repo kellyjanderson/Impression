@@ -7,6 +7,7 @@ Frame {
     property string streamText: ""
     property string refusalText: ""
     property int candidateCount: 0
+    signal sendRequested(string prompt)
 
     padding: 12
 
@@ -43,12 +44,15 @@ Frame {
             spacing: 8
 
             TextField {
+                id: promptField
                 Layout.fillWidth: true
                 placeholderText: "Fixture-scoped prompt"
             }
 
             Button {
+                objectName: "sendPromptButton"
                 text: "Send"
+                onClicked: root.sendRequested(promptField.text)
             }
         }
     }

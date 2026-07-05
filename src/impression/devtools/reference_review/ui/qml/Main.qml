@@ -12,6 +12,10 @@ ApplicationWindow {
     visible: true
     title: "Reference Review Workbench"
     color: "#f7f7f2"
+    property string queueStatusText: "No fixture loaded"
+    property string selectedMessageText: "Select a fixture to begin review."
+    property string codexStreamText: ""
+    property bool hasFixture: false
 
     SplitView {
         anchors.fill: parent
@@ -27,19 +31,32 @@ ApplicationWindow {
                 anchors.fill: parent
                 spacing: 10
 
-                Text {
+                RowLayout {
                     Layout.fillWidth: true
-                    text: "Queue"
-                    font.pixelSize: 18
-                    font.bold: true
-                    color: "#242622"
-                    elide: Text.ElideRight
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: "Queue"
+                        font.pixelSize: 18
+                        font.bold: true
+                        color: "#242622"
+                        elide: Text.ElideRight
+                    }
+
+                    Button {
+                        objectName: "refreshQueueButton"
+                        text: "Refresh"
+                        onClicked: {
+                            root.queueStatusText = "No review sources found"
+                            root.selectedMessageText = "No fixture selected."
+                        }
+                    }
                 }
 
                 Components.StatusBadge {
                     Layout.fillWidth: true
-                    label: "No fixture loaded"
-                    tone: "neutral"
+                    label: root.queueStatusText
+                    tone: root.queueStatusText === "No review sources found" ? "warning" : "neutral"
                 }
 
                 ListView {
@@ -84,6 +101,18 @@ ApplicationWindow {
                         label: startupDiagnostics.length > 0 ? "Diagnostics" : "Ready"
                         tone: startupDiagnostics.length > 0 ? "warning" : "ready"
                     }
+
+                    Button {
+                        objectName: "previousFixtureButton"
+                        text: "Previous"
+                        enabled: root.hasFixture
+                    }
+
+                    Button {
+                        objectName: "nextFixtureButton"
+                        text: "Next"
+                        enabled: root.hasFixture
+                    }
                 }
 
                 Rectangle {
@@ -97,7 +126,7 @@ ApplicationWindow {
                     Label {
                         anchors.centerIn: parent
                         width: Math.min(parent.width - 48, 520)
-                        text: "Select a fixture to begin review."
+                        text: root.selectedMessageText
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.WordWrap
                         color: "#565a51"
@@ -127,7 +156,12 @@ ApplicationWindow {
                     Layout.columnSpan: 2
                     Layout.fillWidth: true
                     Layout.preferredHeight: 220
-                    streamText: ""
+                    streamText: root.codexStreamText
+                    onSendRequested: function(prompt) {
+                        root.codexStreamText = root.hasFixture
+                            ? "Request queued."
+                            : "No fixture selected."
+                    }
                 }
             }
         }
