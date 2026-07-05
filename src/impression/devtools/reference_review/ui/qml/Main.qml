@@ -174,18 +174,34 @@ ApplicationWindow {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    Layout.preferredWidth: 360
+                    Layout.minimumWidth: 300
                     Layout.minimumHeight: 240
                     radius: 4
                     border.color: "#c9c8be"
                     color: "#ffffff"
 
+                    Image {
+                        id: selectedArtifactPreview
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        source: root.hasFixture ? root.currentFixture().artifact_preview_url : ""
+                        fillMode: Image.PreserveAspectFit
+                        asynchronous: true
+                        cache: false
+                        visible: source !== "" && status === Image.Ready
+                    }
+
                     Label {
                         anchors.centerIn: parent
                         width: Math.min(parent.width - 48, 520)
-                        text: root.selectedMessageText
+                        text: root.hasFixture && root.currentFixture().artifact_preview_url === ""
+                            ? "No STL preview available for " + root.currentFixture().artifact_display_path
+                            : root.selectedMessageText
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.WordWrap
                         color: "#565a51"
+                        visible: !selectedArtifactPreview.visible
                     }
                 }
 
@@ -202,7 +218,11 @@ ApplicationWindow {
                 Components.ArtifactPanel {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 180
-                    artifactCount: 0
+                    Layout.preferredWidth: 360
+                    Layout.minimumWidth: 300
+                    artifacts: root.hasFixture && root.currentFixture().artifact_display_path
+                        ? [root.currentFixture()]
+                        : []
                 }
 
                 Components.NotesPanel {

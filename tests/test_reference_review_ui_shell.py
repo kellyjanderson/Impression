@@ -17,6 +17,7 @@ from impression.devtools.reference_review.ui import (
     build_dependency_policy_report,
     launch_workbench,
     load_style_tokens,
+    render_stl_preview,
     verify_qml_resource_layout,
 )
 from impression.devtools.reference_review.ui import shell
@@ -143,6 +144,37 @@ def test_shell_loads_fixture_file_into_selectable_queue(tmp_path: Path) -> None:
     assert root.property("queueStatusText") == "1 fixture loaded"
     assert root.property("selectedMessageText") == "demo/selectable"
     assert root.property("hasFixture")
+
+
+def test_stl_preview_renderer_writes_png_for_artifact(project_root: Path, tmp_path: Path) -> None:
+    artifact = project_root / "project/release-0.1.0a/reference-stl/dirty/surfacebody/box.stl"
+
+    preview = render_stl_preview(artifact, cache_root=tmp_path / "previews", window_size=(240, 180))
+
+    assert preview.diagnostic is None
+    assert preview.preview_path is not None
+    assert preview.preview_path.exists()
+    assert preview.preview_path.suffix == ".png"
+    assert preview.preview_url.startswith("file://")
+
+
+def test_dirty_stl_fixture_launch_exposes_preview_url(project_root: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    fixture_file = project_root / "tests/reference_review_fixtures/dirty-stl-fixtures.json"
+    records, diagnostics = shell.load_fixture_records(fixture_files=(fixture_file,))
+
+    result = launch_workbench(
+        fixture_records=records[:1],
+        fixture_diagnostics=diagnostics,
+        offscreen=True,
+    )
+    root = result.engine.rootObjects()[0]
+    fixtures = root.property("reviewFixtures")
+
+    assert result.launched
+    assert fixtures[0]["artifact_display_path"] == "anchor_shift_rectangle.stl"
+    assert fixtures[0]["artifact_preview_url"].startswith("file://")
+    assert fixtures[0]["artifact_preview_status"] == "ready"
 
 
 def test_shell_next_button_selects_fixture_record(tmp_path: Path) -> None:

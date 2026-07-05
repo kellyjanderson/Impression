@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+from .artifact_preview import ArtifactPreviewRecord, render_stl_preview
 from .bridge import BridgeRecord, BridgeRegistry
 from .packaging import qml_resource_root
 from .queue_context import FixtureQueueViewModel
@@ -78,9 +79,21 @@ def launch_workbench(
     for name, record in bridges.records.items():
         context.setContextProperty(name, record.bridge)
     queue = FixtureQueueViewModel(fixture_records)
-    context.setContextProperty("startupDiagnostics", diagnostics + list(fixture_diagnostics))
-    context.setContextProperty("fixtureItems", _fixture_items_for_qml(queue))
-    context.setContextProperty("initialQueueStatus", _queue_status_text(queue, fixture_diagnostics))
+    artifact_previews = _artifact_previews_for_records(fixture_records)
+    artifact_preview_diagnostics = tuple(
+        preview.diagnostic
+        for preview in artifact_previews.values()
+        if preview.diagnostic is not None
+    )
+    context.setContextProperty(
+        "startupDiagnostics",
+        diagnostics + list(fixture_diagnostics) + list(artifact_preview_diagnostics),
+    )
+    context.setContextProperty("fixtureItems", _fixture_items_for_qml(queue, artifact_previews))
+    context.setContextProperty(
+        "initialQueueStatus",
+        _queue_status_text(queue, fixture_diagnostics + artifact_preview_diagnostics),
+    )
     path = qml_path or (qml_resource_root() / "Main.qml")
     if not path.is_file():
         return WorkbenchLaunchResult(False, (f"missing-qml:{path.name}",), engine)
@@ -120,18 +133,41 @@ def load_fixture_records(
     return tuple(records), tuple(diagnostics)
 
 
-def _fixture_items_for_qml(queue: FixtureQueueViewModel) -> list[dict[str, str]]:
-    return [
-        {
-            "fixture_id": item.fixture_id,
-            "feature_name": item.feature_name,
-            "source_display_path": item.source_display_path,
-            "expected_output": item.expected_output or "",
-            "artifact_display_path": item.artifact_display_path or "",
-            "status": item.status,
-        }
-        for item in queue.items
-    ]
+def _fixture_items_for_qml(
+    queue: FixtureQueueViewModel,
+    artifact_previews: dict[str, ArtifactPreviewRecord] | None = None,
+) -> list[dict[str, object]]:
+    artifact_previews = artifact_previews or {}
+    items: list[dict[str, object]] = []
+    for item in queue.items:
+        preview = artifact_previews.get(item.fixture_id)
+        items.append(
+            {
+                "fixture_id": item.fixture_id,
+                "feature_name": item.feature_name,
+                "source_display_path": item.source_display_path,
+                "expected_output": item.expected_output or "",
+                "artifact_display_path": item.artifact_display_path or "",
+                "artifact_preview_url": preview.preview_url if preview is not None else "",
+                "artifact_preview_status": preview.diagnostic
+                if preview is not None and preview.diagnostic
+                else "ready",
+                "status": item.status,
+            }
+        )
+    return items
+
+
+def _artifact_previews_for_records(
+    records: tuple[ReviewSourceModelRecord, ...],
+) -> dict[str, ArtifactPreviewRecord]:
+    cache_root = Path(".cache/reference-review/stl-previews")
+    previews: dict[str, ArtifactPreviewRecord] = {}
+    for record in records:
+        if not record.artifact_paths:
+            continue
+        previews[record.fixture_id] = render_stl_preview(record.artifact_paths[0], cache_root=cache_root)
+    return previews
 
 
 def _queue_status_text(queue: FixtureQueueViewModel, diagnostics: tuple[str, ...]) -> str:

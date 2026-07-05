@@ -1,5 +1,6 @@
 """Qt/QML shell support for the Reference Review Workbench."""
 
+from .artifact_preview import ArtifactPreviewRecord, render_stl_preview
 from .bridge import BridgeAvailabilityDiagnostic, BridgeRecord, BridgeRegistry
 from .evidence import (
     AccessibilityOverflowMatrix,
@@ -55,6 +56,7 @@ __all__ = [
     "BridgeRecord",
     "BridgeRegistry",
     "BlockedLinkDiagnostic",
+    "ArtifactPreviewRecord",
     "ArtifactPanelViewModel",
     "ArtifactRecord",
     "ArtifactTileViewModel",
@@ -101,5 +103,6 @@ __all__ = [
     "default_component_gallery",
     "launch_workbench",
     "load_style_tokens",
+    "render_stl_preview",
     "verify_qml_resource_layout",
 ]
