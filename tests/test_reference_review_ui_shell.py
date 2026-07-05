@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QObject
+from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import QPushButton
 
 from impression.devtools.reference_review import ReviewSourceModelRecord
@@ -22,6 +23,7 @@ from impression.devtools.reference_review.ui import (
     verify_qml_resource_layout,
 )
 from impression.devtools.reference_review.ui import shell
+from impression.devtools.reference_review.ui.shell import InteractiveStlPreviewLabel
 from impression.devtools.reference_review.ui.style import component_contracts
 
 
@@ -207,6 +209,23 @@ def test_dirty_stl_fixture_selects_embedded_preview_surface(project_root: Path) 
     assert root.findChild(QObject, "embeddedPreviewSurface") is not None
     assert root.findChild(QObject, "resetPreviewButton") is not None
     assert root.property("interactivePreviewReady")
+
+
+def test_embedded_preview_updates_visible_feedback_during_drag() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    preview = InteractiveStlPreviewLabel()
+    preview.resize(240, 180)
+    pixmap = QPixmap(120, 90)
+    pixmap.fill(QColor("#5b84b1"))
+    preview._base_pixmap = pixmap
+    preview._feedback_rotation_deg = 18.0
+    preview._feedback_pan_x = 12.0
+    preview._feedback_pan_y = -6.0
+
+    preview._show_interaction_feedback()
+
+    assert preview.pixmap() is not None
+    assert not preview.pixmap().isNull()
 
 
 def test_shell_next_button_selects_fixture_record(tmp_path: Path) -> None:
