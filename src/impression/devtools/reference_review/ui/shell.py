@@ -11,6 +11,17 @@ from typing import Sequence
 from .bridge import BridgeRecord, BridgeRegistry
 from .packaging import qml_resource_root
 
+_ACTIVE_LAUNCH: "WorkbenchLaunchResult | None" = None
+_USAGE = """usage: impression-reference-review [--check] [--offscreen]
+
+Launch the Impression Reference Review Workbench.
+
+options:
+  --check       validate that the QML shell can load, then exit
+  --offscreen   use Qt's offscreen platform plugin
+  -h, --help    show this help message and exit
+"""
+
 
 @dataclass(frozen=True)
 class WorkbenchLaunchResult:
@@ -73,11 +84,31 @@ def default_bridge_registry() -> BridgeRegistry:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    result = launch_workbench(argv or sys.argv, bridges=default_bridge_registry())
+    global _ACTIVE_LAUNCH
+
+    argv = tuple(argv or sys.argv)
+    args = argv[1:]
+    if any(arg in {"-h", "--help"} for arg in args):
+        print(_USAGE.strip())
+        return 0
+    unknown = tuple(arg for arg in args if arg not in {"--check", "--offscreen"})
+    if unknown:
+        print(f"unknown argument: {unknown[0]}", file=sys.stderr)
+        print(_USAGE.strip(), file=sys.stderr)
+        return 2
+    result = launch_workbench(
+        argv,
+        bridges=default_bridge_registry(),
+        offscreen="--offscreen" in args,
+    )
     if not result.launched:
         for diagnostic in result.diagnostics:
             print(diagnostic, file=sys.stderr)
         return 1
+    _ACTIVE_LAUNCH = result
+    if "--check" in args:
+        print("Reference Review Workbench launch check passed")
+        return 0
     from PySide6.QtGui import QGuiApplication
 
     return QGuiApplication.instance().exec()
@@ -85,4 +116,3 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

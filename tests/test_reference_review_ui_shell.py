@@ -17,6 +17,7 @@ from impression.devtools.reference_review.ui import (
     load_style_tokens,
     verify_qml_resource_layout,
 )
+from impression.devtools.reference_review.ui import shell
 from impression.devtools.reference_review.ui.style import component_contracts
 
 
@@ -116,3 +117,15 @@ def test_status_badge_is_display_only_not_a_button_like_control(project_root: Pa
     assert "Rectangle {" in badge
     assert "Control {" not in badge
     assert "onClicked" not in badge
+
+
+def test_console_entrypoint_supports_help_and_check(capsys) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+    assert shell.main(("impression-reference-review", "--help")) == 0
+    help_output = capsys.readouterr().out
+    assert "usage: impression-reference-review" in help_output
+    assert shell.main(("impression-reference-review", "--check", "--offscreen")) == 0
+    check_output = capsys.readouterr().out
+    assert "launch check passed" in check_output
+    assert shell._ACTIVE_LAUNCH is not None
