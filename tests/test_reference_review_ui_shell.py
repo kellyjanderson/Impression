@@ -6,6 +6,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from PIL import Image
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import QPushButton
@@ -161,6 +162,22 @@ def test_stl_preview_renderer_writes_png_for_artifact(project_root: Path, tmp_pa
     assert preview.preview_path.exists()
     assert preview.preview_path.suffix == ".png"
     assert preview.preview_url.startswith("file://")
+    image = Image.open(preview.preview_path).convert("RGB")
+    corners = (
+        image.getpixel((0, 0)),
+        image.getpixel((image.width - 1, 0)),
+        image.getpixel((0, image.height - 1)),
+        image.getpixel((image.width - 1, image.height - 1)),
+    )
+    pixels = image.load()
+    assert all(blue > red and blue > green and max((red, green, blue)) < 80 for red, green, blue in corners)
+    assert any(
+        (red := pixels[x, y][0]) > 200
+        and 120 <= (green := pixels[x, y][1]) <= 210
+        and (blue := pixels[x, y][2]) < 150
+        for y in range(image.height)
+        for x in range(image.width)
+    )
 
 
 def test_dirty_stl_fixture_launch_exposes_artifact_without_startup_render(project_root: Path) -> None:
@@ -216,7 +233,7 @@ def test_embedded_preview_updates_visible_feedback_during_drag() -> None:
     preview = InteractiveStlPreviewLabel()
     preview.resize(240, 180)
     pixmap = QPixmap(120, 90)
-    pixmap.fill(QColor("#5b84b1"))
+    pixmap.fill(QColor("#ffb56b"))
     preview._base_pixmap = pixmap
     preview._feedback_rotation_deg = 18.0
     preview._feedback_pan_x = 12.0

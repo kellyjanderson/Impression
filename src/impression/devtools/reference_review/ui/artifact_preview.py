@@ -10,7 +10,9 @@ from pathlib import Path
 
 os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
 
-_RENDER_CONTRACT_VERSION = "stl-preview-v3"
+_RENDER_CONTRACT_VERSION = "stl-preview-v4"
+_PREVIEW_BACKGROUND_COLOR = "#071426"
+_PREVIEW_OBJECT_COLOR = "#ffb56b"
 
 
 @dataclass(frozen=True)
@@ -68,8 +70,8 @@ def render_stl_preview(
 
         mesh = pv.read(artifact_path)
         plotter = pv.Plotter(off_screen=True, window_size=window_size)
-        plotter.set_background("white")
-        plotter.add_mesh(mesh, color="#5b84b1", smooth_shading=False, show_edges=True)
+        plotter.set_background(_PREVIEW_BACKGROUND_COLOR)
+        plotter.add_mesh(mesh, color=_PREVIEW_OBJECT_COLOR, smooth_shading=False, show_edges=True)
         _apply_camera(plotter, mesh.bounds, camera)
         plotter.show(screenshot=str(preview_path), auto_close=True, interactive=False)
     except Exception as exc:
