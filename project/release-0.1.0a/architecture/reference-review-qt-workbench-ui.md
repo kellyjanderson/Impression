@@ -5,11 +5,11 @@
 This document defines the visible application structure for the Reference
 Review Workbench.
 
-The workbench should use a PySide 6 desktop application shell with Qt
-Quick/QML for UI chrome, panels, controls, state presentation, and keyboard
-interaction. The 3D model preview is isolated behind a preview bridge so the UI
-can host either an embedded PyVista/VTK viewport or an external preview process
-without rewriting the review workflow.
+The workbench should use a PySide 6 desktop application shell with in-window
+review panels, controls, state presentation, and keyboard interaction. The 3D
+model preview is hosted inside the review window through an embedded
+PyVistaQt/VTK viewport so reviewers can orbit, pan, zoom, and reset without
+leaving the workbench.
 
 ## Parent Architecture
 
@@ -20,17 +20,17 @@ without rewriting the review workflow.
 ## Technology Choice
 
 - Python/PySide 6 owns application startup, service wiring, task submission,
-  model loading, reference lifecycle calls, and bridge objects exposed to QML.
-- Qt Quick/QML owns visible presentation, layout, keyboard/pointer interaction,
-  component composition, and UI-thread state updates.
-- The preview bridge owns 3D viewport integration. The first implementation may
-  choose:
-  - embedded Qt-compatible PyVista/VTK viewport if reliable in the PySide shell
-  - supervised external `impression preview` process with selection/control file
-    handoff as a lower-risk bridge
+  model loading, reference lifecycle calls, and visible review panels.
+- Qt widgets own the primary workbench shell where native widget embedding is
+  required for the PyVistaQt/VTK interactor.
+- Qt Quick/QML remains available for component gallery and QML component assets
+  but is not the primary STL review surface.
+- The preview bridge owns embedded 3D viewport integration. The workbench must
+  not launch a separate preview application for normal STL review.
 
-The architecture does not let QML call PyVista or filesystem operations
-directly.
+The architecture does not let visible controls call PyVista or filesystem
+operations directly; selected, validated fixture records are routed through the
+preview shell.
 
 ## Primary Surfaces
 
@@ -512,9 +512,11 @@ Responsibilities:
 
 Project readiness fields:
 - Implementation owner/module:
-  - future `ui/preview_bridge`
+  - `ui/shell` for the embedded workbench host
+  - `ui/preview_bridge` for preview adapter state policy
 - Chosen defaults / parameters:
-  - embedded bridge preferred; supervised external bridge allowed by adapter
+  - embedded PyVistaQt bridge required for in-app STL review
+  - supervised external preview rejected for normal workbench interaction
 - Test strategy:
   - preview load, source change, camera action, and failure-state tests
 - Data ownership:
@@ -522,9 +524,10 @@ Project readiness fields:
 - Routes:
   - selected fixture to preview task to bridge state
 - Open questions / nuance discovered:
-  - embedded versus supervised bridge requires a small spike
+  - Qt offscreen tests use a placeholder because VTK's interactor is not stable
+    on the offscreen platform
 - Readiness blockers:
-  - bridge spike must select adapter mode before implementation
+  - none for the embedded preview route
 
 Score:
 - Functions/methods: 2 x 2 = 4

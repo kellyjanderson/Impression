@@ -1,4 +1,4 @@
-"""QML launcher/bootstrap for the Reference Review Workbench."""
+"""Launcher/bootstrap for the Reference Review Workbench."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from typing import Sequence
 from .artifact_preview import ArtifactPreviewRecord, render_stl_preview
 from .bridge import BridgeRecord, BridgeRegistry
 from .packaging import qml_resource_root
-from .preview_bridge import InteractivePreviewBridge
 from .queue_context import FixtureQueueViewModel
 from ..source_registry import (
     DiscoverySummary,
@@ -30,7 +29,7 @@ options:
   --fixture-file PATH  load review fixture records from a JSON fixture file
   --fixture-root PATH  discover review-source.json records under a fixture root
   --fixture-db PATH    load review fixture records from a SQLite review_sources table
-  --check       validate that the QML shell can load, then exit
+  --check       validate that the workbench shell can load, then exit
   --offscreen   use Qt's offscreen platform plugin
   -h, --help    show this help message and exit
 """
@@ -43,15 +42,30 @@ class WorkbenchLaunchResult:
     engine: object | None = None
 
 
-def _ensure_qt_app(argv: Sequence[str], *, offscreen: bool) -> object:
+def _ensure_qt_app(argv: Sequence[str], *, offscreen: bool, widgets: bool = False) -> object:
     if offscreen:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    if widgets:
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is not None:
+            return app
+        return QApplication(list(argv))
     from PySide6.QtGui import QGuiApplication
 
     app = QGuiApplication.instance()
     if app is not None:
         return app
     return QGuiApplication(list(argv))
+
+
+class _RootObjectAdapter:
+    def __init__(self, root: object) -> None:
+        self._root = root
+
+    def rootObjects(self) -> list[object]:
+        return [self._root]
 
 
 def launch_workbench(
@@ -66,9 +80,55 @@ def launch_workbench(
     argv = argv or ("impression-reference-review",)
     bridges = bridges or default_bridge_registry(fixture_records)
     diagnostics = [item.code for item in bridges.diagnostics()]
+    if qml_path is not None:
+        return _launch_qml_workbench(
+            argv,
+            bridges=bridges,
+            fixture_records=fixture_records,
+            fixture_diagnostics=fixture_diagnostics,
+            qml_path=qml_path,
+            offscreen=offscreen,
+            diagnostics=diagnostics,
+        )
+    try:
+        _ensure_qt_app(argv, offscreen=offscreen, widgets=True)
+    except Exception as exc:
+        return WorkbenchLaunchResult(False, (f"qt-unavailable:{exc}",))
+
+    queue = FixtureQueueViewModel(fixture_records)
+    artifact_previews = _artifact_previews_for_records(fixture_records)
+    artifact_preview_diagnostics = tuple(
+        preview.diagnostic
+        for preview in artifact_previews.values()
+        if preview.diagnostic is not None
+    )
+    try:
+        window = ReferenceReviewWindow(
+            queue,
+            artifact_previews=artifact_previews,
+            startup_diagnostics=tuple(diagnostics)
+            + tuple(fixture_diagnostics)
+            + artifact_preview_diagnostics,
+            offscreen=offscreen,
+        )
+    except Exception as exc:
+        return WorkbenchLaunchResult(False, (f"shell-unavailable:{exc}",))
+    return WorkbenchLaunchResult(True, tuple(diagnostics), _RootObjectAdapter(window))
+
+
+def _launch_qml_workbench(
+    argv: Sequence[str],
+    *,
+    bridges: BridgeRegistry,
+    fixture_records: tuple[ReviewSourceModelRecord, ...],
+    fixture_diagnostics: tuple[str, ...],
+    qml_path: Path,
+    offscreen: bool,
+    diagnostics: list[str],
+) -> WorkbenchLaunchResult:
     try:
         _ensure_qt_app(argv, offscreen=offscreen)
-        from PySide6.QtCore import QObject, QUrl
+        from PySide6.QtCore import QUrl
         from PySide6.QtQml import QQmlApplicationEngine
         from PySide6.QtQuickControls2 import QQuickStyle
     except Exception as exc:
@@ -95,7 +155,7 @@ def launch_workbench(
         "initialQueueStatus",
         _queue_status_text(queue, fixture_diagnostics + artifact_preview_diagnostics),
     )
-    path = qml_path or (qml_resource_root() / "Main.qml")
+    path = qml_path
     if not path.is_file():
         return WorkbenchLaunchResult(False, (f"missing-qml:{path.name}",), engine)
     engine.load(QUrl.fromLocalFile(str(path)))
@@ -104,20 +164,286 @@ def launch_workbench(
     return WorkbenchLaunchResult(True, tuple(diagnostics), engine)
 
 
+from PySide6.QtWidgets import QWidget
+
+
+class ReferenceReviewWindow(QWidget):
+    """Widget-hosted review shell with an embedded PyVista interactor."""
+
+    def __init__(
+        self,
+        queue: FixtureQueueViewModel,
+        *,
+        artifact_previews: dict[str, ArtifactPreviewRecord],
+        startup_diagnostics: tuple[str, ...],
+        offscreen: bool,
+    ) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import (
+            QFrame,
+            QGridLayout,
+            QHBoxLayout,
+            QLabel,
+            QListWidget,
+            QPushButton,
+            QSplitter,
+            QTextEdit,
+            QVBoxLayout,
+            QWidget,
+        )
+
+        super().__init__()
+        self.setWindowTitle("Reference Review Workbench")
+        self.resize(1180, 760)
+        self.setMinimumSize(880, 560)
+        self.queue = queue
+        self.artifact_previews = artifact_previews
+        self.startup_diagnostics = startup_diagnostics
+        self._offscreen = offscreen
+        self._plotter = None
+        self._selected_index = queue.selected_index if queue.selected_index is not None else -1
+        self._fixture_items = _fixture_items_for_qml(queue, artifact_previews)
+
+        root_layout = QHBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        root_layout.addWidget(splitter)
+
+        sidebar = QFrame()
+        sidebar.setMinimumWidth(220)
+        sidebar.setMaximumWidth(360)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_header = QHBoxLayout()
+        title = QLabel("Queue")
+        title.setStyleSheet("font-size: 18px; font-weight: 700;")
+        self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.setObjectName("refreshQueueButton")
+        sidebar_header.addWidget(title, 1)
+        sidebar_header.addWidget(self.refresh_button)
+        sidebar_layout.addLayout(sidebar_header)
+        self.queue_status = QLabel(_queue_status_text(queue, startup_diagnostics))
+        self.queue_status.setStyleSheet("background: #d8f0f2; border: 1px solid #89bec4; padding: 6px;")
+        sidebar_layout.addWidget(self.queue_status)
+        self.list_widget = QListWidget()
+        sidebar_layout.addWidget(self.list_widget, 1)
+        splitter.addWidget(sidebar)
+
+        main = QWidget()
+        main_layout = QGridLayout(main)
+        main_layout.setContentsMargins(16, 16, 16, 16)
+        main_layout.setHorizontalSpacing(12)
+        main_layout.setVerticalSpacing(12)
+        header = QHBoxLayout()
+        selected_title = QLabel("Selected Fixture")
+        selected_title.setStyleSheet("font-size: 18px; font-weight: 700;")
+        self.ready_badge = QLabel("Ready" if not startup_diagnostics else "Diagnostics")
+        self.ready_badge.setStyleSheet("background: #d8f0f2; border: 1px solid #89bec4; padding: 6px 18px;")
+        self.previous_button = QPushButton("Previous")
+        self.previous_button.setObjectName("previousFixtureButton")
+        self.next_button = QPushButton("Next")
+        self.next_button.setObjectName("nextFixtureButton")
+        header.addWidget(selected_title, 1)
+        header.addWidget(self.ready_badge)
+        header.addWidget(self.previous_button)
+        header.addWidget(self.next_button)
+        main_layout.addLayout(header, 0, 0, 1, 2)
+
+        self.preview_frame = QFrame()
+        self.preview_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.preview_frame.setMinimumSize(360, 260)
+        self.preview_layout = QVBoxLayout(self.preview_frame)
+        self.preview_layout.setContentsMargins(0, 0, 0, 0)
+        self.preview_placeholder = QLabel("No fixture selected.")
+        self.preview_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_layout.addWidget(self.preview_placeholder)
+        main_layout.addWidget(self.preview_frame, 1, 0)
+
+        context = QFrame()
+        context.setFrameShape(QFrame.Shape.StyledPanel)
+        context_layout = QVBoxLayout(context)
+        context_title = QLabel("Context")
+        context_title.setStyleSheet("font-size: 16px; font-weight: 700;")
+        self.context_text = QLabel("")
+        self.context_text.setWordWrap(True)
+        context_layout.addWidget(context_title)
+        context_layout.addWidget(self.context_text, 1)
+        main_layout.addWidget(context, 1, 1)
+
+        artifacts = QFrame()
+        artifacts.setFrameShape(QFrame.Shape.StyledPanel)
+        artifacts_layout = QVBoxLayout(artifacts)
+        artifact_title = QLabel("Artifacts")
+        artifact_title.setStyleSheet("font-size: 16px; font-weight: 700;")
+        self.artifact_thumb = QLabel("")
+        self.artifact_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.artifact_thumb.setMinimumHeight(92)
+        artifacts_layout.addWidget(artifact_title)
+        artifacts_layout.addWidget(self.artifact_thumb, 1)
+        main_layout.addWidget(artifacts, 2, 0)
+
+        notes = QFrame()
+        notes.setFrameShape(QFrame.Shape.StyledPanel)
+        notes_layout = QVBoxLayout(notes)
+        notes_title = QLabel("Notes")
+        notes_title.setStyleSheet("font-size: 16px; font-weight: 700;")
+        self.notes = QTextEdit()
+        self.notes.setPlaceholderText("Review notes")
+        notes_layout.addWidget(notes_title)
+        notes_layout.addWidget(self.notes, 1)
+        main_layout.addWidget(notes, 2, 1)
+
+        codex = QFrame()
+        codex.setFrameShape(QFrame.Shape.StyledPanel)
+        codex_layout = QVBoxLayout(codex)
+        codex_title = QLabel("Codex")
+        codex_title.setStyleSheet("font-size: 16px; font-weight: 700;")
+        self.codex_stream = QLabel("No active stream.")
+        prompt_row = QHBoxLayout()
+        self.prompt = QTextEdit()
+        self.prompt.setFixedHeight(40)
+        self.prompt.setPlaceholderText("Fixture-scoped prompt")
+        self.send_button = QPushButton("Send")
+        self.send_button.setObjectName("sendPromptButton")
+        prompt_row.addWidget(self.prompt, 1)
+        prompt_row.addWidget(self.send_button)
+        codex_layout.addWidget(codex_title)
+        codex_layout.addWidget(self.codex_stream, 1)
+        codex_layout.addLayout(prompt_row)
+        main_layout.addWidget(codex, 3, 0, 1, 2)
+        splitter.addWidget(main)
+        splitter.setStretchFactor(1, 1)
+
+        self._populate_queue_items()
+        if not offscreen:
+            self._install_interactor()
+
+        self.refresh_button.clicked.connect(self._refresh_queue)
+        self.previous_button.clicked.connect(self._previous_fixture)
+        self.next_button.clicked.connect(self._next_fixture)
+        self.send_button.clicked.connect(self._send_prompt)
+        self.list_widget.currentRowChanged.connect(self._select_index)
+        if self._selected_index >= 0:
+            self.list_widget.setCurrentRow(self._selected_index)
+        else:
+            self._sync_properties()
+        self.show()
+
+    def _install_interactor(self) -> None:
+        from pyvistaqt import QtInteractor
+
+        self.preview_layout.removeWidget(self.preview_placeholder)
+        self.preview_placeholder.hide()
+        self._plotter = QtInteractor(self.preview_frame)
+        self.preview_layout.addWidget(self._plotter)
+
+    def _populate_queue_items(self) -> None:
+        from PySide6.QtWidgets import QListWidgetItem
+
+        self.list_widget.clear()
+        for item in self._fixture_items:
+            label = f"{item['fixture_id']}\n{item['artifact_display_path'] or item['source_display_path']}"
+            widget_item = QListWidgetItem(label)
+            widget_item.setData(256, item["fixture_id"])
+            self.list_widget.addItem(widget_item)
+
+    def _refresh_queue(self) -> None:
+        if self._fixture_items:
+            suffix = "s" if len(self._fixture_items) != 1 else ""
+            self.queue_status.setText(f"{len(self._fixture_items)} fixture{suffix} loaded")
+            self._select_index(max(self._selected_index, 0))
+        else:
+            self.queue_status.setText("No fixtures loaded")
+            self._select_index(-1)
+
+    def _previous_fixture(self) -> None:
+        self.list_widget.setCurrentRow(max(0, self._selected_index - 1))
+
+    def _next_fixture(self) -> None:
+        self.list_widget.setCurrentRow(min(len(self._fixture_items) - 1, self._selected_index + 1))
+
+    def _send_prompt(self) -> None:
+        if self._selected_index < 0:
+            self.codex_stream.setText("No fixture selected.")
+            self.setProperty("codexStreamText", "No fixture selected.")
+        else:
+            self.codex_stream.setText("Request queued.")
+            self.setProperty("codexStreamText", "Request queued.")
+
+    def _select_index(self, index: int) -> None:
+        if index < 0 or index >= len(self._fixture_items):
+            self._selected_index = -1
+            self.preview_placeholder.setText("No fixture selected.")
+            self.context_text.setText("No fixture context loaded.")
+            self.artifact_thumb.setText("")
+            self._sync_properties()
+            return
+        self._selected_index = index
+        item = self._fixture_items[index]
+        self.context_text.setText(
+            f"{item['fixture_id']}\n\n"
+            f"Source: {item['source_display_path']}\n"
+            f"Expected: {item['expected_output'] or 'not declared'}\n"
+            f"Artifact: {item['artifact_display_path']}"
+        )
+        self._load_artifact_preview(item)
+        self._sync_properties()
+
+    def _load_artifact_preview(self, item: dict[str, object]) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QPixmap
+
+        record = self.queue.records[self._selected_index]
+        artifact_path = record.artifact_paths[0] if record.artifact_paths else None
+        preview_url = str(item.get("artifact_preview_url", ""))
+        if preview_url.startswith("file://"):
+            pixmap = QPixmap(Path(preview_url.removeprefix("file://")).as_posix())
+            if not pixmap.isNull():
+                self.artifact_thumb.setPixmap(
+                    pixmap.scaled(
+                        148,
+                        92,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                )
+        if self._plotter is None:
+            self.preview_placeholder.setText(str(item["fixture_id"]))
+            return
+        self._plotter.clear()
+        if artifact_path is None or not artifact_path.is_file():
+            return
+        import pyvista as pv
+
+        mesh = pv.read(artifact_path)
+        self._plotter.set_background("#090c10", top="#1b2333")
+        try:
+            self._plotter.enable_eye_dome_lighting()
+            self._plotter.add_axes(interactive=True)
+            self._plotter.show_bounds(grid="front", location="outer")
+        except Exception:
+            pass
+        self._plotter.add_mesh(mesh, color="#6ab0ff", smooth_shading=True, specular=0.2)
+        self._plotter.reset_camera()
+        self._plotter.render()
+
+    def _sync_properties(self) -> None:
+        has_fixture = self._selected_index >= 0
+        selected = self._fixture_items[self._selected_index] if has_fixture else None
+        self.setProperty("reviewFixtures", self._fixture_items)
+        self.setProperty("queueStatusText", self.queue_status.text())
+        self.setProperty("selectedMessageText", selected["fixture_id"] if selected else "No fixture selected.")
+        self.setProperty("hasFixture", has_fixture)
+        self.setProperty("codexStreamText", self.codex_stream.text())
+
+
 def default_bridge_registry(
     fixture_records: tuple[ReviewSourceModelRecord, ...] = (),
 ) -> BridgeRegistry:
     from PySide6.QtCore import QObject
 
     registry = BridgeRegistry()
-    for name in ("queueBridge", "selectionBridge", "codexBridge", "notesBridge"):
+    for name in ("queueBridge", "selectionBridge", "codexBridge", "notesBridge", "artifactsBridge"):
         registry = registry.register(BridgeRecord(name=name, bridge=QObject()))
-    registry = registry.register(
-        BridgeRecord(
-            name="artifactsBridge",
-            bridge=InteractivePreviewBridge(fixture_records).qt_object,
-        )
-    )
     return registry
 
 
@@ -248,9 +574,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if "--check" in flags:
         print("Reference Review Workbench launch check passed")
         return 0
-    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtWidgets import QApplication
 
-    return QGuiApplication.instance().exec()
+    return QApplication.instance().exec()
 
 
 if __name__ == "__main__":

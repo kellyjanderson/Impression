@@ -11,7 +11,7 @@ from typing import Iterable
 @dataclass(frozen=True)
 class DependencyPolicyRecord:
     extra_name: str = "reference-review-ui"
-    required_dependency: str = "PySide6"
+    required_dependencies: tuple[str, ...] = ("PySide6", "pyvistaqt")
     webengine_optional: bool = True
 
 
@@ -59,8 +59,10 @@ def build_dependency_policy_report(
     diagnostics: list[str] = []
     if policy.extra_name not in extras:
         diagnostics.append("missing-reference-review-ui-extra")
-    if any(dep.split(">=")[0] == policy.required_dependency for dep in core_dependencies):
-        diagnostics.append("pyside6-leaked-into-core-dependencies")
+    core_dependency_names = {dep.split(">=")[0] for dep in core_dependencies}
+    for dependency in policy.required_dependencies:
+        if dependency in core_dependency_names:
+            diagnostics.append(f"{dependency.lower()}-leaked-into-core-dependencies")
     return DependencyPolicyReport(valid=not diagnostics, diagnostics=tuple(diagnostics))
 
 

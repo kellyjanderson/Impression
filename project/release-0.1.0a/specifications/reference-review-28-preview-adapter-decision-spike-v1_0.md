@@ -2,8 +2,8 @@
 
 ## Overview
 
-Decide the first preview bridge adapter mode before implementing preview
-binding.
+Record the preview bridge adapter decision for the first review workbench
+implementation.
 
 ## Backlink
 
@@ -19,15 +19,16 @@ binding.
 This specification covers:
 
 - embedded pyvistaqt feasibility check
-- supervised external preview fallback check
+- supervised external preview rejection for normal review workflow
 - adapter mode decision record
 
 ## Behavior
 
 This leaf must define:
 
-- choose one adapter mode before preview load binding implementation
-- record failure reasons for rejected adapter modes
+- choose embedded PyVistaQt as the review-workbench adapter mode
+- record that supervised external preview is not acceptable for normal STL
+  review because interaction must remain in the review app
 - keep the decision behind the preview bridge boundary
 
 ## Constraints
@@ -37,7 +38,7 @@ This leaf must define:
 - Security/privacy-sensitive behavior: preview only loads selected source
   records
 - Performance-sensitive behavior: model load and tessellation never block
-  QML event loop
+  the UI event loop
 - Cross-screen reusable behavior: preview state feeds artifact comparison
   and promotion readiness
 
@@ -51,12 +52,14 @@ Dependencies/services:
 Reusable code plan:
 
 - Existing code reused as-is: Impression preview model-loading semantics
-- Additions to existing reusable library/module: preview bridge adapter
+- Additions to existing reusable library/module: preview bridge adapter policy
+  and widget-hosted preview shell
 - New reusable library/module to create: none
 
 Implementation owner/module:
 
-- future `ui/preview_bridge`
+- `ui/preview_bridge`
+- `ui/shell`
 
 ## Data Ownership And Routes
 
@@ -66,7 +69,7 @@ Data ownership:
 
 Routes:
 
-- selected fixture to preview task to bridge state
+- selected fixture to embedded preview panel to bridge state
 
 ## UI Contract
 
@@ -75,7 +78,8 @@ Routes:
 
 ## Test Strategy
 
-- preview load, source change, camera action, and failure-state tests
+- preview load, source change, camera action, failure-state, and embedded shell
+  route tests
 
 ## Open Questions And Prerequisites
 
