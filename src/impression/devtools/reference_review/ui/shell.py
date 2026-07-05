@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -96,12 +97,8 @@ def launch_workbench(
         return WorkbenchLaunchResult(False, (f"qt-unavailable:{exc}",))
 
     queue = FixtureQueueViewModel(fixture_records)
-    artifact_previews = _artifact_previews_for_records(fixture_records)
-    artifact_preview_diagnostics = tuple(
-        preview.diagnostic
-        for preview in artifact_previews.values()
-        if preview.diagnostic is not None
-    )
+    artifact_previews: dict[str, ArtifactPreviewRecord] = {}
+    artifact_preview_diagnostics: tuple[str, ...] = ()
     try:
         window = ReferenceReviewWindow(
             queue,
@@ -183,15 +180,20 @@ class InteractiveStlPreviewLabel(QLabel):
         self._camera = PreviewCameraState()
         self._last_pos = None
         self._cache_root = Path(".cache/reference-review/stl-previews")
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stl-preview-render")
+        self._active_future: Future[ArtifactPreviewRecord] | None = None
+        self._active_request: tuple[Path, PreviewCameraState, tuple[int, int]] | None = None
+        self._pending_request: tuple[Path, PreviewCameraState, tuple[int, int]] | None = None
+        self._render_poll_timer = None
 
     def set_artifact(self, artifact_path: Path | None) -> None:
         self._artifact_path = artifact_path
         self._camera = PreviewCameraState()
-        self._render_current()
+        self._schedule_render()
 
     def reset_view(self) -> None:
         self._camera = PreviewCameraState()
-        self._render_current()
+        self._schedule_render()
 
     def mousePressEvent(self, event) -> None:
         self._last_pos = event.position()
@@ -212,7 +214,7 @@ class InteractiveStlPreviewLabel(QLabel):
                 pan_x=self._camera.pan_x,
                 pan_y=self._camera.pan_y,
             ).normalized()
-            self._render_current()
+            self._schedule_render()
         elif buttons & (Qt.MouseButton.RightButton | Qt.MouseButton.MiddleButton):
             self._camera = PreviewCameraState(
                 azimuth_deg=self._camera.azimuth_deg,
@@ -221,7 +223,7 @@ class InteractiveStlPreviewLabel(QLabel):
                 pan_x=self._camera.pan_x - delta.x() * 0.004,
                 pan_y=self._camera.pan_y + delta.y() * 0.004,
             ).normalized()
-            self._render_current()
+            self._schedule_render()
 
     def mouseReleaseEvent(self, event) -> None:
         self._last_pos = None
@@ -237,22 +239,69 @@ class InteractiveStlPreviewLabel(QLabel):
             pan_x=self._camera.pan_x,
             pan_y=self._camera.pan_y,
         ).normalized()
-        self._render_current()
+        self._schedule_render()
 
-    def _render_current(self) -> None:
-        from PySide6.QtCore import Qt
-        from PySide6.QtGui import QPixmap
+    def shutdown(self) -> None:
+        self._executor.shutdown(wait=False, cancel_futures=True)
 
+    def _schedule_render(self) -> None:
         if self._artifact_path is None:
+            self._pending_request = None
             self.clear()
             self.setText("No fixture selected.")
             return
-        render = render_stl_preview(
-            self._artifact_path,
+        size = (max(self.width(), 360), max(self.height(), 260))
+        request = (self._artifact_path, self._camera.normalized(), size)
+        self._pending_request = request
+        if self._active_future is not None and not self._active_future.done():
+            self.setText("Rendering preview...")
+            return
+        self._start_next_render()
+
+    def _start_next_render(self) -> None:
+        from PySide6.QtCore import QTimer
+
+        request = self._pending_request
+        if request is None:
+            return
+        self._pending_request = None
+        artifact_path, camera, size = request
+        self._active_request = request
+        self.setText("Rendering preview...")
+        self._active_future = self._executor.submit(
+            render_stl_preview,
+            artifact_path,
             cache_root=self._cache_root,
-            window_size=(max(self.width(), 360), max(self.height(), 260)),
-            camera=self._camera,
+            window_size=size,
+            camera=camera,
         )
+        if self._render_poll_timer is None:
+            self._render_poll_timer = QTimer(self)
+            self._render_poll_timer.setInterval(50)
+            self._render_poll_timer.timeout.connect(self._poll_render)
+        self._render_poll_timer.start()
+
+    def _poll_render(self) -> None:
+        if self._active_future is None or not self._active_future.done():
+            return
+        if self._render_poll_timer is not None:
+            self._render_poll_timer.stop()
+        try:
+            render = self._active_future.result()
+        except Exception as exc:
+            self.clear()
+            self.setText(f"Preview unavailable: {exc.__class__.__name__}")
+        else:
+            self._apply_render(render)
+        self._active_future = None
+        self._active_request = None
+        if self._pending_request is not None:
+            self._start_next_render()
+
+    def _apply_render(self, render: ArtifactPreviewRecord) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QPixmap
+
         if render.preview_path is None:
             self.clear()
             self.setText(render.diagnostic or "Preview unavailable")
@@ -515,6 +564,10 @@ class ReferenceReviewWindow(QWidget):
         self.setProperty("hasFixture", has_fixture)
         self.setProperty("codexStreamText", self.codex_stream.text())
         self.setProperty("interactivePreviewReady", self._interactive_preview_ready)
+
+    def closeEvent(self, event) -> None:
+        self.preview_surface.shutdown()
+        super().closeEvent(event)
 
 
 def default_bridge_registry(

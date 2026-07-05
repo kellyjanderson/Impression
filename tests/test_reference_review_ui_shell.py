@@ -161,7 +161,7 @@ def test_stl_preview_renderer_writes_png_for_artifact(project_root: Path, tmp_pa
     assert preview.preview_url.startswith("file://")
 
 
-def test_dirty_stl_fixture_launch_exposes_preview_url(project_root: Path) -> None:
+def test_dirty_stl_fixture_launch_exposes_artifact_without_startup_render(project_root: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     fixture_file = project_root / "tests/reference_review_fixtures/dirty-stl-fixtures.json"
     records, diagnostics = shell.load_fixture_records(fixture_files=(fixture_file,))
@@ -176,7 +176,7 @@ def test_dirty_stl_fixture_launch_exposes_preview_url(project_root: Path) -> Non
 
     assert result.launched
     assert fixtures[0]["artifact_display_path"] == "anchor_shift_rectangle.stl"
-    assert fixtures[0]["artifact_preview_url"].startswith("file://")
+    assert fixtures[0]["artifact_preview_url"] == ""
     assert fixtures[0]["artifact_preview_status"] == "ready"
 
 
