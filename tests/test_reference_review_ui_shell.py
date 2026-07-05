@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import os
+import json
 import tomllib
 from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QMetaObject, QObject
 
+from impression.devtools.reference_review import ReviewSourceModelRecord
 from impression.devtools.reference_review.ui import (
     BridgeRecord,
     BridgeRegistry,
@@ -102,10 +104,64 @@ def test_empty_shell_commands_give_immediate_visible_feedback() -> None:
     assert refresh is not None
     assert send is not None
     assert QMetaObject.invokeMethod(refresh, "clicked")
-    assert root.property("queueStatusText") == "No review sources found"
+    assert root.property("queueStatusText") == "No fixtures loaded"
     assert root.property("selectedMessageText") == "No fixture selected."
     assert QMetaObject.invokeMethod(send, "clicked")
     assert root.property("codexStreamText") == "No fixture selected."
+
+
+def test_shell_loads_fixture_file_into_selectable_queue(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    source = tmp_path / "model.py"
+    source.write_text("def build():\n    return None\n")
+    fixture_file = tmp_path / "fixtures.json"
+    fixture_file.write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "fixture_id": "demo/selectable",
+                        "feature_name": "demo",
+                        "source_path": source.name,
+                        "expected_output": "demo.png",
+                    }
+                ]
+            }
+        )
+    )
+
+    records, diagnostics = shell.load_fixture_records(fixture_files=(fixture_file,))
+    result = launch_workbench(
+        fixture_records=records,
+        fixture_diagnostics=diagnostics,
+        offscreen=True,
+    )
+    root = result.engine.rootObjects()[0]
+
+    assert result.launched
+    assert diagnostics == ()
+    assert root.property("queueStatusText") == "1 fixture loaded"
+    assert root.property("selectedMessageText") == "demo/selectable"
+    assert root.property("hasFixture")
+
+
+def test_shell_next_button_selects_fixture_record(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    records = (
+        ReviewSourceModelRecord("demo/first", "demo", tmp_path / "first.py"),
+        ReviewSourceModelRecord("demo/second", "demo", tmp_path / "second.py"),
+    )
+    for record in records:
+        record.source_path.write_text("def build():\n    return None\n")
+
+    result = launch_workbench(fixture_records=records, offscreen=True)
+    root = result.engine.rootObjects()[0]
+    next_button = root.findChild(QObject, "nextFixtureButton")
+
+    assert root.property("selectedMessageText") == "demo/first"
+    assert next_button is not None
+    assert QMetaObject.invokeMethod(next_button, "clicked")
+    assert root.property("selectedMessageText") == "demo/second"
 
 
 def test_status_badge_is_display_only_not_a_button_like_control(project_root: Path) -> None:

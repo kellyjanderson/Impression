@@ -12,10 +12,38 @@ ApplicationWindow {
     visible: true
     title: "Reference Review Workbench"
     color: "#f7f7f2"
-    property string queueStatusText: "No fixture loaded"
+    property var reviewFixtures: fixtureItems
+    property int selectedFixtureIndex: reviewFixtures.length > 0 ? 0 : -1
+    property string queueStatusText: initialQueueStatus
     property string selectedMessageText: "Select a fixture to begin review."
     property string codexStreamText: ""
-    property bool hasFixture: false
+    property bool hasFixture: selectedFixtureIndex >= 0
+
+    function currentFixture() {
+        if (!hasFixture) {
+            return null
+        }
+        return reviewFixtures[selectedFixtureIndex]
+    }
+
+    function selectFixture(index) {
+        if (index < 0 || index >= reviewFixtures.length) {
+            selectedFixtureIndex = -1
+            selectedMessageText = "No fixture selected."
+            return
+        }
+        selectedFixtureIndex = index
+        var fixture = currentFixture()
+        selectedMessageText = fixture.fixture_id
+    }
+
+    Component.onCompleted: {
+        if (reviewFixtures.length > 0) {
+            selectFixture(0)
+        } else {
+            selectedMessageText = "Load a fixture file or database to begin review."
+        }
+    }
 
     SplitView {
         anchors.fill: parent
@@ -47,8 +75,14 @@ ApplicationWindow {
                         objectName: "refreshQueueButton"
                         text: "Refresh"
                         onClicked: {
-                            root.queueStatusText = "No review sources found"
-                            root.selectedMessageText = "No fixture selected."
+                            root.queueStatusText = root.reviewFixtures.length > 0
+                                ? root.reviewFixtures.length + " fixture" + (root.reviewFixtures.length === 1 ? "" : "s") + " loaded"
+                                : "No fixtures loaded"
+                            if (root.reviewFixtures.length > 0) {
+                                root.selectFixture(Math.max(root.selectedFixtureIndex, 0))
+                            } else {
+                                root.selectFixture(-1)
+                            }
                         }
                     }
                 }
@@ -56,18 +90,38 @@ ApplicationWindow {
                 Components.StatusBadge {
                     Layout.fillWidth: true
                     label: root.queueStatusText
-                    tone: root.queueStatusText === "No review sources found" ? "warning" : "neutral"
+                    tone: root.reviewFixtures.length > 0 ? "ready" : "warning"
                 }
 
                 ListView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
-                    model: 0
+                    model: root.reviewFixtures
                     delegate: ItemDelegate {
                         width: ListView.view.width
                         height: 44
-                        text: model.display
+                        text: modelData.fixture_id
+                        highlighted: index === root.selectedFixtureIndex
+                        onClicked: root.selectFixture(index)
+
+                        contentItem: Column {
+                            spacing: 1
+                            Text {
+                                width: parent.width
+                                text: modelData.fixture_id
+                                color: "#242622"
+                                font.pixelSize: 13
+                                elide: Text.ElideMiddle
+                            }
+                            Text {
+                                width: parent.width
+                                text: modelData.source_display_path
+                                color: "#565a51"
+                                font.pixelSize: 11
+                                elide: Text.ElideMiddle
+                            }
+                        }
                     }
                 }
             }
@@ -106,12 +160,14 @@ ApplicationWindow {
                         objectName: "previousFixtureButton"
                         text: "Previous"
                         enabled: root.hasFixture
+                        onClicked: root.selectFixture(Math.max(0, root.selectedFixtureIndex - 1))
                     }
 
                     Button {
                         objectName: "nextFixtureButton"
                         text: "Next"
                         enabled: root.hasFixture
+                        onClicked: root.selectFixture(Math.min(root.reviewFixtures.length - 1, root.selectedFixtureIndex + 1))
                     }
                 }
 
@@ -137,7 +193,9 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.minimumHeight: 240
-                    markdownText: "No fixture context loaded."
+                    markdownText: root.hasFixture
+                        ? "# " + root.currentFixture().fixture_id + "\n\nSource: `" + root.currentFixture().source_display_path + "`\n\nExpected: " + (root.currentFixture().expected_output || "not declared")
+                        : "No fixture context loaded."
                 }
 
                 Components.ArtifactPanel {

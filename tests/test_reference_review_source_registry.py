@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 from impression.devtools.reference_review import (
@@ -9,6 +10,8 @@ from impression.devtools.reference_review import (
     ReviewSourceModelRecord,
     build_review_context_payload,
     discover_source_records,
+    load_source_records_from_database,
+    load_source_records_from_file,
     resolve_generated_review_module,
     validate_source_record,
 )
@@ -85,6 +88,47 @@ def test_discovery_reads_review_source_manifests_and_reports_duplicates(tmp_path
     assert any(diagnostic.code == "duplicate-fixture-id" for diagnostic in summary.diagnostics)
 
 
+def test_fixture_file_loads_review_source_records(tmp_path: Path) -> None:
+    source = _write_source(tmp_path, "fixture_model.py")
+    fixture_file = tmp_path / "review-fixtures.json"
+    fixture_file.write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "fixture_id": "demo/file",
+                        "feature_name": "demo",
+                        "source_path": source.name,
+                    }
+                ]
+            }
+        )
+    )
+
+    summary = load_source_records_from_file(fixture_file)
+
+    assert len(summary.valid_items) == 1
+    assert summary.valid_items[0].record.fixture_id == "demo/file"
+
+
+def test_fixture_database_loads_review_source_records(tmp_path: Path) -> None:
+    source = _write_source(tmp_path, "db_model.py")
+    database = tmp_path / "review-fixtures.sqlite"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "create table review_sources (fixture_id text, feature_name text, source_path text, entrypoint text)"
+        )
+        connection.execute(
+            "insert into review_sources values (?, ?, ?, ?)",
+            ("demo/db", "demo", source.name, "build"),
+        )
+
+    summary = load_source_records_from_database(database)
+
+    assert len(summary.valid_items) == 1
+    assert summary.valid_items[0].record.fixture_id == "demo/db"
+
+
 def test_review_context_payload_is_deterministic_and_omits_absolute_source_path(tmp_path: Path) -> None:
     source = _write_source(tmp_path, "candidate.py")
     record = ReviewSourceModelRecord(
@@ -125,4 +169,3 @@ def test_generated_review_module_must_live_under_allowed_root(tmp_path: Path) ->
     assert accepted.record.generated
     assert not refused.valid
     assert refused.diagnostics[0].code == "generated-source-outside-root"
-

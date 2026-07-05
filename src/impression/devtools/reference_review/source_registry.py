@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from .async_core.qt_handoff import sanitize_error_text
 
@@ -215,6 +216,81 @@ def discover_source_records(roots: tuple[Path, ...] | list[Path]) -> DiscoverySu
     return DiscoverySummary(items=tuple(items), diagnostics=tuple(diagnostics))
 
 
+def load_source_records_from_file(path: Path) -> DiscoverySummary:
+    """Load review source records from a JSON fixture file."""
+
+    path = Path(path)
+    try:
+        payload = json.loads(path.read_text())
+    except Exception as exc:
+        return DiscoverySummary(
+            diagnostics=(SourceValidationDiagnostic("invalid-fixture-file", str(exc)),)
+        )
+    rows = payload.get("fixtures", payload) if isinstance(payload, Mapping) else payload
+    if isinstance(rows, Mapping):
+        rows = (rows,)
+    if not isinstance(rows, list | tuple):
+        return DiscoverySummary(
+            diagnostics=(
+                SourceValidationDiagnostic(
+                    "invalid-fixture-file",
+                    "fixture file must contain a record, list, or fixtures list",
+                ),
+            )
+        )
+    return _records_from_mappings(rows, base_dir=path.parent, allowed_root=path.parent)
+
+
+def load_source_records_from_database(path: Path) -> DiscoverySummary:
+    """Load review source records from a SQLite review_sources table."""
+
+    path = Path(path)
+    try:
+        with sqlite3.connect(path) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute("select * from review_sources order by fixture_id").fetchall()
+    except Exception as exc:
+        return DiscoverySummary(
+            diagnostics=(SourceValidationDiagnostic("invalid-fixture-database", str(exc)),)
+        )
+    records: list[dict[str, Any]] = []
+    for row in rows:
+        data = dict(row)
+        parameters = data.get("parameters")
+        if isinstance(parameters, str) and parameters:
+            data["parameters"] = json.loads(parameters)
+        records.append(data)
+    return _records_from_mappings(records, base_dir=path.parent, allowed_root=path.parent)
+
+
+def _records_from_mappings(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    base_dir: Path,
+    allowed_root: Path,
+) -> DiscoverySummary:
+    items: list[DiscoveryItem] = []
+    diagnostics: list[SourceValidationDiagnostic] = []
+    seen: set[str] = set()
+    for row in rows:
+        try:
+            record = ReviewSourceModelRecord.from_mapping(row, base_dir=base_dir)
+        except Exception as exc:
+            diagnostics.append(SourceValidationDiagnostic("invalid-source-record", str(exc)))
+            continue
+        if record.fixture_id in seen:
+            diagnostics.append(
+                SourceValidationDiagnostic(
+                    "duplicate-fixture-id",
+                    record.fixture_id,
+                    record.fixture_id,
+                )
+            )
+        seen.add(record.fixture_id)
+        items.append(DiscoveryItem(record, validate_source_record(record, allowed_root=allowed_root)))
+    return DiscoverySummary(items=tuple(items), diagnostics=tuple(diagnostics))
+
+
 @dataclass(frozen=True)
 class ReviewContextPayload:
     fixture_id: str
@@ -297,4 +373,3 @@ def resolve_generated_review_module(
         generated=True,
     )
     return validate_source_record(record, allowed_root=resolved_root)
-
