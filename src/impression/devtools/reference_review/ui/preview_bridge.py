@@ -11,7 +11,7 @@ from ..source_registry import ReviewSourceModelRecord
 
 class PreviewAdapterMode(str, Enum):
     SUPERVISED_EXTERNAL = "supervised-external"
-    EMBEDDED_PYVISTAQT = "embedded-pyvistaqt"
+    EMBEDDED_RENDERED = "embedded-rendered"
 
 
 @dataclass(frozen=True)
@@ -29,15 +29,15 @@ def choose_preview_adapter(
     if embedded_available:
         if supervised_external_available:
             rejected.append("supervised-external:not-in-review-surface")
-        return PreviewAdapterDecision(PreviewAdapterMode.EMBEDDED_PYVISTAQT, tuple(rejected))
+        return PreviewAdapterDecision(PreviewAdapterMode.EMBEDDED_RENDERED, tuple(rejected))
     if supervised_external_available:
         return PreviewAdapterDecision(
             PreviewAdapterMode.SUPERVISED_EXTERNAL,
-            ("embedded-pyvistaqt:unavailable",),
+            ("embedded-rendered:unavailable",),
         )
     return PreviewAdapterDecision(
         PreviewAdapterMode.SUPERVISED_EXTERNAL,
-        ("supervised-external:unavailable", "embedded-pyvistaqt:unavailable"),
+        ("supervised-external:unavailable", "embedded-rendered:unavailable"),
     )
 
 

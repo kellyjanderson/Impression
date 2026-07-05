@@ -53,7 +53,7 @@ def test_queue_navigation_and_empty_state(tmp_path: Path) -> None:
 def test_preview_adapter_decision_prefers_embedded_review_surface() -> None:
     decision = choose_preview_adapter(embedded_available=True, supervised_external_available=True)
 
-    assert decision.selected is PreviewAdapterMode.EMBEDDED_PYVISTAQT
+    assert decision.selected is PreviewAdapterMode.EMBEDDED_RENDERED
     assert decision.rejected == ("supervised-external:not-in-review-surface",)
 
 

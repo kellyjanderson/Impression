@@ -18,7 +18,7 @@ implementation.
 
 This specification covers:
 
-- embedded pyvistaqt feasibility check
+- embedded in-app PyVista render-surface feasibility check
 - supervised external preview rejection for normal review workflow
 - adapter mode decision record
 
@@ -26,7 +26,7 @@ This specification covers:
 
 This leaf must define:
 
-- choose embedded PyVistaQt as the review-workbench adapter mode
+- choose embedded PyVista-rendered preview as the review-workbench adapter mode
 - record that supervised external preview is not acceptable for normal STL
   review because interaction must remain in the review app
 - keep the decision behind the preview bridge boundary

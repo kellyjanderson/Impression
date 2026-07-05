@@ -11,7 +11,7 @@ from typing import Iterable
 @dataclass(frozen=True)
 class DependencyPolicyRecord:
     extra_name: str = "reference-review-ui"
-    required_dependencies: tuple[str, ...] = ("PySide6", "pyvistaqt")
+    required_dependencies: tuple[str, ...] = ("PySide6",)
     webengine_optional: bool = True
 
 

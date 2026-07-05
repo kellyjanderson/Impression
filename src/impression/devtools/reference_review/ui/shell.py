@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from .artifact_preview import ArtifactPreviewRecord, render_stl_preview
+from .artifact_preview import ArtifactPreviewRecord, PreviewCameraState, render_stl_preview
 from .bridge import BridgeRecord, BridgeRegistry
 from .packaging import qml_resource_root
 from .queue_context import FixtureQueueViewModel
@@ -164,7 +164,110 @@ def _launch_qml_workbench(
     return WorkbenchLaunchResult(True, tuple(diagnostics), engine)
 
 
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QLabel, QWidget
+
+
+class InteractiveStlPreviewLabel(QLabel):
+    """In-window STL preview surface with CLI-like mouse controls."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        from PySide6.QtCore import Qt
+
+        super().__init__(parent)
+        self.setObjectName("embeddedPreviewSurface")
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setMinimumSize(360, 260)
+        self.setText("No fixture selected.")
+        self.setMouseTracking(True)
+        self._artifact_path: Path | None = None
+        self._camera = PreviewCameraState()
+        self._last_pos = None
+        self._cache_root = Path(".cache/reference-review/stl-previews")
+
+    def set_artifact(self, artifact_path: Path | None) -> None:
+        self._artifact_path = artifact_path
+        self._camera = PreviewCameraState()
+        self._render_current()
+
+    def reset_view(self) -> None:
+        self._camera = PreviewCameraState()
+        self._render_current()
+
+    def mousePressEvent(self, event) -> None:
+        self._last_pos = event.position()
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._artifact_path is None or self._last_pos is None:
+            return
+        delta = event.position() - self._last_pos
+        self._last_pos = event.position()
+        buttons = event.buttons()
+        from PySide6.QtCore import Qt
+
+        if buttons & Qt.MouseButton.LeftButton:
+            self._camera = PreviewCameraState(
+                azimuth_deg=self._camera.azimuth_deg + delta.x() * 0.45,
+                elevation_deg=self._camera.elevation_deg - delta.y() * 0.45,
+                zoom=self._camera.zoom,
+                pan_x=self._camera.pan_x,
+                pan_y=self._camera.pan_y,
+            ).normalized()
+            self._render_current()
+        elif buttons & (Qt.MouseButton.RightButton | Qt.MouseButton.MiddleButton):
+            self._camera = PreviewCameraState(
+                azimuth_deg=self._camera.azimuth_deg,
+                elevation_deg=self._camera.elevation_deg,
+                zoom=self._camera.zoom,
+                pan_x=self._camera.pan_x - delta.x() * 0.004,
+                pan_y=self._camera.pan_y + delta.y() * 0.004,
+            ).normalized()
+            self._render_current()
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._last_pos = None
+
+    def wheelEvent(self, event) -> None:
+        if self._artifact_path is None:
+            return
+        factor = 1.12 if event.angleDelta().y() > 0 else 1.0 / 1.12
+        self._camera = PreviewCameraState(
+            azimuth_deg=self._camera.azimuth_deg,
+            elevation_deg=self._camera.elevation_deg,
+            zoom=self._camera.zoom * factor,
+            pan_x=self._camera.pan_x,
+            pan_y=self._camera.pan_y,
+        ).normalized()
+        self._render_current()
+
+    def _render_current(self) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QPixmap
+
+        if self._artifact_path is None:
+            self.clear()
+            self.setText("No fixture selected.")
+            return
+        render = render_stl_preview(
+            self._artifact_path,
+            cache_root=self._cache_root,
+            window_size=(max(self.width(), 360), max(self.height(), 260)),
+            camera=self._camera,
+        )
+        if render.preview_path is None:
+            self.clear()
+            self.setText(render.diagnostic or "Preview unavailable")
+            return
+        pixmap = QPixmap(str(render.preview_path))
+        if pixmap.isNull():
+            self.setText("Preview unavailable")
+            return
+        self.setPixmap(
+            pixmap.scaled(
+                self.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
 
 
 class ReferenceReviewWindow(QWidget):
@@ -200,7 +303,7 @@ class ReferenceReviewWindow(QWidget):
         self.artifact_previews = artifact_previews
         self.startup_diagnostics = startup_diagnostics
         self._offscreen = offscreen
-        self._plotter = None
+        self._interactive_preview_ready = True
         self._selected_index = queue.selected_index if queue.selected_index is not None else -1
         self._fixture_items = _fixture_items_for_qml(queue, artifact_previews)
 
@@ -242,8 +345,11 @@ class ReferenceReviewWindow(QWidget):
         self.previous_button.setObjectName("previousFixtureButton")
         self.next_button = QPushButton("Next")
         self.next_button.setObjectName("nextFixtureButton")
+        self.reset_view_button = QPushButton("Reset View")
+        self.reset_view_button.setObjectName("resetPreviewButton")
         header.addWidget(selected_title, 1)
         header.addWidget(self.ready_badge)
+        header.addWidget(self.reset_view_button)
         header.addWidget(self.previous_button)
         header.addWidget(self.next_button)
         main_layout.addLayout(header, 0, 0, 1, 2)
@@ -253,9 +359,8 @@ class ReferenceReviewWindow(QWidget):
         self.preview_frame.setMinimumSize(360, 260)
         self.preview_layout = QVBoxLayout(self.preview_frame)
         self.preview_layout.setContentsMargins(0, 0, 0, 0)
-        self.preview_placeholder = QLabel("No fixture selected.")
-        self.preview_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_layout.addWidget(self.preview_placeholder)
+        self.preview_surface = InteractiveStlPreviewLabel(self.preview_frame)
+        self.preview_layout.addWidget(self.preview_surface)
         main_layout.addWidget(self.preview_frame, 1, 0)
 
         context = QFrame()
@@ -314,10 +419,9 @@ class ReferenceReviewWindow(QWidget):
         splitter.setStretchFactor(1, 1)
 
         self._populate_queue_items()
-        if not offscreen:
-            self._install_interactor()
 
         self.refresh_button.clicked.connect(self._refresh_queue)
+        self.reset_view_button.clicked.connect(self.preview_surface.reset_view)
         self.previous_button.clicked.connect(self._previous_fixture)
         self.next_button.clicked.connect(self._next_fixture)
         self.send_button.clicked.connect(self._send_prompt)
@@ -327,14 +431,8 @@ class ReferenceReviewWindow(QWidget):
         else:
             self._sync_properties()
         self.show()
-
-    def _install_interactor(self) -> None:
-        from pyvistaqt import QtInteractor
-
-        self.preview_layout.removeWidget(self.preview_placeholder)
-        self.preview_placeholder.hide()
-        self._plotter = QtInteractor(self.preview_frame)
-        self.preview_layout.addWidget(self._plotter)
+        self.raise_()
+        self.activateWindow()
 
     def _populate_queue_items(self) -> None:
         from PySide6.QtWidgets import QListWidgetItem
@@ -372,7 +470,7 @@ class ReferenceReviewWindow(QWidget):
     def _select_index(self, index: int) -> None:
         if index < 0 or index >= len(self._fixture_items):
             self._selected_index = -1
-            self.preview_placeholder.setText("No fixture selected.")
+            self.preview_surface.set_artifact(None)
             self.context_text.setText("No fixture context loaded.")
             self.artifact_thumb.setText("")
             self._sync_properties()
@@ -406,25 +504,7 @@ class ReferenceReviewWindow(QWidget):
                         Qt.TransformationMode.SmoothTransformation,
                     )
                 )
-        if self._plotter is None:
-            self.preview_placeholder.setText(str(item["fixture_id"]))
-            return
-        self._plotter.clear()
-        if artifact_path is None or not artifact_path.is_file():
-            return
-        import pyvista as pv
-
-        mesh = pv.read(artifact_path)
-        self._plotter.set_background("#090c10", top="#1b2333")
-        try:
-            self._plotter.enable_eye_dome_lighting()
-            self._plotter.add_axes(interactive=True)
-            self._plotter.show_bounds(grid="front", location="outer")
-        except Exception:
-            pass
-        self._plotter.add_mesh(mesh, color="#6ab0ff", smooth_shading=True, specular=0.2)
-        self._plotter.reset_camera()
-        self._plotter.render()
+        self.preview_surface.set_artifact(artifact_path if artifact_path and artifact_path.is_file() else None)
 
     def _sync_properties(self) -> None:
         has_fixture = self._selected_index >= 0
@@ -434,6 +514,7 @@ class ReferenceReviewWindow(QWidget):
         self.setProperty("selectedMessageText", selected["fixture_id"] if selected else "No fixture selected.")
         self.setProperty("hasFixture", has_fixture)
         self.setProperty("codexStreamText", self.codex_stream.text())
+        self.setProperty("interactivePreviewReady", self._interactive_preview_ready)
 
 
 def default_bridge_registry(

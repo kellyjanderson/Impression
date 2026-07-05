@@ -8,7 +8,7 @@ Review Workbench.
 The workbench should use a PySide 6 desktop application shell with in-window
 review panels, controls, state presentation, and keyboard interaction. The 3D
 model preview is hosted inside the review window through an embedded
-PyVistaQt/VTK viewport so reviewers can orbit, pan, zoom, and reset without
+PyVista-rendered preview surface so reviewers can orbit, pan, zoom, and reset without
 leaving the workbench.
 
 ## Parent Architecture
@@ -21,11 +21,10 @@ leaving the workbench.
 
 - Python/PySide 6 owns application startup, service wiring, task submission,
   model loading, reference lifecycle calls, and visible review panels.
-- Qt widgets own the primary workbench shell where native widget embedding is
-  required for the PyVistaQt/VTK interactor.
+- Qt widgets own the primary workbench shell and embedded preview surface.
 - Qt Quick/QML remains available for component gallery and QML component assets
   but is not the primary STL review surface.
-- The preview bridge owns embedded 3D viewport integration. The workbench must
+- The preview bridge owns embedded 3D preview integration. The workbench must
   not launch a separate preview application for normal STL review.
 
 The architecture does not let visible controls call PyVista or filesystem
@@ -515,7 +514,7 @@ Project readiness fields:
   - `ui/shell` for the embedded workbench host
   - `ui/preview_bridge` for preview adapter state policy
 - Chosen defaults / parameters:
-  - embedded PyVistaQt bridge required for in-app STL review
+  - embedded PyVista-rendered preview required for in-app STL review
   - supervised external preview rejected for normal workbench interaction
 - Test strategy:
   - preview load, source change, camera action, and failure-state tests

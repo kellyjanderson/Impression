@@ -39,8 +39,7 @@ def test_reference_review_ui_dependency_is_optional_extra() -> None:
     assert report.valid
     assert "reference-review-ui" in extras
     assert any(dep.startswith("PySide6") for dep in extras["reference-review-ui"])
-    assert any(dep.startswith("pyvistaqt") for dep in extras["reference-review-ui"])
-    assert not any(dep.startswith(("PySide6", "pyvistaqt")) for dep in core_dependencies)
+    assert not any(dep.startswith("PySide6") for dep in core_dependencies)
 
 
 def test_qml_resource_layout_contains_shell_and_component_files() -> None:
@@ -205,7 +204,9 @@ def test_dirty_stl_fixture_selects_embedded_preview_surface(project_root: Path) 
     assert root.property("selectedMessageText") == "surfacebody/box"
     assert root.property("hasFixture")
     assert root.findChild(QObject, "openPreviewButton") is None
-    assert getattr(root, "_plotter") is None
+    assert root.findChild(QObject, "embeddedPreviewSurface") is not None
+    assert root.findChild(QObject, "resetPreviewButton") is not None
+    assert root.property("interactivePreviewReady")
 
 
 def test_shell_next_button_selects_fixture_record(tmp_path: Path) -> None:
