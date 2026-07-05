@@ -24,6 +24,7 @@ from .packaging import (
 )
 from .markdown_context import BlockedLinkDiagnostic, MarkdownContextRenderer, RenderedMarkdownContext
 from .preview_bridge import (
+    InteractivePreviewBridge,
     PreviewAdapterDecision,
     PreviewAdapterMode,
     PreviewBridgeController,
@@ -73,6 +74,7 @@ __all__ = [
     "DependencyPolicyReport",
     "FixtureQueueItem",
     "FixtureQueueViewModel",
+    "InteractivePreviewBridge",
     "PackageResourceManifest",
     "PackagingSmokeResult",
     "MarkdownContextRenderer",

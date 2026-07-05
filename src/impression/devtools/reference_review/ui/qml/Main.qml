@@ -17,6 +17,7 @@ ApplicationWindow {
     property string queueStatusText: initialQueueStatus
     property string selectedMessageText: "Select a fixture to begin review."
     property string codexStreamText: ""
+    property string previewLaunchStatus: ""
     property bool hasFixture: selectedFixtureIndex >= 0
 
     function currentFixture() {
@@ -35,6 +36,7 @@ ApplicationWindow {
         selectedFixtureIndex = index
         var fixture = currentFixture()
         selectedMessageText = fixture.fixture_id
+        previewLaunchStatus = ""
     }
 
     Component.onCompleted: {
@@ -157,6 +159,16 @@ ApplicationWindow {
                     }
 
                     Button {
+                        objectName: "openPreviewButton"
+                        text: "Open Preview"
+                        enabled: root.hasFixture && root.currentFixture().artifact_display_path !== ""
+                        onClicked: {
+                            var result = artifactsBridge.openPreview(root.currentFixture().fixture_id)
+                            root.previewLaunchStatus = result === "launched" ? "Interactive preview opened." : result
+                        }
+                    }
+
+                    Button {
                         objectName: "previousFixtureButton"
                         text: "Previous"
                         enabled: root.hasFixture
@@ -195,9 +207,11 @@ ApplicationWindow {
                     Label {
                         anchors.centerIn: parent
                         width: Math.min(parent.width - 48, 520)
-                        text: root.hasFixture && root.currentFixture().artifact_preview_url === ""
-                            ? "No STL preview available for " + root.currentFixture().artifact_display_path
-                            : root.selectedMessageText
+                        text: root.previewLaunchStatus !== ""
+                            ? root.previewLaunchStatus
+                            : root.hasFixture && root.currentFixture().artifact_preview_url === ""
+                                ? "No STL preview available for " + root.currentFixture().artifact_display_path
+                                : root.selectedMessageText
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.WordWrap
                         color: "#565a51"

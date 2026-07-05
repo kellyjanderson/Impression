@@ -6,7 +6,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QMetaObject, QObject
+from PySide6.QtCore import QMetaObject, QObject, Slot
 
 from impression.devtools.reference_review import ReviewSourceModelRecord
 from impression.devtools.reference_review.ui import (
@@ -175,6 +175,51 @@ def test_dirty_stl_fixture_launch_exposes_preview_url(project_root: Path) -> Non
     assert fixtures[0]["artifact_display_path"] == "anchor_shift_rectangle.stl"
     assert fixtures[0]["artifact_preview_url"].startswith("file://")
     assert fixtures[0]["artifact_preview_status"] == "ready"
+
+
+def test_open_preview_button_routes_selected_fixture_to_artifacts_bridge(project_root: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    source = project_root / "tests/reference_review_fixtures/stl_review_sources.py"
+    artifact = project_root / "project/release-0.1.0a/reference-stl/dirty/surfacebody/box.stl"
+    records = (
+        ReviewSourceModelRecord(
+            "surfacebody/box",
+            "surfacebody",
+            source,
+            expected_output="dirty STL",
+            artifact_paths=(artifact,),
+        ),
+    )
+
+    class RecordingArtifactsBridge(QObject):
+        def __init__(self) -> None:
+            super().__init__()
+            self.fixture_id = ""
+
+        @Slot(str, result=str)
+        def openPreview(self, fixture_id: str) -> str:
+            self.fixture_id = fixture_id
+            return "launched"
+
+    artifacts_bridge = RecordingArtifactsBridge()
+    registry = BridgeRegistry()
+    for name in ("queueBridge", "selectionBridge", "codexBridge", "notesBridge"):
+        registry = registry.register(BridgeRecord(name, QObject()))
+    registry = registry.register(BridgeRecord("artifactsBridge", artifacts_bridge))
+
+    result = launch_workbench(
+        bridges=registry,
+        fixture_records=records,
+        offscreen=True,
+    )
+    root = result.engine.rootObjects()[0]
+    button = root.findChild(QObject, "openPreviewButton")
+
+    assert result.launched
+    assert button is not None
+    assert QMetaObject.invokeMethod(button, "clicked")
+    assert artifacts_bridge.fixture_id == "surfacebody/box"
+    assert root.property("previewLaunchStatus") == "Interactive preview opened."
 
 
 def test_shell_next_button_selects_fixture_record(tmp_path: Path) -> None:

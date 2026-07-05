@@ -5,10 +5,15 @@ from pathlib import Path
 from impression.devtools.reference_review import ReviewSourceModelRecord
 from impression.devtools.reference_review.ui import (
     FixtureQueueViewModel,
+    InteractivePreviewBridge,
     MarkdownContextRenderer,
     PreviewAdapterMode,
     PreviewBridgeController,
     choose_preview_adapter,
+)
+from impression.devtools.reference_review.ui.interactive_preview import (
+    InteractivePreviewLaunch,
+    interactive_preview_command,
 )
 
 
@@ -74,6 +79,42 @@ def test_preview_load_binding_rejects_stale_completions_and_routes_camera(
     assert not stale_state.ready
     assert current_state.ready
     assert camera_state.camera_commands == ("reset",)
+
+
+def test_interactive_preview_bridge_launches_selected_fixture_artifact(tmp_path: Path) -> None:
+    source = tmp_path / "model.py"
+    source.write_text("def build():\n    return None\n")
+    artifact = tmp_path / "model.stl"
+    artifact.write_text("solid model\nendsolid model\n")
+    calls: list[tuple[Path, str]] = []
+    bridge = InteractivePreviewBridge(
+        (
+            ReviewSourceModelRecord(
+                "demo/model",
+                "demo",
+                source,
+                artifact_paths=(artifact,),
+            ),
+        ),
+        launcher=lambda path, title: calls.append((path, title)) or InteractivePreviewLaunch(True),
+    )
+
+    assert bridge.open_preview("demo/model") == "launched"
+    assert calls == [(artifact, "Impression Preview - demo/model")]
+    assert bridge.open_preview("missing") == "missing-artifact"
+
+
+def test_interactive_preview_command_uses_module_entrypoint(tmp_path: Path) -> None:
+    command = interactive_preview_command(tmp_path / "shape.stl", title="Fixture")
+
+    assert command[1:] == [
+        "-m",
+        "impression.devtools.reference_review.ui.interactive_preview",
+        "--stl",
+        str(tmp_path / "shape.stl"),
+        "--title",
+        "Fixture",
+    ]
 
 
 def test_markdown_renderer_blocks_external_links_and_caches_render() -> None:

@@ -11,6 +11,7 @@ from typing import Sequence
 from .artifact_preview import ArtifactPreviewRecord, render_stl_preview
 from .bridge import BridgeRecord, BridgeRegistry
 from .packaging import qml_resource_root
+from .preview_bridge import InteractivePreviewBridge
 from .queue_context import FixtureQueueViewModel
 from ..source_registry import (
     DiscoverySummary,
@@ -63,7 +64,7 @@ def launch_workbench(
     offscreen: bool = False,
 ) -> WorkbenchLaunchResult:
     argv = argv or ("impression-reference-review",)
-    bridges = bridges or BridgeRegistry()
+    bridges = bridges or default_bridge_registry(fixture_records)
     diagnostics = [item.code for item in bridges.diagnostics()]
     try:
         _ensure_qt_app(argv, offscreen=offscreen)
@@ -103,12 +104,20 @@ def launch_workbench(
     return WorkbenchLaunchResult(True, tuple(diagnostics), engine)
 
 
-def default_bridge_registry() -> BridgeRegistry:
+def default_bridge_registry(
+    fixture_records: tuple[ReviewSourceModelRecord, ...] = (),
+) -> BridgeRegistry:
     from PySide6.QtCore import QObject
 
     registry = BridgeRegistry()
-    for name in ("queueBridge", "selectionBridge", "codexBridge", "notesBridge", "artifactsBridge"):
+    for name in ("queueBridge", "selectionBridge", "codexBridge", "notesBridge"):
         registry = registry.register(BridgeRecord(name=name, bridge=QObject()))
+    registry = registry.register(
+        BridgeRecord(
+            name="artifactsBridge",
+            bridge=InteractivePreviewBridge(fixture_records).qt_object,
+        )
+    )
     return registry
 
 
@@ -226,7 +235,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     result = launch_workbench(
         argv,
-        bridges=default_bridge_registry(),
+        bridges=default_bridge_registry(fixture_records),
         fixture_records=fixture_records,
         fixture_diagnostics=fixture_diagnostics,
         offscreen="--offscreen" in flags,
