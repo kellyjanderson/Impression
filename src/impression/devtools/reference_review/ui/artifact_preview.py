@@ -10,7 +10,7 @@ from pathlib import Path
 
 os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
 
-_RENDER_CONTRACT_VERSION = "stl-preview-v4"
+_RENDER_CONTRACT_VERSION = "stl-preview-v5"
 _PREVIEW_BACKGROUND_COLOR = "#071426"
 _PREVIEW_OBJECT_COLOR = "#ffb56b"
 
@@ -27,7 +27,7 @@ class PreviewCameraState:
     def normalized(self) -> "PreviewCameraState":
         return PreviewCameraState(
             azimuth_deg=self.azimuth_deg % 360.0,
-            elevation_deg=max(-85.0, min(85.0, self.elevation_deg)),
+            elevation_deg=self.elevation_deg % 360.0,
             roll_deg=self.roll_deg % 360.0,
             zoom=max(0.2, min(6.0, self.zoom)),
             pan_x=max(-5.0, min(5.0, self.pan_x)),
@@ -107,24 +107,32 @@ def _apply_camera(plotter, bounds, camera: PreviewCameraState) -> None:
         focal_point[1] + distance * math.cos(elevation) * math.sin(azimuth),
         focal_point[2] + distance * math.sin(elevation),
     )
-    up = _rolled_up_vector(position, focal_point, camera.roll_deg)
+    up = _camera_up_vector(camera.azimuth_deg, camera.elevation_deg, camera.roll_deg)
     plotter.camera_position = [position, focal_point, up]
     plotter.camera.zoom(1.45)
 
 
-def _rolled_up_vector(
-    position: tuple[float, float, float],
-    focal_point: tuple[float, float, float],
+def _camera_up_vector(
+    azimuth_deg: float,
+    elevation_deg: float,
     roll_deg: float,
 ) -> tuple[float, float, float]:
+    azimuth = math.radians(azimuth_deg)
+    elevation = math.radians(elevation_deg)
+    axis = (
+        -math.cos(elevation) * math.cos(azimuth),
+        -math.cos(elevation) * math.sin(azimuth),
+        -math.sin(elevation),
+    )
+    base_up = (
+        -math.sin(elevation) * math.cos(azimuth),
+        -math.sin(elevation) * math.sin(azimuth),
+        math.cos(elevation),
+    )
     if roll_deg == 0.0:
-        return (0.0, 0.0, 1.0)
-    axis = tuple(focal_point[index] - position[index] for index in range(3))
-    axis_length = math.sqrt(sum(value * value for value in axis))
-    if axis_length == 0.0:
-        return (0.0, 0.0, 1.0)
-    ux, uy, uz = (value / axis_length for value in axis)
-    x, y, z = (0.0, 0.0, 1.0)
+        return base_up
+    ux, uy, uz = axis
+    x, y, z = base_up
     angle = math.radians(roll_deg)
     cos_angle = math.cos(angle)
     sin_angle = math.sin(angle)

@@ -23,6 +23,7 @@ from impression.devtools.reference_review.ui import (
     verify_qml_resource_layout,
 )
 from impression.devtools.reference_review.ui import shell
+from impression.devtools.reference_review.ui.artifact_preview import PreviewCameraState
 from impression.devtools.reference_review.ui.shell import InteractiveStlPreviewLabel
 from impression.devtools.reference_review.ui.style import component_contracts
 
@@ -241,6 +242,26 @@ def test_embedded_preview_uses_vtk_trackball_left_drag_rotation_sign() -> None:
 
     assert preview._camera.azimuth_deg == pytest.approx(36.0)
     assert preview._camera.elevation_deg == pytest.approx(23.5)
+
+
+def test_embedded_preview_vertical_orbit_is_not_clamped_to_half_turn() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    preview = InteractiveStlPreviewLabel()
+    preview.resize(360, 260)
+
+    preview._apply_pointer_delta(
+        QPointF(0.0, -360.0),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPointF(180.0, -100.0),
+    )
+
+    assert preview._camera.elevation_deg == pytest.approx(190.0)
+
+
+def test_preview_camera_state_preserves_full_elevation_orbit() -> None:
+    assert PreviewCameraState(elevation_deg=190.0).normalized().elevation_deg == pytest.approx(190.0)
+    assert PreviewCameraState(elevation_deg=450.0).normalized().elevation_deg == pytest.approx(90.0)
 
 
 def test_embedded_preview_matches_vtk_trackball_modifier_modes() -> None:
