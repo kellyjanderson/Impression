@@ -245,6 +245,81 @@ def test_embedded_preview_updates_visible_feedback_during_drag() -> None:
     assert not preview.pixmap().isNull()
 
 
+def test_embedded_preview_schedules_frames_on_background_render_loop(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    loops = []
+
+    class FakeRenderLoop:
+        def __init__(self, *, cache_root: Path) -> None:
+            self.cache_root = cache_root
+            self.requests = []
+            self.cleared = False
+            loops.append(self)
+
+        def request_frame(
+            self,
+            artifact_path: Path,
+            *,
+            camera,
+            window_size: tuple[int, int],
+        ) -> int:
+            self.requests.append((artifact_path, camera, window_size))
+            return len(self.requests)
+
+        def clear(self) -> int:
+            self.cleared = True
+            return len(self.requests) + 1
+
+        def take_results(self) -> list[object]:
+            return []
+
+        def stop(self) -> None:
+            self.cleared = True
+
+    monkeypatch.setattr(shell, "StlPreviewRenderLoop", FakeRenderLoop)
+    preview = InteractiveStlPreviewLabel()
+    preview.resize(240, 180)
+    artifact = tmp_path / "part.stl"
+    artifact.write_text("solid empty\nendsolid empty\n")
+
+    preview.set_artifact(artifact)
+    preview._camera = preview._camera.__class__(azimuth_deg=90.0)
+    preview._schedule_render()
+    preview.set_artifact(None)
+
+    assert len(loops) == 1
+    assert [request[0] for request in loops[0].requests] == [artifact, artifact]
+    assert loops[0].requests[-1][1].azimuth_deg == 90.0
+    assert loops[0].requests[-1][2] == (360, 260)
+    assert loops[0].cleared
+
+
+def test_embedded_preview_discards_stale_render_loop_results(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    preview = InteractiveStlPreviewLabel()
+    old_record = shell.ArtifactPreviewRecord(tmp_path / "old.stl", None, "old")
+    latest_record = shell.ArtifactPreviewRecord(tmp_path / "latest.stl", None, "latest")
+    applied = []
+
+    class FakeRenderLoop:
+        def take_results(self) -> list[object]:
+            return [
+                shell._PreviewRenderResult(1, record=old_record),
+                shell._PreviewRenderResult(2, record=latest_record),
+            ]
+
+    preview._render_loop = FakeRenderLoop()
+    preview._latest_request_id = 2
+    preview._apply_render = lambda record: applied.append(record)
+
+    preview._poll_render()
+
+    assert applied == [latest_record]
+
+
 def test_shell_next_button_selects_fixture_record(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     records = (

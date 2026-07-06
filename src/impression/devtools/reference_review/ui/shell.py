@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import os
 import sys
-from concurrent.futures import Future, ThreadPoolExecutor
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from queue import Empty, SimpleQueue
+from typing import Callable, Sequence
 
 from .artifact_preview import ArtifactPreviewRecord, PreviewCameraState, render_stl_preview
 from .bridge import BridgeRecord, BridgeRegistry
@@ -164,6 +166,117 @@ def _launch_qml_workbench(
 from PySide6.QtWidgets import QLabel, QWidget
 
 
+@dataclass(frozen=True)
+class _PreviewRenderRequest:
+    request_id: int
+    artifact_path: Path
+    camera: PreviewCameraState
+    window_size: tuple[int, int]
+
+
+@dataclass(frozen=True)
+class _PreviewRenderResult:
+    request_id: int
+    record: ArtifactPreviewRecord | None = None
+    error: str | None = None
+
+
+class StlPreviewRenderLoop:
+    """Single-owner background render loop for interactive STL previews."""
+
+    def __init__(
+        self,
+        *,
+        cache_root: Path,
+        fps: int = 30,
+        renderer: Callable[..., ArtifactPreviewRecord] = render_stl_preview,
+    ) -> None:
+        self._cache_root = cache_root
+        self._renderer = renderer
+        self._frame_interval = 1.0 / fps
+        self._condition = threading.Condition()
+        self._results: SimpleQueue[_PreviewRenderResult] = SimpleQueue()
+        self._latest_request: _PreviewRenderRequest | None = None
+        self._latest_request_id = 0
+        self._stopping = False
+        self._thread = threading.Thread(
+            target=self._run,
+            name="stl-preview-render-loop",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def request_frame(
+        self,
+        artifact_path: Path,
+        *,
+        camera: PreviewCameraState,
+        window_size: tuple[int, int],
+    ) -> int:
+        with self._condition:
+            self._latest_request_id += 1
+            request = _PreviewRenderRequest(
+                self._latest_request_id,
+                artifact_path,
+                camera.normalized(),
+                window_size,
+            )
+            self._latest_request = request
+            self._condition.notify()
+            return request.request_id
+
+    def clear(self) -> int:
+        with self._condition:
+            self._latest_request_id += 1
+            self._latest_request = None
+            self._condition.notify()
+            return self._latest_request_id
+
+    def take_results(self) -> list[_PreviewRenderResult]:
+        results: list[_PreviewRenderResult] = []
+        while True:
+            try:
+                results.append(self._results.get_nowait())
+            except Empty:
+                return results
+
+    def stop(self) -> None:
+        with self._condition:
+            self._stopping = True
+            self._condition.notify()
+        self._thread.join(timeout=1.0)
+
+    def _run(self) -> None:
+        next_frame_at = 0.0
+        while True:
+            with self._condition:
+                while not self._stopping and self._latest_request is None:
+                    self._condition.wait()
+                if self._stopping:
+                    return
+                request = self._latest_request
+                self._latest_request = None
+            if request is None:
+                continue
+            sleep_for = next_frame_at - time.monotonic()
+            if sleep_for > 0:
+                time.sleep(sleep_for)
+            next_frame_at = time.monotonic() + self._frame_interval
+            try:
+                record = self._renderer(
+                    request.artifact_path,
+                    cache_root=self._cache_root,
+                    window_size=request.window_size,
+                    camera=request.camera,
+                )
+            except Exception as exc:
+                self._results.put(
+                    _PreviewRenderResult(request.request_id, error=exc.__class__.__name__)
+                )
+            else:
+                self._results.put(_PreviewRenderResult(request.request_id, record=record))
+
+
 class InteractiveStlPreviewLabel(QLabel):
     """In-window STL preview surface with CLI-like mouse controls."""
 
@@ -180,10 +293,8 @@ class InteractiveStlPreviewLabel(QLabel):
         self._camera = PreviewCameraState()
         self._last_pos = None
         self._cache_root = Path(".cache/reference-review/stl-previews")
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stl-preview-render")
-        self._active_future: Future[ArtifactPreviewRecord] | None = None
-        self._active_request: tuple[Path, PreviewCameraState, tuple[int, int]] | None = None
-        self._pending_request: tuple[Path, PreviewCameraState, tuple[int, int]] | None = None
+        self._render_loop: StlPreviewRenderLoop | None = None
+        self._latest_request_id = 0
         self._render_poll_timer = None
         self._base_pixmap = None
         self._feedback_rotation_deg = 0.0
@@ -256,65 +367,56 @@ class InteractiveStlPreviewLabel(QLabel):
         self._schedule_render()
 
     def shutdown(self) -> None:
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        if self._render_loop is not None:
+            self._render_loop.stop()
+            self._render_loop = None
 
     def _schedule_render(self) -> None:
+        from PySide6.QtCore import QTimer
+
         if self._artifact_path is None:
-            self._pending_request = None
+            if self._render_loop is not None:
+                self._latest_request_id = self._render_loop.clear()
             self._base_pixmap = None
             self._reset_feedback()
             self.clear()
             self.setText("No fixture selected.")
             return
         size = (max(self.width(), 360), max(self.height(), 260))
-        request = (self._artifact_path, self._camera.normalized(), size)
-        self._pending_request = request
-        if self._active_future is not None and not self._active_future.done():
-            if self._base_pixmap is None:
-                self.setText("Rendering preview...")
-            return
-        self._start_next_render()
-
-    def _start_next_render(self) -> None:
-        from PySide6.QtCore import QTimer
-
-        request = self._pending_request
-        if request is None:
-            return
-        self._pending_request = None
-        artifact_path, camera, size = request
-        self._active_request = request
         if self._base_pixmap is None:
             self.setText("Rendering preview...")
-        self._active_future = self._executor.submit(
-            render_stl_preview,
-            artifact_path,
-            cache_root=self._cache_root,
+        self._latest_request_id = self._ensure_render_loop().request_frame(
+            self._artifact_path,
+            camera=self._camera,
             window_size=size,
-            camera=camera,
         )
         if self._render_poll_timer is None:
             self._render_poll_timer = QTimer(self)
-            self._render_poll_timer.setInterval(50)
+            self._render_poll_timer.setInterval(33)
             self._render_poll_timer.timeout.connect(self._poll_render)
-        self._render_poll_timer.start()
+        if not self._render_poll_timer.isActive():
+            self._render_poll_timer.start()
 
     def _poll_render(self) -> None:
-        if self._active_future is None or not self._active_future.done():
+        if self._render_loop is None:
             return
-        if self._render_poll_timer is not None:
+        handled_result = False
+        for result in self._render_loop.take_results():
+            handled_result = True
+            if result.request_id != self._latest_request_id:
+                continue
+            if result.error is not None:
+                self.clear()
+                self.setText(f"Preview unavailable: {result.error}")
+            elif result.record is not None:
+                self._apply_render(result.record)
+        if self._render_poll_timer is not None and handled_result and self._artifact_path is None:
             self._render_poll_timer.stop()
-        try:
-            render = self._active_future.result()
-        except Exception as exc:
-            self.clear()
-            self.setText(f"Preview unavailable: {exc.__class__.__name__}")
-        else:
-            self._apply_render(render)
-        self._active_future = None
-        self._active_request = None
-        if self._pending_request is not None:
-            self._start_next_render()
+
+    def _ensure_render_loop(self) -> StlPreviewRenderLoop:
+        if self._render_loop is None:
+            self._render_loop = StlPreviewRenderLoop(cache_root=self._cache_root)
+        return self._render_loop
 
     def _apply_render(self, render: ArtifactPreviewRecord) -> None:
         from PySide6.QtCore import Qt
