@@ -10,9 +10,10 @@ from pathlib import Path
 
 os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
 
-_RENDER_CONTRACT_VERSION = "stl-preview-v5"
+_RENDER_CONTRACT_VERSION = "stl-preview-v6"
 _PREVIEW_BACKGROUND_COLOR = "#071426"
 _PREVIEW_OBJECT_COLOR = "#ffb56b"
+_PREVIEW_EDGE_COLOR = "#3d210f"
 
 
 @dataclass(frozen=True)
@@ -73,7 +74,10 @@ def render_stl_preview(
         mesh = pv.read(artifact_path)
         plotter = pv.Plotter(off_screen=True, window_size=window_size)
         plotter.set_background(_PREVIEW_BACKGROUND_COLOR)
-        plotter.add_mesh(mesh, color=_PREVIEW_OBJECT_COLOR, smooth_shading=False, show_edges=True)
+        plotter.add_mesh(mesh, color=_PREVIEW_OBJECT_COLOR, smooth_shading=False, show_edges=False)
+        feature_edges = _object_feature_edges(mesh)
+        if feature_edges.n_cells > 0:
+            plotter.add_mesh(feature_edges, color=_PREVIEW_EDGE_COLOR, line_width=2)
         _apply_camera(plotter, mesh.bounds, camera)
         plotter.show(screenshot=str(preview_path), auto_close=True, interactive=False)
     except Exception as exc:
@@ -81,6 +85,16 @@ def render_stl_preview(
     if not preview_path.is_file():
         return ArtifactPreviewRecord(artifact_path, None, "artifact-preview-missing-output")
     return ArtifactPreviewRecord(artifact_path, preview_path)
+
+
+def _object_feature_edges(mesh):
+    return mesh.extract_feature_edges(
+        boundary_edges=True,
+        feature_edges=True,
+        non_manifold_edges=True,
+        manifold_edges=False,
+        feature_angle=30.0,
+    )
 
 
 def _apply_camera(plotter, bounds, camera: PreviewCameraState) -> None:

@@ -22,6 +22,7 @@ from impression.devtools.reference_review.ui import (
     render_stl_preview,
     verify_qml_resource_layout,
 )
+from impression.devtools.reference_review.ui import artifact_preview
 from impression.devtools.reference_review.ui import shell
 from impression.devtools.reference_review.ui.artifact_preview import PreviewCameraState
 from impression.devtools.reference_review.ui.shell import InteractiveStlPreviewLabel
@@ -178,6 +179,19 @@ def test_stl_preview_renderer_writes_png_for_artifact(project_root: Path, tmp_pa
         for y in range(image.height)
         for x in range(image.width)
     )
+
+
+def test_stl_preview_edge_overlay_uses_object_edges_not_triangle_wireframe(project_root: Path) -> None:
+    import pyvista as pv
+
+    artifact = project_root / "project/release-0.1.0a/reference-stl/dirty/surfacebody/box.stl"
+    mesh = pv.read(artifact)
+
+    object_edges = artifact_preview._object_feature_edges(mesh)
+    triangle_edges = mesh.extract_all_edges()
+
+    assert object_edges.n_cells == 12
+    assert triangle_edges.n_cells > object_edges.n_cells
 
 
 def test_dirty_stl_fixture_launch_exposes_artifact_without_startup_render(project_root: Path) -> None:
