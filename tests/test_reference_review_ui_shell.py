@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from PIL import Image
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, QPointF, Qt
 from PySide6.QtWidgets import QPushButton
 
 from impression.devtools.reference_review import ReviewSourceModelRecord
@@ -225,6 +225,78 @@ def test_dirty_stl_fixture_selects_embedded_preview_surface(project_root: Path) 
     assert root.findChild(QObject, "embeddedPreviewSurface") is not None
     assert root.findChild(QObject, "resetPreviewButton") is not None
     assert root.property("interactivePreviewReady")
+
+
+def test_embedded_preview_uses_vtk_trackball_left_drag_rotation_sign() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    preview = InteractiveStlPreviewLabel()
+    preview.resize(360, 260)
+
+    preview._apply_pointer_delta(
+        QPointF(20.0, 10.0),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPointF(200.0, 140.0),
+    )
+
+    assert preview._camera.azimuth_deg == pytest.approx(36.0)
+    assert preview._camera.elevation_deg == pytest.approx(23.5)
+
+
+def test_embedded_preview_matches_vtk_trackball_modifier_modes() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    preview = InteractiveStlPreviewLabel()
+    preview.resize(360, 260)
+
+    preview._apply_pointer_delta(
+        QPointF(20.0, 10.0),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.ShiftModifier,
+        QPointF(200.0, 140.0),
+    )
+    assert preview._camera.pan_x == pytest.approx(-0.08)
+    assert preview._camera.pan_y == pytest.approx(0.04)
+    assert preview._camera.azimuth_deg == pytest.approx(45.0)
+
+    preview.reset_view()
+    preview._apply_pointer_delta(
+        QPointF(0.0, 20.0),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier,
+        QPointF(200.0, 160.0),
+    )
+    assert preview._camera.zoom > 1.0
+    assert preview._camera.azimuth_deg == pytest.approx(45.0)
+
+    preview.reset_view()
+    preview._apply_pointer_delta(
+        QPointF(10.0, 0.0),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.ControlModifier,
+        QPointF(210.0, 140.0),
+    )
+    assert preview._camera.roll_deg != pytest.approx(0.0)
+    assert preview._camera.azimuth_deg == pytest.approx(45.0)
+
+    preview.reset_view()
+    preview._apply_pointer_delta(
+        QPointF(20.0, 10.0),
+        Qt.MouseButton.MiddleButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPointF(200.0, 140.0),
+    )
+    assert preview._camera.pan_x == pytest.approx(-0.08)
+    assert preview._camera.pan_y == pytest.approx(0.04)
+
+    preview.reset_view()
+    preview._apply_pointer_delta(
+        QPointF(0.0, 20.0),
+        Qt.MouseButton.RightButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPointF(200.0, 160.0),
+    )
+    assert preview._camera.zoom > 1.0
+    assert preview._camera.pan_x == pytest.approx(0.0)
 
 
 def test_embedded_preview_schedules_frames_on_background_render_loop(

@@ -327,27 +327,72 @@ class InteractiveStlPreviewLabel(QLabel):
             return
         delta = event.position() - self._last_pos
         self._last_pos = event.position()
-        buttons = event.buttons()
+        self._apply_pointer_delta(delta, event.buttons(), event.modifiers(), event.position())
+        self._schedule_render()
+
+    def _apply_pointer_delta(self, delta, buttons, modifiers, position) -> None:
         from PySide6.QtCore import Qt
 
-        if buttons & Qt.MouseButton.LeftButton:
+        shift_pressed = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        ctrl_pressed = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        if buttons & Qt.MouseButton.LeftButton and ctrl_pressed and shift_pressed:
+            self._dolly_by_pixels(delta.y())
+        elif buttons & Qt.MouseButton.LeftButton and shift_pressed:
+            self._pan_by_pixels(delta.x(), delta.y())
+        elif buttons & Qt.MouseButton.LeftButton and ctrl_pressed:
+            self._spin_to_pointer(position, delta)
+        elif buttons & Qt.MouseButton.LeftButton:
             self._camera = PreviewCameraState(
-                azimuth_deg=self._camera.azimuth_deg + delta.x() * 0.45,
+                azimuth_deg=self._camera.azimuth_deg - delta.x() * 0.45,
                 elevation_deg=self._camera.elevation_deg - delta.y() * 0.45,
+                roll_deg=self._camera.roll_deg,
                 zoom=self._camera.zoom,
                 pan_x=self._camera.pan_x,
                 pan_y=self._camera.pan_y,
             ).normalized()
-            self._schedule_render()
-        elif buttons & (Qt.MouseButton.RightButton | Qt.MouseButton.MiddleButton):
-            self._camera = PreviewCameraState(
-                azimuth_deg=self._camera.azimuth_deg,
-                elevation_deg=self._camera.elevation_deg,
-                zoom=self._camera.zoom,
-                pan_x=self._camera.pan_x - delta.x() * 0.004,
-                pan_y=self._camera.pan_y + delta.y() * 0.004,
-            ).normalized()
-            self._schedule_render()
+        elif buttons & Qt.MouseButton.MiddleButton:
+            self._pan_by_pixels(delta.x(), delta.y())
+        elif buttons & Qt.MouseButton.RightButton and not shift_pressed:
+            self._dolly_by_pixels(delta.y())
+
+    def _pan_by_pixels(self, dx: float, dy: float) -> None:
+        self._camera = PreviewCameraState(
+            azimuth_deg=self._camera.azimuth_deg,
+            elevation_deg=self._camera.elevation_deg,
+            roll_deg=self._camera.roll_deg,
+            zoom=self._camera.zoom,
+            pan_x=self._camera.pan_x - dx * 0.004,
+            pan_y=self._camera.pan_y + dy * 0.004,
+        ).normalized()
+
+    def _dolly_by_pixels(self, dy: float) -> None:
+        factor = 1.1 ** (20.0 * dy / max(float(self.height()), 1.0))
+        self._camera = PreviewCameraState(
+            azimuth_deg=self._camera.azimuth_deg,
+            elevation_deg=self._camera.elevation_deg,
+            roll_deg=self._camera.roll_deg,
+            zoom=self._camera.zoom * factor,
+            pan_x=self._camera.pan_x,
+            pan_y=self._camera.pan_y,
+        ).normalized()
+
+    def _spin_to_pointer(self, position, delta) -> None:
+        import math
+
+        center_x = self.width() / 2.0
+        center_y = self.height() / 2.0
+        old_x = position.x() - delta.x()
+        old_y = position.y() - delta.y()
+        new_angle = math.degrees(math.atan2(position.y() - center_y, position.x() - center_x))
+        old_angle = math.degrees(math.atan2(old_y - center_y, old_x - center_x))
+        self._camera = PreviewCameraState(
+            azimuth_deg=self._camera.azimuth_deg,
+            elevation_deg=self._camera.elevation_deg,
+            roll_deg=self._camera.roll_deg + new_angle - old_angle,
+            zoom=self._camera.zoom,
+            pan_x=self._camera.pan_x,
+            pan_y=self._camera.pan_y,
+        ).normalized()
 
     def mouseReleaseEvent(self, event) -> None:
         self._last_pos = None
@@ -359,6 +404,7 @@ class InteractiveStlPreviewLabel(QLabel):
         self._camera = PreviewCameraState(
             azimuth_deg=self._camera.azimuth_deg,
             elevation_deg=self._camera.elevation_deg,
+            roll_deg=self._camera.roll_deg,
             zoom=self._camera.zoom * factor,
             pan_x=self._camera.pan_x,
             pan_y=self._camera.pan_y,

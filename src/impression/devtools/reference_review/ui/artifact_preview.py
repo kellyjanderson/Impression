@@ -19,6 +19,7 @@ _PREVIEW_OBJECT_COLOR = "#ffb56b"
 class PreviewCameraState:
     azimuth_deg: float = 45.0
     elevation_deg: float = 28.0
+    roll_deg: float = 0.0
     zoom: float = 1.0
     pan_x: float = 0.0
     pan_y: float = 0.0
@@ -27,6 +28,7 @@ class PreviewCameraState:
         return PreviewCameraState(
             azimuth_deg=self.azimuth_deg % 360.0,
             elevation_deg=max(-85.0, min(85.0, self.elevation_deg)),
+            roll_deg=self.roll_deg % 360.0,
             zoom=max(0.2, min(6.0, self.zoom)),
             pan_x=max(-5.0, min(5.0, self.pan_x)),
             pan_y=max(-5.0, min(5.0, self.pan_y)),
@@ -105,8 +107,38 @@ def _apply_camera(plotter, bounds, camera: PreviewCameraState) -> None:
         focal_point[1] + distance * math.cos(elevation) * math.sin(azimuth),
         focal_point[2] + distance * math.sin(elevation),
     )
-    plotter.camera_position = [position, focal_point, (0.0, 0.0, 1.0)]
+    up = _rolled_up_vector(position, focal_point, camera.roll_deg)
+    plotter.camera_position = [position, focal_point, up]
     plotter.camera.zoom(1.45)
+
+
+def _rolled_up_vector(
+    position: tuple[float, float, float],
+    focal_point: tuple[float, float, float],
+    roll_deg: float,
+) -> tuple[float, float, float]:
+    if roll_deg == 0.0:
+        return (0.0, 0.0, 1.0)
+    axis = tuple(focal_point[index] - position[index] for index in range(3))
+    axis_length = math.sqrt(sum(value * value for value in axis))
+    if axis_length == 0.0:
+        return (0.0, 0.0, 1.0)
+    ux, uy, uz = (value / axis_length for value in axis)
+    x, y, z = (0.0, 0.0, 1.0)
+    angle = math.radians(roll_deg)
+    cos_angle = math.cos(angle)
+    sin_angle = math.sin(angle)
+    dot = ux * x + uy * y + uz * z
+    cross = (
+        uy * z - uz * y,
+        uz * x - ux * z,
+        ux * y - uy * x,
+    )
+    return (
+        x * cos_angle + cross[0] * sin_angle + ux * dot * (1.0 - cos_angle),
+        y * cos_angle + cross[1] * sin_angle + uy * dot * (1.0 - cos_angle),
+        z * cos_angle + cross[2] * sin_angle + uz * dot * (1.0 - cos_angle),
+    )
 
 
 def _preview_cache_key(
@@ -123,6 +155,7 @@ def _preview_cache_key(
             f"{window_size[0]}x{window_size[1]}",
             f"{camera.azimuth_deg:.2f}",
             f"{camera.elevation_deg:.2f}",
+            f"{camera.roll_deg:.2f}",
             f"{camera.zoom:.3f}",
             f"{camera.pan_x:.3f}",
             f"{camera.pan_y:.3f}",
