@@ -169,6 +169,7 @@ from PySide6.QtWidgets import QLabel, QWidget
 @dataclass(frozen=True)
 class _PreviewRenderRequest:
     request_id: int
+    generation: int
     artifact_path: Path
     camera: PreviewCameraState
     window_size: tuple[int, int]
@@ -177,6 +178,7 @@ class _PreviewRenderRequest:
 @dataclass(frozen=True)
 class _PreviewRenderResult:
     request_id: int
+    generation: int
     record: ArtifactPreviewRecord | None = None
     error: str | None = None
 
@@ -210,6 +212,7 @@ class StlPreviewRenderLoop:
         self,
         artifact_path: Path,
         *,
+        generation: int,
         camera: PreviewCameraState,
         window_size: tuple[int, int],
     ) -> int:
@@ -217,6 +220,7 @@ class StlPreviewRenderLoop:
             self._latest_request_id += 1
             request = _PreviewRenderRequest(
                 self._latest_request_id,
+                generation,
                 artifact_path,
                 camera.normalized(),
                 window_size,
@@ -271,10 +275,16 @@ class StlPreviewRenderLoop:
                 )
             except Exception as exc:
                 self._results.put(
-                    _PreviewRenderResult(request.request_id, error=exc.__class__.__name__)
+                    _PreviewRenderResult(
+                        request.request_id,
+                        request.generation,
+                        error=exc.__class__.__name__,
+                    )
                 )
             else:
-                self._results.put(_PreviewRenderResult(request.request_id, record=record))
+                self._results.put(
+                    _PreviewRenderResult(request.request_id, request.generation, record=record)
+                )
 
 
 class InteractiveStlPreviewLabel(QLabel):
@@ -295,22 +305,18 @@ class InteractiveStlPreviewLabel(QLabel):
         self._cache_root = Path(".cache/reference-review/stl-previews")
         self._render_loop: StlPreviewRenderLoop | None = None
         self._latest_request_id = 0
+        self._render_generation = 0
         self._render_poll_timer = None
         self._base_pixmap = None
-        self._feedback_rotation_deg = 0.0
-        self._feedback_pan_x = 0.0
-        self._feedback_pan_y = 0.0
-        self._feedback_scale = 1.0
 
     def set_artifact(self, artifact_path: Path | None) -> None:
         self._artifact_path = artifact_path
+        self._render_generation += 1
         self._camera = PreviewCameraState()
-        self._reset_feedback()
         self._schedule_render()
 
     def reset_view(self) -> None:
         self._camera = PreviewCameraState()
-        self._reset_feedback()
         self._schedule_render()
 
     def mousePressEvent(self, event) -> None:
@@ -325,7 +331,6 @@ class InteractiveStlPreviewLabel(QLabel):
         from PySide6.QtCore import Qt
 
         if buttons & Qt.MouseButton.LeftButton:
-            self._feedback_rotation_deg += delta.x() * 0.25
             self._camera = PreviewCameraState(
                 azimuth_deg=self._camera.azimuth_deg + delta.x() * 0.45,
                 elevation_deg=self._camera.elevation_deg - delta.y() * 0.45,
@@ -333,11 +338,8 @@ class InteractiveStlPreviewLabel(QLabel):
                 pan_x=self._camera.pan_x,
                 pan_y=self._camera.pan_y,
             ).normalized()
-            self._show_interaction_feedback()
             self._schedule_render()
         elif buttons & (Qt.MouseButton.RightButton | Qt.MouseButton.MiddleButton):
-            self._feedback_pan_x += delta.x()
-            self._feedback_pan_y += delta.y()
             self._camera = PreviewCameraState(
                 azimuth_deg=self._camera.azimuth_deg,
                 elevation_deg=self._camera.elevation_deg,
@@ -345,7 +347,6 @@ class InteractiveStlPreviewLabel(QLabel):
                 pan_x=self._camera.pan_x - delta.x() * 0.004,
                 pan_y=self._camera.pan_y + delta.y() * 0.004,
             ).normalized()
-            self._show_interaction_feedback()
             self._schedule_render()
 
     def mouseReleaseEvent(self, event) -> None:
@@ -355,7 +356,6 @@ class InteractiveStlPreviewLabel(QLabel):
         if self._artifact_path is None:
             return
         factor = 1.12 if event.angleDelta().y() > 0 else 1.0 / 1.12
-        self._feedback_scale = max(0.2, min(6.0, self._feedback_scale * factor))
         self._camera = PreviewCameraState(
             azimuth_deg=self._camera.azimuth_deg,
             elevation_deg=self._camera.elevation_deg,
@@ -363,7 +363,6 @@ class InteractiveStlPreviewLabel(QLabel):
             pan_x=self._camera.pan_x,
             pan_y=self._camera.pan_y,
         ).normalized()
-        self._show_interaction_feedback()
         self._schedule_render()
 
     def shutdown(self) -> None:
@@ -378,7 +377,6 @@ class InteractiveStlPreviewLabel(QLabel):
             if self._render_loop is not None:
                 self._latest_request_id = self._render_loop.clear()
             self._base_pixmap = None
-            self._reset_feedback()
             self.clear()
             self.setText("No fixture selected.")
             return
@@ -387,6 +385,7 @@ class InteractiveStlPreviewLabel(QLabel):
             self.setText("Rendering preview...")
         self._latest_request_id = self._ensure_render_loop().request_frame(
             self._artifact_path,
+            generation=self._render_generation,
             camera=self._camera,
             window_size=size,
         )
@@ -400,11 +399,15 @@ class InteractiveStlPreviewLabel(QLabel):
     def _poll_render(self) -> None:
         if self._render_loop is None:
             return
+        latest_result: _PreviewRenderResult | None = None
         handled_result = False
         for result in self._render_loop.take_results():
             handled_result = True
-            if result.request_id != self._latest_request_id:
+            if result.generation != self._render_generation:
                 continue
+            latest_result = result
+        if latest_result is not None:
+            result = latest_result
             if result.error is not None:
                 self.clear()
                 self.setText(f"Preview unavailable: {result.error}")
@@ -431,39 +434,23 @@ class InteractiveStlPreviewLabel(QLabel):
             self.setText("Preview unavailable")
             return
         self._base_pixmap = pixmap
-        self._reset_feedback()
-        self._show_interaction_feedback()
+        self._show_rendered_pixmap()
 
-    def _reset_feedback(self) -> None:
-        self._feedback_rotation_deg = 0.0
-        self._feedback_pan_x = 0.0
-        self._feedback_pan_y = 0.0
-        self._feedback_scale = 1.0
-
-    def _show_interaction_feedback(self) -> None:
+    def _show_rendered_pixmap(self) -> None:
         from PySide6.QtCore import Qt
-        from PySide6.QtGui import QPainter, QPixmap
 
         if self._base_pixmap is None or self._base_pixmap.isNull():
             return
-        canvas = QPixmap(self.size())
-        canvas.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(canvas)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        painter.translate(
-            self.width() / 2.0 + self._feedback_pan_x,
-            self.height() / 2.0 + self._feedback_pan_y,
-        )
-        painter.scale(self._feedback_scale, self._feedback_scale)
-        painter.rotate(self._feedback_rotation_deg)
         scaled = self._base_pixmap.scaled(
             self.size(),
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
-        painter.drawPixmap(-scaled.width() / 2.0, -scaled.height() / 2.0, scaled)
-        painter.end()
-        self.setPixmap(canvas)
+        self.setPixmap(scaled)
+
+    def resizeEvent(self, event) -> None:
+        self._show_rendered_pixmap()
+        super().resizeEvent(event)
 
 
 class ReferenceReviewWindow(QWidget):

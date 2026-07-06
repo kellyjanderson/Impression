@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 from PIL import Image
 from PySide6.QtCore import QObject
-from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import QPushButton
 
 from impression.devtools.reference_review import ReviewSourceModelRecord
@@ -228,23 +227,6 @@ def test_dirty_stl_fixture_selects_embedded_preview_surface(project_root: Path) 
     assert root.property("interactivePreviewReady")
 
 
-def test_embedded_preview_updates_visible_feedback_during_drag() -> None:
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    preview = InteractiveStlPreviewLabel()
-    preview.resize(240, 180)
-    pixmap = QPixmap(120, 90)
-    pixmap.fill(QColor("#ffb56b"))
-    preview._base_pixmap = pixmap
-    preview._feedback_rotation_deg = 18.0
-    preview._feedback_pan_x = 12.0
-    preview._feedback_pan_y = -6.0
-
-    preview._show_interaction_feedback()
-
-    assert preview.pixmap() is not None
-    assert not preview.pixmap().isNull()
-
-
 def test_embedded_preview_schedules_frames_on_background_render_loop(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -263,10 +245,11 @@ def test_embedded_preview_schedules_frames_on_background_render_loop(
             self,
             artifact_path: Path,
             *,
+            generation: int,
             camera,
             window_size: tuple[int, int],
         ) -> int:
-            self.requests.append((artifact_path, camera, window_size))
+            self.requests.append((artifact_path, generation, camera, window_size))
             return len(self.requests)
 
         def clear(self) -> int:
@@ -288,36 +271,58 @@ def test_embedded_preview_schedules_frames_on_background_render_loop(
     preview.set_artifact(artifact)
     preview._camera = preview._camera.__class__(azimuth_deg=90.0)
     preview._schedule_render()
+    render_generation = preview._render_generation
     preview.set_artifact(None)
 
     assert len(loops) == 1
     assert [request[0] for request in loops[0].requests] == [artifact, artifact]
-    assert loops[0].requests[-1][1].azimuth_deg == 90.0
-    assert loops[0].requests[-1][2] == (360, 260)
+    assert loops[0].requests[-1][1] == render_generation
+    assert loops[0].requests[-1][2].azimuth_deg == 90.0
+    assert loops[0].requests[-1][3] == (360, 260)
     assert loops[0].cleared
 
 
-def test_embedded_preview_discards_stale_render_loop_results(tmp_path: Path) -> None:
+def test_embedded_preview_applies_completed_current_generation_frames(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     preview = InteractiveStlPreviewLabel()
-    old_record = shell.ArtifactPreviewRecord(tmp_path / "old.stl", None, "old")
+    intermediate_record = shell.ArtifactPreviewRecord(tmp_path / "intermediate.stl", None, "intermediate")
     latest_record = shell.ArtifactPreviewRecord(tmp_path / "latest.stl", None, "latest")
     applied = []
 
     class FakeRenderLoop:
         def take_results(self) -> list[object]:
             return [
-                shell._PreviewRenderResult(1, record=old_record),
-                shell._PreviewRenderResult(2, record=latest_record),
+                shell._PreviewRenderResult(1, 4, record=intermediate_record),
+                shell._PreviewRenderResult(2, 4, record=latest_record),
             ]
 
     preview._render_loop = FakeRenderLoop()
-    preview._latest_request_id = 2
+    preview._render_generation = 4
+    preview._latest_request_id = 20
     preview._apply_render = lambda record: applied.append(record)
 
     preview._poll_render()
 
     assert applied == [latest_record]
+
+
+def test_embedded_preview_discards_previous_artifact_generation_results(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    preview = InteractiveStlPreviewLabel()
+    old_record = shell.ArtifactPreviewRecord(tmp_path / "old.stl", None, "old")
+    applied = []
+
+    class FakeRenderLoop:
+        def take_results(self) -> list[object]:
+            return [shell._PreviewRenderResult(1, 3, record=old_record)]
+
+    preview._render_loop = FakeRenderLoop()
+    preview._render_generation = 4
+    preview._apply_render = lambda record: applied.append(record)
+
+    preview._poll_render()
+
+    assert applied == []
 
 
 def test_shell_next_button_selects_fixture_record(tmp_path: Path) -> None:
