@@ -519,6 +519,7 @@ class ReferenceReviewWindow(QWidget):
             QListWidget,
             QPushButton,
             QSplitter,
+            QTabWidget,
             QTextEdit,
             QVBoxLayout,
             QWidget,
@@ -592,8 +593,11 @@ class ReferenceReviewWindow(QWidget):
         self.preview_layout.addWidget(self.preview_surface)
         main_layout.addWidget(self.preview_frame, 1, 0)
 
-        context = QFrame()
-        context.setFrameShape(QFrame.Shape.StyledPanel)
+        self.detail_tabs = QTabWidget()
+        self.detail_tabs.setObjectName("reviewDetailTabs")
+        self.detail_tabs.setMinimumSize(320, 260)
+
+        context = QWidget()
         context_layout = QVBoxLayout(context)
         context_title = QLabel("Context")
         context_title.setStyleSheet("font-size: 16px; font-weight: 700;")
@@ -601,22 +605,8 @@ class ReferenceReviewWindow(QWidget):
         self.context_text.setWordWrap(True)
         context_layout.addWidget(context_title)
         context_layout.addWidget(self.context_text, 1)
-        main_layout.addWidget(context, 1, 1)
 
-        artifacts = QFrame()
-        artifacts.setFrameShape(QFrame.Shape.StyledPanel)
-        artifacts_layout = QVBoxLayout(artifacts)
-        artifact_title = QLabel("Artifacts")
-        artifact_title.setStyleSheet("font-size: 16px; font-weight: 700;")
-        self.artifact_thumb = QLabel("")
-        self.artifact_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.artifact_thumb.setMinimumHeight(92)
-        artifacts_layout.addWidget(artifact_title)
-        artifacts_layout.addWidget(self.artifact_thumb, 1)
-        main_layout.addWidget(artifacts, 2, 0)
-
-        notes = QFrame()
-        notes.setFrameShape(QFrame.Shape.StyledPanel)
+        notes = QWidget()
         notes_layout = QVBoxLayout(notes)
         notes_title = QLabel("Notes")
         notes_title.setStyleSheet("font-size: 16px; font-weight: 700;")
@@ -624,7 +614,21 @@ class ReferenceReviewWindow(QWidget):
         self.notes.setPlaceholderText("Review notes")
         notes_layout.addWidget(notes_title)
         notes_layout.addWidget(self.notes, 1)
-        main_layout.addWidget(notes, 2, 1)
+
+        artifacts = QWidget()
+        artifacts_layout = QVBoxLayout(artifacts)
+        artifact_title = QLabel("Artifacts")
+        artifact_title.setStyleSheet("font-size: 16px; font-weight: 700;")
+        self.artifact_thumb = QLabel("")
+        self.artifact_thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.artifact_thumb.setMinimumHeight(180)
+        artifacts_layout.addWidget(artifact_title)
+        artifacts_layout.addWidget(self.artifact_thumb, 1)
+
+        self.detail_tabs.addTab(context, "Context")
+        self.detail_tabs.addTab(notes, "Notes")
+        self.detail_tabs.addTab(artifacts, "Artifacts")
+        main_layout.addWidget(self.detail_tabs, 1, 1)
 
         codex = QFrame()
         codex.setFrameShape(QFrame.Shape.StyledPanel)
@@ -643,7 +647,11 @@ class ReferenceReviewWindow(QWidget):
         codex_layout.addWidget(codex_title)
         codex_layout.addWidget(self.codex_stream, 1)
         codex_layout.addLayout(prompt_row)
-        main_layout.addWidget(codex, 3, 0, 1, 2)
+        main_layout.addWidget(codex, 2, 0, 1, 2)
+        main_layout.setColumnStretch(0, 3)
+        main_layout.setColumnStretch(1, 2)
+        main_layout.setRowStretch(1, 3)
+        main_layout.setRowStretch(2, 2)
         splitter.addWidget(main)
         splitter.setStretchFactor(1, 1)
 

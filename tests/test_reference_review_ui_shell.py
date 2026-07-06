@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 from PySide6.QtCore import QObject, QPointF, Qt
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QPushButton, QTabWidget
 
 from impression.devtools.reference_review import ReviewSourceModelRecord
 from impression.devtools.reference_review.ui import (
@@ -225,6 +225,13 @@ def test_dirty_stl_fixture_selects_embedded_preview_surface(project_root: Path) 
     assert root.findChild(QObject, "openPreviewButton") is None
     assert root.findChild(QObject, "embeddedPreviewSurface") is not None
     assert root.findChild(QObject, "resetPreviewButton") is not None
+    detail_tabs = root.findChild(QObject, "reviewDetailTabs")
+    assert isinstance(detail_tabs, QTabWidget)
+    assert [detail_tabs.tabText(index) for index in range(detail_tabs.count())] == [
+        "Context",
+        "Notes",
+        "Artifacts",
+    ]
     assert root.property("interactivePreviewReady")
 
 
