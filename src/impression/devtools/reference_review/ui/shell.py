@@ -11,7 +11,12 @@ from pathlib import Path
 from queue import Empty, SimpleQueue
 from typing import Callable, Sequence
 
-from .artifact_preview import ArtifactPreviewRecord, PreviewCameraState, render_stl_preview
+from .artifact_preview import (
+    ArtifactPreviewRecord,
+    ArtifactPreviewRenderer,
+    PreviewCameraState,
+    render_stl_preview,
+)
 from .bridge import BridgeRecord, BridgeRegistry
 from .packaging import qml_resource_root
 from .queue_context import FixtureQueueViewModel
@@ -191,10 +196,13 @@ class StlPreviewRenderLoop:
         *,
         cache_root: Path,
         fps: int = 6,
-        renderer: Callable[..., ArtifactPreviewRecord] = render_stl_preview,
+        renderer: Callable[..., ArtifactPreviewRecord] | None = None,
+        renderer_factory: Callable[..., ArtifactPreviewRenderer] = ArtifactPreviewRenderer,
     ) -> None:
         self._cache_root = cache_root
         self._renderer = renderer
+        self._renderer_factory = renderer_factory
+        self._owned_renderer: ArtifactPreviewRenderer | None = None
         self._frame_interval = 1.0 / fps
         self._condition = threading.Condition()
         self._results: SimpleQueue[_PreviewRenderResult] = SimpleQueue()
@@ -252,39 +260,58 @@ class StlPreviewRenderLoop:
 
     def _run(self) -> None:
         next_frame_at = 0.0
-        while True:
-            with self._condition:
-                while not self._stopping and self._latest_request is None:
-                    self._condition.wait()
-                if self._stopping:
-                    return
-                request = self._latest_request
-                self._latest_request = None
-            if request is None:
-                continue
-            sleep_for = next_frame_at - time.monotonic()
-            if sleep_for > 0:
-                time.sleep(sleep_for)
-            next_frame_at = time.monotonic() + self._frame_interval
-            try:
-                record = self._renderer(
-                    request.artifact_path,
-                    cache_root=self._cache_root,
-                    window_size=request.window_size,
-                    camera=request.camera,
-                )
-            except Exception as exc:
-                self._results.put(
-                    _PreviewRenderResult(
-                        request.request_id,
-                        request.generation,
-                        error=exc.__class__.__name__,
+        try:
+            while True:
+                with self._condition:
+                    while not self._stopping and self._latest_request is None:
+                        self._condition.wait()
+                    if self._stopping:
+                        return
+                    request = self._latest_request
+                    self._latest_request = None
+                if request is None:
+                    continue
+                sleep_for = next_frame_at - time.monotonic()
+                if sleep_for > 0:
+                    time.sleep(sleep_for)
+                next_frame_at = time.monotonic() + self._frame_interval
+                try:
+                    record = self._render_request(request)
+                except Exception as exc:
+                    self._results.put(
+                        _PreviewRenderResult(
+                            request.request_id,
+                            request.generation,
+                            error=exc.__class__.__name__,
+                        )
                     )
-                )
-            else:
-                self._results.put(
-                    _PreviewRenderResult(request.request_id, request.generation, record=record)
-                )
+                else:
+                    self._results.put(
+                        _PreviewRenderResult(request.request_id, request.generation, record=record)
+                    )
+        finally:
+            self._close_owned_renderer()
+
+    def _render_request(self, request: _PreviewRenderRequest) -> ArtifactPreviewRecord:
+        if self._renderer is not None:
+            return self._renderer(
+                request.artifact_path,
+                cache_root=self._cache_root,
+                window_size=request.window_size,
+                camera=request.camera,
+            )
+        if self._owned_renderer is None:
+            self._owned_renderer = self._renderer_factory(cache_root=self._cache_root)
+        return self._owned_renderer.render(
+            request.artifact_path,
+            window_size=request.window_size,
+            camera=request.camera,
+        )
+
+    def _close_owned_renderer(self) -> None:
+        if self._owned_renderer is not None:
+            self._owned_renderer.close()
+            self._owned_renderer = None
 
 
 class InteractiveStlPreviewLabel(QLabel):

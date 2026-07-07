@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import time
 import tomllib
 from pathlib import Path
 
@@ -24,7 +25,10 @@ from impression.devtools.reference_review.ui import (
 )
 from impression.devtools.reference_review.ui import artifact_preview
 from impression.devtools.reference_review.ui import shell
-from impression.devtools.reference_review.ui.artifact_preview import PreviewCameraState
+from impression.devtools.reference_review.ui.artifact_preview import (
+    ArtifactPreviewRenderer,
+    PreviewCameraState,
+)
 from impression.devtools.reference_review.ui.shell import InteractiveStlPreviewLabel
 from impression.devtools.reference_review.ui.style import component_contracts
 
@@ -179,6 +183,40 @@ def test_artifact_preview_renderer_writes_png_for_impress_artifact(project_root:
         for y in range(image.height)
         for x in range(image.width)
     )
+
+
+def test_artifact_preview_renderer_reuses_pyvista_plotter_between_snapshots(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/box.impress"
+    renderer = ArtifactPreviewRenderer(cache_root=tmp_path / "previews")
+
+    try:
+        first = renderer.render(
+            artifact,
+            window_size=(240, 180),
+            camera=PreviewCameraState(azimuth_deg=10.0),
+        )
+        plotter = renderer._plotter
+        second = renderer.render(
+            artifact,
+            window_size=(240, 180),
+            camera=PreviewCameraState(azimuth_deg=20.0),
+        )
+        second_plotter = renderer._plotter
+    finally:
+        renderer.close()
+
+    assert first.diagnostic is None
+    assert second.diagnostic is None
+    assert first.preview_path is not None
+    assert second.preview_path is not None
+    assert first.preview_path.exists()
+    assert second.preview_path.exists()
+    assert second_plotter is plotter
+    assert renderer._plotter is None
+    assert plotter is not None
 
 
 def test_impress_preview_edge_overlay_uses_object_edges_not_triangle_wireframe(project_root: Path) -> None:
@@ -433,6 +471,79 @@ def test_embedded_preview_schedules_frames_on_background_render_loop(
     assert loops[0].requests[-1][2].azimuth_deg == 90.0
     assert loops[0].requests[-1][3] == (360, 260)
     assert loops[0].cleared
+
+
+def test_preview_render_loop_reuses_owned_renderer_until_stop(tmp_path: Path) -> None:
+    artifact = tmp_path / "part.impress"
+    artifact.write_text('{"format": "impress"}\n')
+    preview_path = tmp_path / "preview.png"
+    instances = []
+
+    class FakePersistentRenderer:
+        def __init__(self, *, cache_root: Path) -> None:
+            self.cache_root = cache_root
+            self.calls = []
+            self.closed = False
+            instances.append(self)
+
+        def render(
+            self,
+            artifact_path: Path,
+            *,
+            window_size: tuple[int, int],
+            camera: PreviewCameraState,
+        ) -> shell.ArtifactPreviewRecord:
+            self.calls.append((artifact_path, window_size, camera))
+            return shell.ArtifactPreviewRecord(artifact_path, preview_path)
+
+        def close(self) -> None:
+            self.closed = True
+
+    loop = shell.StlPreviewRenderLoop(
+        cache_root=tmp_path / "previews",
+        fps=60,
+        renderer_factory=FakePersistentRenderer,
+    )
+    try:
+        loop.request_frame(
+            artifact,
+            generation=1,
+            camera=PreviewCameraState(azimuth_deg=10.0),
+            window_size=(360, 260),
+        )
+        first_results = _take_preview_results(loop, expected=1)
+        loop.request_frame(
+            artifact,
+            generation=1,
+            camera=PreviewCameraState(azimuth_deg=20.0),
+            window_size=(360, 260),
+        )
+        second_results = _take_preview_results(loop, expected=1)
+    finally:
+        loop.stop()
+
+    assert len(instances) == 1
+    assert len(instances[0].calls) == 2
+    assert first_results[0].record is not None
+    assert second_results[0].record is not None
+    assert instances[0].calls[0][2].azimuth_deg == pytest.approx(10.0)
+    assert instances[0].calls[1][2].azimuth_deg == pytest.approx(20.0)
+    assert instances[0].closed
+
+
+def _take_preview_results(
+    loop: shell.StlPreviewRenderLoop,
+    *,
+    expected: int,
+) -> list[shell._PreviewRenderResult]:
+    deadline = time.monotonic() + 2.0
+    results: list[shell._PreviewRenderResult] = []
+    while time.monotonic() < deadline:
+        results.extend(loop.take_results())
+        if len(results) >= expected:
+            return results
+        time.sleep(0.01)
+    return results
 
 
 def test_embedded_preview_applies_completed_current_generation_frames(tmp_path: Path) -> None:

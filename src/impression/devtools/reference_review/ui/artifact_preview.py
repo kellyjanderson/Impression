@@ -49,6 +49,110 @@ class ArtifactPreviewRecord:
         return self.preview_path.resolve().as_uri()
 
 
+@dataclass(frozen=True)
+class _LoadedPreviewScene:
+    artifact_key: tuple[Path, int, int]
+    mesh: object
+    feature_edges: object
+
+
+class ArtifactPreviewRenderer:
+    """Persistent PyVista renderer for a preview surface/session."""
+
+    def __init__(self, *, cache_root: Path) -> None:
+        self._cache_root = cache_root
+        self._pv = None
+        self._plotter = None
+        self._window_size: tuple[int, int] | None = None
+        self._scene: _LoadedPreviewScene | None = None
+
+    def render(
+        self,
+        artifact_path: Path,
+        *,
+        window_size: tuple[int, int] = (720, 520),
+        camera: PreviewCameraState | None = None,
+    ) -> ArtifactPreviewRecord:
+        artifact_path = Path(artifact_path)
+        if artifact_path.suffix.lower() not in {".stl", ".impress"}:
+            return ArtifactPreviewRecord(artifact_path, None, "unsupported-artifact-kind")
+        if not artifact_path.is_file():
+            return ArtifactPreviewRecord(artifact_path, None, "missing-artifact")
+        camera = (camera or PreviewCameraState()).normalized()
+        self._cache_root.mkdir(parents=True, exist_ok=True)
+        preview_path = self._cache_root / f"{_preview_cache_key(artifact_path, window_size, camera)}.png"
+        if preview_path.is_file():
+            return ArtifactPreviewRecord(artifact_path, preview_path)
+        try:
+            pv = self._ensure_pyvista()
+            scene = self._ensure_scene(artifact_path, pv)
+            plotter = self._ensure_plotter(pv, window_size)
+            _apply_camera(plotter, scene.mesh.bounds, camera)
+            plotter.screenshot(str(preview_path), return_img=False)
+        except Exception as exc:
+            return ArtifactPreviewRecord(
+                artifact_path,
+                None,
+                f"artifact-preview-failed:{exc.__class__.__name__}",
+            )
+        if not preview_path.is_file():
+            return ArtifactPreviewRecord(artifact_path, None, "artifact-preview-missing-output")
+        return ArtifactPreviewRecord(artifact_path, preview_path)
+
+    def close(self) -> None:
+        if self._plotter is not None:
+            try:
+                self._plotter.close()
+            except Exception:
+                pass
+        self._plotter = None
+        self._scene = None
+        self._window_size = None
+
+    def _ensure_pyvista(self):
+        if self._pv is None:
+            import pyvista as pv
+
+            self._pv = pv
+        return self._pv
+
+    def _ensure_plotter(self, pv, window_size: tuple[int, int]):
+        if self._plotter is None:
+            self._plotter = pv.Plotter(off_screen=True, window_size=window_size)
+            self._plotter.set_background(_PREVIEW_BACKGROUND_COLOR)
+            self._window_size = window_size
+            self._load_scene_into_plotter()
+        elif self._window_size != window_size:
+            self._plotter.window_size = window_size
+            self._window_size = window_size
+        return self._plotter
+
+    def _ensure_scene(self, artifact_path: Path, pv) -> _LoadedPreviewScene:
+        stat = artifact_path.stat()
+        artifact_key = (artifact_path.resolve(), stat.st_mtime_ns, stat.st_size)
+        if self._scene is not None and self._scene.artifact_key == artifact_key:
+            return self._scene
+        mesh = _preview_mesh_for_artifact(artifact_path, pv)
+        self._scene = _LoadedPreviewScene(artifact_key, mesh, _object_feature_edges(mesh))
+        if self._plotter is not None:
+            self._load_scene_into_plotter()
+        return self._scene
+
+    def _load_scene_into_plotter(self) -> None:
+        if self._plotter is None or self._scene is None:
+            return
+        self._plotter.clear()
+        self._plotter.set_background(_PREVIEW_BACKGROUND_COLOR)
+        self._plotter.add_mesh(
+            self._scene.mesh,
+            color=_PREVIEW_OBJECT_COLOR,
+            smooth_shading=False,
+            show_edges=False,
+        )
+        if self._scene.feature_edges.n_cells > 0:
+            self._plotter.add_mesh(self._scene.feature_edges, color=_PREVIEW_EDGE_COLOR, line_width=2)
+
+
 def render_stl_preview(
     artifact_path: Path,
     *,
@@ -58,48 +162,11 @@ def render_stl_preview(
 ) -> ArtifactPreviewRecord:
     """Render an STL artifact to a cached PNG preview."""
 
-    artifact_path = Path(artifact_path)
-    if artifact_path.suffix.lower() not in {".stl", ".impress"}:
-        return ArtifactPreviewRecord(artifact_path, None, "unsupported-artifact-kind")
-    if not artifact_path.is_file():
-        return ArtifactPreviewRecord(artifact_path, None, "missing-artifact")
-    camera = (camera or PreviewCameraState()).normalized()
-    cache_root.mkdir(parents=True, exist_ok=True)
-    preview_path = cache_root / f"{_preview_cache_key(artifact_path, window_size, camera)}.png"
-    if preview_path.is_file():
-        return ArtifactPreviewRecord(artifact_path, preview_path)
-    pv = None
-    plotter = None
+    renderer = ArtifactPreviewRenderer(cache_root=cache_root)
     try:
-        import pyvista as pv
-
-        mesh = _preview_mesh_for_artifact(artifact_path, pv)
-        plotter = pv.Plotter(off_screen=True, window_size=window_size)
-        plotter.set_background(_PREVIEW_BACKGROUND_COLOR)
-        plotter.add_mesh(mesh, color=_PREVIEW_OBJECT_COLOR, smooth_shading=False, show_edges=False)
-        feature_edges = _object_feature_edges(mesh)
-        if feature_edges.n_cells > 0:
-            plotter.add_mesh(feature_edges, color=_PREVIEW_EDGE_COLOR, line_width=2)
-        _apply_camera(plotter, mesh.bounds, camera)
-        plotter.show(screenshot=str(preview_path), auto_close=True, interactive=False)
-    except Exception as exc:
-        return ArtifactPreviewRecord(artifact_path, None, f"artifact-preview-failed:{exc.__class__.__name__}")
+        return renderer.render(artifact_path, window_size=window_size, camera=camera)
     finally:
-        if plotter is not None:
-            try:
-                plotter.close()
-            except Exception:
-                pass
-        if pv is not None:
-            close_all = getattr(pv, "close_all", None)
-            if callable(close_all):
-                try:
-                    close_all()
-                except Exception:
-                    pass
-    if not preview_path.is_file():
-        return ArtifactPreviewRecord(artifact_path, None, "artifact-preview-missing-output")
-    return ArtifactPreviewRecord(artifact_path, preview_path)
+        renderer.close()
 
 
 def _preview_mesh_for_artifact(artifact_path: Path, pv):
