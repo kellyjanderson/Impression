@@ -4,18 +4,13 @@ from __future__ import annotations
 
 import os
 import sys
-import threading
-import time
 from dataclasses import dataclass
 from pathlib import Path
-from queue import Empty, SimpleQueue
-from typing import Callable, Sequence
+from typing import Sequence
 
 from .artifact_preview import (
     ArtifactPreviewRecord,
-    ArtifactPreviewRenderer,
-    PreviewCameraState,
-    render_stl_preview,
+    _object_feature_edges,
 )
 from .bridge import BridgeRecord, BridgeRegistry
 from .packaging import qml_resource_root
@@ -144,12 +139,8 @@ def _launch_qml_workbench(
     for name, record in bridges.records.items():
         context.setContextProperty(name, record.bridge)
     queue = FixtureQueueViewModel(fixture_records)
-    artifact_previews = _artifact_previews_for_records(fixture_records)
-    artifact_preview_diagnostics = tuple(
-        preview.diagnostic
-        for preview in artifact_previews.values()
-        if preview.diagnostic is not None
-    )
+    artifact_previews: dict[str, ArtifactPreviewRecord] = {}
+    artifact_preview_diagnostics: tuple[str, ...] = ()
     context.setContextProperty(
         "startupDiagnostics",
         diagnostics + list(fixture_diagnostics) + list(artifact_preview_diagnostics),
@@ -171,359 +162,127 @@ def _launch_qml_workbench(
 from PySide6.QtWidgets import QLabel, QWidget
 
 
-@dataclass(frozen=True)
-class _PreviewRenderRequest:
-    request_id: int
-    generation: int
-    artifact_path: Path
-    camera: PreviewCameraState
-    window_size: tuple[int, int]
+def _load_impress_preview_datasets(artifact_path: Path) -> tuple[object, ...]:
+    from impression.io import load_impress
+    from impression.modeling import preview_tessellation_request, tessellate_surface_body
+
+    loaded = load_impress(artifact_path)
+    return tuple(
+        tessellate_surface_body(body, preview_tessellation_request(require_watertight=False)).mesh
+        for body in loaded.bodies
+    )
 
 
-@dataclass(frozen=True)
-class _PreviewRenderResult:
-    request_id: int
-    generation: int
-    record: ArtifactPreviewRecord | None = None
-    error: str | None = None
-
-
-class StlPreviewRenderLoop:
-    """Single-owner background render loop for settled artifact preview snapshots."""
-
-    def __init__(
-        self,
-        *,
-        cache_root: Path,
-        fps: int = 6,
-        renderer: Callable[..., ArtifactPreviewRecord] | None = None,
-        renderer_factory: Callable[..., ArtifactPreviewRenderer] = ArtifactPreviewRenderer,
-    ) -> None:
-        self._cache_root = cache_root
-        self._renderer = renderer
-        self._renderer_factory = renderer_factory
-        self._owned_renderer: ArtifactPreviewRenderer | None = None
-        self._frame_interval = 1.0 / fps
-        self._condition = threading.Condition()
-        self._results: SimpleQueue[_PreviewRenderResult] = SimpleQueue()
-        self._latest_request: _PreviewRenderRequest | None = None
-        self._latest_request_id = 0
-        self._stopping = False
-        self._thread = threading.Thread(
-            target=self._run,
-            name="stl-preview-render-loop",
-            daemon=True,
-        )
-        self._thread.start()
-
-    def request_frame(
-        self,
-        artifact_path: Path,
-        *,
-        generation: int,
-        camera: PreviewCameraState,
-        window_size: tuple[int, int],
-    ) -> int:
-        with self._condition:
-            self._latest_request_id += 1
-            request = _PreviewRenderRequest(
-                self._latest_request_id,
-                generation,
-                artifact_path,
-                camera.normalized(),
-                window_size,
-            )
-            self._latest_request = request
-            self._condition.notify()
-            return request.request_id
-
-    def clear(self) -> int:
-        with self._condition:
-            self._latest_request_id += 1
-            self._latest_request = None
-            self._condition.notify()
-            return self._latest_request_id
-
-    def take_results(self) -> list[_PreviewRenderResult]:
-        results: list[_PreviewRenderResult] = []
-        while True:
-            try:
-                results.append(self._results.get_nowait())
-            except Empty:
-                return results
-
-    def stop(self) -> None:
-        with self._condition:
-            self._stopping = True
-            self._condition.notify()
-        self._thread.join(timeout=1.0)
-
-    def _run(self) -> None:
-        next_frame_at = 0.0
-        try:
-            while True:
-                with self._condition:
-                    while not self._stopping and self._latest_request is None:
-                        self._condition.wait()
-                    if self._stopping:
-                        return
-                    request = self._latest_request
-                    self._latest_request = None
-                if request is None:
-                    continue
-                sleep_for = next_frame_at - time.monotonic()
-                if sleep_for > 0:
-                    time.sleep(sleep_for)
-                next_frame_at = time.monotonic() + self._frame_interval
-                try:
-                    record = self._render_request(request)
-                except Exception as exc:
-                    self._results.put(
-                        _PreviewRenderResult(
-                            request.request_id,
-                            request.generation,
-                            error=exc.__class__.__name__,
-                        )
-                    )
-                else:
-                    self._results.put(
-                        _PreviewRenderResult(request.request_id, request.generation, record=record)
-                    )
-        finally:
-            self._close_owned_renderer()
-
-    def _render_request(self, request: _PreviewRenderRequest) -> ArtifactPreviewRecord:
-        if self._renderer is not None:
-            return self._renderer(
-                request.artifact_path,
-                cache_root=self._cache_root,
-                window_size=request.window_size,
-                camera=request.camera,
-            )
-        if self._owned_renderer is None:
-            self._owned_renderer = self._renderer_factory(cache_root=self._cache_root)
-        return self._owned_renderer.render(
-            request.artifact_path,
-            window_size=request.window_size,
-            camera=request.camera,
-        )
-
-    def _close_owned_renderer(self) -> None:
-        if self._owned_renderer is not None:
-            self._owned_renderer.close()
-            self._owned_renderer = None
-
-
-class InteractiveStlPreviewLabel(QLabel):
-    """In-window STL preview surface with CLI-like mouse controls."""
+class LiveArtifactPreviewWidget(QWidget):
+    """In-window live artifact preview using the same VTK interaction model as CLI preview."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QVBoxLayout
 
         super().__init__(parent)
         self.setObjectName("embeddedPreviewSurface")
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setMinimumSize(360, 260)
-        self.setText("No fixture selected.")
-        self.setMouseTracking(True)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._status = QLabel("No fixture selected.", self)
+        self._status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._layout.addWidget(self._status)
         self._artifact_path: Path | None = None
-        self._camera = PreviewCameraState()
-        self._last_pos = None
-        self._cache_root = Path(".cache/reference-review/stl-previews")
-        self._render_loop: StlPreviewRenderLoop | None = None
-        self._latest_request_id = 0
-        self._render_generation = 0
-        self._render_poll_timer = None
-        self._base_pixmap = None
+        self._plotter = None
+        self._previewer = None
+        self._current_datasets = []
 
     def set_artifact(self, artifact_path: Path | None) -> None:
         self._artifact_path = artifact_path
-        self._render_generation += 1
-        self._camera = PreviewCameraState()
-        self._schedule_render()
+        self._current_datasets = []
+        if artifact_path is None:
+            self._clear_scene("No fixture selected.")
+            return
+        self._load_live_artifact(artifact_path)
 
     def reset_view(self) -> None:
-        self._camera = PreviewCameraState()
-        self._schedule_render()
-
-    def mousePressEvent(self, event) -> None:
-        self._last_pos = event.position()
-
-    def mouseMoveEvent(self, event) -> None:
-        if self._artifact_path is None or self._last_pos is None:
+        if self._plotter is None:
             return
-        delta = event.position() - self._last_pos
-        self._last_pos = event.position()
-        self._apply_pointer_delta(delta, event.buttons(), event.modifiers(), event.position())
-
-    def _apply_pointer_delta(self, delta, buttons, modifiers, position) -> None:
-        from PySide6.QtCore import Qt
-
-        shift_pressed = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
-        ctrl_pressed = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
-        if buttons & Qt.MouseButton.LeftButton and ctrl_pressed and shift_pressed:
-            self._dolly_by_pixels(delta.y())
-        elif buttons & Qt.MouseButton.LeftButton and shift_pressed:
-            self._pan_by_pixels(delta.x(), delta.y())
-        elif buttons & Qt.MouseButton.LeftButton and ctrl_pressed:
-            self._spin_to_pointer(position, delta)
-        elif buttons & Qt.MouseButton.LeftButton:
-            self._camera = PreviewCameraState(
-                azimuth_deg=self._camera.azimuth_deg - delta.x() * 0.45,
-                elevation_deg=self._camera.elevation_deg - delta.y() * 0.45,
-                roll_deg=self._camera.roll_deg,
-                zoom=self._camera.zoom,
-                pan_x=self._camera.pan_x,
-                pan_y=self._camera.pan_y,
-            ).normalized()
-        elif buttons & Qt.MouseButton.MiddleButton:
-            self._pan_by_pixels(delta.x(), delta.y())
-        elif buttons & Qt.MouseButton.RightButton and not shift_pressed:
-            self._dolly_by_pixels(delta.y())
-
-    def _pan_by_pixels(self, dx: float, dy: float) -> None:
-        self._camera = PreviewCameraState(
-            azimuth_deg=self._camera.azimuth_deg,
-            elevation_deg=self._camera.elevation_deg,
-            roll_deg=self._camera.roll_deg,
-            zoom=self._camera.zoom,
-            pan_x=self._camera.pan_x - dx * 0.004,
-            pan_y=self._camera.pan_y + dy * 0.004,
-        ).normalized()
-
-    def _dolly_by_pixels(self, dy: float) -> None:
-        factor = 1.1 ** (20.0 * dy / max(float(self.height()), 1.0))
-        self._camera = PreviewCameraState(
-            azimuth_deg=self._camera.azimuth_deg,
-            elevation_deg=self._camera.elevation_deg,
-            roll_deg=self._camera.roll_deg,
-            zoom=self._camera.zoom * factor,
-            pan_x=self._camera.pan_x,
-            pan_y=self._camera.pan_y,
-        ).normalized()
-
-    def _spin_to_pointer(self, position, delta) -> None:
-        import math
-
-        center_x = self.width() / 2.0
-        center_y = self.height() / 2.0
-        old_x = position.x() - delta.x()
-        old_y = position.y() - delta.y()
-        new_angle = math.degrees(math.atan2(position.y() - center_y, position.x() - center_x))
-        old_angle = math.degrees(math.atan2(old_y - center_y, old_x - center_x))
-        self._camera = PreviewCameraState(
-            azimuth_deg=self._camera.azimuth_deg,
-            elevation_deg=self._camera.elevation_deg,
-            roll_deg=self._camera.roll_deg + new_angle - old_angle,
-            zoom=self._camera.zoom,
-            pan_x=self._camera.pan_x,
-            pan_y=self._camera.pan_y,
-        ).normalized()
-
-    def mouseReleaseEvent(self, event) -> None:
-        self._last_pos = None
-        self._schedule_render()
-
-    def wheelEvent(self, event) -> None:
-        if self._artifact_path is None:
-            return
-        factor = 1.12 if event.angleDelta().y() > 0 else 1.0 / 1.12
-        self._camera = PreviewCameraState(
-            azimuth_deg=self._camera.azimuth_deg,
-            elevation_deg=self._camera.elevation_deg,
-            roll_deg=self._camera.roll_deg,
-            zoom=self._camera.zoom * factor,
-            pan_x=self._camera.pan_x,
-            pan_y=self._camera.pan_y,
-        ).normalized()
-        self._schedule_render()
+        if self._previewer is not None and self._current_datasets:
+            self._previewer._reset_camera(self._plotter, self._current_datasets)
+        else:
+            self._plotter.reset_camera()
+        self._plotter.reset_camera_clipping_range()
+        self._plotter.render()
 
     def shutdown(self) -> None:
-        if self._render_loop is not None:
-            self._render_loop.stop()
-            self._render_loop = None
+        if self._plotter is not None:
+            self._plotter.close()
+            self._plotter = None
 
-    def _schedule_render(self) -> None:
-        from PySide6.QtCore import QTimer
+    def _load_live_artifact(self, artifact_path: Path) -> None:
+        try:
+            plotter = self._ensure_plotter()
+            self._status.hide()
+            plotter.clear()
+            plotter.set_background("#071426")
+            if artifact_path.suffix.lower() == ".impress":
+                datasets = _load_impress_preview_datasets(artifact_path)
+                self._current_datasets = list(datasets)
+                self._add_impress_datasets(plotter, self._current_datasets)
+                self.reset_view()
+            elif artifact_path.suffix.lower() == ".stl":
+                import pyvista as pv
 
-        if self._artifact_path is None:
-            if self._render_loop is not None:
-                self._latest_request_id = self._render_loop.clear()
-            self._base_pixmap = None
-            self.clear()
-            self.setText("No fixture selected.")
-            return
-        size = (max(self.width(), 360), max(self.height(), 260))
-        if self._base_pixmap is None:
-            self.setText("Rendering preview...")
-        self._latest_request_id = self._ensure_render_loop().request_frame(
-            self._artifact_path,
-            generation=self._render_generation,
-            camera=self._camera,
-            window_size=size,
-        )
-        if self._render_poll_timer is None:
-            self._render_poll_timer = QTimer(self)
-            self._render_poll_timer.setInterval(33)
-            self._render_poll_timer.timeout.connect(self._poll_render)
-        if not self._render_poll_timer.isActive():
-            self._render_poll_timer.start()
+                mesh = pv.read(artifact_path)
+                plotter.add_mesh(mesh, color="#ffb56b", smooth_shading=False, show_edges=False)
+                edges = _object_feature_edges(mesh)
+                if edges.n_cells > 0:
+                    plotter.add_mesh(edges, color="#3d210f", line_width=2)
+                plotter.reset_camera()
+                plotter.reset_camera_clipping_range()
+                plotter.render()
+            else:
+                self._clear_scene("Unsupported artifact type.")
+        except Exception as exc:
+            self._clear_scene(f"Preview unavailable: {exc.__class__.__name__}")
 
-    def _poll_render(self) -> None:
-        if self._render_loop is None:
-            return
-        latest_result: _PreviewRenderResult | None = None
-        handled_result = False
-        for result in self._render_loop.take_results():
-            handled_result = True
-            if result.generation != self._render_generation:
-                continue
-            latest_result = result
-        if latest_result is not None:
-            result = latest_result
-            if result.error is not None:
-                self.clear()
-                self.setText(f"Preview unavailable: {result.error}")
-            elif result.record is not None:
-                self._apply_render(result.record)
-        if self._render_poll_timer is not None and handled_result and self._artifact_path is None:
-            self._render_poll_timer.stop()
+    def _ensure_plotter(self):
+        if self._plotter is not None:
+            return self._plotter
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            raise RuntimeError("live-preview-unavailable-offscreen")
+        from pyvistaqt import QtInteractor
+        from rich.console import Console
+        from impression.preview import PyVistaPreviewer
 
-    def _ensure_render_loop(self) -> StlPreviewRenderLoop:
-        if self._render_loop is None:
-            self._render_loop = StlPreviewRenderLoop(cache_root=self._cache_root)
-        return self._render_loop
+        self._plotter = QtInteractor(self)
+        self._layout.addWidget(self._plotter, 1)
+        self._previewer = PyVistaPreviewer(console=Console())
+        self._previewer._configure_plotter(self._plotter, show_bounds=False, show_axes=True)
+        return self._plotter
 
-    def _apply_render(self, render: ArtifactPreviewRecord) -> None:
-        from PySide6.QtCore import Qt
-        from PySide6.QtGui import QPixmap
+    def _add_impress_datasets(self, plotter, datasets: list[object]) -> None:
+        from impression.mesh import mesh_to_pyvista
 
-        if render.preview_path is None:
-            self.clear()
-            self.setText(render.diagnostic or "Preview unavailable")
-            return
-        pixmap = QPixmap(str(render.preview_path))
-        if pixmap.isNull():
-            self.setText("Preview unavailable")
-            return
-        self._base_pixmap = pixmap
-        self._show_rendered_pixmap()
+        for index, mesh in enumerate(datasets):
+            pv_mesh = mesh_to_pyvista(mesh)
+            plotter.add_mesh(
+                pv_mesh,
+                name=f"artifact-{index}",
+                color="#ffb56b",
+                smooth_shading=False,
+                show_edges=False,
+            )
+            edges = _object_feature_edges(pv_mesh)
+            if edges.n_cells > 0:
+                plotter.add_mesh(edges, name=f"artifact-{index}-edges", color="#3d210f", line_width=2)
 
-    def _show_rendered_pixmap(self) -> None:
-        from PySide6.QtCore import Qt
+    def _clear_scene(self, message: str) -> None:
+        if self._plotter is not None:
+            self._plotter.clear()
+            self._plotter.render()
+        self._status.setText(message)
+        self._status.show()
 
-        if self._base_pixmap is None or self._base_pixmap.isNull():
-            return
-        scaled = self._base_pixmap.scaled(
-            self.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self.setPixmap(scaled)
 
-    def resizeEvent(self, event) -> None:
-        self._show_rendered_pixmap()
-        super().resizeEvent(event)
+InteractiveStlPreviewLabel = LiveArtifactPreviewWidget
 
 
 class ReferenceReviewWindow(QWidget):
@@ -751,23 +510,9 @@ class ReferenceReviewWindow(QWidget):
         self._sync_properties()
 
     def _load_artifact_preview(self, item: dict[str, object]) -> None:
-        from PySide6.QtCore import Qt
-        from PySide6.QtGui import QPixmap
-
         record = self.queue.records[self._selected_index]
         artifact_path = record.artifact_paths[0] if record.artifact_paths else None
-        preview_url = str(item.get("artifact_preview_url", ""))
-        if preview_url.startswith("file://"):
-            pixmap = QPixmap(Path(preview_url.removeprefix("file://")).as_posix())
-            if not pixmap.isNull():
-                self.artifact_thumb.setPixmap(
-                    pixmap.scaled(
-                        148,
-                        92,
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
-                    )
-                )
+        self.artifact_thumb.setText(str(item.get("artifact_display_path", "")))
         self.preview_surface.set_artifact(artifact_path if artifact_path and artifact_path.is_file() else None)
 
     def _sync_properties(self) -> None:
@@ -840,18 +585,6 @@ def _fixture_items_for_qml(
             }
         )
     return items
-
-
-def _artifact_previews_for_records(
-    records: tuple[ReviewSourceModelRecord, ...],
-) -> dict[str, ArtifactPreviewRecord]:
-    cache_root = Path(".cache/reference-review/stl-previews")
-    previews: dict[str, ArtifactPreviewRecord] = {}
-    for record in records:
-        if not record.artifact_paths:
-            continue
-        previews[record.fixture_id] = render_stl_preview(record.artifact_paths[0], cache_root=cache_root)
-    return previews
 
 
 def _queue_status_text(queue: FixtureQueueViewModel, diagnostics: tuple[str, ...]) -> str:

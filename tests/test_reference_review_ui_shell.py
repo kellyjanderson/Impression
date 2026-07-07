@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import os
 import json
-import time
 import tomllib
 from pathlib import Path
 
 import pytest
-from PIL import Image
-from PySide6.QtCore import QObject, QPointF, Qt
+from PySide6.QtCore import QObject, Qt
 from PySide6.QtWidgets import QPushButton, QTabWidget
 
 from impression.devtools.reference_review import ReviewSourceModelRecord
@@ -20,15 +18,10 @@ from impression.devtools.reference_review.ui import (
     build_dependency_policy_report,
     launch_workbench,
     load_style_tokens,
-    render_stl_preview,
     verify_qml_resource_layout,
 )
 from impression.devtools.reference_review.ui import artifact_preview
 from impression.devtools.reference_review.ui import shell
-from impression.devtools.reference_review.ui.artifact_preview import (
-    ArtifactPreviewRenderer,
-    PreviewCameraState,
-)
 from impression.devtools.reference_review.ui.shell import InteractiveStlPreviewLabel
 from impression.devtools.reference_review.ui.style import component_contracts
 
@@ -157,68 +150,6 @@ def test_shell_loads_fixture_file_into_selectable_queue(tmp_path: Path) -> None:
     assert root.property("hasFixture")
 
 
-def test_artifact_preview_renderer_writes_png_for_impress_artifact(project_root: Path, tmp_path: Path) -> None:
-    artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/box.impress"
-
-    preview = render_stl_preview(artifact, cache_root=tmp_path / "previews", window_size=(240, 180))
-
-    assert preview.diagnostic is None
-    assert preview.preview_path is not None
-    assert preview.preview_path.exists()
-    assert preview.preview_path.suffix == ".png"
-    assert preview.preview_url.startswith("file://")
-    image = Image.open(preview.preview_path).convert("RGB")
-    corners = (
-        image.getpixel((0, 0)),
-        image.getpixel((image.width - 1, 0)),
-        image.getpixel((0, image.height - 1)),
-        image.getpixel((image.width - 1, image.height - 1)),
-    )
-    pixels = image.load()
-    assert all(blue > red and blue > green and max((red, green, blue)) < 80 for red, green, blue in corners)
-    assert any(
-        (red := pixels[x, y][0]) > 200
-        and 120 <= (green := pixels[x, y][1]) <= 210
-        and (blue := pixels[x, y][2]) < 150
-        for y in range(image.height)
-        for x in range(image.width)
-    )
-
-
-def test_artifact_preview_renderer_reuses_pyvista_plotter_between_snapshots(
-    project_root: Path,
-    tmp_path: Path,
-) -> None:
-    artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/box.impress"
-    renderer = ArtifactPreviewRenderer(cache_root=tmp_path / "previews")
-
-    try:
-        first = renderer.render(
-            artifact,
-            window_size=(240, 180),
-            camera=PreviewCameraState(azimuth_deg=10.0),
-        )
-        plotter = renderer._plotter
-        second = renderer.render(
-            artifact,
-            window_size=(240, 180),
-            camera=PreviewCameraState(azimuth_deg=20.0),
-        )
-        second_plotter = renderer._plotter
-    finally:
-        renderer.close()
-
-    assert first.diagnostic is None
-    assert second.diagnostic is None
-    assert first.preview_path is not None
-    assert second.preview_path is not None
-    assert first.preview_path.exists()
-    assert second.preview_path.exists()
-    assert second_plotter is plotter
-    assert renderer._plotter is None
-    assert plotter is not None
-
-
 def test_impress_preview_edge_overlay_uses_object_edges_not_triangle_wireframe(project_root: Path) -> None:
     import pyvista as pv
 
@@ -287,337 +218,72 @@ def test_dirty_impress_fixture_selects_embedded_preview_surface(project_root: Pa
     assert root.property("interactivePreviewReady")
 
 
-def test_embedded_preview_uses_vtk_trackball_left_drag_rotation_sign() -> None:
+def test_live_preview_loads_impress_artifact_into_plotter(
+    monkeypatch: pytest.MonkeyPatch,
+    project_root: Path,
+) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     preview = InteractiveStlPreviewLabel()
     preview.resize(360, 260)
-
-    preview._apply_pointer_delta(
-        QPointF(20.0, 10.0),
-        Qt.MouseButton.LeftButton,
-        Qt.KeyboardModifier.NoModifier,
-        QPointF(200.0, 140.0),
-    )
-
-    assert preview._camera.azimuth_deg == pytest.approx(36.0)
-    assert preview._camera.elevation_deg == pytest.approx(23.5)
-
-
-def test_embedded_preview_vertical_orbit_is_not_clamped_to_half_turn() -> None:
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    preview = InteractiveStlPreviewLabel()
-    preview.resize(360, 260)
-
-    preview._apply_pointer_delta(
-        QPointF(0.0, -360.0),
-        Qt.MouseButton.LeftButton,
-        Qt.KeyboardModifier.NoModifier,
-        QPointF(180.0, -100.0),
-    )
-
-    assert preview._camera.elevation_deg == pytest.approx(190.0)
-
-
-def test_preview_camera_state_preserves_full_elevation_orbit() -> None:
-    assert PreviewCameraState(elevation_deg=190.0).normalized().elevation_deg == pytest.approx(190.0)
-    assert PreviewCameraState(elevation_deg=450.0).normalized().elevation_deg == pytest.approx(90.0)
-
-
-def test_artifact_preview_camera_application_is_not_cumulative() -> None:
-    class FakeCamera:
-        def __init__(self) -> None:
-            self.zoom_calls = []
-
-        def zoom(self, value: float) -> None:
-            self.zoom_calls.append(value)
+    artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/box.impress"
 
     class FakePlotter:
         def __init__(self) -> None:
-            self.camera = FakeCamera()
-            self.camera_positions = []
+            self.backgrounds = []
+            self.meshes = []
+            self.cleared = 0
+            self.rendered = 0
+            self.clipping_reset = 0
 
-        @property
-        def camera_position(self):
-            return self.camera_positions[-1]
+        def clear(self) -> None:
+            self.cleared += 1
 
-        @camera_position.setter
-        def camera_position(self, value) -> None:
-            self.camera_positions.append(value)
+        def set_background(self, color: str) -> None:
+            self.backgrounds.append(color)
 
-    plotter = FakePlotter()
-    bounds = (-1.0, 1.0, -1.0, 1.0, -1.0, 1.0)
+        def add_mesh(self, *args, **kwargs) -> None:
+            self.meshes.append((args, kwargs))
 
-    artifact_preview._apply_camera(plotter, bounds, PreviewCameraState(azimuth_deg=10.0))
-    artifact_preview._apply_camera(plotter, bounds, PreviewCameraState(azimuth_deg=20.0))
+        def reset_camera_clipping_range(self) -> None:
+            self.clipping_reset += 1
 
-    assert len(plotter.camera_positions) == 2
-    assert plotter.camera.zoom_calls == []
+        def render(self) -> None:
+            self.rendered += 1
 
+    class FakePreviewer:
+        def __init__(self) -> None:
+            self.reset_calls = []
 
-def test_embedded_preview_matches_vtk_trackball_modifier_modes() -> None:
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    preview = InteractiveStlPreviewLabel()
-    preview.resize(360, 260)
+        def _reset_camera(self, plotter, datasets) -> None:
+            self.reset_calls.append((plotter, tuple(datasets)))
 
-    preview._apply_pointer_delta(
-        QPointF(20.0, 10.0),
-        Qt.MouseButton.LeftButton,
-        Qt.KeyboardModifier.ShiftModifier,
-        QPointF(200.0, 140.0),
-    )
-    assert preview._camera.pan_x == pytest.approx(-0.08)
-    assert preview._camera.pan_y == pytest.approx(0.04)
-    assert preview._camera.azimuth_deg == pytest.approx(45.0)
-
-    preview.reset_view()
-    preview._apply_pointer_delta(
-        QPointF(0.0, 20.0),
-        Qt.MouseButton.LeftButton,
-        Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier,
-        QPointF(200.0, 160.0),
-    )
-    assert preview._camera.zoom > 1.0
-    assert preview._camera.azimuth_deg == pytest.approx(45.0)
-
-    preview.reset_view()
-    preview._apply_pointer_delta(
-        QPointF(10.0, 0.0),
-        Qt.MouseButton.LeftButton,
-        Qt.KeyboardModifier.ControlModifier,
-        QPointF(210.0, 140.0),
-    )
-    assert preview._camera.roll_deg != pytest.approx(0.0)
-    assert preview._camera.azimuth_deg == pytest.approx(45.0)
-
-    preview.reset_view()
-    preview._apply_pointer_delta(
-        QPointF(20.0, 10.0),
-        Qt.MouseButton.MiddleButton,
-        Qt.KeyboardModifier.NoModifier,
-        QPointF(200.0, 140.0),
-    )
-    assert preview._camera.pan_x == pytest.approx(-0.08)
-    assert preview._camera.pan_y == pytest.approx(0.04)
-
-    preview.reset_view()
-    preview._apply_pointer_delta(
-        QPointF(0.0, 20.0),
-        Qt.MouseButton.RightButton,
-        Qt.KeyboardModifier.NoModifier,
-        QPointF(200.0, 160.0),
-    )
-    assert preview._camera.zoom > 1.0
-    assert preview._camera.pan_x == pytest.approx(0.0)
-
-
-def test_embedded_preview_defers_render_requests_until_pointer_release(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    preview = InteractiveStlPreviewLabel()
-    preview.resize(360, 260)
-    artifact = tmp_path / "part.impress"
-    artifact.write_text('{"format": "impress"}\n')
-    preview._artifact_path = artifact
-    preview._last_pos = QPointF(10.0, 10.0)
-    scheduled = []
-
-    class FakePointerEvent:
-        def __init__(self, position: QPointF) -> None:
-            self._position = position
-
-        def position(self) -> QPointF:
-            return self._position
-
-        def buttons(self):
-            return Qt.MouseButton.LeftButton
-
-        def modifiers(self):
-            return Qt.KeyboardModifier.NoModifier
-
-    monkeypatch.setattr(preview, "_schedule_render", lambda: scheduled.append(preview._camera))
-
-    preview.mouseMoveEvent(FakePointerEvent(QPointF(30.0, 20.0)))
-
-    assert scheduled == []
-    assert preview._camera.azimuth_deg == pytest.approx(36.0)
-    assert preview._camera.elevation_deg == pytest.approx(23.5)
-
-    preview.mouseReleaseEvent(FakePointerEvent(QPointF(30.0, 20.0)))
-
-    assert len(scheduled) == 1
-
-
-def test_embedded_preview_schedules_frames_on_background_render_loop(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    loops = []
-
-    class FakeRenderLoop:
-        def __init__(self, *, cache_root: Path) -> None:
-            self.cache_root = cache_root
-            self.requests = []
-            self.cleared = False
-            loops.append(self)
-
-        def request_frame(
-            self,
-            artifact_path: Path,
-            *,
-            generation: int,
-            camera,
-            window_size: tuple[int, int],
-        ) -> int:
-            self.requests.append((artifact_path, generation, camera, window_size))
-            return len(self.requests)
-
-        def clear(self) -> int:
-            self.cleared = True
-            return len(self.requests) + 1
-
-        def take_results(self) -> list[object]:
-            return []
-
-        def stop(self) -> None:
-            self.cleared = True
-
-    monkeypatch.setattr(shell, "StlPreviewRenderLoop", FakeRenderLoop)
-    preview = InteractiveStlPreviewLabel()
-    preview.resize(240, 180)
-    artifact = tmp_path / "part.impress"
-    artifact.write_text('{"format": "impress"}\n')
+    fake_plotter = FakePlotter()
+    fake_previewer = FakePreviewer()
+    preview._plotter = fake_plotter
+    preview._previewer = fake_previewer
+    monkeypatch.setattr(preview, "_ensure_plotter", lambda: fake_plotter)
 
     preview.set_artifact(artifact)
-    preview._camera = preview._camera.__class__(azimuth_deg=90.0)
-    preview._schedule_render()
-    render_generation = preview._render_generation
-    preview.set_artifact(None)
 
-    assert len(loops) == 1
-    assert [request[0] for request in loops[0].requests] == [artifact, artifact]
-    assert loops[0].requests[-1][1] == render_generation
-    assert loops[0].requests[-1][2].azimuth_deg == 90.0
-    assert loops[0].requests[-1][3] == (360, 260)
-    assert loops[0].cleared
-
-
-def test_preview_render_loop_reuses_owned_renderer_until_stop(tmp_path: Path) -> None:
-    artifact = tmp_path / "part.impress"
-    artifact.write_text('{"format": "impress"}\n')
-    preview_path = tmp_path / "preview.png"
-    instances = []
-
-    class FakePersistentRenderer:
-        def __init__(self, *, cache_root: Path) -> None:
-            self.cache_root = cache_root
-            self.calls = []
-            self.closed = False
-            instances.append(self)
-
-        def render(
-            self,
-            artifact_path: Path,
-            *,
-            window_size: tuple[int, int],
-            camera: PreviewCameraState,
-        ) -> shell.ArtifactPreviewRecord:
-            self.calls.append((artifact_path, window_size, camera))
-            return shell.ArtifactPreviewRecord(artifact_path, preview_path)
-
-        def close(self) -> None:
-            self.closed = True
-
-    loop = shell.StlPreviewRenderLoop(
-        cache_root=tmp_path / "previews",
-        fps=60,
-        renderer_factory=FakePersistentRenderer,
-    )
-    try:
-        loop.request_frame(
-            artifact,
-            generation=1,
-            camera=PreviewCameraState(azimuth_deg=10.0),
-            window_size=(360, 260),
-        )
-        first_results = _take_preview_results(loop, expected=1)
-        loop.request_frame(
-            artifact,
-            generation=1,
-            camera=PreviewCameraState(azimuth_deg=20.0),
-            window_size=(360, 260),
-        )
-        second_results = _take_preview_results(loop, expected=1)
-    finally:
-        loop.stop()
-
-    assert len(instances) == 1
-    assert len(instances[0].calls) == 2
-    assert first_results[0].record is not None
-    assert second_results[0].record is not None
-    assert instances[0].calls[0][2].azimuth_deg == pytest.approx(10.0)
-    assert instances[0].calls[1][2].azimuth_deg == pytest.approx(20.0)
-    assert instances[0].closed
+    assert fake_plotter.cleared == 1
+    assert fake_plotter.backgrounds == ["#071426"]
+    assert len(fake_plotter.meshes) == 2
+    assert fake_plotter.meshes[0][1]["color"] == "#ffb56b"
+    assert fake_plotter.meshes[1][1]["color"] == "#3d210f"
+    assert len(preview._current_datasets) == 1
+    assert fake_previewer.reset_calls[0][0] is fake_plotter
+    assert fake_plotter.clipping_reset == 1
+    assert fake_plotter.rendered == 1
 
 
-def _take_preview_results(
-    loop: shell.StlPreviewRenderLoop,
-    *,
-    expected: int,
-) -> list[shell._PreviewRenderResult]:
-    deadline = time.monotonic() + 2.0
-    results: list[shell._PreviewRenderResult] = []
-    while time.monotonic() < deadline:
-        results.extend(loop.take_results())
-        if len(results) >= expected:
-            return results
-        time.sleep(0.01)
-    return results
-
-
-def test_embedded_preview_applies_completed_current_generation_frames(tmp_path: Path) -> None:
+def test_live_preview_reports_unavailable_in_offscreen_mode(project_root: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     preview = InteractiveStlPreviewLabel()
-    intermediate_record = shell.ArtifactPreviewRecord(tmp_path / "intermediate.impress", None, "intermediate")
-    latest_record = shell.ArtifactPreviewRecord(tmp_path / "latest.impress", None, "latest")
-    applied = []
+    artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/box.impress"
 
-    class FakeRenderLoop:
-        def take_results(self) -> list[object]:
-            return [
-                shell._PreviewRenderResult(1, 4, record=intermediate_record),
-                shell._PreviewRenderResult(2, 4, record=latest_record),
-            ]
+    preview.set_artifact(artifact)
 
-    preview._render_loop = FakeRenderLoop()
-    preview._render_generation = 4
-    preview._latest_request_id = 20
-    preview._apply_render = lambda record: applied.append(record)
-
-    preview._poll_render()
-
-    assert applied == [latest_record]
-
-
-def test_embedded_preview_discards_previous_artifact_generation_results(tmp_path: Path) -> None:
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    preview = InteractiveStlPreviewLabel()
-    old_record = shell.ArtifactPreviewRecord(tmp_path / "old.impress", None, "old")
-    applied = []
-
-    class FakeRenderLoop:
-        def take_results(self) -> list[object]:
-            return [shell._PreviewRenderResult(1, 3, record=old_record)]
-
-    preview._render_loop = FakeRenderLoop()
-    preview._render_generation = 4
-    preview._apply_render = lambda record: applied.append(record)
-
-    preview._poll_render()
-
-    assert applied == []
+    assert preview._status.text() == "Preview unavailable: RuntimeError"
 
 
 def test_shell_next_button_selects_fixture_record(tmp_path: Path) -> None:
