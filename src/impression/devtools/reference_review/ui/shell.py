@@ -201,6 +201,15 @@ class LiveArtifactPreviewWidget(QWidget):
             return
         self._load_live_artifact(artifact_path)
 
+    def prepare_artifact(self, artifact_path: Path | None) -> None:
+        self._artifact_path = artifact_path
+        self._current_datasets = []
+        if artifact_path is None:
+            self._clear_scene("No fixture selected.")
+            return
+        self._status.setText("Loading preview...")
+        self._status.show()
+
     def reset_view(self) -> None:
         if self._plotter is None:
             return
@@ -322,6 +331,7 @@ class ReferenceReviewWindow(QWidget):
         self._interactive_preview_ready = True
         self._selected_index = queue.selected_index if queue.selected_index is not None else -1
         self._fixture_items = _fixture_items_for_qml(queue, artifact_previews)
+        self._preview_load_generation = 0
 
         root_layout = QHBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -449,13 +459,27 @@ class ReferenceReviewWindow(QWidget):
         self.next_button.clicked.connect(self._next_fixture)
         self.send_button.clicked.connect(self._send_prompt)
         self.list_widget.currentRowChanged.connect(self._select_index)
-        if self._selected_index >= 0:
-            self.list_widget.setCurrentRow(self._selected_index)
-        else:
-            self._sync_properties()
         self.show()
         self.raise_()
         self.activateWindow()
+        if self._selected_index >= 0:
+            self._select_initial_fixture(self._selected_index)
+        else:
+            self._sync_properties()
+
+    def _select_initial_fixture(self, index: int) -> None:
+        if self._offscreen:
+            self.list_widget.setCurrentRow(index)
+            return
+        from PySide6.QtCore import QTimer
+
+        self._sync_properties()
+        QTimer.singleShot(75, lambda: self._apply_initial_selection(index))
+
+    def _apply_initial_selection(self, index: int) -> None:
+        if self.list_widget.count() == 0:
+            return
+        self.list_widget.setCurrentRow(max(0, min(index, self.list_widget.count() - 1)))
 
     def _populate_queue_items(self) -> None:
         from PySide6.QtWidgets import QListWidgetItem
@@ -510,10 +534,22 @@ class ReferenceReviewWindow(QWidget):
         self._sync_properties()
 
     def _load_artifact_preview(self, item: dict[str, object]) -> None:
+        from PySide6.QtCore import QTimer
+
         record = self.queue.records[self._selected_index]
         artifact_path = record.artifact_paths[0] if record.artifact_paths else None
+        live_artifact = artifact_path if artifact_path and artifact_path.is_file() else None
+        self._preview_load_generation += 1
+        generation = self._preview_load_generation
         self.artifact_thumb.setText(str(item.get("artifact_display_path", "")))
-        self.preview_surface.set_artifact(artifact_path if artifact_path and artifact_path.is_file() else None)
+        self.preview_surface.prepare_artifact(live_artifact)
+        delay_ms = 0 if self._offscreen else 75
+        QTimer.singleShot(delay_ms, lambda: self._apply_preview_load(generation, live_artifact))
+
+    def _apply_preview_load(self, generation: int, artifact_path: Path | None) -> None:
+        if generation != self._preview_load_generation:
+            return
+        self.preview_surface.set_artifact(artifact_path)
 
     def _sync_properties(self) -> None:
         has_fixture = self._selected_index >= 0

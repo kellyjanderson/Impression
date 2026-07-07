@@ -286,6 +286,35 @@ def test_live_preview_reports_unavailable_in_offscreen_mode(project_root: Path) 
     assert preview._status.text() == "Preview unavailable: RuntimeError"
 
 
+def test_window_defers_preview_load_and_ignores_stale_loads(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    artifact = tmp_path / "part.impress"
+    artifact.write_text('{"format": "impress"}\n')
+    record = ReviewSourceModelRecord(
+        "demo/part",
+        "demo",
+        tmp_path / "model.py",
+        artifact_paths=(artifact,),
+    )
+    record.source_path.write_text("def build():\n    return None\n")
+    result = launch_workbench(fixture_records=(record,), offscreen=True)
+    window = result.engine.rootObjects()[0]
+    prepared = []
+    loaded = []
+    window.preview_surface.prepare_artifact = lambda path: prepared.append(path)
+    window.preview_surface.set_artifact = lambda path: loaded.append(path)
+
+    window._load_artifact_preview(window._fixture_items[0])
+    first_generation = window._preview_load_generation
+    window._load_artifact_preview(window._fixture_items[0])
+
+    window._apply_preview_load(first_generation, artifact)
+    window._apply_preview_load(window._preview_load_generation, artifact)
+
+    assert prepared == [artifact, artifact]
+    assert loaded == [artifact]
+
+
 def test_shell_next_button_selects_fixture_record(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     records = (
