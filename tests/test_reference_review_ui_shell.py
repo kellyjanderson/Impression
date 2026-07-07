@@ -323,6 +323,37 @@ def test_preview_camera_state_preserves_full_elevation_orbit() -> None:
     assert PreviewCameraState(elevation_deg=450.0).normalized().elevation_deg == pytest.approx(90.0)
 
 
+def test_artifact_preview_camera_application_is_not_cumulative() -> None:
+    class FakeCamera:
+        def __init__(self) -> None:
+            self.zoom_calls = []
+
+        def zoom(self, value: float) -> None:
+            self.zoom_calls.append(value)
+
+    class FakePlotter:
+        def __init__(self) -> None:
+            self.camera = FakeCamera()
+            self.camera_positions = []
+
+        @property
+        def camera_position(self):
+            return self.camera_positions[-1]
+
+        @camera_position.setter
+        def camera_position(self, value) -> None:
+            self.camera_positions.append(value)
+
+    plotter = FakePlotter()
+    bounds = (-1.0, 1.0, -1.0, 1.0, -1.0, 1.0)
+
+    artifact_preview._apply_camera(plotter, bounds, PreviewCameraState(azimuth_deg=10.0))
+    artifact_preview._apply_camera(plotter, bounds, PreviewCameraState(azimuth_deg=20.0))
+
+    assert len(plotter.camera_positions) == 2
+    assert plotter.camera.zoom_calls == []
+
+
 def test_embedded_preview_matches_vtk_trackball_modifier_modes() -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     preview = InteractiveStlPreviewLabel()

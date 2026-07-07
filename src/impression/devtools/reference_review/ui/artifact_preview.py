@@ -208,7 +208,7 @@ def _apply_camera(plotter, bounds, camera: PreviewCameraState) -> None:
     )
     azimuth = math.radians(camera.azimuth_deg)
     elevation = math.radians(camera.elevation_deg)
-    distance = span * 2.8 / camera.zoom
+    distance = span * 1.95 / camera.zoom
     pan_scale = span * 0.35
     focal_point = (
         x_center + camera.pan_x * pan_scale,
@@ -222,7 +222,6 @@ def _apply_camera(plotter, bounds, camera: PreviewCameraState) -> None:
     )
     up = _camera_up_vector(camera.azimuth_deg, camera.elevation_deg, camera.roll_deg)
     plotter.camera_position = [position, focal_point, up]
-    plotter.camera.zoom(1.45)
 
 
 def _camera_up_vector(
