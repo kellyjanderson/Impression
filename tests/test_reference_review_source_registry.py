@@ -27,8 +27,8 @@ def _write_source(root: Path, name: str = "model.py") -> Path:
 
 def test_source_model_record_normalizes_mapping_and_exposes_identity(tmp_path: Path) -> None:
     source = _write_source(tmp_path)
-    artifact = tmp_path / "dirty.stl"
-    artifact.write_text("solid dirty\nendsolid dirty\n")
+    artifact = tmp_path / "dirty.impress"
+    artifact.write_text('{"format": "impress"}\n')
 
     record = ReviewSourceModelRecord.from_mapping(
         {
@@ -52,7 +52,7 @@ def test_source_model_record_normalizes_mapping_and_exposes_identity(tmp_path: P
 
 def test_validation_reports_multiple_blocking_diagnostics_without_importing(tmp_path: Path) -> None:
     outside = tmp_path.parent / "outside_model.py"
-    missing_artifact = tmp_path / "missing.stl"
+    missing_artifact = tmp_path / "missing.impress"
     record = ReviewSourceModelRecord(
         fixture_id="demo/missing",
         feature_name="missing",
@@ -147,22 +147,22 @@ def test_committed_demo_fixture_file_loads(project_root: Path) -> None:
     assert summary.valid_items[0].record.fixture_id == "examples/hello-cube"
 
 
-def test_dirty_stl_fixture_file_covers_dirty_stl_inventory(project_root: Path) -> None:
-    fixture_file = project_root / "tests/reference_review_fixtures/dirty-stl-fixtures.json"
-    dirty_stls = sorted((project_root / "project/release-0.1.0a/reference-stl/dirty").rglob("*.stl"))
+def test_dirty_impress_fixture_file_covers_dirty_impress_inventory(project_root: Path) -> None:
+    fixture_file = project_root / "tests/reference_review_fixtures/dirty-impress-fixtures.json"
+    dirty_impress = sorted((project_root / "tests/reference_review_fixtures/reference-impress/dirty").rglob("*.impress"))
 
     summary = load_source_records_from_file(fixture_file)
     records = tuple(item.record for item in summary.valid_items)
     artifact_paths = sorted(record.artifact_paths[0].resolve() for record in records)
 
     assert not summary.diagnostics
-    assert len(records) == 15
-    assert artifact_paths == dirty_stls
+    assert len(records) == len(dirty_impress)
+    assert artifact_paths == dirty_impress
     assert all(record.source_path.name == "stl_review_sources.py" for record in records)
 
 
-def test_dirty_stl_fixture_entrypoints_build_reviewable_models(project_root: Path) -> None:
-    fixture_file = project_root / "tests/reference_review_fixtures/dirty-stl-fixtures.json"
+def test_dirty_impress_fixture_entrypoints_build_reviewable_models(project_root: Path) -> None:
+    fixture_file = project_root / "tests/reference_review_fixtures/dirty-impress-fixtures.json"
     summary = load_source_records_from_file(fixture_file)
     module_path = project_root / "tests/reference_review_fixtures/stl_review_sources.py"
     spec = importlib.util.spec_from_file_location("stl_review_sources_check", module_path)
@@ -175,8 +175,7 @@ def test_dirty_stl_fixture_entrypoints_build_reviewable_models(project_root: Pat
         getattr(module, item.record.entrypoint)().__class__.__name__ for item in summary.valid_items
     }
 
-    assert built_types <= {"SurfaceBody", "SurfaceConsumerCollection"}
-    assert len(built_types) == 2
+    assert built_types == {"SurfaceBody"}
 
 
 def test_review_context_payload_is_deterministic_and_omits_absolute_source_path(tmp_path: Path) -> None:

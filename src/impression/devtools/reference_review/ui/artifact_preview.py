@@ -59,7 +59,7 @@ def render_stl_preview(
     """Render an STL artifact to a cached PNG preview."""
 
     artifact_path = Path(artifact_path)
-    if artifact_path.suffix.lower() != ".stl":
+    if artifact_path.suffix.lower() not in {".stl", ".impress"}:
         return ArtifactPreviewRecord(artifact_path, None, "unsupported-artifact-kind")
     if not artifact_path.is_file():
         return ArtifactPreviewRecord(artifact_path, None, "missing-artifact")
@@ -68,10 +68,12 @@ def render_stl_preview(
     preview_path = cache_root / f"{_preview_cache_key(artifact_path, window_size, camera)}.png"
     if preview_path.is_file():
         return ArtifactPreviewRecord(artifact_path, preview_path)
+    pv = None
+    plotter = None
     try:
         import pyvista as pv
 
-        mesh = pv.read(artifact_path)
+        mesh = _preview_mesh_for_artifact(artifact_path, pv)
         plotter = pv.Plotter(off_screen=True, window_size=window_size)
         plotter.set_background(_PREVIEW_BACKGROUND_COLOR)
         plotter.add_mesh(mesh, color=_PREVIEW_OBJECT_COLOR, smooth_shading=False, show_edges=False)
@@ -82,9 +84,39 @@ def render_stl_preview(
         plotter.show(screenshot=str(preview_path), auto_close=True, interactive=False)
     except Exception as exc:
         return ArtifactPreviewRecord(artifact_path, None, f"artifact-preview-failed:{exc.__class__.__name__}")
+    finally:
+        if plotter is not None:
+            try:
+                plotter.close()
+            except Exception:
+                pass
+        if pv is not None:
+            close_all = getattr(pv, "close_all", None)
+            if callable(close_all):
+                try:
+                    close_all()
+                except Exception:
+                    pass
     if not preview_path.is_file():
         return ArtifactPreviewRecord(artifact_path, None, "artifact-preview-missing-output")
     return ArtifactPreviewRecord(artifact_path, preview_path)
+
+
+def _preview_mesh_for_artifact(artifact_path: Path, pv):
+    if artifact_path.suffix.lower() == ".stl":
+        return pv.read(artifact_path)
+    from impression.io import load_impress
+    from impression.mesh import combine_meshes, mesh_to_pyvista
+    from impression.modeling import preview_tessellation_request, tessellate_surface_body
+
+    loaded = load_impress(artifact_path)
+    meshes = [
+        tessellate_surface_body(body, preview_tessellation_request(require_watertight=False)).mesh
+        for body in loaded.bodies
+    ]
+    if not meshes:
+        raise ValueError("empty-impress-artifact")
+    return mesh_to_pyvista(meshes[0] if len(meshes) == 1 else combine_meshes(meshes))
 
 
 def _object_feature_edges(mesh):

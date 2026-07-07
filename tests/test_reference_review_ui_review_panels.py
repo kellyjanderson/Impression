@@ -43,7 +43,7 @@ def test_artifact_panel_tiles_track_thumbnail_and_request_service_action(tmp_pat
     panel = ArtifactPanelViewModel(
         (
             ArtifactRecord("png", tmp_path / "dirty.png", thumbnail, diff_status="changed"),
-            ArtifactRecord("stl", tmp_path / "dirty.stl", tmp_path / "missing.png"),
+            ArtifactRecord("impress", tmp_path / "dirty.impress", tmp_path / "missing.png"),
         )
     )
 

@@ -1,0 +1,690 @@
+{
+  "bodies": {
+    "body-0001": {
+      "metadata": {},
+      "shell_count": 1,
+      "shells": [
+        {
+          "adjacency": [],
+          "connected": true,
+          "metadata": {
+            "kernel": {
+              "primitive_family": "box"
+            }
+          },
+          "patch_count": 6,
+          "patches": [
+            "bb5402d37ef6f5921fdeb4db3d535168492c251d907b1e91eeb3a7655b563a5d",
+            "fb8ba1be1afe9c06b1bd7d5f770b882ddb2116c30db848a03c1e6990d5b90f63",
+            "fb92df4393a8833d74b0cddb77d9b6fbc6dcaf96876b6a8f7c1f9273a913f6de",
+            "fe4892e2488a2be5fc1b82ab8d952d799803b62eacbe34967aa29e8e4e20fca0",
+            "585d952b826b55a317cc89eb447c8c70d30c252c5e2f92836e61a9a21a18d93f",
+            "da8eaed33972b038e36611f5ae28b24983466dc5657fa97e4edd216f2324cfe6"
+          ],
+          "seams": [
+            {
+              "boundaries": [
+                {
+                  "boundary_id": "right",
+                  "patch_index": 0
+                },
+                {
+                  "boundary_id": "left",
+                  "patch_index": 1
+                }
+              ],
+              "continuity": "C0",
+              "metadata": {},
+              "seam_id": "front-right"
+            },
+            {
+              "boundaries": [
+                {
+                  "boundary_id": "right",
+                  "patch_index": 1
+                },
+                {
+                  "boundary_id": "left",
+                  "patch_index": 2
+                }
+              ],
+              "continuity": "C0",
+              "metadata": {},
+              "seam_id": "right-back"
+            },
+            {
+              "boundaries": [
+                {
+                  "boundary_id": "right",
+                  "patch_index": 2
+                },
+                {
+                  "boundary_id": "left",
+                  "patch_index": 3
+                }
+              ],
+              "continuity": "C0",
+              "metadata": {},
+              "seam_id": "back-left"
+            },
+            {
+              "boundaries": [
+                {
+                  "boundary_id": "right",
+                  "patch_index": 3
+                },
+                {
+                  "boundary_id": "left",
+                  "patch_index": 0
+                }
+              ],
+              "continuity": "C0",
+              "metadata": {},
+              "seam_id": "left-front"
+            },
+            {
+              "boundaries": [
+                {
+                  "boundary_id": "top",
+                  "patch_index": 0
+                },
+                {
+                  "boundary_id": "bottom",
+                  "patch_index": 4
+                }
+              ],
+              "continuity": "C0",
+              "metadata": {},
+              "seam_id": "front-top"
+            },
+            {
+              "boundaries": [
+                {
+                  "boundary_id": "top",
+                  "patch_index": 1
+                },
+                {
+                  "boundary_id": "right",
+                  "patch_index": 4
+                }
+              ],
+              "continuity": "C0",
+              "metadata": {},
+              "seam_id": "right-top"
+            },
+            {
+              "boundaries": [
+                {
+                  "boundary_id": "top",
+                  "patch_index": 2
+                },
+                {
+                  "boundary_id": "top",
+                  "patch_index": 4
+                }
+              ],
+              "continuity": "C0",
+              "metadata": {},
+              "seam_id": "back-top"
+            },
+            {
+              "boundaries": [
+                {
+                  "boundary_id": "top",
+                  "patch_index": 3
+                },
+                {
+                  "boundary_id": "left",
+                  "patch_index": 4
+                }
+              ],
+              "continuity": "C0",
+              "metadata": {},
+              "seam_id": "left-top"
+            },
+            {
+              "boundaries": [
+                {
+                  "boundary_id": "bottom",
+                  "patch_index": 0
+                },
+                {
+                  "boundary_id": "top",
+                  "patch_index": 5
+                }
+              ],
+              "continuity": "C0",
+              "metadata": {},
+              "seam_id": "front-bottom"
+            },
+            {
+              "boundaries": [
+                {
+                  "boundary_id": "bottom",
+                  "patch_index": 1
+                },
+                {
+                  "boundary_id": "right",
+                  "patch_index": 5
+                }
+              ],
+              "continuity": "C0",
+              "metadata": {},
+              "seam_id": "right-bottom"
+            },
+            {
+              "boundaries": [
+                {
+                  "boundary_id": "bottom",
+                  "patch_index": 2
+                },
+                {
+                  "boundary_id": "bottom",
+                  "patch_index": 5
+                }
+              ],
+              "continuity": "C0",
+              "metadata": {},
+              "seam_id": "back-bottom"
+            },
+            {
+              "boundaries": [
+                {
+                  "boundary_id": "bottom",
+                  "patch_index": 3
+                },
+                {
+                  "boundary_id": "left",
+                  "patch_index": 5
+                }
+              ],
+              "continuity": "C0",
+              "metadata": {},
+              "seam_id": "left-bottom"
+            }
+          ],
+          "transform_matrix": [
+            [
+              1.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              1.0,
+              0.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              1.0,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        }
+      ],
+      "transform_matrix": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    }
+  },
+  "body_store": {
+    "bodies": [
+      {
+        "body_id": "body-0001",
+        "body_ref": "body-0001",
+        "stable_identity": "5b325cfe9c5289094eb80cb485f766e2698704c4653d125c1dcabaa83434e752"
+      }
+    ]
+  },
+  "format": "impress",
+  "metadata": {
+    "fixture_id": "surfacebody/box",
+    "purpose": "reference-review"
+  },
+  "patches": {
+    "585d952b826b55a317cc89eb447c8c70d30c252c5e2f92836e61a9a21a18d93f": {
+      "capability_flags": [],
+      "domain": {
+        "normalized": true,
+        "u_range": [
+          0.0,
+          1.0
+        ],
+        "v_range": [
+          0.0,
+          1.0
+        ]
+      },
+      "family": "planar",
+      "geometry": {
+        "origin": [
+          -1.0,
+          1.5,
+          -0.75
+        ],
+        "payload_version": 1,
+        "u_axis": [
+          2.0,
+          0.0,
+          0.0
+        ],
+        "v_axis": [
+          0.0,
+          0.0,
+          1.5
+        ]
+      },
+      "kind": "PlanarSurfacePatch",
+      "metadata": {
+        "kernel": {
+          "face": "top",
+          "primitive_family": "box"
+        }
+      },
+      "stable_identity": "585d952b826b55a317cc89eb447c8c70d30c252c5e2f92836e61a9a21a18d93f",
+      "transform_matrix": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "trim_loops": []
+    },
+    "bb5402d37ef6f5921fdeb4db3d535168492c251d907b1e91eeb3a7655b563a5d": {
+      "capability_flags": [],
+      "domain": {
+        "normalized": true,
+        "u_range": [
+          0.0,
+          1.0
+        ],
+        "v_range": [
+          0.0,
+          1.0
+        ]
+      },
+      "family": "planar",
+      "geometry": {
+        "origin": [
+          -1.0,
+          -1.5,
+          -0.75
+        ],
+        "payload_version": 1,
+        "u_axis": [
+          2.0,
+          0.0,
+          0.0
+        ],
+        "v_axis": [
+          0.0,
+          3.0,
+          0.0
+        ]
+      },
+      "kind": "PlanarSurfacePatch",
+      "metadata": {
+        "kernel": {
+          "face": "front",
+          "primitive_family": "box"
+        }
+      },
+      "stable_identity": "bb5402d37ef6f5921fdeb4db3d535168492c251d907b1e91eeb3a7655b563a5d",
+      "transform_matrix": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "trim_loops": []
+    },
+    "da8eaed33972b038e36611f5ae28b24983466dc5657fa97e4edd216f2324cfe6": {
+      "capability_flags": [],
+      "domain": {
+        "normalized": true,
+        "u_range": [
+          0.0,
+          1.0
+        ],
+        "v_range": [
+          0.0,
+          1.0
+        ]
+      },
+      "family": "planar",
+      "geometry": {
+        "origin": [
+          -1.0,
+          -1.5,
+          0.75
+        ],
+        "payload_version": 1,
+        "u_axis": [
+          2.0,
+          0.0,
+          0.0
+        ],
+        "v_axis": [
+          0.0,
+          0.0,
+          -1.5
+        ]
+      },
+      "kind": "PlanarSurfacePatch",
+      "metadata": {
+        "kernel": {
+          "face": "bottom",
+          "primitive_family": "box"
+        }
+      },
+      "stable_identity": "da8eaed33972b038e36611f5ae28b24983466dc5657fa97e4edd216f2324cfe6",
+      "transform_matrix": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "trim_loops": []
+    },
+    "fb8ba1be1afe9c06b1bd7d5f770b882ddb2116c30db848a03c1e6990d5b90f63": {
+      "capability_flags": [],
+      "domain": {
+        "normalized": true,
+        "u_range": [
+          0.0,
+          1.0
+        ],
+        "v_range": [
+          0.0,
+          1.0
+        ]
+      },
+      "family": "planar",
+      "geometry": {
+        "origin": [
+          1.0,
+          -1.5,
+          -0.75
+        ],
+        "payload_version": 1,
+        "u_axis": [
+          0.0,
+          0.0,
+          1.5
+        ],
+        "v_axis": [
+          0.0,
+          3.0,
+          0.0
+        ]
+      },
+      "kind": "PlanarSurfacePatch",
+      "metadata": {
+        "kernel": {
+          "face": "right",
+          "primitive_family": "box"
+        }
+      },
+      "stable_identity": "fb8ba1be1afe9c06b1bd7d5f770b882ddb2116c30db848a03c1e6990d5b90f63",
+      "transform_matrix": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "trim_loops": []
+    },
+    "fb92df4393a8833d74b0cddb77d9b6fbc6dcaf96876b6a8f7c1f9273a913f6de": {
+      "capability_flags": [],
+      "domain": {
+        "normalized": true,
+        "u_range": [
+          0.0,
+          1.0
+        ],
+        "v_range": [
+          0.0,
+          1.0
+        ]
+      },
+      "family": "planar",
+      "geometry": {
+        "origin": [
+          1.0,
+          -1.5,
+          0.75
+        ],
+        "payload_version": 1,
+        "u_axis": [
+          -2.0,
+          0.0,
+          0.0
+        ],
+        "v_axis": [
+          0.0,
+          3.0,
+          0.0
+        ]
+      },
+      "kind": "PlanarSurfacePatch",
+      "metadata": {
+        "kernel": {
+          "face": "back",
+          "primitive_family": "box"
+        }
+      },
+      "stable_identity": "fb92df4393a8833d74b0cddb77d9b6fbc6dcaf96876b6a8f7c1f9273a913f6de",
+      "transform_matrix": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "trim_loops": []
+    },
+    "fe4892e2488a2be5fc1b82ab8d952d799803b62eacbe34967aa29e8e4e20fca0": {
+      "capability_flags": [],
+      "domain": {
+        "normalized": true,
+        "u_range": [
+          0.0,
+          1.0
+        ],
+        "v_range": [
+          0.0,
+          1.0
+        ]
+      },
+      "family": "planar",
+      "geometry": {
+        "origin": [
+          -1.0,
+          -1.5,
+          0.75
+        ],
+        "payload_version": 1,
+        "u_axis": [
+          0.0,
+          0.0,
+          -1.5
+        ],
+        "v_axis": [
+          0.0,
+          3.0,
+          0.0
+        ]
+      },
+      "kind": "PlanarSurfacePatch",
+      "metadata": {
+        "kernel": {
+          "face": "left",
+          "primitive_family": "box"
+        }
+      },
+      "stable_identity": "fe4892e2488a2be5fc1b82ab8d952d799803b62eacbe34967aa29e8e4e20fca0",
+      "transform_matrix": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "trim_loops": []
+    }
+  },
+  "schema_version": "1.0",
+  "units": {
+    "length": "unitless"
+  }
+}

@@ -153,8 +153,8 @@ def test_shell_loads_fixture_file_into_selectable_queue(tmp_path: Path) -> None:
     assert root.property("hasFixture")
 
 
-def test_stl_preview_renderer_writes_png_for_artifact(project_root: Path, tmp_path: Path) -> None:
-    artifact = project_root / "project/release-0.1.0a/reference-stl/dirty/surfacebody/box.stl"
+def test_artifact_preview_renderer_writes_png_for_impress_artifact(project_root: Path, tmp_path: Path) -> None:
+    artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/box.impress"
 
     preview = render_stl_preview(artifact, cache_root=tmp_path / "previews", window_size=(240, 180))
 
@@ -181,11 +181,11 @@ def test_stl_preview_renderer_writes_png_for_artifact(project_root: Path, tmp_pa
     )
 
 
-def test_stl_preview_edge_overlay_uses_object_edges_not_triangle_wireframe(project_root: Path) -> None:
+def test_impress_preview_edge_overlay_uses_object_edges_not_triangle_wireframe(project_root: Path) -> None:
     import pyvista as pv
 
-    artifact = project_root / "project/release-0.1.0a/reference-stl/dirty/surfacebody/box.stl"
-    mesh = pv.read(artifact)
+    artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/box.impress"
+    mesh = artifact_preview._preview_mesh_for_artifact(artifact, pv)
 
     object_edges = artifact_preview._object_feature_edges(mesh)
     triangle_edges = mesh.extract_all_edges()
@@ -194,9 +194,9 @@ def test_stl_preview_edge_overlay_uses_object_edges_not_triangle_wireframe(proje
     assert triangle_edges.n_cells > object_edges.n_cells
 
 
-def test_dirty_stl_fixture_launch_exposes_artifact_without_startup_render(project_root: Path) -> None:
+def test_dirty_impress_fixture_launch_exposes_artifact_without_startup_render(project_root: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    fixture_file = project_root / "tests/reference_review_fixtures/dirty-stl-fixtures.json"
+    fixture_file = project_root / "tests/reference_review_fixtures/dirty-impress-fixtures.json"
     records, diagnostics = shell.load_fixture_records(fixture_files=(fixture_file,))
 
     result = launch_workbench(
@@ -208,21 +208,21 @@ def test_dirty_stl_fixture_launch_exposes_artifact_without_startup_render(projec
     fixtures = root.property("reviewFixtures")
 
     assert result.launched
-    assert fixtures[0]["artifact_display_path"] == "anchor_shift_rectangle.stl"
+    assert fixtures[0]["artifact_display_path"] == "box.impress"
     assert fixtures[0]["artifact_preview_url"] == ""
     assert fixtures[0]["artifact_preview_status"] == "ready"
 
 
-def test_dirty_stl_fixture_selects_embedded_preview_surface(project_root: Path) -> None:
+def test_dirty_impress_fixture_selects_embedded_preview_surface(project_root: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     source = project_root / "tests/reference_review_fixtures/stl_review_sources.py"
-    artifact = project_root / "project/release-0.1.0a/reference-stl/dirty/surfacebody/box.stl"
+    artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/box.impress"
     records = (
         ReviewSourceModelRecord(
             "surfacebody/box",
             "surfacebody",
             source,
-            expected_output="dirty STL",
+            expected_output="dirty .impress",
             artifact_paths=(artifact,),
         ),
     )
@@ -341,6 +341,45 @@ def test_embedded_preview_matches_vtk_trackball_modifier_modes() -> None:
     assert preview._camera.pan_x == pytest.approx(0.0)
 
 
+def test_embedded_preview_defers_render_requests_until_pointer_release(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    preview = InteractiveStlPreviewLabel()
+    preview.resize(360, 260)
+    artifact = tmp_path / "part.impress"
+    artifact.write_text('{"format": "impress"}\n')
+    preview._artifact_path = artifact
+    preview._last_pos = QPointF(10.0, 10.0)
+    scheduled = []
+
+    class FakePointerEvent:
+        def __init__(self, position: QPointF) -> None:
+            self._position = position
+
+        def position(self) -> QPointF:
+            return self._position
+
+        def buttons(self):
+            return Qt.MouseButton.LeftButton
+
+        def modifiers(self):
+            return Qt.KeyboardModifier.NoModifier
+
+    monkeypatch.setattr(preview, "_schedule_render", lambda: scheduled.append(preview._camera))
+
+    preview.mouseMoveEvent(FakePointerEvent(QPointF(30.0, 20.0)))
+
+    assert scheduled == []
+    assert preview._camera.azimuth_deg == pytest.approx(36.0)
+    assert preview._camera.elevation_deg == pytest.approx(23.5)
+
+    preview.mouseReleaseEvent(FakePointerEvent(QPointF(30.0, 20.0)))
+
+    assert len(scheduled) == 1
+
+
 def test_embedded_preview_schedules_frames_on_background_render_loop(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -379,8 +418,8 @@ def test_embedded_preview_schedules_frames_on_background_render_loop(
     monkeypatch.setattr(shell, "StlPreviewRenderLoop", FakeRenderLoop)
     preview = InteractiveStlPreviewLabel()
     preview.resize(240, 180)
-    artifact = tmp_path / "part.stl"
-    artifact.write_text("solid empty\nendsolid empty\n")
+    artifact = tmp_path / "part.impress"
+    artifact.write_text('{"format": "impress"}\n')
 
     preview.set_artifact(artifact)
     preview._camera = preview._camera.__class__(azimuth_deg=90.0)
@@ -399,8 +438,8 @@ def test_embedded_preview_schedules_frames_on_background_render_loop(
 def test_embedded_preview_applies_completed_current_generation_frames(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     preview = InteractiveStlPreviewLabel()
-    intermediate_record = shell.ArtifactPreviewRecord(tmp_path / "intermediate.stl", None, "intermediate")
-    latest_record = shell.ArtifactPreviewRecord(tmp_path / "latest.stl", None, "latest")
+    intermediate_record = shell.ArtifactPreviewRecord(tmp_path / "intermediate.impress", None, "intermediate")
+    latest_record = shell.ArtifactPreviewRecord(tmp_path / "latest.impress", None, "latest")
     applied = []
 
     class FakeRenderLoop:
@@ -423,7 +462,7 @@ def test_embedded_preview_applies_completed_current_generation_frames(tmp_path: 
 def test_embedded_preview_discards_previous_artifact_generation_results(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     preview = InteractiveStlPreviewLabel()
-    old_record = shell.ArtifactPreviewRecord(tmp_path / "old.stl", None, "old")
+    old_record = shell.ArtifactPreviewRecord(tmp_path / "old.impress", None, "old")
     applied = []
 
     class FakeRenderLoop:

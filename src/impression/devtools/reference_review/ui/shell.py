@@ -184,13 +184,13 @@ class _PreviewRenderResult:
 
 
 class StlPreviewRenderLoop:
-    """Single-owner background render loop for interactive STL previews."""
+    """Single-owner background render loop for settled artifact preview snapshots."""
 
     def __init__(
         self,
         *,
         cache_root: Path,
-        fps: int = 30,
+        fps: int = 6,
         renderer: Callable[..., ArtifactPreviewRecord] = render_stl_preview,
     ) -> None:
         self._cache_root = cache_root
@@ -328,7 +328,6 @@ class InteractiveStlPreviewLabel(QLabel):
         delta = event.position() - self._last_pos
         self._last_pos = event.position()
         self._apply_pointer_delta(delta, event.buttons(), event.modifiers(), event.position())
-        self._schedule_render()
 
     def _apply_pointer_delta(self, delta, buttons, modifiers, position) -> None:
         from PySide6.QtCore import Qt
@@ -396,6 +395,7 @@ class InteractiveStlPreviewLabel(QLabel):
 
     def mouseReleaseEvent(self, event) -> None:
         self._last_pos = None
+        self._schedule_render()
 
     def wheelEvent(self, event) -> None:
         if self._artifact_path is None:
