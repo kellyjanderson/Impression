@@ -52,6 +52,7 @@ Architecture documents define:
 - [Reference Review Fixture Source Contract](reference-review-fixture-source-contract.md)
 - [Reference Review Qt Workbench UI](reference-review-qt-workbench-ui.md)
 - [Reference Review Async Concurrency](reference-review-async-concurrency.md)
+- [Reference Review Preview Remediation Plan](reference-review-preview-remediation-plan.md)
 - [Reference Review Promotion And Notes Lifecycle](reference-review-promotion-and-notes-lifecycle.md)
 - [Reference Review Codex Sandbox](reference-review-codex-sandbox.md)
 

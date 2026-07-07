@@ -22,6 +22,10 @@ ViewDown desktop-app work.
 - [Reference Review Promotion And Notes Lifecycle](reference-review-promotion-and-notes-lifecycle.md)
 - [Reference Review Codex Sandbox](reference-review-codex-sandbox.md)
 
+## Active Remediation Plans
+
+- [Reference Review Preview Remediation Plan](reference-review-preview-remediation-plan.md)
+
 ## Domain Ownership Index
 
 The parent architecture owns system map, domain boundaries, cross-document
