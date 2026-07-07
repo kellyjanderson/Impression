@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import json
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -41,6 +43,28 @@ def test_reference_review_ui_dependency_is_optional_extra() -> None:
     assert "reference-review-ui" in extras
     assert any(dep.startswith("PySide6") for dep in extras["reference-review-ui"])
     assert not any(dep.startswith("PySide6") for dep in core_dependencies)
+
+
+def test_live_shell_does_not_force_pyvista_offscreen_mode() -> None:
+    env = dict(os.environ)
+    env.pop("PYVISTA_OFF_SCREEN", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import os; "
+                "import impression.devtools.reference_review.ui.shell; "
+                "print(os.environ.get('PYVISTA_OFF_SCREEN'))"
+            ),
+        ],
+        check=True,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.strip() == "None"
 
 
 def test_qml_resource_layout_contains_shell_and_component_files() -> None:
@@ -262,8 +286,11 @@ def test_live_preview_loads_impress_artifact_into_plotter(
     preview._plotter = fake_plotter
     preview._previewer = fake_previewer
     monkeypatch.setattr(preview, "_ensure_plotter", lambda: fake_plotter)
+    preview._artifact_path = artifact
+    preview._load_generation = 1
+    datasets = shell._load_impress_preview_datasets(artifact)
 
-    preview.set_artifact(artifact)
+    preview._apply_build_result(shell._LivePreviewBuildResult(1, artifact, datasets=datasets))
 
     assert fake_plotter.cleared == 1
     assert fake_plotter.backgrounds == ["#071426"]
@@ -276,12 +303,45 @@ def test_live_preview_loads_impress_artifact_into_plotter(
     assert fake_plotter.rendered == 1
 
 
-def test_live_preview_reports_unavailable_in_offscreen_mode(project_root: Path) -> None:
+def test_live_preview_schedules_impress_load_without_entering_vtk(
+    monkeypatch: pytest.MonkeyPatch,
+    project_root: Path,
+) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     preview = InteractiveStlPreviewLabel()
     artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/box.impress"
+    submitted = []
+    monkeypatch.setattr(preview, "_submit_impress_load", lambda path: submitted.append(path))
 
     preview.set_artifact(artifact)
+
+    assert submitted == [artifact]
+    assert preview._status.text() == "Loading preview..."
+
+
+def test_live_preview_ignores_stale_build_result(project_root: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    preview = InteractiveStlPreviewLabel()
+    artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/box.impress"
+    other_artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/missing.impress"
+    preview._artifact_path = other_artifact
+    preview._load_generation = 2
+
+    preview._apply_build_result(shell._LivePreviewBuildResult(1, artifact, datasets=(object(),)))
+
+    assert preview._current_datasets == []
+    assert preview._status.text() == "No fixture selected."
+
+
+def test_live_preview_reports_unavailable_when_vtk_widget_cannot_start(project_root: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    preview = InteractiveStlPreviewLabel()
+    artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/box.impress"
+    preview._artifact_path = artifact
+    preview._load_generation = 1
+    datasets = shell._load_impress_preview_datasets(artifact)
+
+    preview._apply_build_result(shell._LivePreviewBuildResult(1, artifact, datasets=datasets))
 
     assert preview._status.text() == "Preview unavailable: RuntimeError"
 

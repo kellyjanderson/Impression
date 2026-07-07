@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import os
 import sys
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from .artifact_preview import (
-    ArtifactPreviewRecord,
-    _object_feature_edges,
-)
 from .bridge import BridgeRecord, BridgeRegistry
 from .packaging import qml_resource_root
 from .queue_context import FixtureQueueViewModel
@@ -99,7 +96,7 @@ def launch_workbench(
         return WorkbenchLaunchResult(False, (f"qt-unavailable:{exc}",))
 
     queue = FixtureQueueViewModel(fixture_records)
-    artifact_previews: dict[str, ArtifactPreviewRecord] = {}
+    artifact_previews: dict[str, object] = {}
     artifact_preview_diagnostics: tuple[str, ...] = ()
     try:
         window = ReferenceReviewWindow(
@@ -139,7 +136,7 @@ def _launch_qml_workbench(
     for name, record in bridges.records.items():
         context.setContextProperty(name, record.bridge)
     queue = FixtureQueueViewModel(fixture_records)
-    artifact_previews: dict[str, ArtifactPreviewRecord] = {}
+    artifact_previews: dict[str, object] = {}
     artifact_preview_diagnostics: tuple[str, ...] = ()
     context.setContextProperty(
         "startupDiagnostics",
@@ -162,6 +159,14 @@ def _launch_qml_workbench(
 from PySide6.QtWidgets import QLabel, QWidget
 
 
+@dataclass(frozen=True)
+class _LivePreviewBuildResult:
+    generation: int
+    artifact_path: Path
+    datasets: tuple[object, ...] = ()
+    diagnostic: str | None = None
+
+
 def _load_impress_preview_datasets(artifact_path: Path) -> tuple[object, ...]:
     from impression.io import load_impress
     from impression.modeling import preview_tessellation_request, tessellate_surface_body
@@ -170,6 +175,24 @@ def _load_impress_preview_datasets(artifact_path: Path) -> tuple[object, ...]:
     return tuple(
         tessellate_surface_body(body, preview_tessellation_request(require_watertight=False)).mesh
         for body in loaded.bodies
+    )
+
+
+def _build_impress_preview_result(generation: int, artifact_path: Path) -> _LivePreviewBuildResult:
+    try:
+        datasets = _load_impress_preview_datasets(artifact_path)
+    except Exception as exc:
+        return _LivePreviewBuildResult(generation, artifact_path, diagnostic=exc.__class__.__name__)
+    return _LivePreviewBuildResult(generation, artifact_path, datasets=datasets)
+
+
+def _object_feature_edges(mesh):
+    return mesh.extract_feature_edges(
+        boundary_edges=True,
+        feature_edges=True,
+        non_manifold_edges=True,
+        manifold_edges=False,
+        feature_angle=30.0,
     )
 
 
@@ -192,14 +215,23 @@ class LiveArtifactPreviewWidget(QWidget):
         self._plotter = None
         self._previewer = None
         self._current_datasets = []
+        self._load_generation = 0
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="reference-preview-build")
+        self._pending_future: Future[_LivePreviewBuildResult] | None = None
+        self._poll_timer = None
 
     def set_artifact(self, artifact_path: Path | None) -> None:
         self._artifact_path = artifact_path
         self._current_datasets = []
+        self._load_generation += 1
         if artifact_path is None:
             self._clear_scene("No fixture selected.")
             return
-        self._load_live_artifact(artifact_path)
+        self.prepare_artifact(artifact_path)
+        if artifact_path.suffix.lower() == ".impress":
+            self._submit_impress_load(artifact_path)
+        else:
+            self._load_live_artifact(artifact_path)
 
     def prepare_artifact(self, artifact_path: Path | None) -> None:
         self._artifact_path = artifact_path
@@ -221,9 +253,64 @@ class LiveArtifactPreviewWidget(QWidget):
         self._plotter.render()
 
     def shutdown(self) -> None:
+        if self._poll_timer is not None:
+            self._poll_timer.stop()
+        if self._pending_future is not None:
+            self._pending_future.cancel()
+            self._pending_future = None
+        self._executor.shutdown(wait=False, cancel_futures=True)
         if self._plotter is not None:
             self._plotter.close()
             self._plotter = None
+
+    def _submit_impress_load(self, artifact_path: Path) -> None:
+        from PySide6.QtCore import QTimer
+
+        if self._pending_future is not None:
+            self._pending_future.cancel()
+        generation = self._load_generation
+        self._pending_future = self._executor.submit(_build_impress_preview_result, generation, artifact_path)
+        if self._poll_timer is None:
+            self._poll_timer = QTimer(self)
+            self._poll_timer.setInterval(30)
+            self._poll_timer.timeout.connect(self._poll_pending_load)
+        if not self._poll_timer.isActive():
+            self._poll_timer.start()
+
+    def _poll_pending_load(self) -> None:
+        future = self._pending_future
+        if future is None:
+            if self._poll_timer is not None:
+                self._poll_timer.stop()
+            return
+        if not future.done():
+            return
+        self._pending_future = None
+        if self._poll_timer is not None:
+            self._poll_timer.stop()
+        try:
+            result = future.result()
+        except Exception as exc:
+            self._clear_scene(f"Preview unavailable: {exc.__class__.__name__}")
+            return
+        self._apply_build_result(result)
+
+    def _apply_build_result(self, result: _LivePreviewBuildResult) -> None:
+        if result.generation != self._load_generation or result.artifact_path != self._artifact_path:
+            return
+        if result.diagnostic is not None:
+            self._clear_scene(f"Preview unavailable: {result.diagnostic}")
+            return
+        try:
+            plotter = self._ensure_plotter()
+            self._status.hide()
+            plotter.clear()
+            plotter.set_background("#071426")
+            self._current_datasets = list(result.datasets)
+            self._add_impress_datasets(plotter, self._current_datasets)
+            self.reset_view()
+        except Exception as exc:
+            self._clear_scene(f"Preview unavailable: {exc.__class__.__name__}")
 
     def _load_live_artifact(self, artifact_path: Path) -> None:
         try:
@@ -232,10 +319,7 @@ class LiveArtifactPreviewWidget(QWidget):
             plotter.clear()
             plotter.set_background("#071426")
             if artifact_path.suffix.lower() == ".impress":
-                datasets = _load_impress_preview_datasets(artifact_path)
-                self._current_datasets = list(datasets)
-                self._add_impress_datasets(plotter, self._current_datasets)
-                self.reset_view()
+                self._submit_impress_load(artifact_path)
             elif artifact_path.suffix.lower() == ".stl":
                 import pyvista as pv
 
@@ -301,7 +385,7 @@ class ReferenceReviewWindow(QWidget):
         self,
         queue: FixtureQueueViewModel,
         *,
-        artifact_previews: dict[str, ArtifactPreviewRecord],
+        artifact_previews: dict[str, object],
         startup_diagnostics: tuple[str, ...],
         offscreen: bool,
     ) -> None:
@@ -600,7 +684,7 @@ def load_fixture_records(
 
 def _fixture_items_for_qml(
     queue: FixtureQueueViewModel,
-    artifact_previews: dict[str, ArtifactPreviewRecord] | None = None,
+    artifact_previews: dict[str, object] | None = None,
 ) -> list[dict[str, object]]:
     artifact_previews = artifact_previews or {}
     items: list[dict[str, object]] = []
@@ -613,9 +697,9 @@ def _fixture_items_for_qml(
                 "source_display_path": item.source_display_path,
                 "expected_output": item.expected_output or "",
                 "artifact_display_path": item.artifact_display_path or "",
-                "artifact_preview_url": preview.preview_url if preview is not None else "",
-                "artifact_preview_status": preview.diagnostic
-                if preview is not None and preview.diagnostic
+                "artifact_preview_url": getattr(preview, "preview_url", "") if preview is not None else "",
+                "artifact_preview_status": getattr(preview, "diagnostic", None)
+                if preview is not None and getattr(preview, "diagnostic", None)
                 else "ready",
                 "status": item.status,
             }

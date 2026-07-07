@@ -8,8 +8,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
-
 _RENDER_CONTRACT_VERSION = "stl-preview-v6"
 _PREVIEW_BACKGROUND_COLOR = "#071426"
 _PREVIEW_OBJECT_COLOR = "#ffb56b"
@@ -118,6 +116,7 @@ class ArtifactPreviewRenderer:
 
     def _ensure_plotter(self, pv, window_size: tuple[int, int]):
         if self._plotter is None:
+            os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
             self._plotter = pv.Plotter(off_screen=True, window_size=window_size)
             self._plotter.set_background(_PREVIEW_BACKGROUND_COLOR)
             self._window_size = window_size
