@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -216,7 +216,7 @@ class LiveArtifactPreviewWidget(QWidget):
         self._previewer = None
         self._current_datasets = []
         self._load_generation = 0
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="reference-preview-build")
+        self._executor: ProcessPoolExecutor | None = None
         self._pending_future: Future[_LivePreviewBuildResult] | None = None
         self._poll_timer = None
 
@@ -258,7 +258,9 @@ class LiveArtifactPreviewWidget(QWidget):
         if self._pending_future is not None:
             self._pending_future.cancel()
             self._pending_future = None
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        if self._executor is not None:
+            self._executor.shutdown(wait=False, cancel_futures=True)
+            self._executor = None
         if self._plotter is not None:
             self._plotter.close()
             self._plotter = None
@@ -269,6 +271,8 @@ class LiveArtifactPreviewWidget(QWidget):
         if self._pending_future is not None:
             self._pending_future.cancel()
         generation = self._load_generation
+        if self._executor is None:
+            self._executor = ProcessPoolExecutor(max_workers=1)
         self._pending_future = self._executor.submit(_build_impress_preview_result, generation, artifact_path)
         if self._poll_timer is None:
             self._poll_timer = QTimer(self)

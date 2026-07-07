@@ -319,6 +319,59 @@ def test_live_preview_schedules_impress_load_without_entering_vtk(
     assert preview._status.text() == "Loading preview..."
 
 
+def test_live_preview_builder_executor_is_lazy() -> None:
+    preview = InteractiveStlPreviewLabel()
+
+    assert preview._executor is None
+
+
+def test_live_preview_submit_uses_process_pool(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    artifact = tmp_path / "part.impress"
+    artifact.write_text('{"format": "impress"}\n')
+    created = []
+
+    class FakeFuture:
+        def cancel(self) -> None:
+            pass
+
+    class FakeProcessPool:
+        def __init__(self, *, max_workers: int) -> None:
+            self.max_workers = max_workers
+            self.submissions = []
+            created.append(self)
+
+        def submit(self, fn, generation, artifact_path):
+            self.submissions.append((fn, generation, artifact_path))
+            return FakeFuture()
+
+        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
+            pass
+
+    monkeypatch.setattr(shell, "ProcessPoolExecutor", FakeProcessPool)
+    preview = InteractiveStlPreviewLabel()
+    preview._load_generation = 7
+
+    preview._submit_impress_load(artifact)
+
+    assert len(created) == 1
+    assert created[0].max_workers == 1
+    assert created[0].submissions == [(shell._build_impress_preview_result, 7, artifact)]
+
+
+def test_live_preview_process_builder_returns_mesh_dataset(project_root: Path) -> None:
+    from concurrent.futures import ProcessPoolExecutor
+
+    artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/box.impress"
+
+    with ProcessPoolExecutor(max_workers=1) as executor:
+        result = executor.submit(shell._build_impress_preview_result, 3, artifact).result(timeout=10)
+
+    assert result.generation == 3
+    assert result.artifact_path == artifact
+    assert result.diagnostic is None
+    assert len(result.datasets) == 1
+
+
 def test_live_preview_ignores_stale_build_result(project_root: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     preview = InteractiveStlPreviewLabel()
