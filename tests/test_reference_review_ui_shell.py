@@ -14,7 +14,7 @@ import pytest
 import numpy as np
 from PySide6.QtCore import QObject, Qt
 from PySide6.QtGui import QImage, QPainter
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTabWidget
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTabWidget, QToolButton
 
 from impression.mesh import Mesh
 from impression.devtools.reference_review import ReviewSourceModelRecord
@@ -24,11 +24,22 @@ from impression.devtools.reference_review.ui import (
     DependencyPolicyRecord,
     PackageResourceManifest,
     PREVIEW_DISPLAY_CONTROL_ICON_FILES,
+    PREVIEW_DISPLAY_CONTROL_ICON_RECORDS,
+    ExclusiveIconGroupState,
+    ExclusiveIconOptionGroup,
+    ExclusiveIconOptionRecord,
+    PreviewDisplayControlBar,
+    PreviewDisplayOptions,
+    WorkbenchIconToggleButton,
     build_dependency_policy_report,
     launch_workbench,
     load_style_tokens,
     PreviewRendererLifecycleWidget,
     SoftwarePreviewSurface,
+    preview_display_control_icon_record,
+    preview_display_control_icon_records,
+    route_preview_display_command,
+    select_exclusive_icon_option,
     verify_qml_resource_layout,
 )
 from impression.devtools.reference_review import (
@@ -107,9 +118,113 @@ def test_preview_display_control_icons_are_packaged_and_valid_xml() -> None:
     for relative in PREVIEW_DISPLAY_CONTROL_ICON_FILES:
         path = qml_root / relative
         assert path.is_file(), relative
+        assert "currentColor" in path.read_text()
         root = ET.parse(path).getroot()
         assert root.tag.endswith("svg")
         assert root.attrib["viewBox"] == "0 0 24 24"
+
+
+def test_preview_display_control_icon_metadata_registry_resolves_packaged_paths() -> None:
+    qml_root = Path("src/impression/devtools/reference_review/ui/qml")
+    records = preview_display_control_icon_records()
+
+    assert records == PREVIEW_DISPLAY_CONTROL_ICON_RECORDS
+    assert {record.id for record in records} == {
+        "authored-colors",
+        "inspection-color",
+        "lighting-flat",
+        "lighting-face-normals",
+        "lighting-camera",
+        "object-fill",
+        "object-edges",
+        "triangle-wireframe",
+        "bounds-grid",
+        "axis-triad",
+        "gradient-background",
+        "polylines",
+    }
+    for record in records:
+        assert record.tooltip
+        assert record.accessible_name
+        assert (qml_root / record.resource_path).is_file()
+        assert preview_display_control_icon_record(record.id) == record
+    with pytest.raises(KeyError, match="unknown-preview-display-control-icon"):
+        preview_display_control_icon_record("missing")
+
+
+def test_workbench_icon_toggle_button_states_and_command_contract() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    QApplication.instance() or QApplication([])
+    icon = preview_display_control_icon_record("object-fill")
+    button = WorkbenchIconToggleButton(icon)
+    emitted = []
+    button.commandTriggered.connect(emitted.append)
+    original_size = button.size()
+
+    assert isinstance(button, QToolButton)
+    assert button.text() == ""
+    assert button.toolTip() == icon.tooltip
+    assert button.accessibleName() == icon.accessible_name
+    button.setChecked(True)
+    assert button.size() == original_size
+    button.click()
+    assert emitted[-1].command == "object-fill"
+    button.setEnabled(False)
+    button.click()
+    assert len(emitted) == 1
+
+
+def test_exclusive_icon_group_selection_model_and_component() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    QApplication.instance() or QApplication([])
+    options = (
+        ExclusiveIconOptionRecord("flat", "lighting-flat", "lighting-flat"),
+        ExclusiveIconOptionRecord("face_normals", "lighting-face-normals", "lighting-face-normals"),
+        ExclusiveIconOptionRecord("camera", "lighting-camera", "lighting-camera"),
+    )
+    state = ExclusiveIconGroupState(options, "face_normals")
+    group = ExclusiveIconOptionGroup(state)
+    selected = []
+    group.optionSelected.connect(selected.append)
+
+    assert group.option_ids() == ("flat", "face_normals", "camera")
+    assert select_exclusive_icon_option(state, "camera").selected_id == "camera"
+    with pytest.raises(ValueError, match="unknown-exclusive-icon-option"):
+        select_exclusive_icon_option(state, "missing")
+    group.select_option("camera")
+    assert selected == ["camera"]
+    assert group.state.selected_id == "camera"
+    group.set_state(ExclusiveIconGroupState(options, "camera", enabled=False))
+    group.select_option("flat")
+    assert group.state.selected_id == "camera"
+
+
+def test_preview_display_options_and_command_routing_are_deterministic() -> None:
+    options = PreviewDisplayOptions()
+
+    assert options.color_mode == "inspection"
+    assert options.lighting_mode == "face_normals"
+    assert options.show_object_fill
+    assert not options.show_triangle_wireframe
+    assert options.updated(show_bounds_grid=False).show_bounds_grid is False
+    with pytest.raises(ValueError, match="unsupported-preview-color-mode"):
+        PreviewDisplayOptions(color_mode="neon")
+    with pytest.raises(ValueError, match="unsupported-preview-lighting-mode"):
+        PreviewDisplayOptions(lighting_mode="studio")
+
+    authored = route_preview_display_command(options, "authored-colors", ready=True)
+    assert authored.executed
+    assert authored.options.color_mode == "authored"
+    lit = route_preview_display_command(authored.options, "lighting-camera", ready=True)
+    assert lit.options.lighting_mode == "camera"
+    toggled = route_preview_display_command(lit.options, "object-fill", ready=True)
+    assert toggled.options.show_object_fill is False
+    assert toggled.options.color_mode == "authored"
+    disabled = route_preview_display_command(options, "object-fill", ready=False)
+    assert not disabled.executed
+    assert disabled.diagnostic == "preview-display-controls-disabled"
+    unknown = route_preview_display_command(options, "explode", ready=True)
+    assert unknown.diagnostic == "unsupported-preview-display-command"
 
 
 def test_qml_resource_layout_reports_missing_files(tmp_path: Path) -> None:
@@ -250,12 +365,122 @@ def test_software_preview_projects_object_edges_not_triangle_wireframe() -> None
     assert len(scene.faces) == 2
     assert _object_edge_keys(mesh) == {(0, 1), (1, 2), (2, 3), (0, 3)}
     assert sum(len(face.edge_segments) for face in scene.faces) == 4
+    assert sum(len(face.triangle_segments) for face in scene.faces) == 0
     assert len(scene.grid_lines) == 10
     assert len(scene.axis_lines) == 3
     assert any(
         face.color.name() != _SOFTWARE_PREVIEW_DEFAULT_MESH.name()
         for face in scene.faces
     )
+
+
+def test_software_preview_layer_options_are_projected_without_topology_rebuild(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mesh = Mesh(
+        vertices=np.asarray(
+            (
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (0.0, 1.0, 0.0),
+            )
+        ),
+        faces=np.asarray(((0, 1, 2), (0, 2, 3))),
+    )
+    calls = 0
+    original_object_edge_keys = preview_widget._object_edge_keys
+
+    def counting_object_edge_keys(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_object_edge_keys(*args, **kwargs)
+
+    monkeypatch.setattr(preview_widget, "_object_edge_keys", counting_object_edge_keys)
+    surface = SoftwarePreviewSurface()
+    surface.set_datasets((mesh,))
+    assert calls == 1
+    assert surface._geometry is not None
+
+    overlays_off = _project_prepared_geometry(
+        surface._geometry,
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+        options=PreviewDisplayOptions(
+            show_object_edges=False,
+            show_bounds_grid=False,
+            show_axis_triad=False,
+            show_polylines=False,
+        ),
+    )
+    wireframe = _project_prepared_geometry(
+        surface._geometry,
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+        options=PreviewDisplayOptions(show_triangle_wireframe=True),
+    )
+
+    assert overlays_off.grid_lines == ()
+    assert overlays_off.axis_lines == ()
+    assert sum(len(face.edge_segments) for face in overlays_off.faces) == 0
+    assert sum(len(face.triangle_segments) for face in wireframe.faces) == 6
+    assert calls == 1
+
+
+def test_software_preview_authored_color_and_lighting_modes() -> None:
+    mesh = Mesh(
+        vertices=np.asarray(
+            (
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (0.0, 1.0, 0.0),
+            )
+        ),
+        faces=np.asarray(((0, 1, 2), (0, 2, 3))),
+        color=(0.0, 1.0, 0.0, 1.0),
+        face_colors=np.asarray(((0.5, 0.0, 0.0, 1.0), (0.0, 0.0, 0.5, 1.0))),
+    )
+
+    authored_flat = _project_datasets(
+        (mesh,),
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+        options=PreviewDisplayOptions(color_mode="authored", lighting_mode="flat"),
+    )
+    inspection_flat = _project_datasets(
+        (mesh,),
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+        options=PreviewDisplayOptions(lighting_mode="flat"),
+    )
+    camera_lit = _project_datasets(
+        (mesh,),
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+        options=PreviewDisplayOptions(color_mode="authored", lighting_mode="camera"),
+    )
+
+    assert {face.color.name() for face in authored_flat.faces} == {"#800000", "#000080"}
+    assert {face.color.name() for face in inspection_flat.faces} == {
+        _SOFTWARE_PREVIEW_DEFAULT_MESH.name()
+    }
+    assert {face.color.name() for face in camera_lit.faces} != {"#800000", "#000080"}
 
 
 def test_software_preview_caches_object_edges_between_repaints(
@@ -404,6 +629,9 @@ def test_dirty_impress_fixture_selects_embedded_preview_surface(project_root: Pa
     assert root.findChild(QObject, "openPreviewButton") is None
     assert root.findChild(QObject, "embeddedPreviewSurface") is not None
     assert root.findChild(QObject, "resetPreviewButton") is not None
+    assert root.findChild(QObject, "previewDisplayControlBar") is not None
+    assert root.findChild(QObject, "previewDisplayColorGroup") is not None
+    assert root.findChild(QObject, "previewDisplayLightingGroup") is not None
     detail_tabs = root.findChild(QObject, "reviewDetailTabs")
     assert isinstance(detail_tabs, QTabWidget)
     assert [detail_tabs.tabText(index) for index in range(detail_tabs.count())] == [
@@ -412,6 +640,38 @@ def test_dirty_impress_fixture_selects_embedded_preview_surface(project_root: Pa
         "Artifacts",
     ]
     assert root.property("interactivePreviewReady")
+
+
+def test_preview_display_control_bar_order_and_ready_state() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    QApplication.instance() or QApplication([])
+    bar = PreviewDisplayControlBar()
+
+    assert bar.control_ids() == (
+        "authored-colors",
+        "inspection-color",
+        "separator",
+        "lighting-flat",
+        "lighting-face-normals",
+        "lighting-camera",
+        "separator",
+        "object-fill",
+        "object-edges",
+        "triangle-wireframe",
+        "bounds-grid",
+        "axis-triad",
+        "gradient-background",
+        "polylines",
+    )
+    bar.set_ready(False)
+    assert not bar.findChild(QObject, "previewDisplayControl-object-fill").isEnabled()
+    bar.set_ready(True)
+    object_fill = bar.findChild(QObject, "previewDisplayControl-object-fill")
+    assert object_fill.isEnabled()
+    assert object_fill.isChecked()
+    bar.set_options(PreviewDisplayOptions(show_object_fill=False, lighting_mode="camera"))
+    assert not object_fill.isChecked()
+    assert bar.findChild(QObject, "previewDisplayControl-lighting-camera").isChecked()
 
 
 def test_live_preview_loads_impress_artifact_into_plotter(

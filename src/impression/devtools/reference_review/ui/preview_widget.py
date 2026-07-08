@@ -18,6 +18,13 @@ from impression.mesh import Mesh, Polyline
 from ..async_core.qt_handoff import sanitize_error_text
 from ..preview_payload import PreviewPayload
 from ..preview_payload_builder import PREVIEW_PAYLOAD_FORMAT
+from .preview_controls import (
+    COLOR_MODE_AUTHORED,
+    LIGHTING_MODE_CAMERA,
+    LIGHTING_MODE_FACE_NORMALS,
+    LIGHTING_MODE_FLAT,
+    PreviewDisplayOptions,
+)
 
 _PREVIEW_WIDGET_APP: QApplication | None = None
 _SOFTWARE_PREVIEW_BACKGROUND = QColor("#07111f")
@@ -86,6 +93,7 @@ class _ProjectedFace:
     polygon: QPolygonF
     color: QColor
     edge_segments: tuple[tuple[QPointF, QPointF], ...]
+    triangle_segments: tuple[tuple[QPointF, QPointF], ...]
 
 
 @dataclass(frozen=True)
@@ -122,8 +130,10 @@ class _PreparedFaceEdges:
 class _PreparedMesh:
     vertices: np.ndarray
     faces: np.ndarray
-    color: QColor
+    authored_color: QColor | None
+    face_colors: tuple[QColor | None, ...]
     face_edges: tuple[_PreparedFaceEdges, ...]
+    triangle_edges: tuple[_PreparedFaceEdges, ...]
     face_normals: np.ndarray
 
 
@@ -262,6 +272,7 @@ class PreviewRendererLifecycleWidget(QWidget):
         self._renderer_state = PreviewRendererLifecycleState()
         self._payload_state = PreviewWidgetPayloadState()
         self._current_datasets: list[Mesh | Polyline] = []
+        self._display_options = PreviewDisplayOptions()
 
     @property
     def renderer_state(self) -> PreviewRendererLifecycleState:
@@ -284,7 +295,16 @@ class PreviewRendererLifecycleWidget(QWidget):
         self._plotter = plotter
         self._previewer = None
         self._renderer_state = PreviewRendererLifecycleState(created=True)
+        self._apply_display_options_to_plotter()
         return self._plotter
+
+    @property
+    def display_options(self) -> PreviewDisplayOptions:
+        return self._display_options
+
+    def set_display_options(self, options: PreviewDisplayOptions) -> None:
+        self._display_options = options
+        self._apply_display_options_to_plotter()
 
     def clear_renderer_scene(self, message: str) -> None:
         if self._plotter is not None:
@@ -319,6 +339,7 @@ class PreviewRendererLifecycleWidget(QWidget):
             if not callable(set_datasets):
                 raise RuntimeError("preview-renderer-missing-set-datasets")
             set_datasets(datasets)
+            self._apply_display_options_to_plotter()
             self._current_datasets = list(datasets)
             self._payload_state = PreviewWidgetPayloadState(
                 generation=payload.request.generation,
@@ -352,6 +373,13 @@ class PreviewRendererLifecycleWidget(QWidget):
     def _default_previewer_factory(self):
         return None
 
+    def _apply_display_options_to_plotter(self) -> None:
+        if self._plotter is None:
+            return
+        set_display_options = getattr(self._plotter, "set_display_options", None)
+        if callable(set_display_options):
+            set_display_options(self._display_options)
+
 
 class SoftwarePreviewSurface(QWidget):
     """Small Qt-only mesh preview surface for the workbench."""
@@ -366,6 +394,15 @@ class SoftwarePreviewSurface(QWidget):
         self._zoom = 1.0
         self._last_pos = None
         self._geometry: _PreparedPreviewGeometry | None = None
+        self._display_options = PreviewDisplayOptions()
+
+    @property
+    def display_options(self) -> PreviewDisplayOptions:
+        return self._display_options
+
+    def set_display_options(self, options: PreviewDisplayOptions) -> None:
+        self._display_options = options
+        self.update()
 
     def clear(self) -> None:
         self._datasets = ()
@@ -397,10 +434,13 @@ class SoftwarePreviewSurface(QWidget):
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        gradient = QLinearGradient(0.0, 0.0, 0.0, float(max(self.height(), 1)))
-        gradient.setColorAt(0.0, _SOFTWARE_PREVIEW_BACKGROUND_TOP)
-        gradient.setColorAt(1.0, _SOFTWARE_PREVIEW_BACKGROUND)
-        painter.fillRect(self.rect(), gradient)
+        if self._display_options.show_gradient_background:
+            gradient = QLinearGradient(0.0, 0.0, 0.0, float(max(self.height(), 1)))
+            gradient.setColorAt(0.0, _SOFTWARE_PREVIEW_BACKGROUND_TOP)
+            gradient.setColorAt(1.0, _SOFTWARE_PREVIEW_BACKGROUND)
+            painter.fillRect(self.rect(), gradient)
+        else:
+            painter.fillRect(self.rect(), _SOFTWARE_PREVIEW_BACKGROUND)
         if self._geometry is None:
             return
         projected = _project_prepared_geometry(
@@ -410,6 +450,7 @@ class SoftwarePreviewSurface(QWidget):
             rotation_x=self._rotation_x,
             rotation_y=self._rotation_y,
             zoom=self._zoom,
+            options=self._display_options,
         )
         for line in projected.grid_lines:
             painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -419,12 +460,19 @@ class SoftwarePreviewSurface(QWidget):
         edge_pen = QPen(_SOFTWARE_PREVIEW_EDGE, 1.2)
         painter.setPen(Qt.PenStyle.NoPen)
         for face in projected.faces:
-            painter.setBrush(QColor(face.color))
-            painter.drawPolygon(face.polygon)
+            if self._display_options.show_object_fill:
+                painter.setBrush(QColor(face.color))
+                painter.drawPolygon(face.polygon)
             if face.edge_segments:
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.setPen(edge_pen)
                 for start, end in face.edge_segments:
+                    painter.drawLine(start, end)
+                painter.setPen(Qt.PenStyle.NoPen)
+            if face.triangle_segments:
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(QColor("#f7d6ba"), 0.8))
+                for start, end in face.triangle_segments:
                     painter.drawLine(start, end)
                 painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -469,6 +517,7 @@ def _project_datasets(
     rotation_x: float,
     rotation_y: float,
     zoom: float,
+    options: PreviewDisplayOptions | None = None,
 ) -> _ProjectedPreviewScene:
     geometry = _prepare_preview_geometry(datasets)
     if geometry is None:
@@ -480,6 +529,7 @@ def _project_datasets(
         rotation_x=rotation_x,
         rotation_y=rotation_y,
         zoom=zoom,
+        options=options,
     )
 
 
@@ -529,13 +579,16 @@ def _prepare_preview_geometry(
 def _prepare_mesh_geometry(mesh: Mesh, vertices: np.ndarray, faces: np.ndarray) -> _PreparedMesh:
     object_edges = _object_edge_keys(mesh)
     face_edges = []
+    triangle_edges = []
     face_normals = []
     for face in faces:
         edge_pairs = []
+        triangle_pairs = []
         face_indices = tuple(int(index) for index in face)
         for local_index, vertex_index in enumerate(face_indices):
             next_local_index = (local_index + 1) % len(face_indices)
             next_vertex_index = face_indices[next_local_index]
+            triangle_pairs.append((local_index, next_local_index))
             edge_key = (
                 min(vertex_index, next_vertex_index),
                 max(vertex_index, next_vertex_index),
@@ -543,6 +596,7 @@ def _prepare_mesh_geometry(mesh: Mesh, vertices: np.ndarray, faces: np.ndarray) 
             if edge_key in object_edges:
                 edge_pairs.append((local_index, next_local_index))
         face_edges.append(_PreparedFaceEdges(tuple(edge_pairs)))
+        triangle_edges.append(_PreparedFaceEdges(tuple(triangle_pairs)))
         normal = _face_normal(vertices, face)
         face_normals.append(
             normal if normal is not None else np.asarray((0.0, 0.0, 1.0))
@@ -550,8 +604,10 @@ def _prepare_mesh_geometry(mesh: Mesh, vertices: np.ndarray, faces: np.ndarray) 
     return _PreparedMesh(
         vertices,
         faces,
-        _mesh_qcolor(mesh),
+        _mesh_authored_qcolor(mesh),
+        _mesh_face_qcolors(mesh, len(faces)),
         tuple(face_edges),
+        tuple(triangle_edges),
         np.asarray(face_normals, dtype=float),
     )
 
@@ -564,7 +620,9 @@ def _project_prepared_geometry(
     rotation_x: float,
     rotation_y: float,
     zoom: float,
+    options: PreviewDisplayOptions | None = None,
 ) -> _ProjectedPreviewScene:
+    options = options or PreviewDisplayOptions()
     center = geometry.center
     span = geometry.span
     scale = (min(width, height) * 0.72 * zoom) / max(span, 1e-6)
@@ -573,10 +631,20 @@ def _project_prepared_geometry(
 
     faces: list[_ProjectedFace] = []
     polylines: list[_ProjectedPolyline] = []
-    grid_lines = _project_bounds_grid(geometry, rotation=rotation, project_point=project_point)
-    axis_lines = _project_axis_triad(geometry, rotation=rotation, project_point=project_point)
+    grid_lines = (
+        _project_bounds_grid(geometry, rotation=rotation, project_point=project_point)
+        if options.show_bounds_grid
+        else ()
+    )
+    axis_lines = (
+        _project_axis_triad(geometry, rotation=rotation, project_point=project_point)
+        if options.show_axis_triad
+        else ()
+    )
     for item in geometry.items:
         if isinstance(item, _PreparedPolyline):
+            if not options.show_polylines:
+                continue
             rotated = (item.points - center) @ rotation.T
             polygon = QPolygonF([project_point(point) for point in rotated])
             polylines.append(
@@ -591,25 +659,41 @@ def _project_prepared_geometry(
 
         vertices = (item.vertices - center) @ rotation.T
         normals = item.face_normals @ rotation.T
-        for face, prepared_edges, normal in zip(item.faces, item.face_edges, normals):
+        for face_index, (face, prepared_edges, prepared_triangles, normal) in enumerate(
+            zip(item.faces, item.face_edges, item.triangle_edges, normals)
+        ):
             if len(face) < 3:
                 continue
             face_points = vertices[face]
             polygon = QPolygonF([project_point(point) for point in face_points])
             edge_segments = []
-            for local_index, next_local_index in prepared_edges.edge_pairs:
+            for local_index, next_local_index in (
+                prepared_edges.edge_pairs if options.show_object_edges else ()
+            ):
                 edge_segments.append(
                     (
                         QPointF(polygon[local_index]),
                         QPointF(polygon[next_local_index]),
                     )
                 )
+            triangle_segments = []
+            for local_index, next_local_index in (
+                prepared_triangles.edge_pairs if options.show_triangle_wireframe else ()
+            ):
+                triangle_segments.append(
+                    (
+                        QPointF(polygon[local_index]),
+                        QPointF(polygon[next_local_index]),
+                    )
+                )
+            base_color = _display_face_color(item, face_index, options)
             faces.append(
                 _ProjectedFace(
                     float(np.mean(face_points[:, 2])),
                     polygon,
-                    _shaded_color(item.color, normal),
+                    _lit_color(base_color, normal, options.lighting_mode),
                     tuple(edge_segments),
+                    tuple(triangle_segments),
                 )
             )
     faces.sort(key=lambda item: item.depth)
@@ -764,6 +848,46 @@ def _shaded_color(color: QColor, normal: np.ndarray) -> QColor:
     )
 
 
+def _camera_light_color(color: QColor, normal: np.ndarray) -> QColor:
+    normal = np.asarray(normal, dtype=float)
+    norm = float(np.linalg.norm(normal))
+    if norm < 1e-9:
+        return QColor(color)
+    normal = normal / norm
+    light = np.asarray((0.0, 0.0, 1.0), dtype=float)
+    diffuse = max(0.0, float(np.dot(normal, light)))
+    intensity = min(1.25, 0.62 + diffuse * 0.5)
+    return QColor.fromRgbF(
+        min(1.0, color.redF() * intensity),
+        min(1.0, color.greenF() * intensity),
+        min(1.0, color.blueF() * intensity),
+        color.alphaF(),
+    )
+
+
+def _lit_color(color: QColor, normal: np.ndarray, lighting_mode: str) -> QColor:
+    if lighting_mode == LIGHTING_MODE_FLAT:
+        return QColor(color)
+    if lighting_mode == LIGHTING_MODE_CAMERA:
+        return _camera_light_color(color, normal)
+    if lighting_mode == LIGHTING_MODE_FACE_NORMALS:
+        return _shaded_color(color, normal)
+    return QColor(color)
+
+
+def _display_face_color(
+    mesh: _PreparedMesh,
+    face_index: int,
+    options: PreviewDisplayOptions,
+) -> QColor:
+    if options.color_mode == COLOR_MODE_AUTHORED:
+        if face_index < len(mesh.face_colors) and mesh.face_colors[face_index] is not None:
+            return QColor(mesh.face_colors[face_index])
+        if mesh.authored_color is not None:
+            return QColor(mesh.authored_color)
+    return QColor(_SOFTWARE_PREVIEW_DEFAULT_MESH)
+
+
 def _face_normal(vertices: np.ndarray, face: np.ndarray) -> np.ndarray | None:
     if len(face) < 3:
         return None
@@ -794,6 +918,34 @@ def _mesh_qcolor(mesh: Mesh) -> QColor:
     color = mesh.color
     if color is None:
         return QColor(_SOFTWARE_PREVIEW_DEFAULT_MESH)
+    return _color_value_qcolor(color) or QColor(_SOFTWARE_PREVIEW_DEFAULT_MESH)
+
+
+def _mesh_authored_qcolor(mesh: Mesh) -> QColor | None:
+    if mesh.color is None:
+        return None
+    return _color_value_qcolor(mesh.color)
+
+
+def _mesh_face_qcolors(mesh: Mesh, face_count: int) -> tuple[QColor | None, ...]:
+    if mesh.face_colors is None:
+        return tuple(None for _ in range(face_count))
+    colors = np.asarray(mesh.face_colors, dtype=float)
+    result: list[QColor | None] = []
+    for face_index in range(face_count):
+        if face_index >= len(colors):
+            result.append(None)
+        else:
+            result.append(_color_value_qcolor(colors[face_index]))
+    return tuple(result)
+
+
+def _color_value_qcolor(color: object) -> QColor | None:
+    if isinstance(color, QColor):
+        return QColor(color)
+    if isinstance(color, str):
+        qcolor = QColor(color)
+        return qcolor if qcolor.isValid() else None
     values = tuple(float(value) for value in color)
     if len(values) >= 3 and all(0.0 <= value <= 1.0 for value in values[:3]):
         alpha = values[3] if len(values) >= 4 else 1.0
@@ -801,7 +953,7 @@ def _mesh_qcolor(mesh: Mesh) -> QColor:
     if len(values) >= 3:
         alpha = int(values[3]) if len(values) >= 4 else 255
         return QColor(int(values[0]), int(values[1]), int(values[2]), alpha)
-    return QColor(_SOFTWARE_PREVIEW_DEFAULT_MESH)
+    return None
 
 
 def _polyline_qcolor(polyline: Polyline) -> QColor:
