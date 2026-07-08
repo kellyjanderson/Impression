@@ -11,7 +11,7 @@ from typing import Callable
 
 import numpy as np
 from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from impression.mesh import Mesh, Polyline
@@ -99,12 +99,9 @@ class _WheelZoomDecision:
 class _ProjectedFace:
     depth: float
     polygon: QPolygonF
-    points: tuple[tuple[float, float, float], ...]
     color: QColor
     edge_segments: tuple[tuple[QPointF, QPointF], ...]
-    edge_points: tuple[tuple[tuple[float, float, float], tuple[float, float, float]], ...]
     triangle_segments: tuple[tuple[QPointF, QPointF], ...]
-    triangle_points: tuple[tuple[tuple[float, float, float], tuple[float, float, float]], ...]
 
 
 @dataclass(frozen=True)
@@ -471,15 +468,23 @@ class SoftwarePreviewSurface(QWidget):
             painter.drawLine(line.start, line.end)
 
         edge_pen = QPen(_SOFTWARE_PREVIEW_EDGE, 1.2)
-        mesh_image = _depth_render_faces(
-            projected.faces,
-            width=max(self.width(), 1),
-            height=max(self.height(), 1),
-            show_fill=self._display_options.show_object_fill,
-            show_object_edges=self._display_options.show_object_edges,
-            show_triangle_wireframe=self._display_options.show_triangle_wireframe,
-        )
-        painter.drawImage(0, 0, mesh_image)
+        painter.setPen(Qt.PenStyle.NoPen)
+        for face in projected.faces:
+            if self._display_options.show_object_fill:
+                painter.setBrush(QColor(face.color))
+                painter.drawPolygon(face.polygon)
+            if face.edge_segments:
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(edge_pen)
+                for start, end in face.edge_segments:
+                    painter.drawLine(start, end)
+                painter.setPen(Qt.PenStyle.NoPen)
+            if face.triangle_segments:
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(QColor("#f7d6ba"), 0.8))
+                for start, end in face.triangle_segments:
+                    painter.drawLine(start, end)
+                painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(edge_pen)
         for polyline in projected.polylines:
@@ -748,14 +753,8 @@ def _project_prepared_geometry(
             if len(face) < 3:
                 continue
             face_points = vertices[face]
-            projected_points = [project_point(point) for point in face_points]
-            polygon = QPolygonF(projected_points)
-            screen_points = tuple(
-                (float(point.x()), float(point.y()), float(face_point[2]))
-                for point, face_point in zip(projected_points, face_points)
-            )
+            polygon = QPolygonF([project_point(point) for point in face_points])
             edge_segments = []
-            edge_points = []
             for local_index, next_local_index in (
                 prepared_edges.edge_pairs if options.show_object_edges else ()
             ):
@@ -765,14 +764,7 @@ def _project_prepared_geometry(
                         QPointF(polygon[next_local_index]),
                     )
                 )
-                edge_points.append(
-                    (
-                        screen_points[local_index],
-                        screen_points[next_local_index],
-                    )
-                )
             triangle_segments = []
-            triangle_points = []
             for local_index, next_local_index in (
                 prepared_triangles.edge_pairs if options.show_triangle_wireframe else ()
             ):
@@ -782,23 +774,14 @@ def _project_prepared_geometry(
                         QPointF(polygon[next_local_index]),
                     )
                 )
-                triangle_points.append(
-                    (
-                        screen_points[local_index],
-                        screen_points[next_local_index],
-                    )
-                )
             base_color = _display_face_color(item, face_index, options)
             faces.append(
                 _ProjectedFace(
                     float(np.mean(face_points[:, 2])),
                     polygon,
-                    screen_points,
                     _lit_color(base_color, normal, options.lighting_mode),
                     tuple(edge_segments),
-                    tuple(edge_points),
                     tuple(triangle_segments),
-                    tuple(triangle_points),
                 )
             )
     faces.sort(key=lambda item: item.depth)
@@ -809,104 +792,6 @@ def _project_prepared_geometry(
         grid_lines=grid_lines,
         axis_lines=axis_lines,
     )
-
-
-def _depth_render_faces(
-    faces: tuple[_ProjectedFace, ...],
-    *,
-    width: int,
-    height: int,
-    show_fill: bool,
-    show_object_edges: bool,
-    show_triangle_wireframe: bool,
-) -> QImage:
-    image = QImage(width, height, QImage.Format.Format_ARGB32)
-    image.fill(0)
-    z_buffer = np.full((height, width), -np.inf, dtype=float)
-    if show_fill:
-        for face in faces:
-            for triangle in _triangulate_screen_points(face.points):
-                _depth_fill_triangle(image, z_buffer, triangle, face.color)
-    if show_object_edges:
-        for face in faces:
-            for start, end in face.edge_points:
-                _depth_draw_line(image, z_buffer, start, end, _SOFTWARE_PREVIEW_EDGE)
-    if show_triangle_wireframe:
-        triangle_color = QColor("#f7d6ba")
-        for face in faces:
-            for start, end in face.triangle_points:
-                _depth_draw_line(image, z_buffer, start, end, triangle_color)
-    return image
-
-
-def _triangulate_screen_points(
-    points: tuple[tuple[float, float, float], ...],
-) -> tuple[tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]], ...]:
-    if len(points) < 3:
-        return ()
-    origin = points[0]
-    return tuple((origin, points[index], points[index + 1]) for index in range(1, len(points) - 1))
-
-
-def _depth_fill_triangle(
-    image: QImage,
-    z_buffer: np.ndarray,
-    triangle: tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]],
-    color: QColor,
-) -> None:
-    (x0, y0, z0), (x1, y1, z1), (x2, y2, z2) = triangle
-    min_x = max(0, int(math.floor(min(x0, x1, x2))))
-    max_x = min(image.width() - 1, int(math.ceil(max(x0, x1, x2))))
-    min_y = max(0, int(math.floor(min(y0, y1, y2))))
-    max_y = min(image.height() - 1, int(math.ceil(max(y0, y1, y2))))
-    area = _edge_function(x0, y0, x1, y1, x2, y2)
-    if abs(area) < 1e-9:
-        return
-    for y in range(min_y, max_y + 1):
-        py = y + 0.5
-        for x in range(min_x, max_x + 1):
-            px = x + 0.5
-            w0 = _edge_function(x1, y1, x2, y2, px, py) / area
-            w1 = _edge_function(x2, y2, x0, y0, px, py) / area
-            w2 = _edge_function(x0, y0, x1, y1, px, py) / area
-            if w0 < -1e-9 or w1 < -1e-9 or w2 < -1e-9:
-                continue
-            z = w0 * z0 + w1 * z1 + w2 * z2
-            if z >= z_buffer[y, x]:
-                z_buffer[y, x] = z
-                image.setPixelColor(x, y, color)
-
-
-def _depth_draw_line(
-    image: QImage,
-    z_buffer: np.ndarray,
-    start: tuple[float, float, float],
-    end: tuple[float, float, float],
-    color: QColor,
-) -> None:
-    x0, y0, z0 = start
-    x1, y1, z1 = end
-    steps = max(1, int(math.ceil(max(abs(x1 - x0), abs(y1 - y0)))))
-    for index in range(steps + 1):
-        t = index / steps
-        x = int(round(x0 + (x1 - x0) * t))
-        y = int(round(y0 + (y1 - y0) * t))
-        if x < 0 or y < 0 or x >= image.width() or y >= image.height():
-            continue
-        z = z0 + (z1 - z0) * t
-        if z >= z_buffer[y, x] - 1e-6:
-            image.setPixelColor(x, y, color)
-
-
-def _edge_function(
-    ax: float,
-    ay: float,
-    bx: float,
-    by: float,
-    cx: float,
-    cy: float,
-) -> float:
-    return (cx - ax) * (by - ay) - (cy - ay) * (bx - ax)
 
 
 def _object_edge_keys(mesh: Mesh, *, sharp_angle_degrees: float = 30.0) -> set[tuple[int, int]]:

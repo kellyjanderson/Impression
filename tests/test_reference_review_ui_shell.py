@@ -52,7 +52,6 @@ import impression.devtools.reference_review.ui.preview_widget as preview_widget
 from impression.devtools.reference_review.ui import artifact_preview
 from impression.devtools.reference_review.ui.preview_widget import (
     _SOFTWARE_PREVIEW_DEFAULT_MESH,
-    _depth_render_faces,
     _object_edge_keys,
     _project_prepared_geometry,
     _project_datasets,
@@ -620,69 +619,6 @@ def test_software_preview_depth_order_hides_far_faces_without_normal_culling() -
     assert len(scene.faces) == 4
     assert {face.color.name() for face in scene.faces} == {"#ff0000", "#0000ff"}
     assert image.pixelColor(100, 100).name() == "#0000ff"
-
-
-def test_software_preview_depth_buffer_hides_back_edges_inside_front_face() -> None:
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    QApplication.instance() or QApplication([])
-    mesh = Mesh(
-        vertices=np.asarray(
-            (
-                (-1.0, -1.0, 1.0),
-                (1.0, -1.0, 1.0),
-                (1.0, 1.0, 1.0),
-                (-1.0, 1.0, 1.0),
-                (-0.35, -0.35, 0.0),
-                (0.35, -0.35, 0.0),
-                (0.35, 0.35, 0.0),
-                (-0.35, 0.35, 0.0),
-            )
-        ),
-        faces=np.asarray(
-            (
-                (0, 1, 2),
-                (0, 2, 3),
-                (4, 5, 6),
-                (4, 6, 7),
-            )
-        ),
-        face_colors=np.asarray(
-            (
-                (0.0, 0.0, 1.0, 1.0),
-                (0.0, 0.0, 1.0, 1.0),
-                (1.0, 0.0, 0.0, 1.0),
-                (1.0, 0.0, 0.0, 1.0),
-            )
-        ),
-    )
-    options = PreviewDisplayOptions(
-        color_mode="authored",
-        lighting_mode="flat",
-        show_bounds_grid=False,
-        show_axis_triad=False,
-        show_gradient_background=False,
-        show_polylines=False,
-    )
-    scene = _project_datasets(
-        (mesh,),
-        width=200,
-        height=200,
-        rotation_x=0.0,
-        rotation_y=0.0,
-        zoom=1.0,
-        options=options,
-    )
-    image = _depth_render_faces(
-        scene.faces,
-        width=200,
-        height=200,
-        show_fill=options.show_object_fill,
-        show_object_edges=options.show_object_edges,
-        show_triangle_wireframe=options.show_triangle_wireframe,
-    )
-
-    assert image.pixelColor(100, 100).name() == "#0000ff"
-    assert image.pixelColor(75, 100).name() == "#0000ff"
 
 
 def test_software_preview_caches_object_edges_between_repaints(
