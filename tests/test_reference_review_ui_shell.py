@@ -512,6 +512,44 @@ def test_software_preview_authored_color_and_lighting_modes() -> None:
     assert {face.color.name() for face in camera_lit.faces} != {"#800000", "#000080"}
 
 
+def test_software_preview_forces_mesh_fill_opaque_for_review() -> None:
+    mesh = Mesh(
+        vertices=np.asarray(
+            (
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (0.0, 1.0, 0.0),
+            )
+        ),
+        faces=np.asarray(((0, 1, 2), (0, 2, 3))),
+        color=(0.0, 1.0, 0.0, 0.2),
+        face_colors=np.asarray(((0.5, 0.0, 0.0, 0.2), (0.0, 0.0, 0.5, 0.3))),
+    )
+
+    authored_flat = _project_datasets(
+        (mesh,),
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+        options=PreviewDisplayOptions(color_mode="authored", lighting_mode="flat"),
+    )
+    authored_lit = _project_datasets(
+        (mesh,),
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+        options=PreviewDisplayOptions(color_mode="authored", lighting_mode="face_normals"),
+    )
+
+    assert {face.color.alpha() for face in authored_flat.faces} == {255}
+    assert {face.color.alpha() for face in authored_lit.faces} == {255}
+
+
 def test_software_preview_caches_object_edges_between_repaints(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

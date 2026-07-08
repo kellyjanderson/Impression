@@ -917,10 +917,11 @@ def _project_axis_triad(
 
 
 def _shaded_color(color: QColor, normal: np.ndarray) -> QColor:
+    color = _opaque_color(color)
     normal = np.asarray(normal, dtype=float)
     norm = float(np.linalg.norm(normal))
     if norm < 1e-9:
-        return QColor(color)
+        return _opaque_color(color)
     normal = normal / norm
     light = np.asarray((-0.35, 0.45, 0.82), dtype=float)
     light = light / float(np.linalg.norm(light))
@@ -932,15 +933,16 @@ def _shaded_color(color: QColor, normal: np.ndarray) -> QColor:
         min(1.0, color.redF() * intensity),
         min(1.0, color.greenF() * intensity),
         min(1.0, color.blueF() * intensity),
-        color.alphaF(),
+        1.0,
     )
 
 
 def _camera_light_color(color: QColor, normal: np.ndarray) -> QColor:
+    color = _opaque_color(color)
     normal = np.asarray(normal, dtype=float)
     norm = float(np.linalg.norm(normal))
     if norm < 1e-9:
-        return QColor(color)
+        return _opaque_color(color)
     normal = normal / norm
     light = np.asarray((0.0, 0.0, 1.0), dtype=float)
     diffuse = max(0.0, float(np.dot(normal, light)))
@@ -949,18 +951,18 @@ def _camera_light_color(color: QColor, normal: np.ndarray) -> QColor:
         min(1.0, color.redF() * intensity),
         min(1.0, color.greenF() * intensity),
         min(1.0, color.blueF() * intensity),
-        color.alphaF(),
+        1.0,
     )
 
 
 def _lit_color(color: QColor, normal: np.ndarray, lighting_mode: str) -> QColor:
     if lighting_mode == LIGHTING_MODE_FLAT:
-        return QColor(color)
+        return _opaque_color(color)
     if lighting_mode == LIGHTING_MODE_CAMERA:
         return _camera_light_color(color, normal)
     if lighting_mode == LIGHTING_MODE_FACE_NORMALS:
         return _shaded_color(color, normal)
-    return QColor(color)
+    return _opaque_color(color)
 
 
 def _display_face_color(
@@ -970,10 +972,16 @@ def _display_face_color(
 ) -> QColor:
     if options.color_mode == COLOR_MODE_AUTHORED:
         if face_index < len(mesh.face_colors) and mesh.face_colors[face_index] is not None:
-            return QColor(mesh.face_colors[face_index])
+            return _opaque_color(mesh.face_colors[face_index])
         if mesh.authored_color is not None:
-            return QColor(mesh.authored_color)
+            return _opaque_color(mesh.authored_color)
     return QColor(_SOFTWARE_PREVIEW_DEFAULT_MESH)
+
+
+def _opaque_color(color: QColor) -> QColor:
+    result = QColor(color)
+    result.setAlphaF(1.0)
+    return result
 
 
 def _face_normal(vertices: np.ndarray, face: np.ndarray) -> np.ndarray | None:
