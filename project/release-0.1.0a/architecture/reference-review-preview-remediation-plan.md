@@ -16,12 +16,28 @@ The remediation starts by importing and reusing the existing
 `impression.preview` scene behavior instead of continuing to rebuild a parallel
 preview stack inside the review UI.
 
+The preferred path is an embedded Qt wrapper around the actual preview engine:
+`impression.preview` owns preview semantics, a thin Qt widget owns the live
+render surface, and the workbench owns only fixture selection, state chrome,
+notes, artifacts, and review actions.
+
 ## Related Architecture
 
 - [Reference Review Workbench Architecture](reference-review-workbench-architecture.md)
 - [Reference Review Qt Workbench UI](reference-review-qt-workbench-ui.md)
 - [Reference Review Async Concurrency](reference-review-async-concurrency.md)
 - [Reference Review Fixture Source Contract](reference-review-fixture-source-contract.md)
+
+## Architecture Update Checklist
+
+- [x] [Reference Review Preview Remediation Plan](reference-review-preview-remediation-plan.md):
+  established the embedded actual-preview wrapper as the preferred remediation.
+- [x] [Reference Review Qt Workbench UI](reference-review-qt-workbench-ui.md):
+  defined the Qt wrapper, preview pane responsibilities, and split spec shape.
+- [x] [Reference Review Async Concurrency](reference-review-async-concurrency.md):
+  defined renderer thread affinity and async payload-building boundaries.
+- [x] [Reference Review Workbench Architecture](reference-review-workbench-architecture.md):
+  updated parent commitments and system map for the shared preview engine.
 
 ## Current Failure Summary
 
@@ -47,6 +63,67 @@ preview stack inside the review UI.
 - Do not put multiprocessing worker targets in modules that import Qt widgets
   or PyVistaQt at module import time.
 
+## Target Architecture
+
+The workbench should embed the real preview behavior through a thin Qt wrapper,
+not recreate preview behavior inside the review UI.
+
+```text
+selected fixture
+-> async preview payload builder
+-> typed preview-ready result
+-> ReferenceReviewPreviewPane
+-> ImpressionPreviewWidget
+-> impression.preview PreviewSceneController
+-> one long-lived QtInteractor/render surface
+```
+
+Component responsibilities:
+
+- `impression.preview` owns scene semantics: dataset application, edge policy,
+  camera reset, interaction defaults, view controls, colors, and plotter
+  configuration.
+- `ImpressionPreviewWidget` owns one long-lived embedded render surface and
+  adapts Qt widget lifecycle events to the preview controller.
+- `ReferenceReviewPreviewPane` owns workbench-visible state around the widget:
+  placeholder, loading, failed, interactive, selected fixture label, reset
+  command routing, and diagnostics.
+- Preview build workers own source loading, `.impress` parsing, model
+  construction, and tessellation. They do not import Qt widget modules.
+- The async dispatcher owns request ids, stale-result rejection, cancellation,
+  timeout, stdout/stderr capture, and error routing.
+
+The Qt wrapper is intentionally thin. It should not contain mesh conversion,
+feature-edge extraction, camera math, mouse-control policy, or alternate
+rendering behavior. If workbench-specific styling is needed, it must be passed
+as configuration to the shared preview controller rather than copied into a
+second renderer.
+
+## Preview Wrapper Contract
+
+`ImpressionPreviewWidget` should provide a stable widget-level API:
+
+```python
+class ImpressionPreviewWidget(QWidget):
+    def set_preview_payload(self, payload: PreviewPayload) -> None: ...
+    def clear_preview(self) -> None: ...
+    def reset_view(self) -> None: ...
+    def set_busy(self, busy: bool) -> None: ...
+    def dispose(self) -> None: ...
+```
+
+Contract rules:
+
+- The widget creates its renderer once when the preview surface is initialized.
+- The widget destroys the renderer only when the preview surface closes.
+- Camera and mouse interaction behavior comes from `impression.preview`.
+- Scene replacement clears and repopulates the existing renderer; it does not
+  create a fresh renderer for every fixture.
+- Renderer mutation happens on the Qt UI thread.
+- Source loading and tessellation happen outside the Qt UI thread.
+- Stale payloads are rejected before they reach `set_preview_payload`.
+- PNG snapshot rendering is not a fallback for interactive review.
+
 ## Issues
 
 | Severity | Issue | Current anchor | Effect | Target fix |
@@ -62,9 +139,10 @@ preview stack inside the review UI.
 
 ### 1. Import Preview Functionality From `impression.preview`
 
-Create a reusable preview scene component from the CLI preview implementation.
-The workbench must consume that component instead of duplicating mesh-to-PyVista,
-edge extraction, camera reset, color, and actor setup logic.
+Create a reusable preview scene component from the CLI preview implementation
+and make the workbench embed it through `ImpressionPreviewWidget`. The workbench
+must consume that component instead of duplicating mesh-to-PyVista, edge
+extraction, camera reset, color, actor setup, or interaction logic.
 
 The extracted component should own:
 
@@ -85,11 +163,20 @@ class PreviewSceneController:
     def reset_camera(self, plotter, datasets) -> None: ...
 ```
 
+The widget wrapper should be a small adapter over this controller:
+
+```python
+class ImpressionPreviewWidget(QWidget):
+    def __init__(self, *, controller: PreviewSceneController, parent=None): ...
+```
+
 Acceptance:
 
 - The workbench no longer calls Impression mesh conversion or edge extraction
   directly from `src/impression/devtools/reference_review/ui/shell.py`.
 - The CLI preview and workbench share the same scene application path.
+- The workbench preview is hosted by a wrapper widget around that shared path,
+  not by a separately implemented preview renderer.
 - A focused test or import check prevents the workbench from regrowing a
   parallel renderer implementation.
 
@@ -166,20 +253,26 @@ Acceptance:
 - UI thread work for a completed preview is bounded and measurable.
 - Stale payloads are discarded by request id before scene mutation.
 
-### 6. Decide Embedded Preview Versus Supervised CLI Preview Adapter
+### 6. Stabilize The Embedded Actual-Preview Wrapper
 
 After the shared preview component and process boundary are in place, test the
-embedded `pyvistaqt.QtInteractor` route again. If it remains unstable on macOS,
-switch the workbench preview pane to a supervised adapter around the existing
-`impression preview` behavior rather than continuing to debug a separate
-interactive renderer.
+embedded `ImpressionPreviewWidget` route as the primary product path. The
+wrapper should use the same preview controller as the CLI preview while owning
+only Qt widget lifecycle and in-window embedding.
+
+A supervised external `impression preview` process is no longer the normal
+target. It remains an emergency diagnostic fallback only if macOS/VTK embedding
+proves unshippable after the actual preview engine has been shared correctly.
+Using that fallback would require a separate architecture decision because it
+changes focus, window ownership, and review workflow.
 
 Acceptance:
 
-- The review shell can use either an embedded adapter or a supervised preview
-  adapter without changing fixture queue, notes, promotion, or artifact panels.
+- The review shell embeds the actual preview through `ImpressionPreviewWidget`.
+- The widget reuses CLI preview scene, camera, and interaction semantics.
 - Renderer lifetime is explicit: create once for the preview surface and
   destroy only when that surface closes.
+- The wrapper can replace scenes without recreating the render surface.
 
 ### 7. Quarantine Or Remove The PNG Snapshot Path
 
@@ -203,6 +296,8 @@ Minimum automated checks:
 - process controller handles success, failure, cancellation, and stale results
 - stale result from fixture A cannot overwrite fixture B
 - CLI preview and workbench share the same scene application component
+- workbench preview widget wraps the shared preview controller rather than
+  duplicating scene application logic
 
 Manual smoke:
 
@@ -221,6 +316,9 @@ Manual pass criteria:
 
 ## Change History
 
+- 2026-07-07: Expanded plan around the preferred embedded Qt wrapper for the
+  actual `impression.preview` engine and added an architecture update
+  checklist.
 - 2026-07-07: Added remediation plan after live preview beachballing and render
   instability showed the workbench preview had diverged from the CLI preview
   architecture.

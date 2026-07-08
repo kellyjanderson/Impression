@@ -104,8 +104,11 @@ The split architecture follows lessons from the sibling ViewDown project:
   preview-compatible fixture entrypoint.
 - The first implementation should use a PySide 6 application shell with Qt
   Quick/QML for the workbench chrome.
-- The interactive 3D preview is isolated behind a preview bridge so the UI can
-  evolve without tying every panel to PyVista internals.
+- The interactive 3D preview is isolated behind a thin Qt widget wrapper around
+  the actual `impression.preview` engine so the UI can evolve without tying
+  every panel to PyVista internals or duplicating preview behavior.
+- The workbench must not maintain a separate preview renderer, camera-control
+  policy, edge policy, or PNG snapshot pathway for interactive review.
 - Blocking model load, tessellation, artifact generation, filesystem scan,
   note write, promotion, and Codex tool work must run off the UI thread.
 - QML-visible state mutates only on the UI thread through typed completion
@@ -121,10 +124,14 @@ The split architecture follows lessons from the sibling ViewDown project:
 - Fixture source contract: maps fixture ids to loadable model sources,
   entrypoints, parameters, generation commands, and feature context.
 - Qt workbench UI: owns navigation, panels, state presentation, preview
-  embedding, review actions, component reuse, and screenshot evidence.
+  embedding through the actual-preview Qt wrapper, review actions, component
+  reuse, and screenshot evidence.
 - Async concurrency layer: owns task submission, worker isolation, result
   routing, stale-result rejection, cancellation, backpressure, and UI-thread
   handoff.
+- Shared preview engine: owns preview scene semantics, camera behavior,
+  interaction defaults, edge policy, colors, and renderer configuration reused
+  by both CLI preview and the workbench wrapper.
 - Promotion and notes lifecycle: owns durable notes, unresolved review states,
   promotion provenance, gold artifact writes, and release-gate reports.
 - Codex sandbox: owns constrained assistant context, tool allowlist, candidate
@@ -137,7 +144,8 @@ Active release reference roots
 -> fixture source/context resolver
 -> Qt workbench queue model
 -> selected fixture source load
--> interactive preview bridge
+-> async preview payload build
+-> embedded actual-preview Qt wrapper
 -> optional derived artifact comparison
 -> notes or Codex candidate iteration
 -> regeneration from source

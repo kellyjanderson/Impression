@@ -21,6 +21,9 @@ Quick UI thread.
 - Background workers own filesystem scans, source loading, model build,
   tessellation, artifact generation, note writes, promotion writes, and Codex
   tool execution.
+- The embedded preview widget owns renderer mutation on the Qt UI thread; no
+  worker may create, mutate, or destroy Qt widgets, PyVistaQt interactors, or
+  live VTK renderer objects.
 - Results cross boundaries only through typed immutable envelopes.
 - Every request has owner, kind, request id, fixture id, cancellation, timeout,
   and stale-result semantics.
@@ -43,12 +46,48 @@ class ReviewWorkbenchMessage:
 
 - Queue scan worker: discovers dirty/promoted/unresolved fixtures.
 - Source load worker: imports or calls the source model entrypoint.
-- Preview worker: prepares preview datasets or supervises preview process
-  handoff.
+- Preview payload worker: prepares preview-ready payloads for the embedded
+  actual-preview widget. It does not import Qt widget modules or mutate live
+  renderer state.
 - Artifact worker: regenerates PNG/STL/slice/diagnostic evidence.
 - Notes worker: writes and reads durable review notes.
 - Promotion worker: validates and writes gold artifacts atomically.
 - Codex worker: executes allowlisted sidecar tool calls.
+
+## Embedded Preview Concurrency Contract
+
+The workbench preview is split into two ownership zones:
+
+- Preview payload zone: source loading, `.impress` parsing, model construction,
+  tessellation, and serialization into a render-ready payload. This work runs
+  outside the Qt UI thread.
+- Preview widget zone: renderer creation, scene replacement, camera mutation,
+  interaction handling, and disposal. This work runs on the Qt UI thread inside
+  the embedded `ImpressionPreviewWidget`.
+
+Payload workers must return immutable or file-backed payload references. They
+must not return live Qt, PyVistaQt, VTK renderer, or interactor objects.
+
+The UI handoff sequence is:
+
+```text
+fixture selection
+-> owner/request id allocated
+-> preview payload worker launched
+-> typed preview payload result
+-> stale-result check
+-> UI-thread handoff
+-> ImpressionPreviewWidget.set_preview_payload(...)
+```
+
+Renderer lifetime rules:
+
+- The widget creates one renderer for its preview surface.
+- Fixture changes replace the scene inside that renderer.
+- Cancellation or stale completion never destroys the renderer.
+- Renderer disposal happens only when the preview widget closes or the
+  workbench shuts down.
+- Errors from a stale worker cannot clear a newer interactive preview.
 
 ## Ordering And Staleness
 
@@ -64,6 +103,8 @@ class ReviewWorkbenchMessage:
 
 - Only one selected-fixture source load runs at a time.
 - Preview rebuild requests are coalesced by fixture id and source revision.
+- Only one preview payload build for the selected fixture may be active; newer
+  selections cancel or stale-mark older preview payload builds.
 - Artifact regeneration is explicit and queued, not automatic on every
   keystroke.
 - Codex tool calls are serialized per fixture.
@@ -572,6 +613,8 @@ Split decision:
 
 ## Change History
 
+- 2026-07-07: Added embedded actual-preview widget concurrency contract,
+  separating preview payload workers from Qt-thread renderer ownership.
 - 2026-05-31: Ran five critical review, rescore, and split passes over the
   specification manifest. Split the original async candidate into envelope,
   dispatcher, stale guard, durable write serialization, UI handoff, and audit

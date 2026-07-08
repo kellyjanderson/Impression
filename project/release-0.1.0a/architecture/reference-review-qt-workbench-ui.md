@@ -7,9 +7,9 @@ Review Workbench.
 
 The workbench should use a PySide 6 desktop application shell with in-window
 review panels, controls, state presentation, and keyboard interaction. The 3D
-model preview is hosted inside the review window through an embedded
-PyVista-rendered preview surface so reviewers can orbit, pan, zoom, and reset without
-leaving the workbench.
+model preview is hosted inside the review window through an embedded Qt widget
+wrapper around the actual `impression.preview` engine so reviewers can orbit,
+pan, zoom, and reset without leaving the workbench.
 
 ## Parent Architecture
 
@@ -24,12 +24,47 @@ leaving the workbench.
 - Qt widgets own the primary workbench shell and embedded preview surface.
 - Qt Quick/QML remains available for component gallery and QML component assets
   but is not the primary STL review surface.
-- The preview bridge owns embedded 3D preview integration. The workbench must
-  not launch a separate preview application for normal STL review.
+- The preview bridge owns an embedded `ImpressionPreviewWidget` wrapper around
+  shared `impression.preview` scene behavior. The workbench must not launch a
+  separate preview application for normal STL review.
+- The workbench must not implement a second preview renderer. Camera controls,
+  scene application, edge policy, colors, and interaction semantics come from
+  the shared preview engine.
 
 The architecture does not let visible controls call PyVista or filesystem
 operations directly; selected, validated fixture records are routed through the
 preview shell.
+
+## Embedded Preview Wrapper
+
+The primary preview surface is `ImpressionPreviewWidget`, a thin Qt widget
+adapter around reusable preview behavior extracted from `impression.preview`.
+
+Responsibilities:
+
+- create and own one long-lived embedded render surface
+- call shared preview-controller methods for plotter configuration, scene
+  application, camera reset, and interaction defaults
+- expose widget-level methods for setting a prepared preview payload, clearing
+  the scene, resetting the view, showing busy state, and disposing resources
+- keep renderer lifecycle tied to the widget lifecycle rather than fixture
+  selection
+
+Non-responsibilities:
+
+- source import
+- `.impress` parsing
+- model construction
+- tessellation
+- mesh-to-PyVista conversion policy
+- feature-edge extraction policy
+- custom mouse-control behavior
+- PNG snapshot rendering
+
+The containing `ReferenceReviewPreviewPane` owns visible review state around
+the widget: placeholder, loading, failed, interactive, selected fixture label,
+diagnostic banner, and toolbar commands. It routes camera actions to the
+widget, but the meaning of those actions comes from `impression.preview`.
 
 ## Primary Surfaces
 
@@ -469,21 +504,25 @@ Split decision:
   - Split score: queue navigation panel total `17.5`
   - Split score: selected fixture context panel total `15`
 
-### Candidate Spec: Interactive Preview Bridge Panel
+### Candidate Spec: Interactive Preview Wrapper Panel
 
 Discovery purpose:
-- Attach the model preview bridge to the selected fixture without tying the QML
-  shell to PyVista internals.
+- Attach the selected fixture to an embedded Qt widget wrapper around the
+  actual `impression.preview` engine without tying the workbench shell to
+  PyVista internals or duplicating preview behavior.
 
 Responsibilities:
 - Functions/methods:
-  - preview bridge attachment
+  - preview widget attachment
+  - prepared payload handoff
   - camera action dispatch
 - Data structures/models:
   - preview state record
   - camera command record
+  - preview payload record
 - Dependencies/services:
-  - preview bridge
+  - shared `impression.preview` preview controller
+  - `ImpressionPreviewWidget`
   - async dispatcher
 - Returns/outputs/signals:
   - preview ready
@@ -493,40 +532,49 @@ Responsibilities:
 - UI fields/elements:
   - orbit, pan, zoom, reset
 - Reusable code plan:
-  - Existing code reused as-is: Impression preview model-loading semantics
-  - Additions to existing reusable library/module: preview bridge adapter
-  - New reusable library/module to create: none
+  - Existing code reused as-is: Impression preview scene, camera, and
+    interaction semantics
+  - Additions to existing reusable library/module: embeddable preview
+    controller API in `impression.preview`
+  - New reusable library/module to create: thin `ImpressionPreviewWidget`
+    adapter
 - Database queries/tables/migrations:
   - none
 - Async/concurrency behavior:
-  - preview loads run off UI thread; camera controls stay responsive
+  - preview payload preparation runs off UI thread; widget and renderer mutate
+    only on the Qt UI thread; camera controls stay responsive
 - Destructive/write behavior:
   - none
 - Security/privacy-sensitive behavior:
   - preview only loads selected source records
 - Performance-sensitive behavior:
-  - model load and tessellation never block QML event loop
+  - model load and tessellation never block the Qt event loop; renderer is
+    created once per preview surface and reused across fixture changes
 - Cross-screen reusable behavior:
   - preview state feeds artifact comparison and promotion readiness
 
 Project readiness fields:
 - Implementation owner/module:
-  - `ui/shell` for the embedded workbench host
-  - `ui/preview_bridge` for preview adapter state policy
+  - `ui/shell` or preview pane module for the embedded workbench host
+  - `impression.preview` for reusable scene/controller behavior
+  - `ui/preview_widget` for the thin Qt wrapper
 - Chosen defaults / parameters:
-  - embedded PyVista-rendered preview required for in-app STL review
-  - supervised external preview rejected for normal workbench interaction
+  - embedded actual-preview wrapper required for in-app review
+  - supervised external preview is an emergency diagnostic fallback, not the
+    normal interaction path
 - Test strategy:
-  - preview load, source change, camera action, and failure-state tests
+  - preview widget lifecycle, payload handoff, source change, camera action,
+    and failure-state tests
 - Data ownership:
-  - preview bridge owns render state; UI owns controls
+  - preview widget owns render state; shared preview controller owns scene
+    semantics; preview pane owns visible state and controls
 - Routes:
-  - selected fixture to preview task to bridge state
+  - selected fixture to preview payload task to preview pane to preview widget
 - Open questions / nuance discovered:
   - Qt offscreen tests use a placeholder because VTK's interactor is not stable
     on the offscreen platform
 - Readiness blockers:
-  - none for the embedded preview route
+  - none for the embedded actual-preview wrapper route
 
 Score:
 - Functions/methods: 2 x 2 = 4
@@ -548,11 +596,13 @@ Score:
 - Total: 31.5
 
 Split decision:
-- Split required by score. Implement as preview adapter decision spike (`9`),
-  preview load binding (`13.5`), and camera controls (`9`) final specs.
-  - Split score: preview adapter decision spike total `9`
-  - Split score: preview load binding total `13.5`
-  - Split score: camera controls total `9`
+- Split required by score. Implement as shared preview controller extraction
+  (`9`), Qt wrapper lifecycle (`10`), preview payload binding (`13.5`), and
+  camera/control routing (`9`) final specs.
+  - Split score: shared preview controller extraction total `9`
+  - Split score: Qt wrapper lifecycle total `10`
+  - Split score: preview payload binding total `13.5`
+  - Split score: camera/control routing total `9`
 
 ### Candidate Spec: Markdown Context Renderer
 
@@ -964,6 +1014,9 @@ Split decision:
 
 ## Change History
 
+- 2026-07-07: Updated preview architecture to require an embedded Qt wrapper
+  around the actual `impression.preview` engine, with shared scene behavior and
+  long-lived renderer ownership.
 - 2026-05-31: Ran five critical review, rescore, and split passes over the
   specification manifest. Split the UI work into shell, component framework,
   queue/context, preview, Markdown, artifact/notes, Codex panel, screenshot,
