@@ -7,6 +7,21 @@ from importlib import metadata, resources
 from pathlib import Path
 from typing import Iterable
 
+PREVIEW_DISPLAY_CONTROL_ICON_FILES: tuple[str, ...] = (
+    "icons/preview-display/authored-colors.svg",
+    "icons/preview-display/inspection-color.svg",
+    "icons/preview-display/lighting-flat.svg",
+    "icons/preview-display/lighting-face-normals.svg",
+    "icons/preview-display/lighting-camera.svg",
+    "icons/preview-display/object-fill.svg",
+    "icons/preview-display/object-edges.svg",
+    "icons/preview-display/triangle-wireframe.svg",
+    "icons/preview-display/bounds-grid.svg",
+    "icons/preview-display/axis-triad.svg",
+    "icons/preview-display/gradient-background.svg",
+    "icons/preview-display/polylines.svg",
+)
+
 
 @dataclass(frozen=True)
 class DependencyPolicyRecord:
@@ -27,7 +42,7 @@ class PackageResourceManifest:
         "components/MarkdownPanel.qml",
         "components/NotesPanel.qml",
         "components/StatusBadge.qml",
-    )
+    ) + PREVIEW_DISPLAY_CONTROL_ICON_FILES
 
 
 @dataclass(frozen=True)

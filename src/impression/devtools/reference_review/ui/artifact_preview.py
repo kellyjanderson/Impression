@@ -186,13 +186,18 @@ def _preview_mesh_for_artifact(artifact_path: Path, pv):
 
 
 def _object_feature_edges(mesh):
-    return mesh.extract_feature_edges(
-        boundary_edges=True,
-        feature_edges=True,
-        non_manifold_edges=True,
-        manifold_edges=False,
-        feature_angle=30.0,
-    )
+    try:
+        return mesh.extract_feature_edges(
+            boundary_edges=True,
+            feature_edges=True,
+            non_manifold_edges=True,
+            manifold_edges=False,
+            feature_angle=30.0,
+        )
+    except TypeError as exc:
+        if "feature_angle" not in str(exc):
+            raise
+    return mesh.extract_feature_edges(angle=30.0)
 
 
 def _apply_camera(plotter, bounds, camera: PreviewCameraState) -> None:

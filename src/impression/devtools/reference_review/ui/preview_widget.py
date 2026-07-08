@@ -1,0 +1,862 @@
+"""Qt preview widget lifecycle host for Reference Review."""
+
+from __future__ import annotations
+
+import os
+import json
+import math
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
+
+import numpy as np
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen, QPolygonF
+from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+
+from impression.mesh import Mesh, Polyline
+from ..async_core.qt_handoff import sanitize_error_text
+from ..preview_payload import PreviewPayload
+from ..preview_payload_builder import PREVIEW_PAYLOAD_FORMAT
+
+_PREVIEW_WIDGET_APP: QApplication | None = None
+_SOFTWARE_PREVIEW_BACKGROUND = QColor("#07111f")
+_SOFTWARE_PREVIEW_BACKGROUND_TOP = QColor("#10223a")
+_SOFTWARE_PREVIEW_DEFAULT_MESH = QColor("#f4a261")
+_SOFTWARE_PREVIEW_EDGE = QColor("#ffd2a8")
+_SOFTWARE_PREVIEW_GRID = QColor("#31445f")
+_SOFTWARE_PREVIEW_AXIS_X = QColor("#ff7d6e")
+_SOFTWARE_PREVIEW_AXIS_Y = QColor("#7fd37d")
+_SOFTWARE_PREVIEW_AXIS_Z = QColor("#72a8ff")
+
+
+@dataclass(frozen=True)
+class PreviewRendererLifecycleState:
+    """Inspectable renderer lifecycle state for tests and diagnostics."""
+
+    created: bool = False
+    disposed: bool = False
+    diagnostic: str | None = None
+
+
+@dataclass(frozen=True)
+class PreviewWidgetPayloadState:
+    """Current decoded payload state owned by the preview widget."""
+
+    generation: int | None = None
+    fixture_id: str | None = None
+    ready: bool = False
+    diagnostic: str | None = None
+
+
+@dataclass(frozen=True)
+class PreviewPaneVisibleState:
+    """Workbench-visible state owned outside the render widget."""
+
+    mode: str
+    fixture_id: str | None = None
+    message: str = ""
+    diagnostic: str | None = None
+    toolbar_enabled: bool = False
+
+
+@dataclass(frozen=True)
+class PreviewToolbarCommandRecord:
+    """Result of routing a preview toolbar command."""
+
+    command: str
+    executed: bool
+    enabled: bool
+    diagnostic: str | None = None
+
+
+@dataclass(frozen=True)
+class PreviewWrapperSmokeRecord:
+    """Manual smoke evidence command for the live embedded preview wrapper."""
+
+    fixture_file: Path
+    command: tuple[str, ...]
+    expected_fixture_type: str = ".impress"
+    verifies_lifecycle: bool = True
+
+
+@dataclass(frozen=True)
+class _ProjectedFace:
+    depth: float
+    polygon: QPolygonF
+    color: QColor
+    edge_segments: tuple[tuple[QPointF, QPointF], ...]
+
+
+@dataclass(frozen=True)
+class _ProjectedPolyline:
+    depth: float
+    polygon: QPolygonF
+    color: QColor
+    closed: bool
+
+
+@dataclass(frozen=True)
+class _ProjectedLine:
+    depth: float
+    start: QPointF
+    end: QPointF
+    color: QColor
+    width: float = 1.0
+
+
+@dataclass(frozen=True)
+class _ProjectedPreviewScene:
+    faces: tuple[_ProjectedFace, ...]
+    polylines: tuple[_ProjectedPolyline, ...]
+    grid_lines: tuple[_ProjectedLine, ...]
+    axis_lines: tuple[_ProjectedLine, ...]
+
+
+@dataclass(frozen=True)
+class _PreparedFaceEdges:
+    edge_pairs: tuple[tuple[int, int], ...]
+
+
+@dataclass(frozen=True)
+class _PreparedMesh:
+    vertices: np.ndarray
+    faces: np.ndarray
+    color: QColor
+    face_edges: tuple[_PreparedFaceEdges, ...]
+    face_normals: np.ndarray
+
+
+@dataclass(frozen=True)
+class _PreparedPolyline:
+    points: np.ndarray
+    color: QColor
+    closed: bool
+
+
+@dataclass(frozen=True)
+class _PreparedPreviewGeometry:
+    center: np.ndarray
+    span: float
+    bounds_min: np.ndarray
+    bounds_max: np.ndarray
+    items: tuple[_PreparedMesh | _PreparedPolyline, ...]
+
+
+def build_preview_wrapper_smoke_record(
+    fixture_file: Path = Path("tests/reference_review_fixtures/dirty-impress-fixtures.json"),
+) -> PreviewWrapperSmokeRecord:
+    return PreviewWrapperSmokeRecord(
+        fixture_file=fixture_file,
+        command=(
+            ".venv/bin/impression-reference-review",
+            "--fixture-file",
+            fixture_file.as_posix(),
+        ),
+    )
+
+
+def preview_pane_empty_state() -> PreviewPaneVisibleState:
+    return PreviewPaneVisibleState(
+        mode="empty",
+        message="No fixture selected.",
+    )
+
+
+def preview_pane_loading_state(fixture_id: str) -> PreviewPaneVisibleState:
+    return PreviewPaneVisibleState(
+        mode="loading",
+        fixture_id=fixture_id,
+        message="Loading preview...",
+    )
+
+
+def preview_pane_ready_state(payload_state: PreviewWidgetPayloadState) -> PreviewPaneVisibleState:
+    return PreviewPaneVisibleState(
+        mode="ready",
+        fixture_id=payload_state.fixture_id,
+        message="Preview ready.",
+        toolbar_enabled=payload_state.ready,
+    )
+
+
+def preview_pane_failure_state(
+    fixture_id: str | None,
+    diagnostic: str,
+    *,
+    cwd: Path | None = None,
+    home: Path | None = None,
+) -> PreviewPaneVisibleState:
+    sanitized = sanitize_error_text(diagnostic, cwd=cwd, home=home)
+    return PreviewPaneVisibleState(
+        mode="failure",
+        fixture_id=fixture_id,
+        message="Preview unavailable.",
+        diagnostic=sanitized,
+        toolbar_enabled=False,
+    )
+
+
+def resolve_preview_toolbar_enabled(state: PreviewPaneVisibleState) -> bool:
+    return state.toolbar_enabled and state.mode == "ready"
+
+
+def route_preview_toolbar_command(
+    widget: object,
+    state: PreviewPaneVisibleState,
+    command: str,
+) -> PreviewToolbarCommandRecord:
+    enabled = resolve_preview_toolbar_enabled(state)
+    if not enabled:
+        return PreviewToolbarCommandRecord(
+            command=command,
+            executed=False,
+            enabled=False,
+            diagnostic="preview-toolbar-disabled",
+        )
+    if command == "reset":
+        reset = getattr(widget, "reset_view", None)
+        if not callable(reset):
+            return PreviewToolbarCommandRecord(
+                command=command,
+                executed=False,
+                enabled=True,
+                diagnostic="preview-widget-reset-unavailable",
+            )
+        reset()
+        return PreviewToolbarCommandRecord(command=command, executed=True, enabled=True)
+    if command in {"front", "top", "right"}:
+        preset = getattr(widget, "apply_camera_preset", None)
+        if not callable(preset):
+            return PreviewToolbarCommandRecord(
+                command=command,
+                executed=False,
+                enabled=True,
+                diagnostic="preview-widget-preset-unavailable",
+            )
+        preset(command)
+        return PreviewToolbarCommandRecord(command=command, executed=True, enabled=True)
+    return PreviewToolbarCommandRecord(
+        command=command,
+        executed=False,
+        enabled=True,
+        diagnostic="unsupported-preview-toolbar-command",
+    )
+
+
+class PreviewRendererLifecycleWidget(QWidget):
+    """Widget host that owns one long-lived embedded preview renderer."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        _ensure_widget_app()
+        super().__init__(parent)
+        self.setObjectName("embeddedPreviewSurface")
+        self.setMinimumSize(360, 260)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._status = QLabel("No fixture selected.", self)
+        self._status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._layout.addWidget(self._status)
+        self._plotter = None
+        self._previewer = None
+        self._renderer_state = PreviewRendererLifecycleState()
+        self._payload_state = PreviewWidgetPayloadState()
+        self._current_datasets: list[Mesh | Polyline] = []
+
+    @property
+    def renderer_state(self) -> PreviewRendererLifecycleState:
+        return self._renderer_state
+
+    @property
+    def payload_state(self) -> PreviewWidgetPayloadState:
+        return self._payload_state
+
+    def ensure_renderer(
+        self,
+        *,
+        renderer_factory: Callable[[QWidget], object] | None = None,
+        previewer_factory: Callable[[], object] | None = None,
+    ) -> object:
+        if self._plotter is not None:
+            return self._plotter
+        plotter = renderer_factory(self) if renderer_factory is not None else self._default_renderer_factory()
+        self._layout.addWidget(plotter, 1)
+        self._plotter = plotter
+        self._previewer = None
+        self._renderer_state = PreviewRendererLifecycleState(created=True)
+        return self._plotter
+
+    def clear_renderer_scene(self, message: str) -> None:
+        if self._plotter is not None:
+            self._plotter.clear()
+        self._status.setText(message)
+        self._status.show()
+
+    def clear_preview(self, message: str = "No fixture selected.") -> PreviewWidgetPayloadState:
+        self._current_datasets = []
+        self._payload_state = PreviewWidgetPayloadState(diagnostic=message)
+        self.clear_renderer_scene(message)
+        return self._payload_state
+
+    def set_preview_payload(
+        self,
+        payload: PreviewPayload,
+        *,
+        renderer_factory: Callable[[QWidget], object] | None = None,
+        previewer_factory: Callable[[], object] | None = None,
+    ) -> PreviewWidgetPayloadState:
+        if payload.payload_path is None:
+            return self._fail_payload(payload, "preview-payload-missing-path")
+        try:
+            datasets = _load_payload_datasets(payload.payload_path)
+            plotter = self.ensure_renderer(
+                renderer_factory=renderer_factory,
+                previewer_factory=previewer_factory,
+            )
+            self._status.hide()
+            plotter.clear()
+            set_datasets = getattr(plotter, "set_datasets", None)
+            if not callable(set_datasets):
+                raise RuntimeError("preview-renderer-missing-set-datasets")
+            set_datasets(datasets)
+            self._current_datasets = list(datasets)
+            self._payload_state = PreviewWidgetPayloadState(
+                generation=payload.request.generation,
+                fixture_id=payload.request.fixture_id,
+                ready=True,
+            )
+            return self._payload_state
+        except Exception as exc:
+            return self._fail_payload(payload, str(exc) or exc.__class__.__name__)
+
+    def dispose_renderer(self) -> None:
+        if self._plotter is not None:
+            self._plotter.close()
+            self._plotter = None
+        self._renderer_state = PreviewRendererLifecycleState(disposed=True)
+
+    def _fail_payload(self, payload: PreviewPayload, diagnostic: str) -> PreviewWidgetPayloadState:
+        self._payload_state = PreviewWidgetPayloadState(
+            generation=payload.request.generation,
+            fixture_id=payload.request.fixture_id,
+            diagnostic=sanitize_error_text(diagnostic),
+        )
+        self._current_datasets = []
+        self._status.setText(f"Preview unavailable: {self._payload_state.diagnostic}")
+        self._status.show()
+        return self._payload_state
+
+    def _default_renderer_factory(self):
+        return SoftwarePreviewSurface(self)
+
+    def _default_previewer_factory(self):
+        return None
+
+
+class SoftwarePreviewSurface(QWidget):
+    """Small Qt-only mesh preview surface for the workbench."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setMinimumSize(360, 260)
+        self.setMouseTracking(True)
+        self._datasets: tuple[Mesh | Polyline, ...] = ()
+        self._rotation_x = -0.35
+        self._rotation_y = 0.45
+        self._zoom = 1.0
+        self._last_pos = None
+        self._geometry: _PreparedPreviewGeometry | None = None
+
+    def clear(self) -> None:
+        self._datasets = ()
+        self._geometry = None
+        self.update()
+
+    def set_datasets(self, datasets: tuple[Mesh | Polyline, ...]) -> None:
+        self._datasets = tuple(datasets)
+        self._geometry = _prepare_preview_geometry(self._datasets)
+        self.update()
+
+    def reset_camera(self) -> None:
+        self._rotation_x = -0.35
+        self._rotation_y = 0.45
+        self._zoom = 1.0
+        self.update()
+
+    def reset_camera_clipping_range(self) -> None:
+        return
+
+    def render(self, *args, **kwargs):
+        if len(args) == 1 and isinstance(args[0], QPainter) and not kwargs:
+            return super().render(args[0], QPoint(0, 0))
+        if args or kwargs:
+            return super().render(*args, **kwargs)
+        self.update()
+        return None
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        gradient = QLinearGradient(0.0, 0.0, 0.0, float(max(self.height(), 1)))
+        gradient.setColorAt(0.0, _SOFTWARE_PREVIEW_BACKGROUND_TOP)
+        gradient.setColorAt(1.0, _SOFTWARE_PREVIEW_BACKGROUND)
+        painter.fillRect(self.rect(), gradient)
+        if self._geometry is None:
+            return
+        projected = _project_prepared_geometry(
+            self._geometry,
+            width=max(self.width(), 1),
+            height=max(self.height(), 1),
+            rotation_x=self._rotation_x,
+            rotation_y=self._rotation_y,
+            zoom=self._zoom,
+        )
+        for line in projected.grid_lines:
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(line.color, line.width))
+            painter.drawLine(line.start, line.end)
+
+        edge_pen = QPen(_SOFTWARE_PREVIEW_EDGE, 1.2)
+        painter.setPen(Qt.PenStyle.NoPen)
+        for face in projected.faces:
+            painter.setBrush(QColor(face.color))
+            painter.drawPolygon(face.polygon)
+            if face.edge_segments:
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(edge_pen)
+                for start, end in face.edge_segments:
+                    painter.drawLine(start, end)
+                painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(edge_pen)
+        for polyline in projected.polylines:
+            if polyline.closed:
+                painter.drawPolygon(polyline.polygon)
+            else:
+                painter.drawPolyline(polyline.polygon)
+        for line in projected.axis_lines:
+            painter.setPen(QPen(line.color, line.width))
+            painter.drawLine(line.start, line.end)
+
+    def mousePressEvent(self, event) -> None:
+        self._last_pos = event.position()
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._last_pos is None:
+            self._last_pos = event.position()
+            return
+        pos = event.position()
+        delta = pos - self._last_pos
+        self._last_pos = pos
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            self._rotation_y += delta.x() * 0.01
+            self._rotation_x += delta.y() * 0.01
+            self.update()
+
+    def mouseReleaseEvent(self, _event) -> None:
+        self._last_pos = None
+
+    def wheelEvent(self, event) -> None:
+        self._zoom = min(4.0, max(0.25, self._zoom * (1.1 if event.angleDelta().y() > 0 else 0.9)))
+        self.update()
+
+
+def _project_datasets(
+    datasets: tuple[Mesh | Polyline, ...],
+    *,
+    width: int,
+    height: int,
+    rotation_x: float,
+    rotation_y: float,
+    zoom: float,
+) -> _ProjectedPreviewScene:
+    geometry = _prepare_preview_geometry(datasets)
+    if geometry is None:
+        return _ProjectedPreviewScene(faces=(), polylines=(), grid_lines=(), axis_lines=())
+    return _project_prepared_geometry(
+        geometry,
+        width=width,
+        height=height,
+        rotation_x=rotation_x,
+        rotation_y=rotation_y,
+        zoom=zoom,
+    )
+
+
+def _prepare_preview_geometry(
+    datasets: tuple[Mesh | Polyline, ...],
+) -> _PreparedPreviewGeometry | None:
+    points = []
+    for dataset in datasets:
+        if isinstance(dataset, Mesh) and len(dataset.vertices):
+            points.append(np.asarray(dataset.vertices, dtype=float))
+        elif isinstance(dataset, Polyline) and len(dataset.points):
+            points.append(np.asarray(dataset.points, dtype=float))
+    if not points:
+        return None
+    all_points = np.vstack(points)
+    bounds_min = all_points.min(axis=0)
+    bounds_max = all_points.max(axis=0)
+    center = (bounds_min + bounds_max) / 2.0
+    span = float(np.max(bounds_max - bounds_min))
+    items: list[_PreparedMesh | _PreparedPolyline] = []
+    for dataset in datasets:
+        if isinstance(dataset, Polyline):
+            items.append(
+                _PreparedPolyline(
+                    np.asarray(dataset.points, dtype=float),
+                    _polyline_qcolor(dataset),
+                    dataset.closed,
+                )
+            )
+            continue
+        items.append(
+            _prepare_mesh_geometry(
+                dataset,
+                np.asarray(dataset.vertices, dtype=float),
+                np.asarray(dataset.faces, dtype=int),
+            )
+        )
+    return _PreparedPreviewGeometry(
+        center=center,
+        span=span,
+        bounds_min=bounds_min,
+        bounds_max=bounds_max,
+        items=tuple(items),
+    )
+
+
+def _prepare_mesh_geometry(mesh: Mesh, vertices: np.ndarray, faces: np.ndarray) -> _PreparedMesh:
+    object_edges = _object_edge_keys(mesh)
+    face_edges = []
+    face_normals = []
+    for face in faces:
+        edge_pairs = []
+        face_indices = tuple(int(index) for index in face)
+        for local_index, vertex_index in enumerate(face_indices):
+            next_local_index = (local_index + 1) % len(face_indices)
+            next_vertex_index = face_indices[next_local_index]
+            edge_key = (
+                min(vertex_index, next_vertex_index),
+                max(vertex_index, next_vertex_index),
+            )
+            if edge_key in object_edges:
+                edge_pairs.append((local_index, next_local_index))
+        face_edges.append(_PreparedFaceEdges(tuple(edge_pairs)))
+        normal = _face_normal(vertices, face)
+        face_normals.append(
+            normal if normal is not None else np.asarray((0.0, 0.0, 1.0))
+        )
+    return _PreparedMesh(
+        vertices,
+        faces,
+        _mesh_qcolor(mesh),
+        tuple(face_edges),
+        np.asarray(face_normals, dtype=float),
+    )
+
+
+def _project_prepared_geometry(
+    geometry: _PreparedPreviewGeometry,
+    *,
+    width: int,
+    height: int,
+    rotation_x: float,
+    rotation_y: float,
+    zoom: float,
+) -> _ProjectedPreviewScene:
+    center = geometry.center
+    span = geometry.span
+    scale = (min(width, height) * 0.72 * zoom) / max(span, 1e-6)
+    rotation = _rotation_matrix(rotation_x, rotation_y)
+    project_point = _make_projector(width, height, scale)
+
+    faces: list[_ProjectedFace] = []
+    polylines: list[_ProjectedPolyline] = []
+    grid_lines = _project_bounds_grid(geometry, rotation=rotation, project_point=project_point)
+    axis_lines = _project_axis_triad(geometry, rotation=rotation, project_point=project_point)
+    for item in geometry.items:
+        if isinstance(item, _PreparedPolyline):
+            rotated = (item.points - center) @ rotation.T
+            polygon = QPolygonF([project_point(point) for point in rotated])
+            polylines.append(
+                _ProjectedPolyline(
+                    float(np.mean(rotated[:, 2])) if len(rotated) else 0.0,
+                    polygon,
+                    item.color,
+                    item.closed,
+                )
+            )
+            continue
+
+        vertices = (item.vertices - center) @ rotation.T
+        normals = item.face_normals @ rotation.T
+        for face, prepared_edges, normal in zip(item.faces, item.face_edges, normals):
+            if len(face) < 3:
+                continue
+            face_points = vertices[face]
+            polygon = QPolygonF([project_point(point) for point in face_points])
+            edge_segments = []
+            for local_index, next_local_index in prepared_edges.edge_pairs:
+                edge_segments.append(
+                    (
+                        QPointF(polygon[local_index]),
+                        QPointF(polygon[next_local_index]),
+                    )
+                )
+            faces.append(
+                _ProjectedFace(
+                    float(np.mean(face_points[:, 2])),
+                    polygon,
+                    _shaded_color(item.color, normal),
+                    tuple(edge_segments),
+                )
+            )
+    faces.sort(key=lambda item: item.depth)
+    polylines.sort(key=lambda item: item.depth)
+    return _ProjectedPreviewScene(
+        faces=tuple(faces),
+        polylines=tuple(polylines),
+        grid_lines=grid_lines,
+        axis_lines=axis_lines,
+    )
+
+
+def _object_edge_keys(mesh: Mesh, *, sharp_angle_degrees: float = 30.0) -> set[tuple[int, int]]:
+    vertices = np.asarray(mesh.vertices, dtype=float)
+    faces = np.asarray(mesh.faces, dtype=int)
+    normals = [_face_normal(vertices, face) for face in faces]
+    edge_faces: dict[tuple[int, int], list[int]] = {}
+    for face_index, face in enumerate(faces):
+        face_indices = tuple(int(index) for index in face)
+        for local_index, vertex_index in enumerate(face_indices):
+            next_vertex_index = face_indices[(local_index + 1) % len(face_indices)]
+            edge_key = (
+                min(vertex_index, next_vertex_index),
+                max(vertex_index, next_vertex_index),
+            )
+            edge_faces.setdefault(edge_key, []).append(face_index)
+
+    sharp_dot_threshold = math.cos(math.radians(sharp_angle_degrees))
+    object_edges: set[tuple[int, int]] = set()
+    for edge_key, adjacent_faces in edge_faces.items():
+        if len(adjacent_faces) != 2:
+            object_edges.add(edge_key)
+            continue
+        first = normals[adjacent_faces[0]]
+        second = normals[adjacent_faces[1]]
+        if first is None or second is None or float(np.dot(first, second)) < sharp_dot_threshold:
+            object_edges.add(edge_key)
+    return object_edges
+
+
+def _make_projector(width: int, height: int, scale: float):
+    def project(point: np.ndarray) -> QPointF:
+        return QPointF(width / 2.0 + point[0] * scale, height / 2.0 - point[1] * scale)
+
+    return project
+
+
+def _project_bounds_grid(
+    geometry: _PreparedPreviewGeometry,
+    *,
+    rotation: np.ndarray,
+    project_point,
+) -> tuple[_ProjectedLine, ...]:
+    bounds_min = geometry.bounds_min
+    bounds_max = geometry.bounds_max
+    center = geometry.center
+    span = max(geometry.span, 1e-6)
+    z = bounds_min[2]
+    x_min = bounds_min[0]
+    x_max = bounds_max[0]
+    y_min = bounds_min[1]
+    y_max = bounds_max[1]
+    if abs(x_max - x_min) < 1e-9:
+        x_min -= span * 0.5
+        x_max += span * 0.5
+    if abs(y_max - y_min) < 1e-9:
+        y_min -= span * 0.5
+        y_max += span * 0.5
+
+    lines: list[_ProjectedLine] = []
+    steps = 4
+    for index in range(steps + 1):
+        t = index / steps
+        x = x_min + (x_max - x_min) * t
+        y = y_min + (y_max - y_min) * t
+        x_start = (np.asarray((x, y_min, z), dtype=float) - center) @ rotation.T
+        x_end = (np.asarray((x, y_max, z), dtype=float) - center) @ rotation.T
+        y_start = (np.asarray((x_min, y, z), dtype=float) - center) @ rotation.T
+        y_end = (np.asarray((x_max, y, z), dtype=float) - center) @ rotation.T
+        width = 1.4 if index in {0, steps} else 0.8
+        lines.append(
+            _ProjectedLine(
+                float((x_start[2] + x_end[2]) * 0.5),
+                project_point(x_start),
+                project_point(x_end),
+                _SOFTWARE_PREVIEW_GRID,
+                width,
+            )
+        )
+        lines.append(
+            _ProjectedLine(
+                float((y_start[2] + y_end[2]) * 0.5),
+                project_point(y_start),
+                project_point(y_end),
+                _SOFTWARE_PREVIEW_GRID,
+                width,
+            )
+        )
+    return tuple(lines)
+
+
+def _project_axis_triad(
+    geometry: _PreparedPreviewGeometry,
+    *,
+    rotation: np.ndarray,
+    project_point,
+) -> tuple[_ProjectedLine, ...]:
+    center = geometry.center
+    origin = np.asarray(
+        (geometry.bounds_min[0], geometry.bounds_min[1], geometry.bounds_min[2]),
+        dtype=float,
+    )
+    axis_length = max(geometry.span, 1e-6) * 0.28
+    specs = (
+        (np.asarray((axis_length, 0.0, 0.0), dtype=float), _SOFTWARE_PREVIEW_AXIS_X),
+        (np.asarray((0.0, axis_length, 0.0), dtype=float), _SOFTWARE_PREVIEW_AXIS_Y),
+        (np.asarray((0.0, 0.0, axis_length), dtype=float), _SOFTWARE_PREVIEW_AXIS_Z),
+    )
+    projected_origin = (origin - center) @ rotation.T
+    lines = []
+    for offset, color in specs:
+        projected_end = (origin + offset - center) @ rotation.T
+        lines.append(
+            _ProjectedLine(
+                float((projected_origin[2] + projected_end[2]) * 0.5),
+                project_point(projected_origin),
+                project_point(projected_end),
+                color,
+                2.0,
+            )
+        )
+    return tuple(lines)
+
+
+def _shaded_color(color: QColor, normal: np.ndarray) -> QColor:
+    normal = np.asarray(normal, dtype=float)
+    norm = float(np.linalg.norm(normal))
+    if norm < 1e-9:
+        return QColor(color)
+    normal = normal / norm
+    light = np.asarray((-0.35, 0.45, 0.82), dtype=float)
+    light = light / float(np.linalg.norm(light))
+    diffuse = max(0.0, float(np.dot(normal, light)))
+    backlight = max(0.0, float(np.dot(-normal, light))) * 0.18
+    rim = (1.0 - abs(float(normal[2]))) * 0.18
+    intensity = min(1.18, 0.48 + diffuse * 0.46 + backlight + rim)
+    return QColor.fromRgbF(
+        min(1.0, color.redF() * intensity),
+        min(1.0, color.greenF() * intensity),
+        min(1.0, color.blueF() * intensity),
+        color.alphaF(),
+    )
+
+
+def _face_normal(vertices: np.ndarray, face: np.ndarray) -> np.ndarray | None:
+    if len(face) < 3:
+        return None
+    face_points = vertices[face]
+    origin = face_points[0]
+    for first_index in range(1, len(face_points) - 1):
+        first = face_points[first_index] - origin
+        for second_index in range(first_index + 1, len(face_points)):
+            second = face_points[second_index] - origin
+            normal = np.cross(first, second)
+            norm = float(np.linalg.norm(normal))
+            if norm > 1e-9:
+                return normal / norm
+    return None
+
+
+def _rotation_matrix(rotation_x: float, rotation_y: float) -> np.ndarray:
+    cx = math.cos(rotation_x)
+    sx = math.sin(rotation_x)
+    cy = math.cos(rotation_y)
+    sy = math.sin(rotation_y)
+    rx = np.asarray(((1.0, 0.0, 0.0), (0.0, cx, -sx), (0.0, sx, cx)))
+    ry = np.asarray(((cy, 0.0, sy), (0.0, 1.0, 0.0), (-sy, 0.0, cy)))
+    return ry @ rx
+
+
+def _mesh_qcolor(mesh: Mesh) -> QColor:
+    color = mesh.color
+    if color is None:
+        return QColor(_SOFTWARE_PREVIEW_DEFAULT_MESH)
+    values = tuple(float(value) for value in color)
+    if len(values) >= 3 and all(0.0 <= value <= 1.0 for value in values[:3]):
+        alpha = values[3] if len(values) >= 4 else 1.0
+        return QColor.fromRgbF(values[0], values[1], values[2], alpha)
+    if len(values) >= 3:
+        alpha = int(values[3]) if len(values) >= 4 else 255
+        return QColor(int(values[0]), int(values[1]), int(values[2]), alpha)
+    return QColor(_SOFTWARE_PREVIEW_DEFAULT_MESH)
+
+
+def _polyline_qcolor(polyline: Polyline) -> QColor:
+    color = polyline.color
+    if color is None:
+        return QColor(_SOFTWARE_PREVIEW_DEFAULT_MESH)
+    if isinstance(color, str):
+        return QColor(color)
+    values = tuple(float(value) for value in color)
+    if len(values) >= 3 and all(0.0 <= value <= 1.0 for value in values[:3]):
+        alpha = values[3] if len(values) >= 4 else 1.0
+        return QColor.fromRgbF(values[0], values[1], values[2], alpha)
+    if len(values) >= 3:
+        alpha = int(values[3]) if len(values) >= 4 else 255
+        return QColor(int(values[0]), int(values[1]), int(values[2]), alpha)
+    return QColor(_SOFTWARE_PREVIEW_DEFAULT_MESH)
+
+
+def _ensure_widget_app() -> QApplication:
+    global _PREVIEW_WIDGET_APP
+    app = QApplication.instance()
+    if app is not None:
+        return app
+    _PREVIEW_WIDGET_APP = QApplication([])
+    return _PREVIEW_WIDGET_APP
+
+
+def _load_payload_datasets(path: Path) -> tuple[Mesh | Polyline, ...]:
+    payload = json.loads(Path(path).read_text())
+    if payload.get("format") != PREVIEW_PAYLOAD_FORMAT:
+        raise ValueError("unsupported-preview-payload-format")
+    datasets = tuple(_decode_dataset(item) for item in payload.get("datasets", ()))
+    if not datasets:
+        raise ValueError("empty-preview-payload")
+    return datasets
+
+
+def _decode_dataset(item: object) -> Mesh | Polyline:
+    if not isinstance(item, dict):
+        raise ValueError("invalid-preview-payload-dataset")
+    kind = item.get("kind")
+    if kind == "mesh":
+        return Mesh(
+            vertices=np.asarray(item.get("vertices", ()), dtype=float),
+            faces=np.asarray(item.get("faces", ()), dtype=int),
+            color=None if item.get("color") is None else tuple(item["color"]),
+            face_colors=None
+            if item.get("face_colors") is None
+            else np.asarray(item["face_colors"], dtype=float),
+            metadata=dict(item.get("metadata", {})),
+        )
+    if kind == "polyline":
+        return Polyline(
+            points=np.asarray(item.get("points", ()), dtype=float),
+            closed=bool(item.get("closed", False)),
+            color=None if item.get("color") is None else tuple(item["color"]),
+        )
+    raise ValueError("unsupported-preview-payload-dataset")

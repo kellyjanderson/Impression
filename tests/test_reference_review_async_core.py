@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pickle
 from threading import Event
 from pathlib import Path
 
@@ -66,6 +67,27 @@ def test_worker_result_envelope_requires_error_text_for_failures() -> None:
     assert failure.owner == "preview"
     assert failure.kind is ReviewTaskKind.PREVIEW_BUILD
     assert failure.error == "boom"
+
+
+def test_workbench_message_pickle_preserves_immutable_payload() -> None:
+    message = ReviewWorkbenchMessage(
+        owner="preview",
+        kind=ReviewTaskKind.PREVIEW_BUILD,
+        request_id=3,
+        fixture_id="fixture-a",
+        payload={"generation": 4},
+    )
+
+    restored = pickle.loads(pickle.dumps(message))
+
+    assert restored.owner_key == message.owner_key
+    assert restored.payload["generation"] == 4
+    try:
+        restored.payload["generation"] = 5
+    except TypeError:
+        pass
+    else:  # pragma: no cover - defensive
+        raise AssertionError("payload should remain immutable after pickle roundtrip")
 
 
 def test_dispatcher_accepts_tasks_and_returns_typed_completion_envelopes() -> None:

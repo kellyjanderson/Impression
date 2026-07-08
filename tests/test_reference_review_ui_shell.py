@@ -5,24 +5,46 @@ import json
 import subprocess
 import sys
 import tomllib
+import xml.etree.ElementTree as ET
+from concurrent.futures import Future
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import numpy as np
 from PySide6.QtCore import QObject, Qt
-from PySide6.QtWidgets import QPushButton, QTabWidget
+from PySide6.QtGui import QImage, QPainter
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTabWidget
 
+from impression.mesh import Mesh
 from impression.devtools.reference_review import ReviewSourceModelRecord
 from impression.devtools.reference_review.ui import (
     BridgeRecord,
     BridgeRegistry,
     DependencyPolicyRecord,
     PackageResourceManifest,
+    PREVIEW_DISPLAY_CONTROL_ICON_FILES,
     build_dependency_policy_report,
     launch_workbench,
     load_style_tokens,
+    PreviewRendererLifecycleWidget,
+    SoftwarePreviewSurface,
     verify_qml_resource_layout,
 )
+from impression.devtools.reference_review import (
+    LoadedPreviewDataset,
+    PreviewPayloadRequest,
+    build_impress_preview_result,
+    write_preview_payload_file,
+)
+import impression.devtools.reference_review.ui.preview_widget as preview_widget
 from impression.devtools.reference_review.ui import artifact_preview
+from impression.devtools.reference_review.ui.preview_widget import (
+    _SOFTWARE_PREVIEW_DEFAULT_MESH,
+    _object_edge_keys,
+    _project_prepared_geometry,
+    _project_datasets,
+)
 from impression.devtools.reference_review.ui import shell
 from impression.devtools.reference_review.ui.shell import InteractiveStlPreviewLabel
 from impression.devtools.reference_review.ui.style import component_contracts
@@ -32,6 +54,9 @@ def test_reference_review_ui_dependency_is_optional_extra() -> None:
     pyproject = tomllib.loads(Path("pyproject.toml").read_text())
     extras = pyproject["project"]["optional-dependencies"]
     core_dependencies = pyproject["project"]["dependencies"]
+    package_data = pyproject["tool"]["setuptools"]["package-data"][
+        "impression.devtools.reference_review.ui"
+    ]
 
     report = build_dependency_policy_report(
         DependencyPolicyRecord(),
@@ -43,6 +68,7 @@ def test_reference_review_ui_dependency_is_optional_extra() -> None:
     assert "reference-review-ui" in extras
     assert any(dep.startswith("PySide6") for dep in extras["reference-review-ui"])
     assert not any(dep.startswith("PySide6") for dep in core_dependencies)
+    assert "qml/icons/preview-display/*.svg" in package_data
 
 
 def test_live_shell_does_not_force_pyvista_offscreen_mode() -> None:
@@ -72,6 +98,18 @@ def test_qml_resource_layout_contains_shell_and_component_files() -> None:
 
     assert result.valid
     assert not result.diagnostics
+
+
+def test_preview_display_control_icons_are_packaged_and_valid_xml() -> None:
+    qml_root = Path("src/impression/devtools/reference_review/ui/qml")
+
+    assert len(PREVIEW_DISPLAY_CONTROL_ICON_FILES) == 12
+    for relative in PREVIEW_DISPLAY_CONTROL_ICON_FILES:
+        path = qml_root / relative
+        assert path.is_file(), relative
+        root = ET.parse(path).getroot()
+        assert root.tag.endswith("svg")
+        assert root.attrib["viewBox"] == "0 0 24 24"
 
 
 def test_qml_resource_layout_reports_missing_files(tmp_path: Path) -> None:
@@ -187,6 +225,140 @@ def test_impress_preview_edge_overlay_uses_object_edges_not_triangle_wireframe(p
     assert triangle_edges.n_cells > object_edges.n_cells
 
 
+def test_software_preview_projects_object_edges_not_triangle_wireframe() -> None:
+    mesh = Mesh(
+        vertices=np.asarray(
+            (
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (0.0, 1.0, 0.0),
+            )
+        ),
+        faces=np.asarray(((0, 1, 2), (0, 2, 3))),
+    )
+
+    scene = _project_datasets(
+        (mesh,),
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+    )
+
+    assert len(scene.faces) == 2
+    assert _object_edge_keys(mesh) == {(0, 1), (1, 2), (2, 3), (0, 3)}
+    assert sum(len(face.edge_segments) for face in scene.faces) == 4
+    assert len(scene.grid_lines) == 10
+    assert len(scene.axis_lines) == 3
+    assert any(
+        face.color.name() != _SOFTWARE_PREVIEW_DEFAULT_MESH.name()
+        for face in scene.faces
+    )
+
+
+def test_software_preview_caches_object_edges_between_repaints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    mesh = Mesh(
+        vertices=np.asarray(
+            (
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (0.0, 1.0, 0.0),
+            )
+        ),
+        faces=np.asarray(((0, 1, 2), (0, 2, 3))),
+    )
+    calls = 0
+    original_object_edge_keys = preview_widget._object_edge_keys
+
+    def counting_object_edge_keys(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_object_edge_keys(*args, **kwargs)
+
+    monkeypatch.setattr(preview_widget, "_object_edge_keys", counting_object_edge_keys)
+    surface = SoftwarePreviewSurface()
+    surface.set_datasets((mesh,))
+
+    assert calls == 1
+    assert surface._geometry is not None
+    _project_prepared_geometry(
+        surface._geometry,
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+    )
+    _project_prepared_geometry(
+        surface._geometry,
+        width=300,
+        height=300,
+        rotation_x=0.2,
+        rotation_y=0.3,
+        zoom=1.1,
+    )
+
+    assert calls == 1
+
+
+def test_software_preview_renders_to_qt_paint_device() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    QApplication.instance() or QApplication([])
+    mesh = Mesh(
+        vertices=np.asarray(
+            (
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (0.0, 1.0, 0.0),
+                (0.0, 0.0, 1.0),
+                (1.0, 0.0, 1.0),
+                (1.0, 1.0, 1.0),
+                (0.0, 1.0, 1.0),
+            )
+        ),
+        faces=np.asarray(
+            (
+                (0, 1, 2),
+                (0, 2, 3),
+                (4, 6, 5),
+                (4, 7, 6),
+                (0, 4, 5),
+                (0, 5, 1),
+                (1, 5, 6),
+                (1, 6, 2),
+                (2, 6, 7),
+                (2, 7, 3),
+                (3, 7, 4),
+                (3, 4, 0),
+            )
+        ),
+    )
+    surface = SoftwarePreviewSurface()
+    surface.resize(360, 260)
+    surface.set_datasets((mesh,))
+    image = QImage(surface.size(), QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+
+    surface.render(painter)
+    painter.end()
+
+    sampled_colors = {
+        image.pixelColor(x, y).name()
+        for y in range(0, image.height(), 10)
+        for x in range(0, image.width(), 10)
+    }
+    assert len(sampled_colors) > 8
+    assert any(color.startswith("#") and int(color[1:3], 16) > 100 for color in sampled_colors)
+
+
 def test_dirty_impress_fixture_launch_exposes_artifact_without_startup_render(project_root: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     fixture_file = project_root / "tests/reference_review_fixtures/dirty-impress-fixtures.json"
@@ -253,20 +425,20 @@ def test_live_preview_loads_impress_artifact_into_plotter(
 
     class FakePlotter:
         def __init__(self) -> None:
-            self.backgrounds = []
-            self.meshes = []
             self.cleared = 0
             self.rendered = 0
             self.clipping_reset = 0
+            self.reset = 0
+            self.datasets = []
 
         def clear(self) -> None:
             self.cleared += 1
 
-        def set_background(self, color: str) -> None:
-            self.backgrounds.append(color)
+        def set_datasets(self, datasets) -> None:
+            self.datasets.append(tuple(datasets))
 
-        def add_mesh(self, *args, **kwargs) -> None:
-            self.meshes.append((args, kwargs))
+        def reset_camera(self) -> None:
+            self.reset += 1
 
         def reset_camera_clipping_range(self) -> None:
             self.clipping_reset += 1
@@ -274,17 +446,8 @@ def test_live_preview_loads_impress_artifact_into_plotter(
         def render(self) -> None:
             self.rendered += 1
 
-    class FakePreviewer:
-        def __init__(self) -> None:
-            self.reset_calls = []
-
-        def _reset_camera(self, plotter, datasets) -> None:
-            self.reset_calls.append((plotter, tuple(datasets)))
-
     fake_plotter = FakePlotter()
-    fake_previewer = FakePreviewer()
     preview._plotter = fake_plotter
-    preview._previewer = fake_previewer
     monkeypatch.setattr(preview, "_ensure_plotter", lambda: fake_plotter)
     preview._artifact_path = artifact
     preview._load_generation = 1
@@ -292,70 +455,289 @@ def test_live_preview_loads_impress_artifact_into_plotter(
 
     preview._apply_build_result(shell._LivePreviewBuildResult(1, artifact, datasets=datasets))
 
-    assert fake_plotter.cleared == 1
-    assert fake_plotter.backgrounds == ["#071426"]
-    assert len(fake_plotter.meshes) == 2
-    assert fake_plotter.meshes[0][1]["color"] == "#ffb56b"
-    assert fake_plotter.meshes[1][1]["color"] == "#3d210f"
     assert len(preview._current_datasets) == 1
-    assert fake_previewer.reset_calls[0][0] is fake_plotter
+    assert fake_plotter.datasets == [tuple(preview._current_datasets)]
+    assert fake_plotter.reset == 1
     assert fake_plotter.clipping_reset == 1
     assert fake_plotter.rendered == 1
 
 
 def test_live_preview_schedules_impress_load_without_entering_vtk(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     project_root: Path,
 ) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     preview = InteractiveStlPreviewLabel()
     artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/box.impress"
-    submitted = []
-    monkeypatch.setattr(preview, "_submit_impress_load", lambda path: submitted.append(path))
 
     preview.set_artifact(artifact)
 
-    assert submitted == [artifact]
-    assert preview._status.text() == "Loading preview..."
+    assert not hasattr(preview, "_load_live_artifact")
+    assert preview._status.text() == "Preview payload pending."
+    stl_artifact = tmp_path / "part.stl"
+    stl_artifact.write_text("solid empty\nendsolid empty\n")
+    preview.set_artifact(stl_artifact)
+    assert preview._status.text() == "Preview payload pending."
 
 
-def test_live_preview_builder_executor_is_lazy() -> None:
+def test_live_preview_widget_does_not_own_worker_state() -> None:
     preview = InteractiveStlPreviewLabel()
 
-    assert preview._executor is None
+    assert not hasattr(preview, "_executor")
+    assert not hasattr(preview, "_pending_future")
+    assert not hasattr(preview, "_poll_timer")
 
 
-def test_live_preview_submit_uses_process_pool(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    artifact = tmp_path / "part.impress"
-    artifact.write_text('{"format": "impress"}\n')
+def test_preview_renderer_lifecycle_widget_reuses_single_render_surface() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    widget = PreviewRendererLifecycleWidget()
     created = []
 
-    class FakeFuture:
-        def cancel(self) -> None:
-            pass
+    class FakeRenderSurface(QLabel):
+        def __init__(self, parent=None) -> None:
+            super().__init__(parent)
+            self.closed = 0
+            self.cleared = 0
+            self.rendered = 0
 
-    class FakeProcessPool:
-        def __init__(self, *, max_workers: int) -> None:
-            self.max_workers = max_workers
-            self.submissions = []
-            created.append(self)
+        def close(self) -> bool:
+            self.closed += 1
+            return True
 
-        def submit(self, fn, generation, artifact_path):
-            self.submissions.append((fn, generation, artifact_path))
-            return FakeFuture()
+        def clear(self) -> None:
+            self.cleared += 1
 
-        def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
-            pass
+        def render(self) -> None:
+            self.rendered += 1
 
-    monkeypatch.setattr(shell, "ProcessPoolExecutor", FakeProcessPool)
-    preview = InteractiveStlPreviewLabel()
-    preview._load_generation = 7
+    def renderer_factory(parent):
+        surface = FakeRenderSurface(parent)
+        created.append(surface)
+        return surface
 
-    preview._submit_impress_load(artifact)
+    first = widget.ensure_renderer(
+        renderer_factory=renderer_factory,
+    )
+    second = widget.ensure_renderer(
+        renderer_factory=renderer_factory,
+    )
 
+    assert first is second
     assert len(created) == 1
-    assert created[0].max_workers == 1
-    assert created[0].submissions == [(shell._build_impress_preview_result, 7, artifact)]
+    assert widget.renderer_state.created
+    assert widget._previewer is None
+    widget.clear_renderer_scene("Cleared")
+    assert first.cleared == 1
+    assert first.rendered == 0
+    assert widget._status.text() == "Cleared"
+    widget.dispose_renderer()
+    assert first.closed == 1
+    assert widget.renderer_state.disposed
+
+
+def test_preview_renderer_lifecycle_widget_uses_software_surface_by_default() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    widget = PreviewRendererLifecycleWidget()
+
+    renderer = widget.ensure_renderer()
+
+    assert isinstance(renderer, SoftwarePreviewSurface)
+    assert widget.renderer_state.created
+    assert widget._previewer is None
+
+
+def test_preview_renderer_lifecycle_widget_default_previewer_is_disabled() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    widget = PreviewRendererLifecycleWidget()
+
+    previewer = widget._default_previewer_factory()
+
+    assert previewer is None
+
+
+def test_preview_renderer_lifecycle_widget_applies_payload_without_recreating_renderer(
+    tmp_path: Path,
+) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    widget = PreviewRendererLifecycleWidget()
+    record = ReviewSourceModelRecord(
+        fixture_id="fixture/payload",
+        feature_name="Payload",
+        source_path=tmp_path / "model.py",
+    )
+    request = PreviewPayloadRequest.from_source_record(
+        record,
+        owner="preview-payload",
+        request_id=1,
+        generation=7,
+    )
+    loaded = LoadedPreviewDataset(
+        request=request,
+        datasets=(
+            Mesh(
+                vertices=np.asarray(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))),
+                faces=np.asarray(((0, 1, 2),)),
+            ),
+        ),
+        source_type="SurfaceBody",
+    )
+    payload = write_preview_payload_file(loaded, payload_dir=tmp_path)
+    created = []
+
+    class FakeRenderSurface(QLabel):
+        def __init__(self, parent=None) -> None:
+            super().__init__(parent)
+            self.cleared = 0
+            self.datasets = []
+
+        def clear(self) -> None:
+            self.cleared += 1
+
+        def set_datasets(self, datasets) -> None:
+            self.datasets.append(tuple(datasets))
+
+        def render(self) -> None:
+            pass
+
+    def renderer_factory(parent):
+        surface = FakeRenderSurface(parent)
+        created.append(surface)
+        return surface
+
+    first_state = widget.set_preview_payload(
+        payload,
+        renderer_factory=renderer_factory,
+    )
+    second_state = widget.set_preview_payload(
+        payload,
+        renderer_factory=renderer_factory,
+    )
+
+    assert first_state.ready
+    assert second_state.ready
+    assert second_state.generation == 7
+    assert len(created) == 1
+    assert len(created[0].datasets) == 2
+    assert created[0].datasets[-1][0].n_faces == 1
+
+
+def test_preview_renderer_lifecycle_widget_applies_payload_to_software_surface(
+    tmp_path: Path,
+) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    widget = PreviewRendererLifecycleWidget()
+    record = ReviewSourceModelRecord(
+        fixture_id="fixture/software-payload",
+        feature_name="Software Payload",
+        source_path=tmp_path / "model.py",
+    )
+    request = PreviewPayloadRequest.from_source_record(
+        record,
+        owner="preview-payload",
+        request_id=1,
+        generation=4,
+    )
+    loaded = LoadedPreviewDataset(
+        request=request,
+        datasets=(
+            Mesh(
+                vertices=np.asarray(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))),
+                faces=np.asarray(((0, 1, 2),)),
+            ),
+        ),
+        source_type="SurfaceBody",
+    )
+    payload = write_preview_payload_file(loaded, payload_dir=tmp_path)
+
+    state = widget.set_preview_payload(payload)
+
+    assert state.ready
+    assert isinstance(widget._plotter, SoftwarePreviewSurface)
+    assert widget._previewer is None
+    assert len(widget._plotter._datasets) == 1
+
+
+def test_preview_renderer_lifecycle_widget_reports_invalid_payload(
+    tmp_path: Path,
+) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    widget = PreviewRendererLifecycleWidget()
+    record = ReviewSourceModelRecord(
+        fixture_id="fixture/bad-payload",
+        feature_name="Bad Payload",
+        source_path=tmp_path / "model.py",
+    )
+    request = PreviewPayloadRequest.from_source_record(
+        record,
+        owner="preview-payload",
+        request_id=1,
+        generation=1,
+    )
+    bad_path = tmp_path / "bad.preview-payload.json"
+    bad_path.write_text('{"format":"wrong","datasets":[]}')
+    from impression.devtools.reference_review import PreviewPayload
+
+    state = widget.set_preview_payload(PreviewPayload.success(request, payload_path=bad_path))
+
+    assert not state.ready
+    assert state.diagnostic == "unsupported-preview-payload-format"
+    assert widget._status.text() == "Preview unavailable: unsupported-preview-payload-format"
+
+
+def test_window_preview_controller_launches_and_polls_payload(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    artifact = tmp_path / "part.impress"
+    artifact.write_text('{"format": "impress"}\n')
+    source = tmp_path / "model.py"
+    source.write_text("def build():\n    return None\n")
+    record = ReviewSourceModelRecord(
+        "demo/part",
+        "demo",
+        source,
+        artifact_paths=(artifact,),
+    )
+    result = launch_workbench(fixture_records=(record,), offscreen=True)
+    window = result.engine.rootObjects()[0]
+    future: Future = Future()
+    launched = []
+    applied = []
+    cleaned = []
+
+    class FakePreviewController:
+        def launch(self, record):
+            launched.append(record)
+            return SimpleNamespace(accepted=True, future=future, diagnostic=None)
+
+        def handle_completion(self, envelope, handoff, diagnostic_handoff=None):
+            handoff(SimpleNamespace(payload="payload"))
+
+        def cleanup_payload(self, payload, *, reason: str):
+            cleaned.append((payload, reason))
+
+        def close(self):
+            pass
+
+    window._preview_controller.close()
+    window._preview_futures = []
+    window._preview_controller = FakePreviewController()
+    window.preview_surface.set_preview_payload = lambda payload: (
+        applied.append(payload) or SimpleNamespace(ready=True)
+    )
+
+    window._load_artifact_preview(window._fixture_items[0])
+    future.set_result(SimpleNamespace(ok=True))
+    window._poll_preview_payloads()
+
+    assert launched == [record]
+    assert applied == ["payload"]
+    assert cleaned == [("payload", "completed")]
+    assert window._preview_futures == []
+
+
+def test_live_preview_process_target_is_non_ui_module() -> None:
+    assert build_impress_preview_result.__module__ == (
+        "impression.devtools.reference_review.preview_payload_builder"
+    )
 
 
 def test_live_preview_process_builder_returns_mesh_dataset(project_root: Path) -> None:
@@ -364,7 +746,7 @@ def test_live_preview_process_builder_returns_mesh_dataset(project_root: Path) -
     artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/box.impress"
 
     with ProcessPoolExecutor(max_workers=1) as executor:
-        result = executor.submit(shell._build_impress_preview_result, 3, artifact).result(timeout=10)
+        result = executor.submit(build_impress_preview_result, 3, artifact).result(timeout=10)
 
     assert result.generation == 3
     assert result.artifact_path == artifact
@@ -386,7 +768,7 @@ def test_live_preview_ignores_stale_build_result(project_root: Path) -> None:
     assert preview._status.text() == "No fixture selected."
 
 
-def test_live_preview_reports_unavailable_when_vtk_widget_cannot_start(project_root: Path) -> None:
+def test_live_preview_legacy_build_result_uses_software_surface(project_root: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     preview = InteractiveStlPreviewLabel()
     artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/box.impress"
@@ -396,7 +778,8 @@ def test_live_preview_reports_unavailable_when_vtk_widget_cannot_start(project_r
 
     preview._apply_build_result(shell._LivePreviewBuildResult(1, artifact, datasets=datasets))
 
-    assert preview._status.text() == "Preview unavailable: RuntimeError"
+    assert isinstance(preview._plotter, SoftwarePreviewSurface)
+    assert len(preview._plotter._datasets) == 1
 
 
 def test_window_defers_preview_load_and_ignores_stale_loads(tmp_path: Path) -> None:

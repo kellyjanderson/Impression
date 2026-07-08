@@ -50,6 +50,7 @@ where = ["src"]
     "qml/*.qml",
     "qml/*.conf",
     "qml/components/*.qml",
+    "qml/icons/preview-display/*.svg",
 ]
 
 [tool.coverage.run]

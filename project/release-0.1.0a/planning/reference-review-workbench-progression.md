@@ -72,26 +72,56 @@ These specs remediate the original preview path by extracting the real
 thin Qt wrapper, and moving fixture payload work behind explicit async
 boundaries.
 
-- [ ] [Reference Review Spec 43: Shared Preview Controller API And Style Records](../specifications/reference-review-43-shared-preview-controller-api-and-style-records-v1_0.md)
-- [ ] [Reference Review Spec 44: Shared Scene Application And Camera Policy](../specifications/reference-review-44-shared-scene-application-and-camera-policy-v1_0.md)
-- [ ] [Reference Review Spec 45: CLI Preview Host Delegation](../specifications/reference-review-45-cli-preview-host-delegation-v1_0.md)
-- [ ] [Reference Review Spec 46: Preview Parity And Import-Boundary Guards](../specifications/reference-review-46-preview-parity-and-import-boundary-guards-v1_0.md)
-- [ ] [Reference Review Spec 47: Preview Payload Request And Result Records](../specifications/reference-review-47-preview-payload-request-and-result-records-v1_0.md)
-- [ ] [Reference Review Spec 48: Preview Source Load And Tessellation Adapter](../specifications/reference-review-48-preview-source-load-and-tessellation-adapter-v1_0.md)
-- [ ] [Reference Review Spec 49: Preview Payload Serialization Writer](../specifications/reference-review-49-preview-payload-serialization-writer-v1_0.md)
-- [ ] [Reference Review Spec 50: Preview Payload Builder Orchestration](../specifications/reference-review-50-preview-payload-builder-orchestration-v1_0.md)
-- [ ] [Reference Review Spec 51: Preview Payload Process Controller](../specifications/reference-review-51-preview-payload-process-controller-v1_0.md)
-- [ ] [Reference Review Spec 52: Preview Temporary Payload Cleanup](../specifications/reference-review-52-preview-temporary-payload-cleanup-v1_0.md)
-- [ ] [Reference Review Spec 53: Preview Current And Stale Payload Handoff](../specifications/reference-review-53-preview-current-and-stale-payload-handoff-v1_0.md)
-- [ ] [Reference Review Spec 54: Preview Payload Failure Diagnostic Handoff](../specifications/reference-review-54-preview-payload-failure-diagnostic-handoff-v1_0.md)
-- [ ] [Reference Review Spec 55: Preview Widget Renderer Lifecycle](../specifications/reference-review-55-preview-widget-renderer-lifecycle-v1_0.md)
-- [ ] [Reference Review Spec 56: Preview Widget Payload Application](../specifications/reference-review-56-preview-widget-payload-application-v1_0.md)
-- [ ] [Reference Review Spec 57: Preview Pane Visible State](../specifications/reference-review-57-preview-pane-visible-state-v1_0.md)
-- [ ] [Reference Review Spec 58: Preview Toolbar Command Routing](../specifications/reference-review-58-preview-toolbar-command-routing-v1_0.md)
-- [ ] [Reference Review Spec 59: Preview Wrapper Real-Render Smoke And Lifecycle Evidence](../specifications/reference-review-59-preview-wrapper-real-render-smoke-and-lifecycle-evidence-v1_0.md)
-- [ ] [Reference Review Spec 60: Preview Stale Success And Failure Rejection Tests](../specifications/reference-review-60-preview-stale-success-and-failure-rejection-tests-v1_0.md)
-- [ ] [Reference Review Spec 61: Preview Cancellation Ordering Tests](../specifications/reference-review-61-preview-cancellation-ordering-tests-v1_0.md)
-- [ ] [Reference Review Spec 62: Preview Cleanup Deletion Tests](../specifications/reference-review-62-preview-cleanup-deletion-tests-v1_0.md)
+- [x] [Reference Review Spec 43: Shared Preview Controller API And Style Records](../specifications/reference-review-43-shared-preview-controller-api-and-style-records-v1_0.md)
+- [x] [Reference Review Spec 44: Shared Scene Application And Camera Policy](../specifications/reference-review-44-shared-scene-application-and-camera-policy-v1_0.md)
+- [x] [Reference Review Spec 45: CLI Preview Host Delegation](../specifications/reference-review-45-cli-preview-host-delegation-v1_0.md)
+- [x] [Reference Review Spec 46: Preview Parity And Import-Boundary Guards](../specifications/reference-review-46-preview-parity-and-import-boundary-guards-v1_0.md)
+- [x] [Reference Review Spec 47: Preview Payload Request And Result Records](../specifications/reference-review-47-preview-payload-request-and-result-records-v1_0.md)
+- [x] [Reference Review Spec 48: Preview Source Load And Tessellation Adapter](../specifications/reference-review-48-preview-source-load-and-tessellation-adapter-v1_0.md)
+- [x] [Reference Review Spec 49: Preview Payload Serialization Writer](../specifications/reference-review-49-preview-payload-serialization-writer-v1_0.md)
+- [x] [Reference Review Spec 50: Preview Payload Builder Orchestration](../specifications/reference-review-50-preview-payload-builder-orchestration-v1_0.md)
+- [x] [Reference Review Spec 51: Preview Payload Process Controller](../specifications/reference-review-51-preview-payload-process-controller-v1_0.md)
+- [x] [Reference Review Spec 52: Preview Temporary Payload Cleanup](../specifications/reference-review-52-preview-temporary-payload-cleanup-v1_0.md)
+- [x] [Reference Review Spec 53: Preview Current And Stale Payload Handoff](../specifications/reference-review-53-preview-current-and-stale-payload-handoff-v1_0.md)
+- [x] [Reference Review Spec 54: Preview Payload Failure Diagnostic Handoff](../specifications/reference-review-54-preview-payload-failure-diagnostic-handoff-v1_0.md)
+- [x] [Reference Review Spec 55: Preview Widget Renderer Lifecycle](../specifications/reference-review-55-preview-widget-renderer-lifecycle-v1_0.md)
+- [x] [Reference Review Spec 56: Preview Widget Payload Application](../specifications/reference-review-56-preview-widget-payload-application-v1_0.md)
+- [x] [Reference Review Spec 57: Preview Pane Visible State](../specifications/reference-review-57-preview-pane-visible-state-v1_0.md)
+- [x] [Reference Review Spec 58: Preview Toolbar Command Routing](../specifications/reference-review-58-preview-toolbar-command-routing-v1_0.md)
+- [x] [Reference Review Spec 59: Preview Wrapper Real-Render Smoke And Lifecycle Evidence](../specifications/reference-review-59-preview-wrapper-real-render-smoke-and-lifecycle-evidence-v1_0.md)
+- [x] [Reference Review Spec 60: Preview Stale Success And Failure Rejection Tests](../specifications/reference-review-60-preview-stale-success-and-failure-rejection-tests-v1_0.md)
+- [x] [Reference Review Spec 61: Preview Cancellation Ordering Tests](../specifications/reference-review-61-preview-cancellation-ordering-tests-v1_0.md)
+- [x] [Reference Review Spec 62: Preview Cleanup Deletion Tests](../specifications/reference-review-62-preview-cleanup-deletion-tests-v1_0.md)
+
+## Preview Display Controls
+
+These specs define the reusable icon/control pieces and the composed preview
+display-control button bar.
+
+- [ ] [Reference Review Spec 63: Preview Display Icon Asset Packaging](../specifications/reference-review-63-preview-display-icon-asset-packaging-v1_0.md)
+- [ ] [Reference Review Spec 63 Test: Preview Display Icon Asset Packaging](../test-specifications/reference-review-63-preview-display-icon-asset-packaging-v1_0.md)
+- [ ] [Reference Review Spec 64: Preview Display Icon Metadata Registry](../specifications/reference-review-64-preview-display-icon-metadata-registry-v1_0.md)
+- [ ] [Reference Review Spec 64 Test: Preview Display Icon Metadata Registry](../test-specifications/reference-review-64-preview-display-icon-metadata-registry-v1_0.md)
+- [ ] [Reference Review Spec 65: Icon Toggle Button Visual State Component](../specifications/reference-review-65-icon-toggle-button-visual-state-component-v1_0.md)
+- [ ] [Reference Review Spec 65 Test: Icon Toggle Button Visual State Component](../test-specifications/reference-review-65-icon-toggle-button-visual-state-component-v1_0.md)
+- [ ] [Reference Review Spec 66: Icon Toggle Button Interaction Contract](../specifications/reference-review-66-icon-toggle-button-interaction-contract-v1_0.md)
+- [ ] [Reference Review Spec 66 Test: Icon Toggle Button Interaction Contract](../test-specifications/reference-review-66-icon-toggle-button-interaction-contract-v1_0.md)
+- [ ] [Reference Review Spec 67: Exclusive Icon Group Selection Model](../specifications/reference-review-67-exclusive-icon-group-selection-model-v1_0.md)
+- [ ] [Reference Review Spec 67 Test: Exclusive Icon Group Selection Model](../test-specifications/reference-review-67-exclusive-icon-group-selection-model-v1_0.md)
+- [ ] [Reference Review Spec 68: Exclusive Icon Group Component Composition](../specifications/reference-review-68-exclusive-icon-group-component-composition-v1_0.md)
+- [ ] [Reference Review Spec 68 Test: Exclusive Icon Group Component Composition](../test-specifications/reference-review-68-exclusive-icon-group-component-composition-v1_0.md)
+- [ ] [Reference Review Spec 69: Preview Display Options State Record](../specifications/reference-review-69-preview-display-options-state-record-v1_0.md)
+- [ ] [Reference Review Spec 69 Test: Preview Display Options State Record](../test-specifications/reference-review-69-preview-display-options-state-record-v1_0.md)
+- [ ] [Reference Review Spec 70: Preview Display Command Routing](../specifications/reference-review-70-preview-display-command-routing-v1_0.md)
+- [ ] [Reference Review Spec 70 Test: Preview Display Command Routing](../test-specifications/reference-review-70-preview-display-command-routing-v1_0.md)
+- [ ] [Reference Review Spec 71: Preview Surface Layer Visibility Options](../specifications/reference-review-71-preview-surface-layer-visibility-options-v1_0.md)
+- [ ] [Reference Review Spec 71 Test: Preview Surface Layer Visibility Options](../test-specifications/reference-review-71-preview-surface-layer-visibility-options-v1_0.md)
+- [ ] [Reference Review Spec 72: Preview Surface Color And Lighting Options](../specifications/reference-review-72-preview-surface-color-and-lighting-options-v1_0.md)
+- [ ] [Reference Review Spec 72 Test: Preview Surface Color And Lighting Options](../test-specifications/reference-review-72-preview-surface-color-and-lighting-options-v1_0.md)
+- [ ] [Reference Review Spec 73: Preview Pane Display Control Slot](../specifications/reference-review-73-preview-pane-display-control-slot-v1_0.md)
+- [ ] [Reference Review Spec 73 Test: Preview Pane Display Control Slot](../test-specifications/reference-review-73-preview-pane-display-control-slot-v1_0.md)
+- [ ] [Reference Review Spec 74: Preview Display Control Row Composition](../specifications/reference-review-74-preview-display-control-row-composition-v1_0.md)
+- [ ] [Reference Review Spec 74 Test: Preview Display Control Row Composition](../test-specifications/reference-review-74-preview-display-control-row-composition-v1_0.md)
 
 ## UI Evidence And Review Quality
 
@@ -120,3 +150,8 @@ architecture-index verification.
 2026-07-07: Specs 43-62 were added for preview-wrapper remediation and remain
 unimplemented until the shared preview controller, Qt wrapper, and preview
 payload boundary work is completed.
+
+2026-07-08: Specs 63-74 and their paired test specifications were added for
+the preview display-control icon assets, reusable icon controls, option-group
+controls, display option state, renderer option application, and composed
+button bar. They are intentionally unchecked until implemented and verified.

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import os
 import sys
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
 from .bridge import BridgeRecord, BridgeRegistry
 from .packaging import qml_resource_root
+from .preview_widget import PreviewRendererLifecycleWidget
 from .queue_context import FixtureQueueViewModel
 from ..source_registry import (
     DiscoverySummary,
@@ -19,6 +20,17 @@ from ..source_registry import (
     load_source_records_from_database,
     load_source_records_from_file,
 )
+from ..preview_payload_builder import (
+    ImpressPreviewBuildResult,
+    build_impress_preview_result,
+    load_impress_preview_datasets,
+)
+from ..preview_payload_controller import (
+    PreviewPayloadFailedEvent,
+    PreviewPayloadProcessController,
+    PreviewPayloadReadyEvent,
+)
+from ..async_core import WorkerResultEnvelope
 
 _ACTIVE_LAUNCH: "WorkbenchLaunchResult | None" = None
 _USAGE = """usage: impression-reference-review [--fixture-file PATH] [--fixture-root PATH] [--fixture-db PATH] [--check] [--offscreen]
@@ -168,57 +180,27 @@ class _LivePreviewBuildResult:
 
 
 def _load_impress_preview_datasets(artifact_path: Path) -> tuple[object, ...]:
-    from impression.io import load_impress
-    from impression.modeling import preview_tessellation_request, tessellate_surface_body
-
-    loaded = load_impress(artifact_path)
-    return tuple(
-        tessellate_surface_body(body, preview_tessellation_request(require_watertight=False)).mesh
-        for body in loaded.bodies
-    )
+    return load_impress_preview_datasets(artifact_path)
 
 
 def _build_impress_preview_result(generation: int, artifact_path: Path) -> _LivePreviewBuildResult:
-    try:
-        datasets = _load_impress_preview_datasets(artifact_path)
-    except Exception as exc:
-        return _LivePreviewBuildResult(generation, artifact_path, diagnostic=exc.__class__.__name__)
-    return _LivePreviewBuildResult(generation, artifact_path, datasets=datasets)
-
-
-def _object_feature_edges(mesh):
-    return mesh.extract_feature_edges(
-        boundary_edges=True,
-        feature_edges=True,
-        non_manifold_edges=True,
-        manifold_edges=False,
-        feature_angle=30.0,
+    result = build_impress_preview_result(generation, artifact_path)
+    return _LivePreviewBuildResult(
+        result.generation,
+        result.artifact_path,
+        datasets=result.datasets,
+        diagnostic=result.diagnostic,
     )
 
 
-class LiveArtifactPreviewWidget(QWidget):
+class LiveArtifactPreviewWidget(PreviewRendererLifecycleWidget):
     """In-window live artifact preview using the same VTK interaction model as CLI preview."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QVBoxLayout
-
         super().__init__(parent)
-        self.setObjectName("embeddedPreviewSurface")
-        self.setMinimumSize(360, 260)
-        self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(0, 0, 0, 0)
-        self._status = QLabel("No fixture selected.", self)
-        self._status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._layout.addWidget(self._status)
         self._artifact_path: Path | None = None
-        self._plotter = None
-        self._previewer = None
         self._current_datasets = []
         self._load_generation = 0
-        self._executor: ProcessPoolExecutor | None = None
-        self._pending_future: Future[_LivePreviewBuildResult] | None = None
-        self._poll_timer = None
 
     def set_artifact(self, artifact_path: Path | None) -> None:
         self._artifact_path = artifact_path
@@ -228,10 +210,7 @@ class LiveArtifactPreviewWidget(QWidget):
             self._clear_scene("No fixture selected.")
             return
         self.prepare_artifact(artifact_path)
-        if artifact_path.suffix.lower() == ".impress":
-            self._submit_impress_load(artifact_path)
-        else:
-            self._load_live_artifact(artifact_path)
+        self._clear_scene("Preview payload pending.")
 
     def prepare_artifact(self, artifact_path: Path | None) -> None:
         self._artifact_path = artifact_path
@@ -245,61 +224,14 @@ class LiveArtifactPreviewWidget(QWidget):
     def reset_view(self) -> None:
         if self._plotter is None:
             return
-        if self._previewer is not None and self._current_datasets:
-            self._previewer._reset_camera(self._plotter, self._current_datasets)
-        else:
-            self._plotter.reset_camera()
+        self._plotter.reset_camera()
         self._plotter.reset_camera_clipping_range()
         self._plotter.render()
 
     def shutdown(self) -> None:
-        if self._poll_timer is not None:
-            self._poll_timer.stop()
-        if self._pending_future is not None:
-            self._pending_future.cancel()
-            self._pending_future = None
-        if self._executor is not None:
-            self._executor.shutdown(wait=False, cancel_futures=True)
-            self._executor = None
-        if self._plotter is not None:
-            self._plotter.close()
-            self._plotter = None
+        self.dispose_renderer()
 
-    def _submit_impress_load(self, artifact_path: Path) -> None:
-        from PySide6.QtCore import QTimer
-
-        if self._pending_future is not None:
-            self._pending_future.cancel()
-        generation = self._load_generation
-        if self._executor is None:
-            self._executor = ProcessPoolExecutor(max_workers=1)
-        self._pending_future = self._executor.submit(_build_impress_preview_result, generation, artifact_path)
-        if self._poll_timer is None:
-            self._poll_timer = QTimer(self)
-            self._poll_timer.setInterval(30)
-            self._poll_timer.timeout.connect(self._poll_pending_load)
-        if not self._poll_timer.isActive():
-            self._poll_timer.start()
-
-    def _poll_pending_load(self) -> None:
-        future = self._pending_future
-        if future is None:
-            if self._poll_timer is not None:
-                self._poll_timer.stop()
-            return
-        if not future.done():
-            return
-        self._pending_future = None
-        if self._poll_timer is not None:
-            self._poll_timer.stop()
-        try:
-            result = future.result()
-        except Exception as exc:
-            self._clear_scene(f"Preview unavailable: {exc.__class__.__name__}")
-            return
-        self._apply_build_result(result)
-
-    def _apply_build_result(self, result: _LivePreviewBuildResult) -> None:
+    def _apply_build_result(self, result: _LivePreviewBuildResult | ImpressPreviewBuildResult) -> None:
         if result.generation != self._load_generation or result.artifact_path != self._artifact_path:
             return
         if result.diagnostic is not None:
@@ -309,74 +241,20 @@ class LiveArtifactPreviewWidget(QWidget):
             plotter = self._ensure_plotter()
             self._status.hide()
             plotter.clear()
-            plotter.set_background("#071426")
             self._current_datasets = list(result.datasets)
-            self._add_impress_datasets(plotter, self._current_datasets)
+            set_datasets = getattr(plotter, "set_datasets", None)
+            if not callable(set_datasets):
+                raise RuntimeError("preview-renderer-missing-set-datasets")
+            set_datasets(tuple(self._current_datasets))
             self.reset_view()
         except Exception as exc:
             self._clear_scene(f"Preview unavailable: {exc.__class__.__name__}")
 
-    def _load_live_artifact(self, artifact_path: Path) -> None:
-        try:
-            plotter = self._ensure_plotter()
-            self._status.hide()
-            plotter.clear()
-            plotter.set_background("#071426")
-            if artifact_path.suffix.lower() == ".impress":
-                self._submit_impress_load(artifact_path)
-            elif artifact_path.suffix.lower() == ".stl":
-                import pyvista as pv
-
-                mesh = pv.read(artifact_path)
-                plotter.add_mesh(mesh, color="#ffb56b", smooth_shading=False, show_edges=False)
-                edges = _object_feature_edges(mesh)
-                if edges.n_cells > 0:
-                    plotter.add_mesh(edges, color="#3d210f", line_width=2)
-                plotter.reset_camera()
-                plotter.reset_camera_clipping_range()
-                plotter.render()
-            else:
-                self._clear_scene("Unsupported artifact type.")
-        except Exception as exc:
-            self._clear_scene(f"Preview unavailable: {exc.__class__.__name__}")
-
     def _ensure_plotter(self):
-        if self._plotter is not None:
-            return self._plotter
-        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
-            raise RuntimeError("live-preview-unavailable-offscreen")
-        from pyvistaqt import QtInteractor
-        from rich.console import Console
-        from impression.preview import PyVistaPreviewer
-
-        self._plotter = QtInteractor(self)
-        self._layout.addWidget(self._plotter, 1)
-        self._previewer = PyVistaPreviewer(console=Console())
-        self._previewer._configure_plotter(self._plotter, show_bounds=False, show_axes=True)
-        return self._plotter
-
-    def _add_impress_datasets(self, plotter, datasets: list[object]) -> None:
-        from impression.mesh import mesh_to_pyvista
-
-        for index, mesh in enumerate(datasets):
-            pv_mesh = mesh_to_pyvista(mesh)
-            plotter.add_mesh(
-                pv_mesh,
-                name=f"artifact-{index}",
-                color="#ffb56b",
-                smooth_shading=False,
-                show_edges=False,
-            )
-            edges = _object_feature_edges(pv_mesh)
-            if edges.n_cells > 0:
-                plotter.add_mesh(edges, name=f"artifact-{index}-edges", color="#3d210f", line_width=2)
+        return self.ensure_renderer()
 
     def _clear_scene(self, message: str) -> None:
-        if self._plotter is not None:
-            self._plotter.clear()
-            self._plotter.render()
-        self._status.setText(message)
-        self._status.show()
+        self.clear_renderer_scene(message)
 
 
 InteractiveStlPreviewLabel = LiveArtifactPreviewWidget
@@ -393,7 +271,7 @@ class ReferenceReviewWindow(QWidget):
         startup_diagnostics: tuple[str, ...],
         offscreen: bool,
     ) -> None:
-        from PySide6.QtCore import Qt
+        from PySide6.QtCore import Qt, QTimer
         from PySide6.QtWidgets import (
             QFrame,
             QGridLayout,
@@ -420,6 +298,11 @@ class ReferenceReviewWindow(QWidget):
         self._selected_index = queue.selected_index if queue.selected_index is not None else -1
         self._fixture_items = _fixture_items_for_qml(queue, artifact_previews)
         self._preview_load_generation = 0
+        self._preview_controller = PreviewPayloadProcessController(cwd=Path.cwd())
+        self._preview_futures: list[Future[WorkerResultEnvelope]] = []
+        self._preview_poll_timer = QTimer(self)
+        self._preview_poll_timer.setInterval(30)
+        self._preview_poll_timer.timeout.connect(self._poll_preview_payloads)
 
         root_layout = QHBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -622,22 +505,55 @@ class ReferenceReviewWindow(QWidget):
         self._sync_properties()
 
     def _load_artifact_preview(self, item: dict[str, object]) -> None:
-        from PySide6.QtCore import QTimer
-
         record = self.queue.records[self._selected_index]
         artifact_path = record.artifact_paths[0] if record.artifact_paths else None
         live_artifact = artifact_path if artifact_path and artifact_path.is_file() else None
         self._preview_load_generation += 1
-        generation = self._preview_load_generation
         self.artifact_thumb.setText(str(item.get("artifact_display_path", "")))
         self.preview_surface.prepare_artifact(live_artifact)
-        delay_ms = 0 if self._offscreen else 75
-        QTimer.singleShot(delay_ms, lambda: self._apply_preview_load(generation, live_artifact))
+        if live_artifact is None:
+            self.preview_surface.set_artifact(None)
+            return
+        result = self._preview_controller.launch(record)
+        if not result.accepted or result.future is None:
+            self.preview_surface.clear_preview(f"Preview unavailable: {result.diagnostic or 'queue_full'}")
+            return
+        self._preview_futures.append(result.future)
+        if not self._preview_poll_timer.isActive():
+            self._preview_poll_timer.start()
 
     def _apply_preview_load(self, generation: int, artifact_path: Path | None) -> None:
         if generation != self._preview_load_generation:
             return
         self.preview_surface.set_artifact(artifact_path)
+
+    def _poll_preview_payloads(self) -> None:
+        pending: list[Future[WorkerResultEnvelope]] = []
+        for future in self._preview_futures:
+            if not future.done():
+                pending.append(future)
+                continue
+            try:
+                envelope = future.result()
+            except Exception as exc:
+                self.preview_surface.clear_preview(f"Preview unavailable: {exc.__class__.__name__}")
+                continue
+            self._preview_controller.handle_completion(
+                envelope,
+                self._apply_preview_payload_ready,
+                self._apply_preview_payload_failed,
+            )
+        self._preview_futures = pending
+        if not self._preview_futures:
+            self._preview_poll_timer.stop()
+
+    def _apply_preview_payload_ready(self, event: PreviewPayloadReadyEvent) -> None:
+        state = self.preview_surface.set_preview_payload(event.payload)
+        if state.ready:
+            self._preview_controller.cleanup_payload(event.payload, reason="completed")
+
+    def _apply_preview_payload_failed(self, event: PreviewPayloadFailedEvent) -> None:
+        self.preview_surface.clear_preview(f"Preview unavailable: {event.diagnostic.message}")
 
     def _sync_properties(self) -> None:
         has_fixture = self._selected_index >= 0
@@ -650,6 +566,11 @@ class ReferenceReviewWindow(QWidget):
         self.setProperty("interactivePreviewReady", self._interactive_preview_ready)
 
     def closeEvent(self, event) -> None:
+        self._preview_poll_timer.stop()
+        for future in self._preview_futures:
+            future.cancel()
+        self._preview_futures = []
+        self._preview_controller.close()
         self.preview_surface.shutdown()
         super().closeEvent(event)
 

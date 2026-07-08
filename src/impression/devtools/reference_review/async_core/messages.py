@@ -69,6 +69,21 @@ class ReviewWorkbenchMessage:
         object.__setattr__(self, "kind", ReviewTaskKind(self.kind))
         object.__setattr__(self, "payload", MappingProxyType(dict(self.payload)))
 
+    def __reduce__(self):
+        return (
+            self.__class__,
+            (
+                self.owner,
+                self.kind,
+                self.request_id,
+                self.fixture_id,
+                dict(self.payload),
+                self.timeout_seconds,
+                self.cancellation_id,
+                self.created_at_monotonic,
+            ),
+        )
+
     @property
     def owner_key(self) -> tuple[str, ReviewTaskKind, str | None]:
         return (self.owner, self.kind, self.fixture_id)
@@ -114,4 +129,3 @@ class WorkerResultEnvelope:
     @property
     def fixture_id(self) -> str | None:
         return self.request.fixture_id
-
