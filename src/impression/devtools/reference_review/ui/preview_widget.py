@@ -752,8 +752,6 @@ def _project_prepared_geometry(
         ):
             if len(face) < 3:
                 continue
-            if not _is_camera_facing(normal):
-                continue
             face_points = vertices[face]
             polygon = QPolygonF([project_point(point) for point in face_points])
             edge_segments = []
@@ -794,10 +792,6 @@ def _project_prepared_geometry(
         grid_lines=grid_lines,
         axis_lines=axis_lines,
     )
-
-
-def _is_camera_facing(normal: np.ndarray) -> bool:
-    return float(normal[2]) >= -1e-6
 
 
 def _object_edge_keys(mesh: Mesh, *, sharp_angle_degrees: float = 30.0) -> set[tuple[int, int]]:

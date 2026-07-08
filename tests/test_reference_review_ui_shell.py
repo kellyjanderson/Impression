@@ -550,7 +550,9 @@ def test_software_preview_forces_mesh_fill_opaque_for_review() -> None:
     assert {face.color.alpha() for face in authored_lit.faces} == {255}
 
 
-def test_software_preview_culls_back_faces_and_hidden_back_edges() -> None:
+def test_software_preview_depth_order_hides_far_faces_without_normal_culling() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    QApplication.instance() or QApplication([])
     mesh = Mesh(
         vertices=np.asarray(
             (
@@ -582,6 +584,29 @@ def test_software_preview_culls_back_faces_and_hidden_back_edges() -> None:
         ),
     )
 
+    surface = SoftwarePreviewSurface()
+    surface.resize(200, 200)
+    surface.set_display_options(
+        PreviewDisplayOptions(
+            color_mode="authored",
+            lighting_mode="flat",
+            show_object_edges=False,
+            show_bounds_grid=False,
+            show_axis_triad=False,
+            show_gradient_background=False,
+            show_polylines=False,
+        )
+    )
+    surface.set_datasets((mesh,))
+    surface._rotation_x = 0.0
+    surface._rotation_y = 0.0
+    image = QImage(surface.size(), QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+
+    surface.render(painter)
+    painter.end()
+
     scene = _project_datasets(
         (mesh,),
         width=200,
@@ -589,17 +614,11 @@ def test_software_preview_culls_back_faces_and_hidden_back_edges() -> None:
         rotation_x=0.0,
         rotation_y=0.0,
         zoom=1.0,
-        options=PreviewDisplayOptions(
-            color_mode="authored",
-            lighting_mode="flat",
-            show_bounds_grid=False,
-            show_axis_triad=False,
-        ),
+        options=surface.display_options,
     )
-
-    assert len(scene.faces) == 2
-    assert {face.color.name() for face in scene.faces} == {"#0000ff"}
-    assert sum(len(face.edge_segments) for face in scene.faces) == 4
+    assert len(scene.faces) == 4
+    assert {face.color.name() for face in scene.faces} == {"#ff0000", "#0000ff"}
+    assert image.pixelColor(100, 100).name() == "#0000ff"
 
 
 def test_software_preview_caches_object_edges_between_repaints(
