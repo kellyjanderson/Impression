@@ -393,6 +393,7 @@ class SoftwarePreviewSurface(QWidget):
         self._rotation_y = 0.45
         self._zoom = 1.0
         self._last_pos = None
+        self._wheel_zoom_direction: int | None = None
         self._geometry: _PreparedPreviewGeometry | None = None
         self._display_options = PreviewDisplayOptions()
 
@@ -505,8 +506,14 @@ class SoftwarePreviewSurface(QWidget):
         self._last_pos = None
 
     def wheelEvent(self, event) -> None:
-        self._zoom = min(4.0, max(0.25, self._zoom * (1.1 if event.angleDelta().y() > 0 else 0.9)))
+        direction = _wheel_zoom_direction(event, self._wheel_zoom_direction)
+        self._wheel_zoom_direction = _next_wheel_zoom_direction(event, direction)
+        if direction == 0:
+            event.accept()
+            return
+        self._zoom = _clamped_zoom(self._zoom, 1.1 if direction > 0 else 0.9)
         self.update()
+        event.accept()
 
 
 def _project_datasets(
@@ -531,6 +538,64 @@ def _project_datasets(
         zoom=zoom,
         options=options,
     )
+
+
+def _clamped_zoom(current_zoom: float, factor: float) -> float:
+    return min(4.0, max(0.25, current_zoom * factor))
+
+
+def _wheel_zoom_direction(event: object, latched_direction: int | None) -> int:
+    raw_direction = _wheel_delta_direction(event)
+    phase = _wheel_phase(event)
+    if phase == Qt.ScrollPhase.ScrollEnd:
+        return 0
+    if phase in {
+        Qt.ScrollPhase.ScrollUpdate,
+        Qt.ScrollPhase.ScrollMomentum,
+    } and latched_direction is not None:
+        return latched_direction
+    return raw_direction
+
+
+def _next_wheel_zoom_direction(event: object, direction: int) -> int | None:
+    phase = _wheel_phase(event)
+    if phase in {Qt.ScrollPhase.NoScrollPhase, Qt.ScrollPhase.ScrollEnd}:
+        return None
+    if phase == Qt.ScrollPhase.ScrollBegin:
+        return direction if direction != 0 else None
+    if phase in {Qt.ScrollPhase.ScrollUpdate, Qt.ScrollPhase.ScrollMomentum}:
+        return direction if direction != 0 else None
+    return None
+
+
+def _wheel_delta_direction(event: object) -> int:
+    delta = _wheel_delta_y(event, "pixelDelta")
+    if delta == 0:
+        delta = _wheel_delta_y(event, "angleDelta")
+    if delta > 0:
+        return 1
+    if delta < 0:
+        return -1
+    return 0
+
+
+def _wheel_delta_y(event: object, method_name: str) -> int:
+    method = getattr(event, method_name, None)
+    if not callable(method):
+        return 0
+    delta = method()
+    y = getattr(delta, "y", None)
+    if not callable(y):
+        return 0
+    return int(y())
+
+
+def _wheel_phase(event: object) -> Qt.ScrollPhase:
+    phase = getattr(event, "phase", None)
+    if not callable(phase):
+        return Qt.ScrollPhase.NoScrollPhase
+    value = phase()
+    return value if isinstance(value, Qt.ScrollPhase) else Qt.ScrollPhase.NoScrollPhase
 
 
 def _prepare_preview_geometry(

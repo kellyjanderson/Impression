@@ -55,6 +55,7 @@ from impression.devtools.reference_review.ui.preview_widget import (
     _object_edge_keys,
     _project_prepared_geometry,
     _project_datasets,
+    _wheel_zoom_direction,
 )
 from impression.devtools.reference_review.ui import shell
 from impression.devtools.reference_review.ui.shell import InteractiveStlPreviewLabel
@@ -610,6 +611,77 @@ def test_software_preview_renders_to_qt_paint_device() -> None:
     }
     assert len(sampled_colors) > 8
     assert any(color.startswith("#") and int(color[1:3], 16) > 100 for color in sampled_colors)
+
+
+def test_software_preview_latches_trackpad_zoom_direction_during_gesture() -> None:
+    latched = None
+    first = _wheel_zoom_direction(_FakeWheelEvent(120, Qt.ScrollPhase.ScrollUpdate), latched)
+    latched = first
+    noisy_opposite = _wheel_zoom_direction(
+        _FakeWheelEvent(-120, Qt.ScrollPhase.ScrollUpdate),
+        latched,
+    )
+    momentum_opposite = _wheel_zoom_direction(
+        _FakeWheelEvent(-120, Qt.ScrollPhase.ScrollMomentum),
+        latched,
+    )
+    after_end = _wheel_zoom_direction(_FakeWheelEvent(-120), None)
+
+    assert first == 1
+    assert noisy_opposite == 1
+    assert momentum_opposite == 1
+    assert after_end == -1
+
+
+def test_software_preview_wheel_event_keeps_long_swipe_zoom_monotonic() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    QApplication.instance() or QApplication([])
+    surface = SoftwarePreviewSurface()
+
+    surface.wheelEvent(_FakeWheelEvent(120, Qt.ScrollPhase.ScrollUpdate))
+    first_zoom = surface._zoom
+    surface.wheelEvent(_FakeWheelEvent(-120, Qt.ScrollPhase.ScrollUpdate))
+    second_zoom = surface._zoom
+    surface.wheelEvent(_FakeWheelEvent(0, Qt.ScrollPhase.ScrollEnd))
+    surface.wheelEvent(_FakeWheelEvent(-120, Qt.ScrollPhase.ScrollUpdate))
+
+    assert first_zoom > 1.0
+    assert second_zoom > first_zoom
+    assert surface._zoom < second_zoom
+
+
+class _FakeDelta:
+    def __init__(self, y: int) -> None:
+        self._y = y
+
+    def y(self) -> int:
+        return self._y
+
+
+class _FakeWheelEvent:
+    def __init__(
+        self,
+        angle_y: int,
+        phase: Qt.ScrollPhase = Qt.ScrollPhase.NoScrollPhase,
+        *,
+        pixel_y: int = 0,
+    ) -> None:
+        self._angle_y = angle_y
+        self._pixel_y = pixel_y
+        self._phase = phase
+        self.accepted = False
+
+    def angleDelta(self) -> _FakeDelta:
+        return _FakeDelta(self._angle_y)
+
+    def pixelDelta(self) -> _FakeDelta:
+        return _FakeDelta(self._pixel_y)
+
+    def phase(self) -> Qt.ScrollPhase:
+        return self._phase
+
+    def accept(self) -> None:
+        self.accepted = True
 
 
 def test_dirty_impress_fixture_launch_exposes_artifact_without_startup_render(project_root: Path) -> None:
