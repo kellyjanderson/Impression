@@ -99,35 +99,40 @@ commands flow inward.
 
 ## Specification Manifest For Discovery
 
-### Candidate Spec: Embedded Impression Preview Widget
+## Manifest Review History
+
+- 2026-07-07 loop 1: Initial review found the embedded widget candidate scored
+  above the split threshold because it bundled renderer lifetime, payload
+  application, pane state, toolbar routing, and real-render verification.
+- 2026-07-07 loop 2: Split renderer lifecycle from payload handoff because
+  lifecycle must be stable before scene replacement is wired.
+- 2026-07-07 loop 3: Split preview-pane visible state from the widget because
+  pane diagnostics and toolbar enablement are workbench UI behavior.
+- 2026-07-07 loop 4: Final review confirmed no remaining candidate scores at
+  or above `25`; `16-24` candidates include cohesion explanations.
+
+### Candidate Spec: Preview Widget Renderer Lifecycle
 
 Discovery purpose:
-- Add the Qt widget host that embeds the shared Impression preview engine in
-  the Reference Review Workbench.
+- Add the Qt widget host that owns one long-lived embedded render surface and
+  disposes it only with the widget lifecycle.
 
 Responsibilities:
 - Functions/methods:
   - widget initialization
-  - payload handoff
-  - clear/reset/dispose methods
-  - preview state signal emission
+  - render surface creation
+  - clear/dispose methods
 - Data structures/models:
-  - widget state record
-  - payload generation id
+  - renderer lifecycle state
 - Dependencies/services:
   - PySide6 widgets
-  - shared preview controller
   - PyVistaQt render surface
 - Returns/outputs/signals:
-  - preview ready signal
-  - preview failed signal
-  - disposed state
+  - lifecycle diagnostic
 - UI surfaces/components:
   - preview widget
-  - preview pane
 - UI fields/elements:
   - preview viewport
-  - reset/camera toolbar routing
 - Reusable code plan:
   - Existing code reused as-is: shared preview controller from
     `impression.preview`
@@ -140,11 +145,11 @@ Responsibilities:
 - Destructive/write behavior:
   - none
 - Security/privacy-sensitive behavior:
-  - widget displays already-selected fixture payloads only
+  - none
 - Performance-sensitive behavior:
-  - renderer is long-lived and scene replacement does not recreate the surface
+  - renderer is long-lived and not recreated per frame or fixture
 - Cross-screen reusable behavior:
-  - preview pane feeds artifact comparison and promotion readiness
+  - none
 
 Project readiness fields:
 - Implementation owner/module:
@@ -153,12 +158,11 @@ Project readiness fields:
   - dark blue background and light orange object color supplied through shared
     preview style
 - Test strategy:
-  - Qt widget lifecycle tests, mocked controller tests, and manual real-render
-    smoke with `.impress` fixtures
+  - Qt widget lifecycle tests and mocked render-surface tests
 - Data ownership:
-  - widget owns renderer lifecycle; pane owns visible workbench state
+  - widget owns renderer lifecycle only
 - Routes:
-  - preview pane to widget to shared preview controller
+  - preview pane creates widget; widget creates renderer
 - Open questions / nuance discovered:
   - offscreen Qt tests may need a fake render surface because VTK interactor
     is unstable on offscreen platforms
@@ -166,29 +170,346 @@ Project readiness fields:
   - shared preview controller extraction
 
 Score:
-- Functions/methods: 4 x 2 = 8
-- Data structures/models: 2 x 1 = 2
-- Dependencies/services: 3 x 1 = 3
-- Returns/outputs/signals: 3 x 1 = 3
+- Functions/methods: 3 x 2 = 6
+- Data structures/models: 1 x 1 = 1
+- Dependencies/services: 2 x 1 = 2
+- Returns/outputs/signals: 1 x 1 = 1
 - Existing reusable code reused as-is: 1 x 0.5 = 0.5
 - Adding code to an existing library/module: 0 x 1 = 0
 - Creating a new reusable library/module: 1 x 3 = 3
 - Destructive/write behavior: 0 x 3 = 0
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 1 x 2 = 2
+- UI fields/elements: 1 x 1 = 1
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 1 x 3 = 3
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 1 x 2 = 2
+- Total: 23.5
+
+Split decision:
+- No split needed. Cohesion reason: renderer creation, stable ownership, and
+  disposal are one lifecycle boundary.
+
+### Candidate Spec: Preview Widget Payload Application
+
+Discovery purpose:
+- Let the preview widget accept a prepared payload and apply it through the
+  shared preview controller without recreating the renderer.
+
+Responsibilities:
+- Functions/methods:
+  - `set_preview_payload`
+  - `clear_preview`
+  - payload generation check
+- Data structures/models:
+  - payload generation id
+  - widget payload state
+- Dependencies/services:
+  - shared preview controller
+  - preview payload record
+- Returns/outputs/signals:
+  - preview ready signal
+  - preview failed signal
+- UI surfaces/components:
+  - preview widget
+- UI fields/elements:
+  - preview viewport
+- Reusable code plan:
+  - Existing code reused as-is: shared preview controller
+  - Additions to existing reusable library/module: none
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - payload application happens on Qt UI thread
+- Destructive/write behavior:
+  - none
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - scene replacement reuses the existing renderer
+- Cross-screen reusable behavior:
+  - preview payload state feeds preview readiness
+
+Project readiness fields:
+- Implementation owner/module:
+  - future `ui/preview_widget.py`
+- Chosen defaults / parameters:
+  - stale payloads are rejected before widget application
+- Test strategy:
+  - mocked payload handoff and scene replacement tests
+- Data ownership:
+  - widget owns current payload generation after pane validation
+- Routes:
+  - preview pane to widget to shared preview controller
+- Open questions / nuance discovered:
+  - payload shape depends on preview payload boundary spec
+- Readiness blockers:
+  - shared preview controller extraction
+
+Score:
+- Functions/methods: 3 x 2 = 6
+- Data structures/models: 2 x 1 = 2
+- Dependencies/services: 2 x 1 = 2
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 0 x 1 = 0
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 0 x 3 = 0
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 1 x 2 = 2
+- UI fields/elements: 1 x 1 = 1
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 1 x 3 = 3
+- Cross-screen reusable behavior: 1 x 2 = 2
+- Readiness blockers: 1 x 2 = 2
+- Total: 24.5
+
+Split decision:
+- No split needed. Cohesion reason: widget payload acceptance, clear, ready,
+  and failed signals are one scene-replacement boundary; stale-result ownership
+  belongs to the payload-boundary architecture.
+
+### Candidate Spec: Preview Pane Visible State
+
+Discovery purpose:
+- Keep workbench-visible preview state outside the render widget while still
+  embedding the widget in the preview pane.
+
+Responsibilities:
+- Functions/methods:
+  - preview pane state reducer
+  - diagnostic display update
+- Data structures/models:
+  - preview pane state record
+- Dependencies/services:
+  - `ImpressionPreviewWidget`
+  - workbench selection model
+- Returns/outputs/signals:
+  - toolbar enabled state
+  - pane diagnostic state
+- UI surfaces/components:
+  - preview pane
+- UI fields/elements:
+  - placeholder
+  - loading indicator
+  - diagnostic banner
+- Reusable code plan:
+  - Existing code reused as-is: workbench panel patterns
+  - Additions to existing reusable library/module: preview pane state model
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - pane state mutates only on Qt UI thread after owner/request checks
+- Destructive/write behavior:
+  - none
+- Security/privacy-sensitive behavior:
+  - diagnostics avoid unsafe environment dumps
+- Performance-sensitive behavior:
+  - pane state changes do not recreate the renderer
+- Cross-screen reusable behavior:
+  - preview state feeds review readiness, artifact panels, and promotion state
+
+Project readiness fields:
+- Implementation owner/module:
+  - future preview pane module or shell preview section
+- Chosen defaults / parameters:
+  - toolbar disabled until widget is interactive
+- Test strategy:
+  - pane state transition tests
+- Data ownership:
+  - pane owns visible state; widget owns renderer state
+- Routes:
+  - selection and payload controller events to pane state
+- Open questions / nuance discovered:
+  - none
+- Readiness blockers:
+  - preview widget lifecycle
+
+Score:
+- Functions/methods: 2 x 2 = 4
+- Data structures/models: 1 x 1 = 1
+- Dependencies/services: 2 x 1 = 2
+- Returns/outputs/signals: 2 x 1 = 2
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 0 x 3 = 0
 - Security/privacy-sensitive behavior: 1 x 3 = 3
 - Performance-sensitive behavior: 1 x 2 = 2
-- UI surfaces/components: 2 x 2 = 4
+- UI surfaces/components: 1 x 2 = 2
+- UI fields/elements: 3 x 1 = 3
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 1 x 3 = 3
+- Cross-screen reusable behavior: 1 x 2 = 2
+- Readiness blockers: 1 x 2 = 2
+- Total: 24.5
+
+Split decision:
+- No split needed. Cohesion reason: placeholder, loading, and diagnostic states
+  are one visible preview-pane state boundary; toolbar routing is separate.
+
+### Candidate Spec: Preview Toolbar Command Routing
+
+Discovery purpose:
+- Route preview toolbar commands to the widget without letting the toolbar own
+  camera or interaction semantics.
+
+Responsibilities:
+- Functions/methods:
+  - toolbar command router
+  - command enablement resolver
+- Data structures/models:
+  - camera command record
+- Dependencies/services:
+  - `ImpressionPreviewWidget`
+  - preview pane state
+- Returns/outputs/signals:
+  - toolbar enabled state
+- UI surfaces/components:
+  - preview pane
+- UI fields/elements:
+  - reset control
+  - camera preset controls
+- Reusable code plan:
+  - Existing code reused as-is: workbench toolbar patterns
+  - Additions to existing reusable library/module: none
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - commands execute on Qt UI thread
+- Destructive/write behavior:
+  - none
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - commands do not recreate renderer
+- Cross-screen reusable behavior:
+  - toolbar command state supports preview and promotion readiness
+
+Project readiness fields:
+- Implementation owner/module:
+  - future preview pane module
+- Chosen defaults / parameters:
+  - toolbar disabled until widget is interactive
+- Test strategy:
+  - command enablement and routing tests with a fake widget
+- Data ownership:
+  - pane owns command state; shared preview controller owns command semantics
+- Routes:
+  - toolbar action to pane router to widget method
+- Open questions / nuance discovered:
+  - exact preset list inherits current UI definition
+- Readiness blockers:
+  - preview pane visible state
+
+Score:
+- Functions/methods: 2 x 2 = 4
+- Data structures/models: 1 x 1 = 1
+- Dependencies/services: 2 x 1 = 2
+- Returns/outputs/signals: 1 x 1 = 1
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 0 x 1 = 0
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 0 x 3 = 0
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 1 x 2 = 2
 - UI fields/elements: 2 x 1 = 2
 - Database queries/tables/migrations: 0 x 2 = 0
 - Async/concurrency behavior: 1 x 3 = 3
 - Cross-screen reusable behavior: 1 x 2 = 2
 - Readiness blockers: 1 x 2 = 2
-- Total: 37.5
+- Total: 21.5
 
 Split decision:
-- Split required before final specification. Split into widget lifecycle,
-  payload handoff, and pane toolbar/state leaves.
+- No split needed. Cohesive command-routing leaf.
+
+### Candidate Spec: Preview Wrapper Real-Render Smoke And Lifecycle Evidence
+
+Discovery purpose:
+- Define the verification evidence needed to prove the embedded wrapper uses a
+  stable live renderer with real `.impress` fixtures.
+
+Responsibilities:
+- Functions/methods:
+  - manual smoke command
+  - lifecycle evidence capture
+- Data structures/models:
+  - smoke result record
+- Dependencies/services:
+  - test fixtures
+  - workbench launcher
+- Returns/outputs/signals:
+  - smoke pass/fail note
+- UI surfaces/components:
+  - preview pane
+- UI fields/elements:
+  - preview viewport
+- Reusable code plan:
+  - Existing code reused as-is: workbench launcher and fixtures
+  - Additions to existing reusable library/module: none
+  - New reusable library/module to create: none
+- Database queries/tables/migrations:
+  - none
+- Async/concurrency behavior:
+  - verifies launch, interaction, fixture switch, and shutdown ordering
+- Destructive/write behavior:
+  - none
+- Security/privacy-sensitive behavior:
+  - none
+- Performance-sensitive behavior:
+  - verifies renderer is not recreated per interaction
+- Cross-screen reusable behavior:
+  - smoke evidence supports review readiness
+
+Project readiness fields:
+- Implementation owner/module:
+  - future paired test specification
+- Chosen defaults / parameters:
+  - use dirty `.impress` fixtures, not demo PNG/STL snapshot smoke
+- Test strategy:
+  - manual real-render smoke plus focused lifecycle tests
+- Data ownership:
+  - evidence belongs to test/review artifacts
+- Routes:
+  - launcher to fixture to preview pane to widget
+- Open questions / nuance discovered:
+  - none
+- Readiness blockers:
+  - preview widget lifecycle
+
+Score:
+- Functions/methods: 2 x 2 = 4
+- Data structures/models: 1 x 1 = 1
+- Dependencies/services: 2 x 1 = 2
+- Returns/outputs/signals: 1 x 1 = 1
+- Existing reusable code reused as-is: 1 x 0.5 = 0.5
+- Adding code to an existing library/module: 0 x 1 = 0
+- Creating a new reusable library/module: 0 x 3 = 0
+- Destructive/write behavior: 0 x 3 = 0
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- UI surfaces/components: 1 x 2 = 2
+- UI fields/elements: 1 x 1 = 1
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 1 x 3 = 3
+- Cross-screen reusable behavior: 1 x 2 = 2
+- Readiness blockers: 1 x 2 = 2
+- Total: 20.5
+
+Split decision:
+- No split needed. Cohesive verification leaf for the wrapper's renderer
+  lifetime and real-fixture behavior.
 
 ## Change History
 
+- 2026-07-07: Ran four manifest review loops, split the high-scoring embedded
+  widget candidate, and rescored resulting implementation leaves.
 - 2026-07-07: Created supplemental architecture for the embedded Qt wrapper
   around the shared preview engine.
