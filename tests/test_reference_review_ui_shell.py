@@ -650,6 +650,23 @@ def test_software_preview_wheel_event_keeps_long_swipe_zoom_monotonic() -> None:
     assert surface._zoom < second_zoom
 
 
+def test_software_preview_wheel_event_can_reverse_direction_without_finger_lift() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    QApplication.instance() or QApplication([])
+    surface = SoftwarePreviewSurface()
+
+    surface.wheelEvent(_FakeWheelEvent(120, Qt.ScrollPhase.ScrollUpdate))
+    first_zoom = surface._zoom
+    surface.wheelEvent(_FakeWheelEvent(-120, Qt.ScrollPhase.ScrollUpdate))
+    jitter_ignored_zoom = surface._zoom
+    surface.wheelEvent(_FakeWheelEvent(-120, Qt.ScrollPhase.ScrollUpdate))
+    reversed_zoom = surface._zoom
+
+    assert first_zoom > 1.0
+    assert jitter_ignored_zoom > first_zoom
+    assert reversed_zoom < jitter_ignored_zoom
+
+
 class _FakeDelta:
     def __init__(self, y: int) -> None:
         self._y = y

@@ -35,6 +35,7 @@ _SOFTWARE_PREVIEW_GRID = QColor("#31445f")
 _SOFTWARE_PREVIEW_AXIS_X = QColor("#ff7d6e")
 _SOFTWARE_PREVIEW_AXIS_Y = QColor("#7fd37d")
 _SOFTWARE_PREVIEW_AXIS_Z = QColor("#72a8ff")
+_WHEEL_ZOOM_REVERSE_THRESHOLD_UNITS = 2.0
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,13 @@ class PreviewWrapperSmokeRecord:
     command: tuple[str, ...]
     expected_fixture_type: str = ".impress"
     verifies_lifecycle: bool = True
+
+
+@dataclass(frozen=True)
+class _WheelZoomDecision:
+    direction: int
+    latched_direction: int | None
+    reverse_delta_units: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -394,6 +402,7 @@ class SoftwarePreviewSurface(QWidget):
         self._zoom = 1.0
         self._last_pos = None
         self._wheel_zoom_direction: int | None = None
+        self._wheel_zoom_reverse_delta_units = 0.0
         self._geometry: _PreparedPreviewGeometry | None = None
         self._display_options = PreviewDisplayOptions()
 
@@ -506,12 +515,17 @@ class SoftwarePreviewSurface(QWidget):
         self._last_pos = None
 
     def wheelEvent(self, event) -> None:
-        direction = _wheel_zoom_direction(event, self._wheel_zoom_direction)
-        self._wheel_zoom_direction = _next_wheel_zoom_direction(event, direction)
-        if direction == 0:
+        decision = _wheel_zoom_decision(
+            event,
+            self._wheel_zoom_direction,
+            self._wheel_zoom_reverse_delta_units,
+        )
+        self._wheel_zoom_direction = decision.latched_direction
+        self._wheel_zoom_reverse_delta_units = decision.reverse_delta_units
+        if decision.direction == 0:
             event.accept()
             return
-        self._zoom = _clamped_zoom(self._zoom, 1.1 if direction > 0 else 0.9)
+        self._zoom = _clamped_zoom(self._zoom, 1.1 if decision.direction > 0 else 0.9)
         self.update()
         event.accept()
 
@@ -545,33 +559,42 @@ def _clamped_zoom(current_zoom: float, factor: float) -> float:
 
 
 def _wheel_zoom_direction(event: object, latched_direction: int | None) -> int:
-    raw_direction = _wheel_delta_direction(event)
+    return _wheel_zoom_decision(event, latched_direction, 0.0).direction
+
+
+def _wheel_zoom_decision(
+    event: object,
+    latched_direction: int | None,
+    reverse_delta_units: float,
+) -> _WheelZoomDecision:
+    delta_units = _wheel_delta_units(event)
+    raw_direction = _direction_from_delta(delta_units)
     phase = _wheel_phase(event)
     if phase == Qt.ScrollPhase.ScrollEnd:
-        return 0
-    if phase in {
-        Qt.ScrollPhase.ScrollUpdate,
-        Qt.ScrollPhase.ScrollMomentum,
-    } and latched_direction is not None:
-        return latched_direction
-    return raw_direction
+        return _WheelZoomDecision(0, None, 0.0)
+    if phase == Qt.ScrollPhase.NoScrollPhase:
+        return _WheelZoomDecision(raw_direction, None, 0.0)
+    if raw_direction == 0:
+        return _WheelZoomDecision(0, latched_direction, reverse_delta_units)
+    if latched_direction is None:
+        return _WheelZoomDecision(raw_direction, raw_direction, 0.0)
+    if raw_direction == latched_direction:
+        return _WheelZoomDecision(raw_direction, latched_direction, 0.0)
+
+    reverse_delta_units += abs(delta_units)
+    if reverse_delta_units >= _WHEEL_ZOOM_REVERSE_THRESHOLD_UNITS:
+        return _WheelZoomDecision(raw_direction, raw_direction, 0.0)
+    return _WheelZoomDecision(latched_direction, latched_direction, reverse_delta_units)
 
 
-def _next_wheel_zoom_direction(event: object, direction: int) -> int | None:
-    phase = _wheel_phase(event)
-    if phase in {Qt.ScrollPhase.NoScrollPhase, Qt.ScrollPhase.ScrollEnd}:
-        return None
-    if phase == Qt.ScrollPhase.ScrollBegin:
-        return direction if direction != 0 else None
-    if phase in {Qt.ScrollPhase.ScrollUpdate, Qt.ScrollPhase.ScrollMomentum}:
-        return direction if direction != 0 else None
-    return None
-
-
-def _wheel_delta_direction(event: object) -> int:
+def _wheel_delta_units(event: object) -> float:
     delta = _wheel_delta_y(event, "pixelDelta")
-    if delta == 0:
-        delta = _wheel_delta_y(event, "angleDelta")
+    if delta != 0:
+        return float(delta) / 24.0
+    return float(_wheel_delta_y(event, "angleDelta")) / 120.0
+
+
+def _direction_from_delta(delta: float) -> int:
     if delta > 0:
         return 1
     if delta < 0:
