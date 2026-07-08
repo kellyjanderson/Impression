@@ -12,8 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 import numpy as np
-from PySide6.QtCore import QObject, Qt
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtCore import QObject, QSize, Qt
+from PySide6.QtGui import QIcon, QImage, QPainter
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTabWidget, QToolButton
 
 from impression.mesh import Mesh
@@ -171,6 +171,19 @@ def test_workbench_icon_toggle_button_states_and_command_contract() -> None:
     assert "color: #dbe8f5" in style
     assert "QToolButton:checked" in style
     assert "color: #ffffff" in style
+    inactive_colors = _visible_icon_colors(
+        button.icon().pixmap(QSize(18, 18), QIcon.Mode.Normal, QIcon.State.Off).toImage()
+    )
+    active_colors = _visible_icon_colors(
+        button.icon().pixmap(QSize(18, 18), QIcon.Mode.Normal, QIcon.State.On).toImage()
+    )
+    disabled_colors = _visible_icon_colors(
+        button.icon().pixmap(QSize(18, 18), QIcon.Mode.Disabled, QIcon.State.Off).toImage()
+    )
+    assert inactive_colors
+    assert min(color.red() + color.green() + color.blue() for color in inactive_colors) > 520
+    assert min(color.red() + color.green() + color.blue() for color in active_colors) > 700
+    assert min(color.red() + color.green() + color.blue() for color in disabled_colors) > 350
     button.setChecked(True)
     assert button.size() == original_size
     button.click()
@@ -178,6 +191,15 @@ def test_workbench_icon_toggle_button_states_and_command_contract() -> None:
     button.setEnabled(False)
     button.click()
     assert len(emitted) == 1
+
+
+def _visible_icon_colors(image: QImage) -> list:
+    return [
+        image.pixelColor(x, y)
+        for y in range(image.height())
+        for x in range(image.width())
+        if image.pixelColor(x, y).alpha() > 32
+    ]
 
 
 def test_exclusive_icon_group_selection_model_and_component() -> None:

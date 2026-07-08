@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from PySide6.QtCore import QSize, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QToolButton, QWidget
 
 from .packaging import (
@@ -38,6 +38,9 @@ TOGGLE_COMMAND_FIELDS = {
     "gradient-background": "show_gradient_background",
     "polylines": "show_polylines",
 }
+ICON_COLOR_INACTIVE = "#dbe8f5"
+ICON_COLOR_ACTIVE = "#ffffff"
+ICON_COLOR_DISABLED = "#87919e"
 
 
 @dataclass(frozen=True)
@@ -168,7 +171,7 @@ class WorkbenchIconToggleButton(QToolButton):
         self.setToolTip(icon.tooltip)
         self.setAccessibleName(icon.accessible_name)
         self.setText("")
-        self.setIcon(QIcon(str(qml_resource_root() / icon.resource_path)))
+        self.setIcon(_state_icon(icon.resource_path))
         self.setFocusPolicy(self.focusPolicy())
         self.clicked.connect(self._emit_command)
         self.setStyleSheet(
@@ -209,6 +212,39 @@ class WorkbenchIconToggleButton(QToolButton):
     def _emit_command(self) -> None:
         if self.isEnabled():
             self.commandTriggered.emit(self.command_record())
+
+
+def _state_icon(resource_path: str) -> QIcon:
+    icon = QIcon()
+    icon.addPixmap(
+        _icon_pixmap(resource_path, ICON_COLOR_INACTIVE),
+        QIcon.Mode.Normal,
+        QIcon.State.Off,
+    )
+    icon.addPixmap(
+        _icon_pixmap(resource_path, ICON_COLOR_ACTIVE),
+        QIcon.Mode.Normal,
+        QIcon.State.On,
+    )
+    icon.addPixmap(
+        _icon_pixmap(resource_path, ICON_COLOR_DISABLED),
+        QIcon.Mode.Disabled,
+        QIcon.State.Off,
+    )
+    icon.addPixmap(
+        _icon_pixmap(resource_path, ICON_COLOR_DISABLED),
+        QIcon.Mode.Disabled,
+        QIcon.State.On,
+    )
+    return icon
+
+
+def _icon_pixmap(resource_path: str, color: str) -> QPixmap:
+    svg = (qml_resource_root() / resource_path).read_text()
+    pixmap = QPixmap()
+    if not pixmap.loadFromData(svg.replace("currentColor", color).encode("utf-8"), "SVG"):
+        raise ValueError(f"preview-display-icon-rasterize-failed:{resource_path}")
+    return pixmap
 
 
 class ExclusiveIconOptionGroup(QWidget):
