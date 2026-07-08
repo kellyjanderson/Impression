@@ -26,6 +26,12 @@ ViewDown desktop-app work.
 
 - [Reference Review Preview Remediation Plan](reference-review-preview-remediation-plan.md)
 
+Supplemental preview remediation architecture:
+
+- [Reference Review Preview Engine Sharing Architecture](reference-review-preview-engine-sharing-architecture.md)
+- [Reference Review Preview Qt Wrapper Architecture](reference-review-preview-qt-wrapper-architecture.md)
+- [Reference Review Preview Payload Boundary Architecture](reference-review-preview-payload-boundary-architecture.md)
+
 ## Domain Ownership Index
 
 The parent architecture owns system map, domain boundaries, cross-document

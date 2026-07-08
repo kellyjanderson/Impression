@@ -27,17 +27,43 @@ notes, artifacts, and review actions.
 - [Reference Review Qt Workbench UI](reference-review-qt-workbench-ui.md)
 - [Reference Review Async Concurrency](reference-review-async-concurrency.md)
 - [Reference Review Fixture Source Contract](reference-review-fixture-source-contract.md)
+- [Reference Review Preview Engine Sharing Architecture](reference-review-preview-engine-sharing-architecture.md)
+- [Reference Review Preview Qt Wrapper Architecture](reference-review-preview-qt-wrapper-architecture.md)
+- [Reference Review Preview Payload Boundary Architecture](reference-review-preview-payload-boundary-architecture.md)
 
-## Architecture Update Checklist
+## Architecture File Inventory
 
-- [x] [Reference Review Preview Remediation Plan](reference-review-preview-remediation-plan.md):
-  established the embedded actual-preview wrapper as the preferred remediation.
-- [x] [Reference Review Qt Workbench UI](reference-review-qt-workbench-ui.md):
-  defined the Qt wrapper, preview pane responsibilities, and split spec shape.
-- [x] [Reference Review Async Concurrency](reference-review-async-concurrency.md):
-  defined renderer thread affinity and async payload-building boundaries.
-- [x] [Reference Review Workbench Architecture](reference-review-workbench-architecture.md):
-  updated parent commitments and system map for the shared preview engine.
+These architecture files describe the preview remediation path. This inventory
+is not an implementation completion checklist.
+
+- [Reference Review Preview Remediation Plan](reference-review-preview-remediation-plan.md):
+  the tracking anchor for the remediation path.
+- [Reference Review Preview Engine Sharing Architecture](reference-review-preview-engine-sharing-architecture.md):
+  what must change in `impression.preview` so CLI preview and workbench preview
+  use the same preview engine.
+- [Reference Review Preview Qt Wrapper Architecture](reference-review-preview-qt-wrapper-architecture.md):
+  what the embedded Qt widget wrapper owns and must not own.
+- [Reference Review Preview Payload Boundary Architecture](reference-review-preview-payload-boundary-architecture.md):
+  how preview payloads cross from async source loading into the UI-owned
+  renderer.
+- [Reference Review Qt Workbench UI](reference-review-qt-workbench-ui.md):
+  visible workbench shell and preview-pane responsibilities.
+- [Reference Review Async Concurrency](reference-review-async-concurrency.md):
+  request ownership, stale-result handling, and renderer thread affinity.
+- [Reference Review Workbench Architecture](reference-review-workbench-architecture.md):
+  parent system commitments and system flow.
+
+## Implementation Checklist
+
+- [ ] Extract shared preview scene/controller behavior from `impression.preview`.
+- [ ] Route CLI preview through the shared preview controller.
+- [ ] Add the embedded `ImpressionPreviewWidget` Qt wrapper.
+- [ ] Replace workbench duplicate preview rendering with the wrapper.
+- [ ] Move preview payload building out of UI modules.
+- [ ] Add Qt-owned async handoff for preview payload results.
+- [ ] Remove the PNG snapshot pathway from live interactive review.
+- [ ] Verify launch, fixture selection, interaction, stale-result, and shutdown
+  behavior against real `.impress` fixtures.
 
 ## Current Failure Summary
 
@@ -316,6 +342,9 @@ Manual pass criteria:
 
 ## Change History
 
+- 2026-07-07: Replaced checked architecture-update list with an unchecked
+  implementation checklist and added supplemental architecture documents for
+  spec-ready change slicing.
 - 2026-07-07: Expanded plan around the preferred embedded Qt wrapper for the
   actual `impression.preview` engine and added an architecture update
   checklist.

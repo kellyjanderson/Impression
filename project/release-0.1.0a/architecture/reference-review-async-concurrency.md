@@ -14,6 +14,8 @@ Quick UI thread.
 
 - [Reference Review Workbench Architecture](reference-review-workbench-architecture.md)
 - [Reference Review Qt Workbench UI](reference-review-qt-workbench-ui.md)
+- [Reference Review Preview Payload Boundary Architecture](reference-review-preview-payload-boundary-architecture.md)
+- [Reference Review Preview Qt Wrapper Architecture](reference-review-preview-qt-wrapper-architecture.md)
 
 ## Core Contract
 

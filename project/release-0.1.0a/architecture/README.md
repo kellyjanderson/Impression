@@ -53,6 +53,9 @@ Architecture documents define:
 - [Reference Review Qt Workbench UI](reference-review-qt-workbench-ui.md)
 - [Reference Review Async Concurrency](reference-review-async-concurrency.md)
 - [Reference Review Preview Remediation Plan](reference-review-preview-remediation-plan.md)
+- [Reference Review Preview Engine Sharing Architecture](reference-review-preview-engine-sharing-architecture.md)
+- [Reference Review Preview Qt Wrapper Architecture](reference-review-preview-qt-wrapper-architecture.md)
+- [Reference Review Preview Payload Boundary Architecture](reference-review-preview-payload-boundary-architecture.md)
 - [Reference Review Promotion And Notes Lifecycle](reference-review-promotion-and-notes-lifecycle.md)
 - [Reference Review Codex Sandbox](reference-review-codex-sandbox.md)
 
