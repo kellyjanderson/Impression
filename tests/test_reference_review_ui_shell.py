@@ -550,6 +550,58 @@ def test_software_preview_forces_mesh_fill_opaque_for_review() -> None:
     assert {face.color.alpha() for face in authored_lit.faces} == {255}
 
 
+def test_software_preview_culls_back_faces_and_hidden_back_edges() -> None:
+    mesh = Mesh(
+        vertices=np.asarray(
+            (
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (0.0, 1.0, 0.0),
+                (0.0, 0.0, 1.0),
+                (1.0, 0.0, 1.0),
+                (1.0, 1.0, 1.0),
+                (0.0, 1.0, 1.0),
+            )
+        ),
+        faces=np.asarray(
+            (
+                (0, 2, 1),
+                (0, 3, 2),
+                (4, 5, 6),
+                (4, 6, 7),
+            )
+        ),
+        face_colors=np.asarray(
+            (
+                (1.0, 0.0, 0.0, 1.0),
+                (1.0, 0.0, 0.0, 1.0),
+                (0.0, 0.0, 1.0, 1.0),
+                (0.0, 0.0, 1.0, 1.0),
+            )
+        ),
+    )
+
+    scene = _project_datasets(
+        (mesh,),
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+        options=PreviewDisplayOptions(
+            color_mode="authored",
+            lighting_mode="flat",
+            show_bounds_grid=False,
+            show_axis_triad=False,
+        ),
+    )
+
+    assert len(scene.faces) == 2
+    assert {face.color.name() for face in scene.faces} == {"#0000ff"}
+    assert sum(len(face.edge_segments) for face in scene.faces) == 4
+
+
 def test_software_preview_caches_object_edges_between_repaints(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
