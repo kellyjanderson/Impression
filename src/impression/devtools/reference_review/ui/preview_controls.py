@@ -174,15 +174,15 @@ class WorkbenchIconToggleButton(QToolButton):
         self.setStyleSheet(
             """
             QToolButton {
-                background: #151a21;
-                border: 1px solid #313b48;
+                background: #202936;
+                border: 1px solid #6f8195;
                 border-radius: 5px;
-                color: #d8e1ea;
+                color: #f0f6ff;
                 padding: 0;
             }
             QToolButton:hover {
-                background: #1c2632;
-                border-color: #5c708a;
+                background: #29384a;
+                border-color: #9bb3cc;
             }
             QToolButton:pressed {
                 background: #27364a;
@@ -195,9 +195,9 @@ class WorkbenchIconToggleButton(QToolButton):
                 border: 2px solid #f2c14e;
             }
             QToolButton:disabled {
-                background: #101318;
-                border-color: #252b33;
-                color: #68717c;
+                background: #161b22;
+                border-color: #3a4654;
+                color: #87919e;
             }
             """
         )
