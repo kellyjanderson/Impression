@@ -166,9 +166,11 @@ def test_workbench_icon_toggle_button_states_and_command_contract() -> None:
     assert button.toolTip() == icon.tooltip
     assert button.accessibleName() == icon.accessible_name
     style = button.styleSheet()
-    assert "background: #202936" in style
-    assert "border: 1px solid #6f8195" in style
-    assert "color: #f0f6ff" in style
+    assert "background: #1b2430" in style
+    assert "border: 1px solid #65788e" in style
+    assert "color: #dbe8f5" in style
+    assert "QToolButton:checked" in style
+    assert "color: #ffffff" in style
     button.setChecked(True)
     assert button.size() == original_size
     button.click()
