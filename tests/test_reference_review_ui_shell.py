@@ -55,6 +55,7 @@ from impression.devtools.reference_review.ui.preview_widget import (
     _object_edge_keys,
     _project_prepared_geometry,
     _project_datasets,
+    _should_use_pyvistaqt_preview,
     _wheel_zoom_direction,
 )
 from impression.devtools.reference_review.ui import shell
@@ -1168,6 +1169,15 @@ def test_preview_renderer_lifecycle_widget_reports_invalid_payload(
     assert not state.ready
     assert state.diagnostic == "unsupported-preview-payload-format"
     assert widget._status.text() == "Preview unavailable: unsupported-preview-payload-format"
+
+
+def test_default_renderer_policy_avoids_vtk_qt_interactor_in_offscreen_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    assert not _should_use_pyvistaqt_preview()
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+    assert _should_use_pyvistaqt_preview()
 
 
 def test_window_preview_controller_launches_and_polls_payload(tmp_path: Path) -> None:

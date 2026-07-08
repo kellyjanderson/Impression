@@ -15,6 +15,12 @@ from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from impression.mesh import Mesh, Polyline
+from impression.preview import (
+    PreviewControllerOptions,
+    PreviewInteractionPolicy,
+    PreviewSceneController,
+    PreviewStyle,
+)
 from ..async_core.qt_handoff import sanitize_error_text
 from ..preview_payload import PreviewPayload
 from ..preview_payload_builder import PREVIEW_PAYLOAD_FORMAT
@@ -376,6 +382,8 @@ class PreviewRendererLifecycleWidget(QWidget):
         return self._payload_state
 
     def _default_renderer_factory(self):
+        if _should_use_pyvistaqt_preview():
+            return PyVistaQtPreviewSurface(self)
         return SoftwarePreviewSurface(self)
 
     def _default_previewer_factory(self):
@@ -528,6 +536,135 @@ class SoftwarePreviewSurface(QWidget):
         self._zoom = _clamped_zoom(self._zoom, 1.1 if decision.direction > 0 else 0.9)
         self.update()
         event.accept()
+
+
+class PyVistaQtPreviewSurface(QWidget):
+    """Qt-embedded VTK preview surface using the shared CLI preview controller."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setMinimumSize(360, 260)
+        self._datasets: tuple[Mesh | Polyline, ...] = ()
+        self._display_options = PreviewDisplayOptions()
+        self._camera_aligned = False
+        self._scene_controller = PreviewSceneController(
+            options=PreviewControllerOptions(
+                style=PreviewStyle.workbench_default(),
+                interaction=PreviewInteractionPolicy(
+                    show_bounds=True,
+                    show_axes=True,
+                    enable_eye_dome_lighting=True,
+                ),
+            )
+        )
+        from pyvistaqt import QtInteractor
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self._plotter = QtInteractor(
+            self,
+            off_screen=os.environ.get("QT_QPA_PLATFORM") == "offscreen",
+            auto_update=False,
+        )
+        layout.addWidget(self._plotter)
+        self._configure_plotter()
+
+    @property
+    def display_options(self) -> PreviewDisplayOptions:
+        return self._display_options
+
+    @property
+    def plotter(self):
+        return self._plotter
+
+    def set_display_options(self, options: PreviewDisplayOptions) -> None:
+        self._display_options = options
+        if self._datasets:
+            self._apply_scene(align_camera=False)
+
+    def set_datasets(self, datasets: tuple[Mesh | Polyline, ...]) -> None:
+        self._datasets = tuple(datasets)
+        self._camera_aligned = False
+        self._apply_scene(align_camera=True)
+
+    def clear(self) -> None:
+        self._datasets = ()
+        self._camera_aligned = False
+        self._plotter.clear()
+        self._configure_plotter()
+        self._plotter.render()
+
+    def reset_camera(self) -> None:
+        self._scene_controller.reset_camera(self._plotter, self._datasets)
+        self._camera_aligned = True
+        self._plotter.render()
+
+    def reset_camera_clipping_range(self) -> None:
+        reset = getattr(self._plotter, "reset_camera_clipping_range", None)
+        if callable(reset):
+            reset()
+
+    def render(self, *args, **kwargs):
+        return self._plotter.render(*args, **kwargs)
+
+    def close(self) -> bool:
+        self._plotter.close()
+        return super().close()
+
+    def _configure_plotter(self) -> None:
+        self._scene_controller.configure_plotter(
+            self._plotter,
+            show_bounds=self._display_options.show_bounds_grid,
+            show_axes=self._display_options.show_axis_triad,
+        )
+
+    def _apply_scene(self, *, align_camera: bool) -> None:
+        self._configure_plotter()
+        self._scene_controller.apply_scene(
+            self._plotter,
+            _datasets_for_display_options(self._datasets, self._display_options),
+            show_edges=self._display_options.show_triangle_wireframe,
+            face_edges=self._display_options.show_object_edges,
+            show_bounds=self._display_options.show_bounds_grid,
+            show_axes=self._display_options.show_axis_triad,
+            align_camera=align_camera and not self._camera_aligned,
+        )
+        if align_camera:
+            self._camera_aligned = True
+        self._plotter.render()
+
+
+def _should_use_pyvistaqt_preview() -> bool:
+    return os.environ.get("QT_QPA_PLATFORM") != "offscreen"
+
+
+def _datasets_for_display_options(
+    datasets: tuple[Mesh | Polyline, ...],
+    options: PreviewDisplayOptions,
+) -> tuple[Mesh | Polyline, ...]:
+    if options.color_mode == COLOR_MODE_AUTHORED:
+        return datasets
+    prepared: list[Mesh | Polyline] = []
+    for dataset in datasets:
+        if isinstance(dataset, Mesh):
+            prepared.append(
+                Mesh(
+                    vertices=np.asarray(dataset.vertices, dtype=float),
+                    faces=np.asarray(dataset.faces, dtype=int),
+                    color=None,
+                    face_colors=None,
+                    metadata=dict(dataset.metadata),
+                )
+            )
+        else:
+            prepared.append(
+                Polyline(
+                    np.asarray(dataset.points, dtype=float),
+                    closed=dataset.closed,
+                    color=None,
+                )
+            )
+    return tuple(prepared)
 
 
 def _project_datasets(
