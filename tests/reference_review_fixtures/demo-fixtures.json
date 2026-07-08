@@ -1,0 +1,13 @@
+{
+  "allowed_root": "../..",
+  "fixtures": [
+    {
+      "fixture_id": "examples/hello-cube",
+      "feature_name": "example-model",
+      "source_path": "../../examples/hello_cube.py",
+      "entrypoint": "build",
+      "expected_output": "interactive preview model",
+      "description": "Smoke fixture for launching the Reference Review Workbench with a selectable source model."
+    }
+  ]
+}

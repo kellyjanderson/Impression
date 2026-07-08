@@ -22,6 +22,46 @@ ViewDown desktop-app work.
 - [Reference Review Promotion And Notes Lifecycle](reference-review-promotion-and-notes-lifecycle.md)
 - [Reference Review Codex Sandbox](reference-review-codex-sandbox.md)
 
+## Active Remediation Plans
+
+- [Reference Review Preview Remediation Plan](reference-review-preview-remediation-plan.md)
+
+Supplemental preview remediation architecture:
+
+- [Reference Review Preview Engine Sharing Architecture](reference-review-preview-engine-sharing-architecture.md)
+- [Reference Review Preview Qt Wrapper Architecture](reference-review-preview-qt-wrapper-architecture.md)
+- [Reference Review Preview Payload Boundary Architecture](reference-review-preview-payload-boundary-architecture.md)
+
+## Domain Ownership Index
+
+The parent architecture owns system map, domain boundaries, cross-document
+commitments, and release-level navigation. Child architecture documents own the
+implementation candidates in their domain.
+
+| Domain | Owning child architecture | Implementation candidate families |
+| --- | --- | --- |
+| Fixture/source records | [Reference Review Fixture Source Contract](reference-review-fixture-source-contract.md) | source record schema, validation, discovery, deterministic context payload, generated review module contract |
+| Responsive execution | [Reference Review Async Concurrency](reference-review-async-concurrency.md) | workbench message envelope, dispatcher policy, stale completion guards, durable write serialization, UI handoff, task audit events |
+| Review lifecycle | [Reference Review Promotion And Notes Lifecycle](reference-review-promotion-and-notes-lifecycle.md) | note store, state classifier, promotion validator, atomic promotion executor, provenance, release gate report |
+| Codex sidecar | [Reference Review Codex Sandbox](reference-review-codex-sandbox.md) | fixture context builder, tool broker, candidate model store, candidate note patches, regeneration route, sidecar audit boundary |
+| Qt workbench UI | [Reference Review Qt Workbench UI](reference-review-qt-workbench-ui.md) | QML shell, bridge registry, shared component framework, queue/context panels, preview bridge, Markdown panel, artifact/notes/Codex panels, screenshot and accessibility evidence |
+
+## Cross-Document Commitments
+
+- Child documents may add domain-specific details, but they may not bypass the
+  parent commitments below.
+- The fixture source contract owns source truth; UI panels and Codex context
+  consume source records instead of inventing fixture identity.
+- Async concurrency owns task ownership, request ids, stale completions, and
+  UI-thread handoff for every expensive operation.
+- Promotion and notes lifecycle owns durable review notes, promotion writes,
+  provenance, and release gate meaning.
+- Codex sandbox owns sidecar authority. UI surfaces display broker results and
+  refusals but do not grant shell, git, arbitrary filesystem, or promotion
+  authority.
+- Qt workbench UI owns visible state, layout, and evidence, while service
+  modules own durable writes and project mutations.
+
 ## Related Impression Architecture
 
 This workbench extends the active release reference evidence architecture:
@@ -70,8 +110,11 @@ The split architecture follows lessons from the sibling ViewDown project:
   preview-compatible fixture entrypoint.
 - The first implementation should use a PySide 6 application shell with Qt
   Quick/QML for the workbench chrome.
-- The interactive 3D preview is isolated behind a preview bridge so the UI can
-  evolve without tying every panel to PyVista internals.
+- The interactive 3D preview is isolated behind a thin Qt widget wrapper around
+  the actual `impression.preview` engine so the UI can evolve without tying
+  every panel to PyVista internals or duplicating preview behavior.
+- The workbench must not maintain a separate preview renderer, camera-control
+  policy, edge policy, or PNG snapshot pathway for interactive review.
 - Blocking model load, tessellation, artifact generation, filesystem scan,
   note write, promotion, and Codex tool work must run off the UI thread.
 - QML-visible state mutates only on the UI thread through typed completion
@@ -87,10 +130,14 @@ The split architecture follows lessons from the sibling ViewDown project:
 - Fixture source contract: maps fixture ids to loadable model sources,
   entrypoints, parameters, generation commands, and feature context.
 - Qt workbench UI: owns navigation, panels, state presentation, preview
-  embedding, review actions, component reuse, and screenshot evidence.
+  embedding through the actual-preview Qt wrapper, review actions, component
+  reuse, and screenshot evidence.
 - Async concurrency layer: owns task submission, worker isolation, result
   routing, stale-result rejection, cancellation, backpressure, and UI-thread
   handoff.
+- Shared preview engine: owns preview scene semantics, camera behavior,
+  interaction defaults, edge policy, colors, and renderer configuration reused
+  by both CLI preview and the workbench wrapper.
 - Promotion and notes lifecycle: owns durable notes, unresolved review states,
   promotion provenance, gold artifact writes, and release-gate reports.
 - Codex sandbox: owns constrained assistant context, tool allowlist, candidate
@@ -103,7 +150,8 @@ Active release reference roots
 -> fixture source/context resolver
 -> Qt workbench queue model
 -> selected fixture source load
--> interactive preview bridge
+-> async preview payload build
+-> embedded actual-preview Qt wrapper
 -> optional derived artifact comparison
 -> notes or Codex candidate iteration
 -> regeneration from source

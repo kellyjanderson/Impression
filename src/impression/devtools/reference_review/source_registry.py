@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from .async_core.qt_handoff import sanitize_error_text
 
@@ -62,6 +63,7 @@ class ReviewSourceModelRecord:
     expected_output: str | None = None
     description: str | None = None
     parameters: tuple[EntrypointParameterRecord, ...] = ()
+    artifact_paths: tuple[Path, ...] = ()
     generated: bool = False
 
     def __post_init__(self) -> None:
@@ -73,6 +75,7 @@ class ReviewSourceModelRecord:
             raise ValueError("entrypoint must not be empty")
         object.__setattr__(self, "load_mode", ReviewSourceLoadMode(self.load_mode))
         object.__setattr__(self, "source_path", Path(self.source_path))
+        object.__setattr__(self, "artifact_paths", tuple(Path(path) for path in self.artifact_paths))
 
     @property
     def identity(self) -> SourceIdentity:
@@ -96,6 +99,11 @@ class ReviewSourceModelRecord:
             EntrypointParameterRecord(name=str(item["name"]), value=item.get("value"))
             for item in data.get("parameters", ())
         )
+        artifact_paths = tuple(Path(str(path)) for path in data.get("artifact_paths", ()))
+        if base_dir is not None:
+            artifact_paths = tuple(
+                path if path.is_absolute() else base_dir / path for path in artifact_paths
+            )
         return cls(
             fixture_id=str(data.get("fixture_id", "")),
             feature_name=str(data.get("feature_name", "")),
@@ -105,6 +113,7 @@ class ReviewSourceModelRecord:
             expected_output=data.get("expected_output"),
             description=data.get("description"),
             parameters=parameters,
+            artifact_paths=artifact_paths,
             generated=bool(data.get("generated", False)),
         )
 
@@ -169,6 +178,31 @@ def validate_source_record(
         diagnostics.append(
             SourceValidationDiagnostic("missing-entrypoint", "entrypoint is required", record.fixture_id)
         )
+    for artifact_path in record.artifact_paths:
+        if allowed_root is not None:
+            root = allowed_root.resolve()
+            try:
+                artifact_path.resolve().relative_to(root)
+            except ValueError:
+                diagnostics.append(
+                    SourceValidationDiagnostic(
+                        "artifact-outside-root",
+                        "artifact path is outside the configured reference root",
+                        record.fixture_id,
+                    )
+                )
+        if not artifact_path.exists():
+            diagnostics.append(
+                SourceValidationDiagnostic(
+                    "missing-artifact",
+                    sanitize_error_text(str(artifact_path)),
+                    record.fixture_id,
+                )
+            )
+        elif not artifact_path.is_file():
+            diagnostics.append(
+                SourceValidationDiagnostic("artifact-not-file", artifact_path.name, record.fixture_id)
+            )
     return SourceValidationResult(record=record, diagnostics=tuple(diagnostics))
 
 
@@ -215,6 +249,84 @@ def discover_source_records(roots: tuple[Path, ...] | list[Path]) -> DiscoverySu
     return DiscoverySummary(items=tuple(items), diagnostics=tuple(diagnostics))
 
 
+def load_source_records_from_file(path: Path) -> DiscoverySummary:
+    """Load review source records from a JSON fixture file."""
+
+    path = Path(path)
+    try:
+        payload = json.loads(path.read_text())
+    except Exception as exc:
+        return DiscoverySummary(
+            diagnostics=(SourceValidationDiagnostic("invalid-fixture-file", str(exc)),)
+        )
+    allowed_root = path.parent
+    if isinstance(payload, Mapping) and payload.get("allowed_root") is not None:
+        allowed_root = path.parent / str(payload["allowed_root"])
+    rows = payload.get("fixtures", payload) if isinstance(payload, Mapping) else payload
+    if isinstance(rows, Mapping):
+        rows = (rows,)
+    if not isinstance(rows, list | tuple):
+        return DiscoverySummary(
+            diagnostics=(
+                SourceValidationDiagnostic(
+                    "invalid-fixture-file",
+                    "fixture file must contain a record, list, or fixtures list",
+                ),
+            )
+        )
+    return _records_from_mappings(rows, base_dir=path.parent, allowed_root=allowed_root)
+
+
+def load_source_records_from_database(path: Path) -> DiscoverySummary:
+    """Load review source records from a SQLite review_sources table."""
+
+    path = Path(path)
+    try:
+        with sqlite3.connect(path) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute("select * from review_sources order by fixture_id").fetchall()
+    except Exception as exc:
+        return DiscoverySummary(
+            diagnostics=(SourceValidationDiagnostic("invalid-fixture-database", str(exc)),)
+        )
+    records: list[dict[str, Any]] = []
+    for row in rows:
+        data = dict(row)
+        parameters = data.get("parameters")
+        if isinstance(parameters, str) and parameters:
+            data["parameters"] = json.loads(parameters)
+        records.append(data)
+    return _records_from_mappings(records, base_dir=path.parent, allowed_root=path.parent)
+
+
+def _records_from_mappings(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    base_dir: Path,
+    allowed_root: Path,
+) -> DiscoverySummary:
+    items: list[DiscoveryItem] = []
+    diagnostics: list[SourceValidationDiagnostic] = []
+    seen: set[str] = set()
+    for row in rows:
+        try:
+            record = ReviewSourceModelRecord.from_mapping(row, base_dir=base_dir)
+        except Exception as exc:
+            diagnostics.append(SourceValidationDiagnostic("invalid-source-record", str(exc)))
+            continue
+        if record.fixture_id in seen:
+            diagnostics.append(
+                SourceValidationDiagnostic(
+                    "duplicate-fixture-id",
+                    record.fixture_id,
+                    record.fixture_id,
+                )
+            )
+        seen.add(record.fixture_id)
+        items.append(DiscoveryItem(record, validate_source_record(record, allowed_root=allowed_root)))
+    return DiscoverySummary(items=tuple(items), diagnostics=tuple(diagnostics))
+
+
 @dataclass(frozen=True)
 class ReviewContextPayload:
     fixture_id: str
@@ -224,6 +336,7 @@ class ReviewContextPayload:
     expected_output: str | None
     description: str | None
     parameters: tuple[EntrypointParameterRecord, ...] = ()
+    artifact_display_paths: tuple[str, ...] = ()
 
     def to_json_dict(self) -> dict[str, Any]:
         return {
@@ -236,6 +349,7 @@ class ReviewContextPayload:
             "parameters": [
                 {"name": item.name, "value": item.value} for item in self.parameters
             ],
+            "artifact_display_paths": list(self.artifact_display_paths),
         }
 
 
@@ -248,6 +362,7 @@ def build_review_context_payload(record: ReviewSourceModelRecord) -> ReviewConte
         expected_output=record.expected_output,
         description=record.description,
         parameters=record.parameters,
+        artifact_display_paths=tuple(path.name for path in record.artifact_paths),
     )
 
 
@@ -297,4 +412,3 @@ def resolve_generated_review_module(
         generated=True,
     )
     return validate_source_record(record, allowed_root=resolved_root)
-

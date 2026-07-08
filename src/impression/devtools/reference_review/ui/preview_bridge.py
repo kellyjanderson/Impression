@@ -11,7 +11,7 @@ from ..source_registry import ReviewSourceModelRecord
 
 class PreviewAdapterMode(str, Enum):
     SUPERVISED_EXTERNAL = "supervised-external"
-    EMBEDDED_PYVISTAQT = "embedded-pyvistaqt"
+    EMBEDDED_RENDERED = "embedded-rendered"
 
 
 @dataclass(frozen=True)
@@ -22,19 +22,22 @@ class PreviewAdapterDecision:
 
 def choose_preview_adapter(
     *,
-    embedded_available: bool = False,
+    embedded_available: bool = True,
     supervised_external_available: bool = True,
 ) -> PreviewAdapterDecision:
     rejected: list[str] = []
-    if supervised_external_available:
-        if not embedded_available:
-            rejected.append("embedded-pyvistaqt:not-available-or-too-coupled")
-        return PreviewAdapterDecision(PreviewAdapterMode.SUPERVISED_EXTERNAL, tuple(rejected))
     if embedded_available:
-        return PreviewAdapterDecision(PreviewAdapterMode.EMBEDDED_PYVISTAQT, ("supervised-external:unavailable",))
+        if supervised_external_available:
+            rejected.append("supervised-external:not-in-review-surface")
+        return PreviewAdapterDecision(PreviewAdapterMode.EMBEDDED_RENDERED, tuple(rejected))
+    if supervised_external_available:
+        return PreviewAdapterDecision(
+            PreviewAdapterMode.SUPERVISED_EXTERNAL,
+            ("embedded-rendered:unavailable",),
+        )
     return PreviewAdapterDecision(
         PreviewAdapterMode.SUPERVISED_EXTERNAL,
-        ("supervised-external:unavailable", "embedded-pyvistaqt:unavailable"),
+        ("supervised-external:unavailable", "embedded-rendered:unavailable"),
     )
 
 

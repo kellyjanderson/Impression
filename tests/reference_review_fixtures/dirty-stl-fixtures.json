@@ -1,0 +1,125 @@
+{
+  "allowed_root": "../..",
+  "fixtures": [
+    {
+      "fixture_id": "loft/anchor_shift_rectangle",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_anchor_shift_rectangle",
+      "expected_output": "dirty STL",
+      "artifact_paths": ["../../project/release-0.1.0a/reference-stl/dirty/loft/anchor_shift_rectangle.stl"]
+    },
+    {
+      "fixture_id": "loft/branching_manifold",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_branching_manifold",
+      "expected_output": "dirty STL",
+      "artifact_paths": ["../../project/release-0.1.0a/reference-stl/dirty/loft/branching_manifold.stl"]
+    },
+    {
+      "fixture_id": "loft/cylinder_correspondence",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_cylinder_correspondence",
+      "expected_output": "dirty STL",
+      "artifact_paths": ["../../project/release-0.1.0a/reference-stl/dirty/loft/cylinder_correspondence.stl"]
+    },
+    {
+      "fixture_id": "loft/hourglass_vessel",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_hourglass_vessel",
+      "expected_output": "dirty STL",
+      "artifact_paths": ["../../project/release-0.1.0a/reference-stl/dirty/loft/hourglass_vessel.stl"]
+    },
+    {
+      "fixture_id": "loft/phase_shift_cylinder",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_phase_shift_cylinder",
+      "expected_output": "dirty STL",
+      "artifact_paths": ["../../project/release-0.1.0a/reference-stl/dirty/loft/phase_shift_cylinder.stl"]
+    },
+    {
+      "fixture_id": "loft/square_correspondence",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_square_correspondence",
+      "expected_output": "dirty STL",
+      "artifact_paths": ["../../project/release-0.1.0a/reference-stl/dirty/loft/square_correspondence.stl"]
+    },
+    {
+      "fixture_id": "surfacebody/box",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_box",
+      "expected_output": "dirty STL",
+      "artifact_paths": ["../../project/release-0.1.0a/reference-stl/dirty/surfacebody/box.stl"]
+    },
+    {
+      "fixture_id": "surfacebody/csg_difference_slot",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_difference_slot",
+      "expected_output": "dirty STL",
+      "artifact_paths": ["../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg_difference_slot.stl"]
+    },
+    {
+      "fixture_id": "surfacebody/csg_union_box_post",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_union_box_post",
+      "expected_output": "dirty STL",
+      "artifact_paths": ["../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg_union_box_post.stl"]
+    },
+    {
+      "fixture_id": "surfacebody/drafting_arrow",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_drafting_arrow",
+      "expected_output": "dirty STL",
+      "artifact_paths": ["../../project/release-0.1.0a/reference-stl/dirty/surfacebody/drafting_arrow.stl"]
+    },
+    {
+      "fixture_id": "surfacebody/heightmap_surface",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_heightmap_surface",
+      "expected_output": "dirty STL",
+      "artifact_paths": ["../../project/release-0.1.0a/reference-stl/dirty/surfacebody/heightmap_surface.stl"]
+    },
+    {
+      "fixture_id": "surfacebody/hinge_bistable_blank",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_hinge_bistable_blank",
+      "expected_output": "dirty STL",
+      "artifact_paths": ["../../project/release-0.1.0a/reference-stl/dirty/surfacebody/hinge_bistable_blank.stl"]
+    },
+    {
+      "fixture_id": "surfacebody/hinge_living_panel",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_hinge_living_panel",
+      "expected_output": "dirty STL",
+      "artifact_paths": ["../../project/release-0.1.0a/reference-stl/dirty/surfacebody/hinge_living_panel.stl"]
+    },
+    {
+      "fixture_id": "surfacebody/hinge_traditional_pair",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_hinge_traditional_pair",
+      "expected_output": "dirty STL",
+      "artifact_paths": ["../../project/release-0.1.0a/reference-stl/dirty/surfacebody/hinge_traditional_pair.stl"]
+    },
+    {
+      "fixture_id": "surfacebody/text_surface",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_text_surface",
+      "expected_output": "dirty STL",
+      "artifact_paths": ["../../project/release-0.1.0a/reference-stl/dirty/surfacebody/text_surface.stl"]
+    }
+  ]
+}

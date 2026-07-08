@@ -29,6 +29,7 @@ class SidecarTool(str, Enum):
     WRITE_CANDIDATE_MODEL = "write_candidate_model"
     WRITE_CANDIDATE_NOTE_PATCH = "write_candidate_note_patch"
     REQUEST_CANDIDATE_REGENERATION = "request_candidate_regeneration"
+    REQUEST_CANDIDATE_ADOPTION = "request_candidate_adoption"
     LIST_CANDIDATE_OUTPUTS = "list_candidate_outputs"
     EXPLAIN_BLOCKING_DIAGNOSTIC = "explain_blocking_diagnostic"
 

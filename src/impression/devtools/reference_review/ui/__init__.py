@@ -1,6 +1,19 @@
 """Qt/QML shell support for the Reference Review Workbench."""
 
+from .artifact_preview import ArtifactPreviewRecord, render_stl_preview
 from .bridge import BridgeAvailabilityDiagnostic, BridgeRecord, BridgeRegistry
+from .evidence import (
+    AccessibilityOverflowMatrix,
+    ComponentGallery,
+    ComponentStateScenario,
+    ScreenshotArtifact,
+    ScreenshotRunReport,
+    ScreenshotScenario,
+    ScreenshotScenarioRunner,
+    StateMatrixRecord,
+    build_accessibility_overflow_matrix,
+    default_component_gallery,
+)
 from .packaging import (
     DependencyPolicyRecord,
     DependencyPolicyReport,
@@ -19,6 +32,22 @@ from .preview_bridge import (
     choose_preview_adapter,
 )
 from .queue_context import FixtureQueueItem, FixtureQueueViewModel, SelectedFixtureContext
+from .review_panels import (
+    ArtifactPanelViewModel,
+    ArtifactRecord,
+    ArtifactTileViewModel,
+    CandidateAdoptionRequest,
+    CandidateListItem,
+    CandidateListViewModel,
+    ChatStreamPanelViewModel,
+    ChatStreamState,
+    MarkdownPanelState,
+    NotesPanelState,
+    NotesPanelViewModel,
+    RefusalDisplayState,
+    build_markdown_panel_state,
+    build_refusal_display,
+)
 from .shell import WorkbenchLaunchResult, launch_workbench
 from .style import ComponentContractRecord, StyleLoadDiagnostic, StyleTokenRecord, load_style_tokens
 
@@ -27,7 +56,19 @@ __all__ = [
     "BridgeRecord",
     "BridgeRegistry",
     "BlockedLinkDiagnostic",
+    "ArtifactPreviewRecord",
+    "ArtifactPanelViewModel",
+    "ArtifactRecord",
+    "ArtifactTileViewModel",
+    "AccessibilityOverflowMatrix",
+    "CandidateAdoptionRequest",
+    "CandidateListItem",
+    "CandidateListViewModel",
+    "ChatStreamPanelViewModel",
+    "ChatStreamState",
     "ComponentContractRecord",
+    "ComponentGallery",
+    "ComponentStateScenario",
     "DependencyPolicyRecord",
     "DependencyPolicyReport",
     "FixtureQueueItem",
@@ -35,19 +76,33 @@ __all__ = [
     "PackageResourceManifest",
     "PackagingSmokeResult",
     "MarkdownContextRenderer",
+    "MarkdownPanelState",
+    "NotesPanelState",
+    "NotesPanelViewModel",
     "PreviewAdapterDecision",
     "PreviewAdapterMode",
     "PreviewBridgeController",
     "PreviewBridgeState",
     "PreviewLoadBinding",
     "RenderedMarkdownContext",
+    "RefusalDisplayState",
+    "ScreenshotArtifact",
+    "ScreenshotRunReport",
+    "ScreenshotScenario",
+    "ScreenshotScenarioRunner",
     "SelectedFixtureContext",
+    "StateMatrixRecord",
     "StyleLoadDiagnostic",
     "StyleTokenRecord",
     "WorkbenchLaunchResult",
+    "build_accessibility_overflow_matrix",
+    "build_markdown_panel_state",
     "build_dependency_policy_report",
+    "build_refusal_display",
     "choose_preview_adapter",
+    "default_component_gallery",
     "launch_workbench",
     "load_style_tokens",
+    "render_stl_preview",
     "verify_qml_resource_layout",
 ]

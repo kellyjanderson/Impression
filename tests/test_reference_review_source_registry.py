@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+import sqlite3
 from pathlib import Path
 
 from impression.devtools.reference_review import (
@@ -9,6 +11,8 @@ from impression.devtools.reference_review import (
     ReviewSourceModelRecord,
     build_review_context_payload,
     discover_source_records,
+    load_source_records_from_database,
+    load_source_records_from_file,
     resolve_generated_review_module,
     validate_source_record,
 )
@@ -23,6 +27,8 @@ def _write_source(root: Path, name: str = "model.py") -> Path:
 
 def test_source_model_record_normalizes_mapping_and_exposes_identity(tmp_path: Path) -> None:
     source = _write_source(tmp_path)
+    artifact = tmp_path / "dirty.impress"
+    artifact.write_text('{"format": "impress"}\n')
 
     record = ReviewSourceModelRecord.from_mapping(
         {
@@ -33,6 +39,7 @@ def test_source_model_record_normalizes_mapping_and_exposes_identity(tmp_path: P
             "entrypoint": "build",
             "expected_output": "png",
             "parameters": [{"name": "width", "value": 12}],
+            "artifact_paths": [artifact.name],
         },
         base_dir=tmp_path,
     )
@@ -40,16 +47,19 @@ def test_source_model_record_normalizes_mapping_and_exposes_identity(tmp_path: P
     assert record.load_mode is ReviewSourceLoadMode.MODULE
     assert record.identity.key == ("demo/box", source.as_posix(), "build")
     assert record.parameters == (EntrypointParameterRecord("width", 12),)
+    assert record.artifact_paths == (artifact,)
 
 
 def test_validation_reports_multiple_blocking_diagnostics_without_importing(tmp_path: Path) -> None:
     outside = tmp_path.parent / "outside_model.py"
+    missing_artifact = tmp_path / "missing.impress"
     record = ReviewSourceModelRecord(
         fixture_id="demo/missing",
         feature_name="missing",
         source_path=outside,
         load_mode=ReviewSourceLoadMode.CALLABLE,
         entrypoint="build",
+        artifact_paths=(missing_artifact,),
     )
 
     result = validate_source_record(record, allowed_root=tmp_path)
@@ -59,6 +69,7 @@ def test_validation_reports_multiple_blocking_diagnostics_without_importing(tmp_
         "source-outside-root",
         "missing-source",
         "callable-entrypoint-not-qualified",
+        "missing-artifact",
     }
 
 
@@ -85,6 +96,88 @@ def test_discovery_reads_review_source_manifests_and_reports_duplicates(tmp_path
     assert any(diagnostic.code == "duplicate-fixture-id" for diagnostic in summary.diagnostics)
 
 
+def test_fixture_file_loads_review_source_records(tmp_path: Path) -> None:
+    source = _write_source(tmp_path, "fixture_model.py")
+    fixture_file = tmp_path / "review-fixtures.json"
+    fixture_file.write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "fixture_id": "demo/file",
+                        "feature_name": "demo",
+                        "source_path": source.name,
+                    }
+                ]
+            }
+        )
+    )
+
+    summary = load_source_records_from_file(fixture_file)
+
+    assert len(summary.valid_items) == 1
+    assert summary.valid_items[0].record.fixture_id == "demo/file"
+
+
+def test_fixture_database_loads_review_source_records(tmp_path: Path) -> None:
+    source = _write_source(tmp_path, "db_model.py")
+    database = tmp_path / "review-fixtures.sqlite"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "create table review_sources (fixture_id text, feature_name text, source_path text, entrypoint text)"
+        )
+        connection.execute(
+            "insert into review_sources values (?, ?, ?, ?)",
+            ("demo/db", "demo", source.name, "build"),
+        )
+
+    summary = load_source_records_from_database(database)
+
+    assert len(summary.valid_items) == 1
+    assert summary.valid_items[0].record.fixture_id == "demo/db"
+
+
+def test_committed_demo_fixture_file_loads(project_root: Path) -> None:
+    fixture_file = project_root / "tests/reference_review_fixtures/demo-fixtures.json"
+
+    summary = load_source_records_from_file(fixture_file)
+
+    assert not summary.diagnostics
+    assert len(summary.valid_items) == 1
+    assert summary.valid_items[0].record.fixture_id == "examples/hello-cube"
+
+
+def test_dirty_impress_fixture_file_covers_dirty_impress_inventory(project_root: Path) -> None:
+    fixture_file = project_root / "tests/reference_review_fixtures/dirty-impress-fixtures.json"
+    dirty_impress = sorted((project_root / "tests/reference_review_fixtures/reference-impress/dirty").rglob("*.impress"))
+
+    summary = load_source_records_from_file(fixture_file)
+    records = tuple(item.record for item in summary.valid_items)
+    artifact_paths = sorted(record.artifact_paths[0].resolve() for record in records)
+
+    assert not summary.diagnostics
+    assert len(records) == len(dirty_impress)
+    assert artifact_paths == dirty_impress
+    assert all(record.source_path.name == "stl_review_sources.py" for record in records)
+
+
+def test_dirty_impress_fixture_entrypoints_build_reviewable_models(project_root: Path) -> None:
+    fixture_file = project_root / "tests/reference_review_fixtures/dirty-impress-fixtures.json"
+    summary = load_source_records_from_file(fixture_file)
+    module_path = project_root / "tests/reference_review_fixtures/stl_review_sources.py"
+    spec = importlib.util.spec_from_file_location("stl_review_sources_check", module_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    built_types = {
+        getattr(module, item.record.entrypoint)().__class__.__name__ for item in summary.valid_items
+    }
+
+    assert built_types == {"SurfaceBody"}
+
+
 def test_review_context_payload_is_deterministic_and_omits_absolute_source_path(tmp_path: Path) -> None:
     source = _write_source(tmp_path, "candidate.py")
     record = ReviewSourceModelRecord(
@@ -101,6 +194,7 @@ def test_review_context_payload_is_deterministic_and_omits_absolute_source_path(
 
     assert first == second
     assert first["source_display_path"] == "candidate.py"
+    assert first["artifact_display_paths"] == []
     assert str(tmp_path) not in json.dumps(first)
 
 
@@ -125,4 +219,3 @@ def test_generated_review_module_must_live_under_allowed_root(tmp_path: Path) ->
     assert accepted.record.generated
     assert not refused.valid
     assert refused.diagnostics[0].code == "generated-source-outside-root"
-

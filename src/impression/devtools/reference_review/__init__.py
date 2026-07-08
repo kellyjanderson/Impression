@@ -14,6 +14,8 @@ from .source_registry import (
     SourceValidationResult,
     build_review_context_payload,
     discover_source_records,
+    load_source_records_from_database,
+    load_source_records_from_file,
     resolve_generated_review_module,
     validate_source_record,
 )
@@ -106,6 +108,8 @@ __all__ = [
     "classify_review_state",
     "default_context_for_source",
     "discover_source_records",
+    "load_source_records_from_database",
+    "load_source_records_from_file",
     "make_provenance_record",
     "propose_note_patch",
     "request_regeneration",

@@ -50,11 +50,11 @@ def test_queue_navigation_and_empty_state(tmp_path: Path) -> None:
     assert empty.selected_context.empty
 
 
-def test_preview_adapter_decision_prefers_supervised_external_boundary() -> None:
-    decision = choose_preview_adapter(embedded_available=False, supervised_external_available=True)
+def test_preview_adapter_decision_prefers_embedded_review_surface() -> None:
+    decision = choose_preview_adapter(embedded_available=True, supervised_external_available=True)
 
-    assert decision.selected is PreviewAdapterMode.SUPERVISED_EXTERNAL
-    assert decision.rejected == ("embedded-pyvistaqt:not-available-or-too-coupled",)
+    assert decision.selected is PreviewAdapterMode.EMBEDDED_RENDERED
+    assert decision.rejected == ("supervised-external:not-in-review-surface",)
 
 
 def test_preview_load_binding_rejects_stale_completions_and_routes_camera(

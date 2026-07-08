@@ -1,0 +1,13 @@
+{
+  "allowed_root": "../..",
+  "fixtures": [
+    {
+      "fixture_id": "surfacebody/box",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_box",
+      "expected_output": "dirty .impress",
+      "artifact_paths": ["reference-impress/dirty/surfacebody/box.impress"]
+    }
+  ]
+}
