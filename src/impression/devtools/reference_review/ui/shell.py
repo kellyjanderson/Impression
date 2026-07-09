@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 from concurrent.futures import Future
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Sequence
 
@@ -26,10 +26,14 @@ from .preview_widget import PreviewRendererLifecycleWidget
 from .queue_context import FixtureQueueViewModel
 from ..source_registry import (
     DiscoverySummary,
+    ReferenceReviewStatus,
     ReviewSourceModelRecord,
+    approve_reference_artifacts,
     discover_source_records,
     load_source_records_from_database,
     load_source_records_from_file,
+    update_fixture_review_status_in_database,
+    update_fixture_review_status_in_file,
 )
 from ..preview_payload_builder import (
     ImpressPreviewBuildResult,
@@ -101,6 +105,8 @@ def launch_workbench(
     bridges: BridgeRegistry | None = None,
     fixture_records: tuple[ReviewSourceModelRecord, ...] = (),
     fixture_diagnostics: tuple[str, ...] = (),
+    fixture_files: tuple[Path, ...] = (),
+    fixture_databases: tuple[Path, ...] = (),
     qml_path: Path | None = None,
     offscreen: bool = False,
 ) -> WorkbenchLaunchResult:
@@ -113,6 +119,8 @@ def launch_workbench(
             bridges=bridges,
             fixture_records=fixture_records,
             fixture_diagnostics=fixture_diagnostics,
+            fixture_files=fixture_files,
+            fixture_databases=fixture_databases,
             qml_path=qml_path,
             offscreen=offscreen,
             diagnostics=diagnostics,
@@ -132,6 +140,8 @@ def launch_workbench(
             startup_diagnostics=tuple(diagnostics)
             + tuple(fixture_diagnostics)
             + artifact_preview_diagnostics,
+            fixture_files=fixture_files,
+            fixture_databases=fixture_databases,
             offscreen=offscreen,
         )
     except Exception as exc:
@@ -145,6 +155,8 @@ def _launch_qml_workbench(
     bridges: BridgeRegistry,
     fixture_records: tuple[ReviewSourceModelRecord, ...],
     fixture_diagnostics: tuple[str, ...],
+    fixture_files: tuple[Path, ...],
+    fixture_databases: tuple[Path, ...],
     qml_path: Path,
     offscreen: bool,
     diagnostics: list[str],
@@ -284,6 +296,8 @@ class ReferenceReviewWindow(QWidget):
         *,
         artifact_previews: dict[str, object],
         startup_diagnostics: tuple[str, ...],
+        fixture_files: tuple[Path, ...],
+        fixture_databases: tuple[Path, ...],
         offscreen: bool,
     ) -> None:
         from PySide6.QtCore import Qt, QTimer
@@ -308,6 +322,8 @@ class ReferenceReviewWindow(QWidget):
         self.queue = queue
         self.artifact_previews = artifact_previews
         self.startup_diagnostics = startup_diagnostics
+        self._fixture_files = fixture_files
+        self._fixture_databases = fixture_databases
         self._offscreen = offscreen
         self._interactive_preview_ready = True
         self._selected_index = queue.selected_index if queue.selected_index is not None else -1
@@ -366,6 +382,8 @@ class ReferenceReviewWindow(QWidget):
         header = QHBoxLayout()
         self.approve_button = QPushButton("Approve" if not startup_diagnostics else "Diagnostics")
         self.approve_button.setObjectName("approveFixtureButton")
+        self.decline_button = QPushButton("Decline")
+        self.decline_button.setObjectName("declineFixtureButton")
         self.previous_button = QPushButton("Previous")
         self.previous_button.setObjectName("previousFixtureButton")
         self.next_button = QPushButton("Next")
@@ -376,6 +394,7 @@ class ReferenceReviewWindow(QWidget):
         self.preview_display_controls.set_ready(False)
         header.addWidget(self.preview_display_controls, 1)
         header.addWidget(self.approve_button)
+        header.addWidget(self.decline_button)
         header.addWidget(self.reset_view_button)
         header.addWidget(self.previous_button)
         header.addWidget(self.next_button)
@@ -441,6 +460,8 @@ class ReferenceReviewWindow(QWidget):
         self.refresh_button.clicked.connect(self._refresh_queue)
         self.reset_view_button.clicked.connect(self.preview_surface.reset_view)
         self.preview_display_controls.commandTriggered.connect(self._route_preview_display_command)
+        self.approve_button.clicked.connect(self._approve_fixture)
+        self.decline_button.clicked.connect(self._decline_fixture)
         self.previous_button.clicked.connect(self._previous_fixture)
         self.next_button.clicked.connect(self._next_fixture)
         self.list_widget.currentRowChanged.connect(self._select_index)
@@ -471,7 +492,10 @@ class ReferenceReviewWindow(QWidget):
 
         self.list_widget.clear()
         for item in self._fixture_items:
-            label = f"{item['fixture_id']}\n{item['artifact_display_path'] or item['source_display_path']}"
+            label = (
+                f"{item['fixture_id']} [{item['status']}]\n"
+                f"{item['artifact_display_path'] or item['source_display_path']}"
+            )
             widget_item = QListWidgetItem(label)
             widget_item.setData(256, item["fixture_id"])
             self.list_widget.addItem(widget_item)
@@ -491,6 +515,93 @@ class ReferenceReviewWindow(QWidget):
     def _next_fixture(self) -> None:
         self.list_widget.setCurrentRow(min(len(self._fixture_items) - 1, self._selected_index + 1))
 
+    def _approve_fixture(self) -> None:
+        record = self._selected_record()
+        if record is None:
+            self.queue_status.setText("No fixture selected")
+            return
+        promotion = approve_reference_artifacts(record)
+        if not promotion.updated:
+            self.queue_status.setText(_diagnostic_summary("Approval failed", promotion.diagnostics))
+            return
+        approved_record = replace(
+            record,
+            artifact_paths=promotion.artifact_paths,
+            review_status=ReferenceReviewStatus.APPROVED,
+        )
+        if not self._persist_review_status(
+            approved_record,
+            ReferenceReviewStatus.APPROVED,
+            artifact_paths=promotion.artifact_paths,
+        ):
+            return
+        self._replace_selected_record(approved_record)
+        self.queue_status.setText(f"{record.fixture_id} approved")
+        self._sync_properties()
+
+    def _decline_fixture(self) -> None:
+        record = self._selected_record()
+        if record is None:
+            self.queue_status.setText("No fixture selected")
+            return
+        declined_record = replace(record, review_status=ReferenceReviewStatus.DECLINED)
+        if not self._persist_review_status(declined_record, ReferenceReviewStatus.DECLINED):
+            return
+        self._replace_selected_record(declined_record)
+        self.queue_status.setText(f"{record.fixture_id} declined")
+        self._sync_properties()
+
+    def _selected_record(self) -> ReviewSourceModelRecord | None:
+        if self._selected_index < 0 or self._selected_index >= len(self.queue.records):
+            return None
+        return self.queue.records[self._selected_index]
+
+    def _persist_review_status(
+        self,
+        record: ReviewSourceModelRecord,
+        status: ReferenceReviewStatus,
+        *,
+        artifact_paths: tuple[Path, ...] | None = None,
+    ) -> bool:
+        targets = list(self._fixture_files) + list(self._fixture_databases)
+        if not targets:
+            self.queue_status.setText("Review status changed locally; no fixture file/db configured")
+            return True
+        diagnostics: list[str] = []
+        updated = False
+        for fixture_file in self._fixture_files:
+            result = update_fixture_review_status_in_file(
+                fixture_file,
+                fixture_id=record.fixture_id,
+                status=status,
+                artifact_paths=artifact_paths,
+            )
+            updated = updated or result.updated
+            diagnostics.extend(diagnostic.code for diagnostic in result.diagnostics)
+        for fixture_database in self._fixture_databases:
+            result = update_fixture_review_status_in_database(
+                fixture_database,
+                fixture_id=record.fixture_id,
+                status=status,
+                artifact_paths=artifact_paths,
+            )
+            updated = updated or result.updated
+            diagnostics.extend(diagnostic.code for diagnostic in result.diagnostics)
+        if not updated:
+            self.queue_status.setText(f"Review status not saved: {', '.join(diagnostics) or 'no source'}")
+            return False
+        return True
+
+    def _replace_selected_record(self, record: ReviewSourceModelRecord) -> None:
+        records = list(self.queue.records)
+        records[self._selected_index] = record
+        self.queue.records = tuple(records)
+        self.queue.statuses[record.fixture_id] = record.review_status.value
+        self._fixture_items = _fixture_items_for_qml(self.queue, self.artifact_previews)
+        self._populate_queue_items()
+        self.list_widget.setCurrentRow(self._selected_index)
+        self._select_index(self._selected_index)
+
     def _select_index(self, index: int) -> None:
         if index < 0 or index >= len(self._fixture_items):
             self._selected_index = -1
@@ -504,6 +615,7 @@ class ReferenceReviewWindow(QWidget):
         item = self._fixture_items[index]
         self.context_text.setText(
             f"{item['fixture_id']}\n\n"
+            f"Review: {item['status']}\n"
             f"Source: {item['source_display_path']}\n"
             f"Expected: {item['expected_output'] or 'not declared'}\n"
             f"Artifact: {item['artifact_display_path']}"
@@ -772,6 +884,11 @@ def _queue_status_text(queue: FixtureQueueViewModel, diagnostics: tuple[str, ...
     return "No fixture file loaded"
 
 
+def _diagnostic_summary(prefix: str, diagnostics: tuple[object, ...]) -> str:
+    codes = [getattr(diagnostic, "code", str(diagnostic)) for diagnostic in diagnostics]
+    return f"{prefix}: {', '.join(codes) if codes else 'unknown'}"
+
+
 def _parse_args(args: Sequence[str]) -> tuple[list[Path], list[Path], list[Path], set[str], str | None]:
     fixture_files: list[Path] = []
     fixture_roots: list[Path] = []
@@ -824,6 +941,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         bridges=default_bridge_registry(fixture_records),
         fixture_records=fixture_records,
         fixture_diagnostics=fixture_diagnostics,
+        fixture_files=tuple(fixture_files),
+        fixture_databases=tuple(fixture_databases),
         offscreen="--offscreen" in flags,
     )
     if not result.launched:

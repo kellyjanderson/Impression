@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..source_registry import ReviewContextPayload, ReviewSourceModelRecord, build_review_context_payload
+from ..source_registry import (
+    ReferenceReviewStatus,
+    ReviewContextPayload,
+    ReviewSourceModelRecord,
+    build_review_context_payload,
+)
 
 
 @dataclass(frozen=True)
@@ -14,10 +19,15 @@ class FixtureQueueItem:
     source_display_path: str
     expected_output: str | None
     artifact_display_path: str | None = None
-    status: str = "dirty"
+    status: str = ReferenceReviewStatus.UNREVIEWED.value
 
     @classmethod
-    def from_record(cls, record: ReviewSourceModelRecord, *, status: str = "dirty") -> "FixtureQueueItem":
+    def from_record(
+        cls,
+        record: ReviewSourceModelRecord,
+        *,
+        status: str = ReferenceReviewStatus.UNREVIEWED.value,
+    ) -> "FixtureQueueItem":
         return cls(
             fixture_id=record.fixture_id,
             feature_name=record.feature_name,
@@ -63,11 +73,12 @@ class FixtureQueueViewModel:
     ) -> None:
         self.records = records
         self.statuses = statuses or {}
-        self.selected_index = self._first_dirty_index()
+        self.selected_index = self._first_unreviewed_index()
 
-    def _first_dirty_index(self) -> int | None:
+    def _first_unreviewed_index(self) -> int | None:
         for index, record in enumerate(self.records):
-            if self.statuses.get(record.fixture_id, "dirty") == "dirty":
+            status = self.statuses.get(record.fixture_id, record.review_status.value)
+            if status == ReferenceReviewStatus.UNREVIEWED.value:
                 return index
         return 0 if self.records else None
 
@@ -76,7 +87,7 @@ class FixtureQueueViewModel:
         return tuple(
             FixtureQueueItem.from_record(
                 record,
-                status=self.statuses.get(record.fixture_id, "dirty"),
+                status=self.statuses.get(record.fixture_id, record.review_status.value),
             )
             for record in self.records
         )

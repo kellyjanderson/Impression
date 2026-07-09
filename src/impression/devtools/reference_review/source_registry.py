@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 from dataclasses import dataclass, field
 from enum import Enum
@@ -16,6 +17,12 @@ class ReviewSourceLoadMode(str, Enum):
     MODULE = "module"
     CALLABLE = "callable"
     GENERATED_REVIEW_MODULE = "generated-review-module"
+
+
+class ReferenceReviewStatus(str, Enum):
+    UNREVIEWED = "unreviewed"
+    APPROVED = "approved"
+    DECLINED = "declined"
 
 
 @dataclass(frozen=True)
@@ -64,6 +71,7 @@ class ReviewSourceModelRecord:
     description: str | None = None
     parameters: tuple[EntrypointParameterRecord, ...] = ()
     artifact_paths: tuple[Path, ...] = ()
+    review_status: ReferenceReviewStatus = ReferenceReviewStatus.UNREVIEWED
     generated: bool = False
 
     def __post_init__(self) -> None:
@@ -76,6 +84,7 @@ class ReviewSourceModelRecord:
         object.__setattr__(self, "load_mode", ReviewSourceLoadMode(self.load_mode))
         object.__setattr__(self, "source_path", Path(self.source_path))
         object.__setattr__(self, "artifact_paths", tuple(Path(path) for path in self.artifact_paths))
+        object.__setattr__(self, "review_status", ReferenceReviewStatus(self.review_status))
 
     @property
     def identity(self) -> SourceIdentity:
@@ -114,6 +123,7 @@ class ReviewSourceModelRecord:
             description=data.get("description"),
             parameters=parameters,
             artifact_paths=artifact_paths,
+            review_status=data.get("review_status", data.get("status", ReferenceReviewStatus.UNREVIEWED)),
             generated=bool(data.get("generated", False)),
         )
 
@@ -133,6 +143,13 @@ class SourceValidationResult:
     @property
     def valid(self) -> bool:
         return not self.diagnostics and self.record is not None
+
+
+@dataclass(frozen=True)
+class ReferenceReviewStatusWriteResult:
+    updated: bool
+    diagnostics: tuple[SourceValidationDiagnostic, ...] = ()
+    artifact_paths: tuple[Path, ...] = ()
 
 
 def validate_source_record(
@@ -295,8 +312,140 @@ def load_source_records_from_database(path: Path) -> DiscoverySummary:
         parameters = data.get("parameters")
         if isinstance(parameters, str) and parameters:
             data["parameters"] = json.loads(parameters)
+        artifact_paths = data.get("artifact_paths")
+        if isinstance(artifact_paths, str) and artifact_paths:
+            data["artifact_paths"] = json.loads(artifact_paths)
         records.append(data)
     return _records_from_mappings(records, base_dir=path.parent, allowed_root=path.parent)
+
+
+def approve_reference_artifacts(record: ReviewSourceModelRecord) -> ReferenceReviewStatusWriteResult:
+    """Move dirty reference artifacts to matching gold paths."""
+
+    gold_paths: list[Path] = []
+    diagnostics: list[SourceValidationDiagnostic] = []
+    for artifact_path in record.artifact_paths:
+        gold_path = _gold_path_for_dirty_artifact(artifact_path)
+        if gold_path is None:
+            diagnostics.append(
+                SourceValidationDiagnostic(
+                    "artifact-not-under-dirty-root",
+                    sanitize_error_text(str(artifact_path)),
+                    record.fixture_id,
+                )
+            )
+            continue
+        if not artifact_path.exists():
+            diagnostics.append(
+                SourceValidationDiagnostic(
+                    "missing-artifact",
+                    sanitize_error_text(str(artifact_path)),
+                    record.fixture_id,
+                )
+            )
+            continue
+        gold_path.parent.mkdir(parents=True, exist_ok=True)
+        if gold_path.exists():
+            gold_path.unlink()
+        shutil.move(str(artifact_path), str(gold_path))
+        gold_paths.append(gold_path)
+    if diagnostics:
+        return ReferenceReviewStatusWriteResult(False, tuple(diagnostics), tuple(gold_paths))
+    return ReferenceReviewStatusWriteResult(True, artifact_paths=tuple(gold_paths))
+
+
+def update_fixture_review_status_in_file(
+    path: Path,
+    *,
+    fixture_id: str,
+    status: ReferenceReviewStatus | str,
+    artifact_paths: tuple[Path, ...] | None = None,
+) -> ReferenceReviewStatusWriteResult:
+    """Persist a fixture review status into a JSON fixture file."""
+
+    path = Path(path)
+    try:
+        payload = json.loads(path.read_text())
+    except Exception as exc:
+        return ReferenceReviewStatusWriteResult(
+            False,
+            (SourceValidationDiagnostic("invalid-fixture-file", str(exc), fixture_id),),
+        )
+    rows = payload.get("fixtures", payload) if isinstance(payload, Mapping) else payload
+    if isinstance(rows, Mapping):
+        rows = [rows]
+    if not isinstance(rows, list):
+        return ReferenceReviewStatusWriteResult(
+            False,
+            (SourceValidationDiagnostic("invalid-fixture-file", "fixture rows are not editable", fixture_id),),
+        )
+    row = next(
+        (item for item in rows if isinstance(item, dict) and item.get("fixture_id") == fixture_id),
+        None,
+    )
+    if row is None:
+        return ReferenceReviewStatusWriteResult(
+            False,
+            (SourceValidationDiagnostic("missing-fixture-record", fixture_id, fixture_id),),
+        )
+    row["review_status"] = ReferenceReviewStatus(status).value
+    if artifact_paths is not None:
+        row["artifact_paths"] = [
+            _path_for_fixture_storage(artifact_path, base_dir=path.parent)
+            for artifact_path in artifact_paths
+        ]
+    path.write_text(json.dumps(payload, indent=2) + "\n")
+    return ReferenceReviewStatusWriteResult(True, artifact_paths=tuple(artifact_paths or ()))
+
+
+def update_fixture_review_status_in_database(
+    path: Path,
+    *,
+    fixture_id: str,
+    status: ReferenceReviewStatus | str,
+    artifact_paths: tuple[Path, ...] | None = None,
+) -> ReferenceReviewStatusWriteResult:
+    """Persist a fixture review status into a SQLite review_sources table."""
+
+    path = Path(path)
+    try:
+        with sqlite3.connect(path) as connection:
+            columns = {
+                row[1]
+                for row in connection.execute("pragma table_info(review_sources)").fetchall()
+            }
+            if "review_status" not in columns:
+                connection.execute("alter table review_sources add column review_status text")
+            if artifact_paths is not None and "artifact_paths" not in columns:
+                connection.execute("alter table review_sources add column artifact_paths text")
+            values: list[object] = [ReferenceReviewStatus(status).value]
+            assignments = ["review_status = ?"]
+            if artifact_paths is not None:
+                assignments.append("artifact_paths = ?")
+                values.append(
+                    json.dumps(
+                        [
+                            _path_for_fixture_storage(artifact_path, base_dir=path.parent)
+                            for artifact_path in artifact_paths
+                        ]
+                    )
+                )
+            values.append(fixture_id)
+            cursor = connection.execute(
+                f"update review_sources set {', '.join(assignments)} where fixture_id = ?",
+                values,
+            )
+            if cursor.rowcount == 0:
+                return ReferenceReviewStatusWriteResult(
+                    False,
+                    (SourceValidationDiagnostic("missing-fixture-record", fixture_id, fixture_id),),
+                )
+    except Exception as exc:
+        return ReferenceReviewStatusWriteResult(
+            False,
+            (SourceValidationDiagnostic("invalid-fixture-database", str(exc), fixture_id),),
+        )
+    return ReferenceReviewStatusWriteResult(True, artifact_paths=tuple(artifact_paths or ()))
 
 
 def _records_from_mappings(
@@ -412,3 +561,20 @@ def resolve_generated_review_module(
         generated=True,
     )
     return validate_source_record(record, allowed_root=resolved_root)
+
+
+def _gold_path_for_dirty_artifact(path: Path) -> Path | None:
+    parts = path.parts
+    try:
+        dirty_index = parts.index("dirty")
+    except ValueError:
+        return None
+    return Path(*parts[:dirty_index], "gold", *parts[dirty_index + 1 :])
+
+
+def _path_for_fixture_storage(path: Path, *, base_dir: Path) -> str:
+    path = Path(path)
+    try:
+        return path.resolve().relative_to(base_dir.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()

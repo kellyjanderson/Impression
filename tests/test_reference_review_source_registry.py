@@ -7,13 +7,17 @@ from pathlib import Path
 
 from impression.devtools.reference_review import (
     EntrypointParameterRecord,
+    ReferenceReviewStatus,
     ReviewSourceLoadMode,
     ReviewSourceModelRecord,
+    approve_reference_artifacts,
     build_review_context_payload,
     discover_source_records,
     load_source_records_from_database,
     load_source_records_from_file,
     resolve_generated_review_module,
+    update_fixture_review_status_in_database,
+    update_fixture_review_status_in_file,
     validate_source_record,
 )
 
@@ -117,6 +121,46 @@ def test_fixture_file_loads_review_source_records(tmp_path: Path) -> None:
 
     assert len(summary.valid_items) == 1
     assert summary.valid_items[0].record.fixture_id == "demo/file"
+    assert summary.valid_items[0].record.review_status is ReferenceReviewStatus.UNREVIEWED
+
+
+def test_fixture_file_persists_review_status_and_gold_artifact_path(tmp_path: Path) -> None:
+    source = _write_source(tmp_path, "fixture_model.py")
+    dirty = tmp_path / "reference-stl" / "dirty" / "demo" / "fixture.stl"
+    dirty.parent.mkdir(parents=True)
+    dirty.write_text("solid demo\nendsolid demo\n")
+    fixture_file = tmp_path / "review-fixtures.json"
+    fixture_file.write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "fixture_id": "demo/file",
+                        "feature_name": "demo",
+                        "source_path": source.name,
+                        "artifact_paths": [dirty.relative_to(tmp_path).as_posix()],
+                    }
+                ]
+            }
+        )
+    )
+    record = load_source_records_from_file(fixture_file).valid_items[0].record
+
+    promotion = approve_reference_artifacts(record)
+    result = update_fixture_review_status_in_file(
+        fixture_file,
+        fixture_id=record.fixture_id,
+        status=ReferenceReviewStatus.APPROVED,
+        artifact_paths=promotion.artifact_paths,
+    )
+    reloaded = load_source_records_from_file(fixture_file).valid_items[0].record
+
+    assert promotion.updated
+    assert result.updated
+    assert not dirty.exists()
+    assert reloaded.review_status is ReferenceReviewStatus.APPROVED
+    assert reloaded.artifact_paths[0].parts[-3:] == ("gold", "demo", "fixture.stl")
+    assert reloaded.artifact_paths[0].read_text() == "solid demo\nendsolid demo\n"
 
 
 def test_fixture_database_loads_review_source_records(tmp_path: Path) -> None:
@@ -135,6 +179,29 @@ def test_fixture_database_loads_review_source_records(tmp_path: Path) -> None:
 
     assert len(summary.valid_items) == 1
     assert summary.valid_items[0].record.fixture_id == "demo/db"
+
+
+def test_fixture_database_persists_declined_status(tmp_path: Path) -> None:
+    source = _write_source(tmp_path, "db_model.py")
+    database = tmp_path / "review-fixtures.sqlite"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "create table review_sources (fixture_id text, feature_name text, source_path text, entrypoint text)"
+        )
+        connection.execute(
+            "insert into review_sources values (?, ?, ?, ?)",
+            ("demo/db", "demo", source.name, "build"),
+        )
+
+    result = update_fixture_review_status_in_database(
+        database,
+        fixture_id="demo/db",
+        status=ReferenceReviewStatus.DECLINED,
+    )
+    reloaded = load_source_records_from_database(database).valid_items[0].record
+
+    assert result.updated
+    assert reloaded.review_status is ReferenceReviewStatus.DECLINED
 
 
 def test_committed_demo_fixture_file_loads(project_root: Path) -> None:

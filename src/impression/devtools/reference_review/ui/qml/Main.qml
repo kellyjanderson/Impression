@@ -157,6 +157,12 @@ ApplicationWindow {
                     }
 
                     Button {
+                        objectName: "declineFixtureButton"
+                        text: "Decline"
+                        enabled: root.hasFixture
+                    }
+
+                    Button {
                         objectName: "previousFixtureButton"
                         text: "Previous"
                         enabled: root.hasFixture
@@ -210,7 +216,7 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     Layout.minimumHeight: 240
                     markdownText: root.hasFixture
-                        ? "# " + root.currentFixture().fixture_id + "\n\nSource: `" + root.currentFixture().source_display_path + "`\n\nExpected: " + (root.currentFixture().expected_output || "not declared")
+                        ? "# " + root.currentFixture().fixture_id + "\n\nReview: " + (root.currentFixture().status || "unreviewed") + "\n\nSource: `" + root.currentFixture().source_display_path + "`\n\nExpected: " + (root.currentFixture().expected_output || "not declared")
                             + (root.currentFixture().artifact_display_path ? "\n\nArtifact: `" + root.currentFixture().artifact_display_path + "`" : "")
                         : "No fixture context loaded."
                 }

@@ -315,11 +315,14 @@ def test_empty_shell_commands_give_immediate_visible_feedback() -> None:
     root = result.engine.rootObjects()[0]
     refresh = root.findChild(QObject, "refreshQueueButton")
     approve = root.findChild(QObject, "approveFixtureButton")
+    decline = root.findChild(QObject, "declineFixtureButton")
 
     assert refresh is not None
     assert approve is not None
+    assert decline is not None
     assert isinstance(refresh, QPushButton)
     assert isinstance(approve, QPushButton)
+    assert isinstance(decline, QPushButton)
     assert approve.text() == "Approve"
     refresh.click()
     assert root.property("queueStatusText") == "No fixtures loaded"
@@ -360,6 +363,47 @@ def test_shell_loads_fixture_file_into_selectable_queue(tmp_path: Path) -> None:
     assert root.property("queueStatusText") == "1 fixture loaded"
     assert root.property("selectedMessageText") == "demo/selectable"
     assert root.property("hasFixture")
+
+
+def test_decline_button_marks_fixture_file_declined(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    source = tmp_path / "model.py"
+    source.write_text("def build():\n    return None\n")
+    artifact = tmp_path / "reference-stl" / "dirty" / "demo" / "fixture.stl"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("solid demo\nendsolid demo\n")
+    fixture_file = tmp_path / "fixtures.json"
+    fixture_file.write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "fixture_id": "demo/selectable",
+                        "feature_name": "demo",
+                        "source_path": source.name,
+                        "expected_output": "dirty STL",
+                        "artifact_paths": [artifact.relative_to(tmp_path).as_posix()],
+                    }
+                ]
+            }
+        )
+    )
+    records, diagnostics = shell.load_fixture_records(fixture_files=(fixture_file,))
+    result = launch_workbench(
+        fixture_records=records,
+        fixture_diagnostics=diagnostics,
+        fixture_files=(fixture_file,),
+        offscreen=True,
+    )
+    root = result.engine.rootObjects()[0]
+    decline = root.findChild(QObject, "declineFixtureButton")
+
+    assert isinstance(decline, QPushButton)
+    decline.click()
+
+    payload = json.loads(fixture_file.read_text())
+    assert payload["fixtures"][0]["review_status"] == "declined"
+    assert root.property("queueStatusText") == "demo/selectable declined"
 
 
 def test_impress_preview_edge_overlay_uses_object_edges_not_triangle_wireframe(project_root: Path) -> None:
@@ -862,6 +906,7 @@ def test_dirty_impress_fixture_selects_embedded_preview_surface(project_root: Pa
     assert root.findChild(QObject, "embeddedPreviewSurface") is not None
     assert root.findChild(QObject, "resetPreviewButton") is not None
     assert root.findChild(QObject, "approveFixtureButton") is not None
+    assert root.findChild(QObject, "declineFixtureButton") is not None
     assert root.findChild(QObject, "sendPromptButton") is None
     assert root.findChild(QObject, "previewDisplayControlBar") is not None
     assert root.findChild(QObject, "previewDisplayColorGroup") is not None

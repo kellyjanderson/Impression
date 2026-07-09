@@ -28,7 +28,7 @@ def test_queue_selects_first_dirty_fixture_and_uses_display_paths(tmp_path: Path
     dirty = _record(tmp_path, "demo/dirty", expected_output="dirty.png")
     queue = FixtureQueueViewModel(
         (clean, dirty),
-        statuses={"demo/clean": "approved", "demo/dirty": "dirty"},
+        statuses={"demo/clean": "approved", "demo/dirty": "unreviewed"},
     )
 
     assert queue.selected_context.fixture_id == "demo/dirty"
