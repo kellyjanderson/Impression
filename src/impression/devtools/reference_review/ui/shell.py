@@ -438,6 +438,7 @@ class ReferenceReviewWindow(QWidget):
         context_title = QLabel("Context")
         context_title.setStyleSheet("font-size: 16px; font-weight: 700;")
         self.context_text = QLabel("")
+        self.context_text.setObjectName("selectedFixtureContextText")
         self.context_text.setWordWrap(True)
         context_layout.addWidget(context_title)
         context_layout.addWidget(self.context_text, 1)
@@ -689,6 +690,9 @@ class ReferenceReviewWindow(QWidget):
         self.context_text.setText(
             f"{item['fixture_id']}\n\n"
             f"Review: {item['status']}\n"
+            f"Purpose: {item['purpose'] or 'not provided'}\n\n"
+            f"Methodology: {item['methodology'] or 'not provided'}\n\n"
+            f"Rendered result: {item['render_description'] or 'not provided'}\n\n"
             f"Source: {item['source_display_path']}\n"
             f"Expected: {item['expected_output'] or 'not declared'}\n"
             f"Artifact: {item['artifact_display_path']}"
@@ -944,6 +948,9 @@ def _fixture_items_for_qml(
                 "feature_name": item.feature_name,
                 "source_display_path": item.source_display_path,
                 "expected_output": item.expected_output or "",
+                "purpose": item.purpose or "",
+                "methodology": item.methodology or "",
+                "render_description": item.render_description or "",
                 "artifact_display_path": item.artifact_display_path or "",
                 "artifact_preview_url": getattr(preview, "preview_url", "") if preview is not None else "",
                 "artifact_preview_status": getattr(preview, "diagnostic", None)

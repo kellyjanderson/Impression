@@ -365,6 +365,36 @@ def test_shell_loads_fixture_file_into_selectable_queue(tmp_path: Path) -> None:
     assert root.property("hasFixture")
 
 
+def test_context_tab_shows_fixture_purpose_methodology_and_render_description(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    source = tmp_path / "model.py"
+    source.write_text("def build():\n    return None\n")
+    record = ReviewSourceModelRecord(
+        fixture_id="demo/context",
+        feature_name="demo",
+        source_path=source,
+        purpose="Validate bevel edge visibility.",
+        methodology="Render with object edges enabled and inspect the silhouette.",
+        render_description="A compact orange part with four clean outer vertical edges.",
+    )
+
+    result = launch_workbench(fixture_records=(record,), offscreen=True)
+    root = result.engine.rootObjects()[0]
+    context = root.findChild(QObject, "selectedFixtureContextText")
+
+    assert isinstance(context, QLabel)
+    assert "Purpose: Validate bevel edge visibility." in context.text()
+    assert "Methodology: Render with object edges enabled and inspect the silhouette." in context.text()
+    assert (
+        "Rendered result: A compact orange part with four clean outer vertical edges."
+        in context.text()
+    )
+    fixture = root.property("reviewFixtures")[0]
+    assert fixture["purpose"] == "Validate bevel edge visibility."
+    assert fixture["methodology"] == "Render with object edges enabled and inspect the silhouette."
+    assert fixture["render_description"] == "A compact orange part with four clean outer vertical edges."
+
+
 def test_fixture_queue_hides_approved_until_checkbox_is_checked(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     approved_source = tmp_path / "approved.py"

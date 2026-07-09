@@ -70,6 +70,9 @@ class ReviewSourceModelRecord:
     entrypoint: str = "build"
     expected_output: str | None = None
     description: str | None = None
+    purpose: str | None = None
+    methodology: str | None = None
+    render_description: str | None = None
     parameters: tuple[EntrypointParameterRecord, ...] = ()
     artifact_paths: tuple[Path, ...] = ()
     review_status: ReferenceReviewStatus = ReferenceReviewStatus.UNREVIEWED
@@ -122,6 +125,9 @@ class ReviewSourceModelRecord:
             entrypoint=str(data.get("entrypoint", "build")),
             expected_output=data.get("expected_output"),
             description=data.get("description"),
+            purpose=data.get("purpose"),
+            methodology=data.get("methodology"),
+            render_description=data.get("render_description"),
             parameters=parameters,
             artifact_paths=artifact_paths,
             review_status=data.get("review_status", data.get("status", ReferenceReviewStatus.UNREVIEWED)),
@@ -485,6 +491,9 @@ class ReviewContextPayload:
     entrypoint: str
     expected_output: str | None
     description: str | None
+    purpose: str | None
+    methodology: str | None
+    render_description: str | None
     parameters: tuple[EntrypointParameterRecord, ...] = ()
     artifact_display_paths: tuple[str, ...] = ()
 
@@ -496,6 +505,9 @@ class ReviewContextPayload:
             "entrypoint": self.entrypoint,
             "expected_output": self.expected_output,
             "description": self.description,
+            "purpose": self.purpose,
+            "methodology": self.methodology,
+            "render_description": self.render_description,
             "parameters": [
                 {"name": item.name, "value": item.value} for item in self.parameters
             ],
@@ -511,6 +523,9 @@ def build_review_context_payload(record: ReviewSourceModelRecord) -> ReviewConte
         entrypoint=record.entrypoint,
         expected_output=record.expected_output,
         description=record.description,
+        purpose=record.purpose,
+        methodology=record.methodology,
+        render_description=record.render_description,
         parameters=record.parameters,
         artifact_display_paths=tuple(path.name for path in record.artifact_paths),
     )

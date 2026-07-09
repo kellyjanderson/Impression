@@ -42,6 +42,9 @@ def test_source_model_record_normalizes_mapping_and_exposes_identity(tmp_path: P
             "load_mode": "module",
             "entrypoint": "build",
             "expected_output": "png",
+            "purpose": "Exercise fixture metadata",
+            "methodology": "Compare the canonical rendered STL against the selected artifact.",
+            "render_description": "A single centered box with crisp vertical sides.",
             "parameters": [{"name": "width", "value": 12}],
             "artifact_paths": [artifact.name],
         },
@@ -50,6 +53,9 @@ def test_source_model_record_normalizes_mapping_and_exposes_identity(tmp_path: P
 
     assert record.load_mode is ReviewSourceLoadMode.MODULE
     assert record.identity.key == ("demo/box", source.as_posix(), "build")
+    assert record.purpose == "Exercise fixture metadata"
+    assert record.methodology == "Compare the canonical rendered STL against the selected artifact."
+    assert record.render_description == "A single centered box with crisp vertical sides."
     assert record.parameters == (EntrypointParameterRecord("width", 12),)
     assert record.artifact_paths == (artifact,)
 
@@ -296,6 +302,9 @@ def test_review_context_payload_is_deterministic_and_omits_absolute_source_path(
         source_path=source,
         expected_output="image+stl",
         description="Context fixture",
+        purpose="Verify context serialization",
+        methodology="Serialize twice and compare stable dictionaries.",
+        render_description="A deterministic image and STL pair.",
         parameters=(EntrypointParameterRecord("scale", 2),),
     )
 
@@ -304,6 +313,9 @@ def test_review_context_payload_is_deterministic_and_omits_absolute_source_path(
 
     assert first == second
     assert first["source_display_path"] == "candidate.py"
+    assert first["purpose"] == "Verify context serialization"
+    assert first["methodology"] == "Serialize twice and compare stable dictionaries."
+    assert first["render_description"] == "A deterministic image and STL pair."
     assert first["artifact_display_paths"] == []
     assert str(tmp_path) not in json.dumps(first)
 

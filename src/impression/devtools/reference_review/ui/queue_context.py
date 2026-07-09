@@ -18,6 +18,9 @@ class FixtureQueueItem:
     feature_name: str
     source_display_path: str
     expected_output: str | None
+    purpose: str | None = None
+    methodology: str | None = None
+    render_description: str | None = None
     artifact_display_path: str | None = None
     status: str = ReferenceReviewStatus.UNREVIEWED.value
 
@@ -33,6 +36,9 @@ class FixtureQueueItem:
             feature_name=record.feature_name,
             source_display_path=record.identity.display_path,
             expected_output=record.expected_output,
+            purpose=record.purpose,
+            methodology=record.methodology,
+            render_description=record.render_description,
             artifact_display_path=record.artifact_paths[0].name if record.artifact_paths else None,
             status=status,
         )
@@ -44,12 +50,15 @@ class SelectedFixtureContext:
     feature_name: str | None
     source_display_path: str | None
     expected_output: str | None
+    purpose: str | None = None
+    methodology: str | None = None
+    render_description: str | None = None
     artifact_display_paths: tuple[str, ...] = ()
     empty: bool = False
 
     @classmethod
     def empty_state(cls) -> "SelectedFixtureContext":
-        return cls(None, None, None, None, (), empty=True)
+        return cls(None, None, None, None, None, None, None, (), empty=True)
 
     @classmethod
     def from_payload(cls, payload: ReviewContextPayload) -> "SelectedFixtureContext":
@@ -58,6 +67,9 @@ class SelectedFixtureContext:
             payload.feature_name,
             payload.source_display_path,
             payload.expected_output,
+            payload.purpose,
+            payload.methodology,
+            payload.render_description,
             payload.artifact_display_paths,
         )
 
