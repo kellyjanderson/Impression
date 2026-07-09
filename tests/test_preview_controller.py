@@ -226,6 +226,7 @@ def test_preview_scene_controller_applies_mesh_scene_and_feature_edges(monkeypat
         "color": "#6ab0ff",
         "opacity": 1.0,
         "smooth_shading": True,
+        "lighting": True,
         "specular": 0.2,
     }
     edge_call = plotter.mesh_calls[1]
@@ -254,6 +255,39 @@ def test_preview_scene_controller_supports_legacy_feature_edge_signature(monkeyp
 
     assert pv_mesh.feature_angles == [60.0]
     assert len(plotter.mesh_calls) == 2
+
+
+def test_preview_scene_controller_can_render_edges_without_object_fill(monkeypatch) -> None:
+    import impression.preview as preview_module
+
+    plotter = FakePlotter()
+    pv_mesh = FakePvMesh()
+    monkeypatch.setattr(preview_module, "mesh_to_pyvista", lambda mesh: pv_mesh)
+    controller = PreviewSceneController(unit_settings=UnitSettings("millimeters", "mm", 1.0))
+    mesh = Mesh(
+        vertices=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]]),
+        faces=np.array([[0, 1, 2]]),
+    )
+
+    controller.apply_scene(
+        plotter,
+        [mesh],
+        show_edges=True,
+        face_edges=True,
+        show_bounds=False,
+        show_axes=False,
+        show_object_fill=False,
+    )
+
+    assert plotter.mesh_calls[0] == {
+        "mesh": pv_mesh,
+        "name": "mesh-0-wireframe",
+        "color": "#cdd7ff",
+        "style": "wireframe",
+        "line_width": 1.0,
+        "lighting": False,
+    }
+    assert isinstance(plotter.mesh_calls[1]["mesh"], FakeFeatureEdges)
 
 
 def test_preview_scene_controller_resets_camera_from_combined_bounds() -> None:
@@ -433,6 +467,13 @@ def test_qt_preview_scene_handoff_delegates_to_shared_controller() -> None:
                 "show_bounds": False,
                 "show_axes": False,
                 "align_camera": True,
+                "show_object_fill": True,
+                "show_polylines": True,
+                "smooth_shading": True,
+                "lighting": True,
+                "specular": 0.2,
+                "background": None,
+                "background_top": None,
             },
         )
     ]

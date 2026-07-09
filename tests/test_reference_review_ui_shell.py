@@ -1218,7 +1218,42 @@ def test_pyvistaqt_preview_surface_uses_lightweight_scene_handoff(
         "show_bounds": True,
         "show_axes": True,
         "align_camera": True,
+        "show_object_fill": True,
+        "show_polylines": True,
+        "smooth_shading": False,
+        "lighting": True,
+        "specular": 0.0,
+        "background": "#07111f",
+        "background_top": "#10223a",
     }
+
+
+def test_pyvistaqt_preview_scene_options_map_display_controls() -> None:
+    options = PreviewDisplayOptions(
+        lighting_mode="camera",
+        show_object_fill=False,
+        show_triangle_wireframe=True,
+        show_object_edges=False,
+        show_bounds_grid=False,
+        show_axis_triad=False,
+        show_gradient_background=False,
+        show_polylines=False,
+    )
+
+    apply_options = preview_widget._preview_scene_apply_options(options, align_camera=False)
+
+    assert apply_options.show_edges is True
+    assert apply_options.face_edges is False
+    assert apply_options.show_bounds is False
+    assert apply_options.show_axes is False
+    assert apply_options.align_camera is False
+    assert apply_options.show_object_fill is False
+    assert apply_options.show_polylines is False
+    assert apply_options.smooth_shading is True
+    assert apply_options.lighting is True
+    assert apply_options.specular == 0.2
+    assert apply_options.background == "#07111f"
+    assert apply_options.background_top is None
 
 
 def test_preview_render_command_records_and_queue_coalesce_by_lane(tmp_path: Path) -> None:
@@ -1409,6 +1444,78 @@ def test_window_preview_controller_launches_and_polls_payload(tmp_path: Path) ->
     assert applied == [payload]
     assert cleaned == [(payload, "completed")]
     assert window._preview_futures == []
+
+
+def test_window_preview_display_button_updates_live_surface(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    artifact = tmp_path / "part.impress"
+    artifact.write_text('{"format": "impress"}\n')
+    source = tmp_path / "model.py"
+    source.write_text("def build():\n    return None\n")
+    record = ReviewSourceModelRecord(
+        "demo/part",
+        "demo",
+        source,
+        artifact_paths=(artifact,),
+    )
+    result = launch_workbench(fixture_records=(record,), offscreen=True)
+    window = result.engine.rootObjects()[0]
+    future: Future = Future()
+    request = PreviewPayloadRequest.from_source_record(
+        record,
+        owner="preview-payload",
+        request_id=7,
+        generation=1,
+    )
+    payload = PreviewPayload.success(request, payload_path=tmp_path / "payload.json")
+    applied_options = []
+
+    class FakePreviewController:
+        active_identity = payload.identity
+
+        def launch(self, record):
+            return SimpleNamespace(accepted=True, future=future, diagnostic=None, request=request)
+
+        def handle_completion(self, envelope, handoff, diagnostic_handoff=None):
+            handoff(SimpleNamespace(payload=payload))
+
+        def cleanup_payload(self, payload, *, reason: str):
+            return None
+
+        def close(self):
+            pass
+
+    window._preview_controller.close()
+    window._preview_futures = []
+    window._preview_controller = FakePreviewController()
+
+    def apply_payload(payload):
+        window.preview_surface._payload_state = preview_widget.PreviewWidgetPayloadState(
+            generation=payload.request.generation,
+            fixture_id=payload.request.fixture_id,
+            ready=True,
+        )
+        return window.preview_surface._payload_state
+
+    window.preview_surface.set_preview_payload = apply_payload
+    window.preview_surface.set_display_options = lambda options: applied_options.append(options)
+
+    window._load_artifact_preview(window._fixture_items[0])
+    future.set_result(SimpleNamespace(ok=True))
+    window._poll_preview_payloads()
+    window.preview_surface._drain_preview_render_queue()
+    window.preview_surface._drain_preview_render_queue()
+
+    button = window.findChild(QToolButton, "previewDisplayControl-triangle-wireframe")
+    assert button is not None
+    button.click()
+    window.preview_surface._drain_preview_render_queue()
+
+    assert applied_options[-1].show_triangle_wireframe is True
+    assert window.preview_display_controls.findChild(
+        QToolButton,
+        "previewDisplayControl-triangle-wireframe",
+    ).isChecked()
 
 
 def test_window_preview_controller_uses_thread_dispatcher_not_process_pool(tmp_path: Path) -> None:

@@ -127,6 +127,13 @@ class PreviewSceneApplyOptions:
     show_bounds: bool = True
     show_axes: bool = True
     align_camera: bool = False
+    show_object_fill: bool = True
+    show_polylines: bool = True
+    smooth_shading: bool = True
+    lighting: bool = True
+    specular: float = 0.2
+    background: str | None = None
+    background_top: str | None = None
 
 
 @dataclass(frozen=True)
@@ -220,12 +227,24 @@ class PreviewSceneController:
         show_bounds: bool = True,
         show_axes: bool = True,
         align_camera: bool = False,
+        show_object_fill: bool = True,
+        show_polylines: bool = True,
+        smooth_shading: bool = True,
+        lighting: bool = True,
+        specular: float = 0.2,
+        background: str | None = None,
+        background_top: str | None = None,
     ) -> None:
         """Apply datasets to a caller-owned plotter using shared preview semantics."""
 
         datasets = list(datasets)
         style = self.style
         plotter.clear()
+        if background is not None:
+            if background_top is None:
+                plotter.set_background(background)
+            else:
+                plotter.set_background(background, top=background_top)
         if not _pyvista_safe_mode():
             if show_bounds:
                 self.show_bounds_with_units(plotter)
@@ -234,6 +253,8 @@ class PreviewSceneController:
 
         for index, mesh in enumerate(datasets):
             if isinstance(mesh, Polyline):
+                if not show_polylines:
+                    continue
                 pv_mesh = self.polyline_to_pyvista(mesh)
                 plotter.add_mesh(
                     pv_mesh,
@@ -245,6 +266,20 @@ class PreviewSceneController:
                 continue
 
             pv_mesh = mesh_to_pyvista(mesh)
+            if not show_object_fill:
+                if show_edges:
+                    plotter.add_mesh(
+                        pv_mesh,
+                        name=f"mesh-{index}-wireframe",
+                        color=style.feature_edge_color,
+                        style="wireframe",
+                        line_width=1.0,
+                        lighting=False,
+                    )
+                if face_edges:
+                    self.add_feature_edges(plotter, pv_mesh, index)
+                continue
+
             cell_colors = mesh.face_colors
             if cell_colors is not None and len(cell_colors) == mesh.n_faces:
                 scalars = np.asarray(cell_colors)
@@ -257,8 +292,9 @@ class PreviewSceneController:
                     scalars=scalars,
                     rgb=rgb_mode,
                     rgba=rgba_mode,
-                    smooth_shading=True,
-                    specular=0.2,
+                    smooth_shading=smooth_shading,
+                    lighting=lighting,
+                    specular=specular,
                 )
                 if face_edges:
                     self.add_feature_edges(plotter, pv_mesh, index)
@@ -279,8 +315,9 @@ class PreviewSceneController:
                 show_edges=show_edges,
                 color=color,
                 opacity=opacity,
-                smooth_shading=True,
-                specular=0.2,
+                smooth_shading=smooth_shading,
+                lighting=lighting,
+                specular=specular,
             )
             if face_edges:
                 self.add_feature_edges(plotter, pv_mesh, index)

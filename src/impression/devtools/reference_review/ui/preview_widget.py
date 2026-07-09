@@ -763,12 +763,21 @@ def _preview_scene_apply_options(
     *,
     align_camera: bool,
 ) -> PreviewSceneApplyOptions:
+    lighting = options.lighting_mode != LIGHTING_MODE_FLAT
+    smooth_shading = options.lighting_mode == LIGHTING_MODE_CAMERA
     return PreviewSceneApplyOptions(
         show_edges=options.show_triangle_wireframe,
         face_edges=options.show_object_edges,
         show_bounds=options.show_bounds_grid,
         show_axes=options.show_axis_triad,
         align_camera=align_camera,
+        show_object_fill=options.show_object_fill,
+        show_polylines=options.show_polylines,
+        smooth_shading=smooth_shading,
+        lighting=lighting,
+        specular=0.2 if options.lighting_mode == LIGHTING_MODE_CAMERA else 0.0,
+        background="#07111f",
+        background_top="#10223a" if options.show_gradient_background else None,
     )
 
 
@@ -777,7 +786,11 @@ def _datasets_for_display_options(
     options: PreviewDisplayOptions,
 ) -> tuple[Mesh | Polyline, ...]:
     if options.color_mode == COLOR_MODE_AUTHORED:
-        return datasets
+        return tuple(
+            dataset
+            for dataset in datasets
+            if not isinstance(dataset, Polyline) or options.show_polylines
+        )
     prepared: list[Mesh | Polyline] = []
     for dataset in datasets:
         if isinstance(dataset, Mesh):
@@ -791,6 +804,8 @@ def _datasets_for_display_options(
                 )
             )
         else:
+            if not options.show_polylines:
+                continue
             prepared.append(
                 Polyline(
                     np.asarray(dataset.points, dtype=float),
