@@ -37,6 +37,7 @@ class FakePlotter:
         self.clear_calls = 0
         self.mesh_calls: list[dict[str, object]] = []
         self.actors: list[FakeActor] = []
+        self.light_calls: list[FakeLight] = []
         self.camera_position = None
 
     def set_background(self, background: str, *, top: str | None = None) -> None:
@@ -65,6 +66,9 @@ class FakePlotter:
 
     def remove_bounding_box(self) -> None:
         self.remove_bounding_box_calls += 1
+
+    def add_light(self, light: "FakeLight") -> None:
+        self.light_calls.append(light)
 
     def clear(self) -> None:
         self.clear_calls += 1
@@ -101,6 +105,22 @@ class FakeActorProperty:
 
     def SetInterpolationToPhong(self) -> None:
         self.calls.append("SetInterpolationToPhong")
+
+
+class FakeLight:
+    def __init__(self, **kwargs: object) -> None:
+        self.kwargs = dict(kwargs)
+        self.switch_calls: list[str] = []
+
+    def switch_on(self) -> None:
+        self.switch_calls.append("on")
+
+    def switch_off(self) -> None:
+        self.switch_calls.append("off")
+
+
+class FakeLightingPyVista:
+    Light = FakeLight
 
 
 class FakePyVista:
@@ -399,6 +419,59 @@ def test_preview_scene_controller_camera_lighting_uses_smooth_actor_interpolatio
     )
 
     assert plotter.actors[0].property.calls == ["LightingOn", "SetInterpolationToPhong"]
+
+
+def test_preview_scene_controller_reuses_predefined_light_presets(monkeypatch) -> None:
+    import impression.preview as preview_module
+
+    plotter = FakePlotter()
+    pv_mesh = FakePvMesh()
+    monkeypatch.setattr(preview_module, "mesh_to_pyvista", lambda mesh: pv_mesh)
+    controller = PreviewSceneController(
+        unit_settings=UnitSettings("millimeters", "mm", 1.0),
+        pyvista_provider=lambda: FakeLightingPyVista,
+    )
+    mesh = Mesh(
+        vertices=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]]),
+        faces=np.array([[0, 1, 2]]),
+    )
+
+    controller.apply_scene(
+        plotter,
+        [mesh],
+        show_bounds=False,
+        show_axes=False,
+        lighting=True,
+        lighting_profile="face_normals",
+        smooth_shading=False,
+    )
+    controller.apply_scene(
+        plotter,
+        [mesh],
+        show_bounds=False,
+        show_axes=False,
+        lighting=True,
+        lighting_profile="camera",
+        smooth_shading=True,
+    )
+    controller.apply_scene(
+        plotter,
+        [mesh],
+        show_bounds=False,
+        show_axes=False,
+        lighting=False,
+        lighting_profile="flat",
+        smooth_shading=False,
+    )
+
+    assert [light.kwargs for light in plotter.light_calls] == [
+        {"light_type": "headlight", "intensity": 0.9},
+        {"light_type": "camera light", "intensity": 0.35},
+    ]
+    head, fill = plotter.light_calls
+    assert head.switch_calls == ["on", "on", "off"]
+    assert fill.switch_calls == ["off", "on", "off"]
+    assert len(plotter.light_calls) == 2
 
 
 def test_preview_scene_controller_resets_camera_from_combined_bounds() -> None:
