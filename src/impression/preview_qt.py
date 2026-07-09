@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from typing import Iterable
 
@@ -26,6 +27,7 @@ class QtPreviewSurfaceConfig:
     apply_options: PreviewSceneApplyOptions = field(default_factory=PreviewSceneApplyOptions)
     allow_offscreen: bool = False
     auto_update: bool | float = False
+    qvtk_base: str | None = None
 
     @classmethod
     def workbench_default(cls) -> "QtPreviewSurfaceConfig":
@@ -47,6 +49,7 @@ class QtPreviewSurfaceConfig:
             ),
             allow_offscreen=False,
             auto_update=False,
+            qvtk_base="QOpenGLWidget",
         )
 
 
@@ -75,6 +78,32 @@ def apply_qt_preview_scene(
     )
 
 
+def configure_qvtk_backend(base: str | None) -> None:
+    """Configure the QVTK widget backend before pyvistaqt imports it."""
+
+    if base is None:
+        return
+    if "pyvistaqt.rwi" in sys.modules:
+        return
+    import vtkmodules.qt
+
+    vtkmodules.qt.QVTKRWIBase = base
+
+
+def configure_qt_preview_surface_format() -> None:
+    """Configure the OpenGL surface format used by embedded preview widgets."""
+
+    from PySide6.QtGui import QSurfaceFormat
+
+    fmt = QSurfaceFormat()
+    fmt.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
+    fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CompatibilityProfile)
+    fmt.setVersion(2, 1)
+    fmt.setDepthBufferSize(24)
+    fmt.setStencilBufferSize(8)
+    QSurfaceFormat.setDefaultFormat(fmt)
+
+
 class QtPreviewSurface(QWidget):
     """Reusable Qt-embedded PyVista preview surface.
 
@@ -99,6 +128,7 @@ class QtPreviewSurface(QWidget):
         self._datasets: tuple[Mesh | Polyline, ...] = ()
         self._camera_aligned = False
 
+        configure_qvtk_backend(self._config.qvtk_base)
         from pyvistaqt import QtInteractor
 
         layout = QVBoxLayout(self)

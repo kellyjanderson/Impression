@@ -16,6 +16,8 @@ from impression.preview import (
 from impression.preview_qt import (
     QtPreviewSurfaceConfig,
     apply_qt_preview_scene,
+    configure_qt_preview_surface_format,
+    configure_qvtk_backend,
     qt_preview_supported_environment,
 )
 
@@ -358,6 +360,37 @@ def test_qt_preview_surface_config_has_workbench_defaults() -> None:
     assert config.apply_options.show_axes is False
     assert config.apply_options.align_camera is True
     assert config.auto_update is False
+    assert config.qvtk_base == "QOpenGLWidget"
+
+
+def test_qt_preview_configures_qopengl_backend_before_pyvistaqt_import() -> None:
+    import sys
+    import vtkmodules.qt
+
+    original_base = getattr(vtkmodules.qt, "QVTKRWIBase", None)
+    sys.modules.pop("pyvistaqt.rwi", None)
+    try:
+        vtkmodules.qt.QVTKRWIBase = "QWidget"
+        configure_qvtk_backend("QOpenGLWidget")
+
+        assert vtkmodules.qt.QVTKRWIBase == "QOpenGLWidget"
+    finally:
+        if original_base is not None:
+            vtkmodules.qt.QVTKRWIBase = original_base
+
+
+def test_qt_preview_configures_opengl_compatibility_surface_format() -> None:
+    from PySide6.QtGui import QSurfaceFormat
+
+    configure_qt_preview_surface_format()
+
+    fmt = QSurfaceFormat.defaultFormat()
+    assert fmt.renderableType() == QSurfaceFormat.RenderableType.OpenGL
+    assert fmt.profile() == QSurfaceFormat.OpenGLContextProfile.CompatibilityProfile
+    assert fmt.majorVersion() == 2
+    assert fmt.minorVersion() == 1
+    assert fmt.depthBufferSize() == 24
+    assert fmt.stencilBufferSize() == 8
 
 
 def test_qt_preview_supported_environment_rejects_offscreen_by_default(monkeypatch) -> None:

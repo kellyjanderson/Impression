@@ -22,6 +22,7 @@ from impression.preview_qt import (
     QtPreviewSurface,
     QtPreviewSurfaceConfig,
     apply_qt_preview_scene,
+    configure_qt_preview_surface_format,
     qt_preview_supported_environment,
 )
 from ..async_core.qt_handoff import sanitize_error_text
@@ -1343,6 +1344,7 @@ def _ensure_widget_app() -> QApplication:
     app = QApplication.instance()
     if app is not None:
         return app
+    configure_qt_preview_surface_format()
     _PREVIEW_WIDGET_APP = QApplication([])
     return _PREVIEW_WIDGET_APP
 

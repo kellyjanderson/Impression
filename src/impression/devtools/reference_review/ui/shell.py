@@ -43,6 +43,7 @@ from ..preview_payload_controller import (
 )
 from ..async_core import WorkerResultEnvelope
 from ..async_core import ReviewTaskKind, TaskDispatcher, WorkerPolicy
+from impression.preview_qt import configure_qt_preview_surface_format
 
 _ACTIVE_LAUNCH: "WorkbenchLaunchResult | None" = None
 _USAGE = """usage: impression-reference-review [--fixture-file PATH] [--fixture-root PATH] [--fixture-db PATH] [--check] [--offscreen]
@@ -75,6 +76,7 @@ def _ensure_qt_app(argv: Sequence[str], *, offscreen: bool, widgets: bool = Fals
         app = QApplication.instance()
         if app is not None:
             return app
+        configure_qt_preview_surface_format()
         return QApplication(list(argv))
     from PySide6.QtGui import QGuiApplication
 
