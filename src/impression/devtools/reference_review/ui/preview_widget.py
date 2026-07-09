@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+os.environ.setdefault("QT_OPENGL", "desktop")
+
 import numpy as np
 from PySide6.QtCore import QPoint, QPointF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen, QPolygonF

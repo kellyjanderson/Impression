@@ -49,7 +49,7 @@ class QtPreviewSurfaceConfig:
             ),
             allow_offscreen=False,
             auto_update=False,
-            qvtk_base="QWidget",
+            qvtk_base="QOpenGLWidget",
         )
 
 
@@ -117,7 +117,7 @@ def configure_qt_preview_surface_format() -> None:
     fmt = QSurfaceFormat()
     fmt.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
     fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CompatibilityProfile)
-    fmt.setVersion(4, 1)
+    fmt.setVersion(2, 1)
     fmt.setDepthBufferSize(24)
     fmt.setStencilBufferSize(8)
     QSurfaceFormat.setDefaultFormat(fmt)
