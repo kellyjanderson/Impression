@@ -245,7 +245,6 @@ class LiveArtifactPreviewWidget(PreviewRendererLifecycleWidget):
         try:
             plotter = self._ensure_plotter()
             self._status.hide()
-            plotter.clear()
             self._current_datasets = list(result.datasets)
             set_datasets = getattr(plotter, "set_datasets", None)
             if not callable(set_datasets):

@@ -348,7 +348,6 @@ class PreviewRendererLifecycleWidget(QWidget):
                 previewer_factory=previewer_factory,
             )
             self._status.hide()
-            plotter.clear()
             set_datasets = getattr(plotter, "set_datasets", None)
             if not callable(set_datasets):
                 raise RuntimeError("preview-renderer-missing-set-datasets")
@@ -551,9 +550,9 @@ class PyVistaQtPreviewSurface(QWidget):
             options=PreviewControllerOptions(
                 style=PreviewStyle.workbench_default(),
                 interaction=PreviewInteractionPolicy(
-                    show_bounds=True,
-                    show_axes=True,
-                    enable_eye_dome_lighting=True,
+                    show_bounds=False,
+                    show_axes=False,
+                    enable_eye_dome_lighting=False,
                 ),
             )
         )
@@ -591,7 +590,7 @@ class PyVistaQtPreviewSurface(QWidget):
         self._datasets = ()
         self._camera_aligned = False
         self._plotter.clear()
-        self._configure_plotter()
+        self._plotter.set_background(PreviewStyle.workbench_default().background)
         self._plotter.render()
 
     def reset_camera(self) -> None:
@@ -614,19 +613,17 @@ class PyVistaQtPreviewSurface(QWidget):
     def _configure_plotter(self) -> None:
         self._scene_controller.configure_plotter(
             self._plotter,
-            show_bounds=self._display_options.show_bounds_grid,
-            show_axes=self._display_options.show_axis_triad,
+            show_bounds=False,
+            show_axes=False,
         )
 
     def _apply_scene(self, *, align_camera: bool) -> None:
         self._configure_plotter()
-        self._scene_controller.apply_scene(
+        _apply_pyvistaqt_scene(
+            self._scene_controller,
             self._plotter,
-            _datasets_for_display_options(self._datasets, self._display_options),
-            show_edges=self._display_options.show_triangle_wireframe,
-            face_edges=self._display_options.show_object_edges,
-            show_bounds=self._display_options.show_bounds_grid,
-            show_axes=self._display_options.show_axis_triad,
+            self._datasets,
+            self._display_options,
             align_camera=align_camera and not self._camera_aligned,
         )
         if align_camera:
@@ -636,6 +633,25 @@ class PyVistaQtPreviewSurface(QWidget):
 
 def _should_use_pyvistaqt_preview() -> bool:
     return os.environ.get("QT_QPA_PLATFORM") != "offscreen"
+
+
+def _apply_pyvistaqt_scene(
+    scene_controller: PreviewSceneController,
+    plotter: object,
+    datasets: tuple[Mesh | Polyline, ...],
+    options: PreviewDisplayOptions,
+    *,
+    align_camera: bool,
+) -> None:
+    scene_controller.apply_scene(
+        plotter,
+        _datasets_for_display_options(datasets, options),
+        show_edges=options.show_triangle_wireframe,
+        face_edges=False,
+        show_bounds=False,
+        show_axes=False,
+        align_camera=align_camera,
+    )
 
 
 def _datasets_for_display_options(

@@ -53,6 +53,7 @@ from impression.devtools.reference_review.ui import artifact_preview
 from impression.devtools.reference_review.ui.preview_widget import (
     _SOFTWARE_PREVIEW_DEFAULT_MESH,
     _object_edge_keys,
+    _apply_pyvistaqt_scene,
     _project_prepared_geometry,
     _project_datasets,
     _should_use_pyvistaqt_preview,
@@ -1178,6 +1179,38 @@ def test_default_renderer_policy_avoids_vtk_qt_interactor_in_offscreen_mode(
     assert not _should_use_pyvistaqt_preview()
     monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
     assert _should_use_pyvistaqt_preview()
+
+
+def test_pyvistaqt_preview_surface_uses_lightweight_scene_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    datasets = (
+        Mesh(
+            vertices=np.asarray(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))),
+            faces=np.asarray(((0, 1, 2),)),
+        ),
+    )
+    calls = []
+
+    class FakeSceneController:
+        def apply_scene(self, plotter, datasets, **kwargs):
+            calls.append(("apply", tuple(datasets), kwargs))
+
+    _apply_pyvistaqt_scene(
+        FakeSceneController(),
+        object(),
+        datasets,
+        PreviewDisplayOptions(),
+        align_camera=True,
+    )
+
+    assert calls[0][2] == {
+        "show_edges": False,
+        "face_edges": False,
+        "show_bounds": False,
+        "show_axes": False,
+        "align_camera": True,
+    }
 
 
 def test_window_preview_controller_launches_and_polls_payload(tmp_path: Path) -> None:
