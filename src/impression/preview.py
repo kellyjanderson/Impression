@@ -557,6 +557,8 @@ class PreviewLightingPresetController:
         if not self._supported:
             return
         normalized = profile if profile in {"flat", "face_normals", "camera"} else "camera"
+        self._ensure_attached(self._head_light)
+        self._ensure_attached(self._fill_light)
         self._set_light(self._head_light, normalized in {"face_normals", "camera"})
         self._set_light(self._fill_light, normalized == "camera")
 
@@ -574,6 +576,28 @@ class PreviewLightingPresetController:
             self._initialized = True
         except Exception:
             self._supported = False
+
+    def _ensure_attached(self, light) -> None:
+        if light is None:
+            return
+        lights = self._renderer_lights()
+        if lights is not None and any(item is light for item in lights):
+            return
+        add_light = getattr(self._plotter, "add_light", None)
+        if callable(add_light):
+            add_light(light)
+
+    def _renderer_lights(self):
+        renderer = getattr(self._plotter, "renderer", None)
+        lights = getattr(renderer, "lights", None)
+        if lights is None:
+            lights = getattr(self._plotter, "lights", None)
+        if lights is None:
+            return None
+        try:
+            return tuple(lights)
+        except TypeError:
+            return None
 
     def _set_light(self, light, enabled: bool) -> None:
         if light is None:

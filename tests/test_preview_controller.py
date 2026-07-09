@@ -38,7 +38,9 @@ class FakePlotter:
         self.mesh_calls: list[dict[str, object]] = []
         self.actors: list[FakeActor] = []
         self.light_calls: list[FakeLight] = []
+        self.active_lights: list[FakeLight] = []
         self.camera_position = None
+        self.renderer = FakeRenderer(self)
 
     def set_background(self, background: str, *, top: str | None = None) -> None:
         self.background_calls.append((background, top))
@@ -69,9 +71,12 @@ class FakePlotter:
 
     def add_light(self, light: "FakeLight") -> None:
         self.light_calls.append(light)
+        if light not in self.active_lights:
+            self.active_lights.append(light)
 
     def clear(self) -> None:
         self.clear_calls += 1
+        self.active_lights.clear()
 
     def add_mesh(self, mesh: object, **kwargs: object) -> "FakeActor":
         call = dict(kwargs)
@@ -107,6 +112,15 @@ class FakeActorProperty:
         self.calls.append("SetInterpolationToPhong")
 
 
+class FakeRenderer:
+    def __init__(self, plotter: FakePlotter) -> None:
+        self._plotter = plotter
+
+    @property
+    def lights(self) -> tuple["FakeLight", ...]:
+        return tuple(self._plotter.active_lights)
+
+
 class FakeLight:
     def __init__(self, **kwargs: object) -> None:
         self.kwargs = dict(kwargs)
@@ -120,7 +134,13 @@ class FakeLight:
 
 
 class FakeLightingPyVista:
-    Light = FakeLight
+    created: list[FakeLight] = []
+
+    @classmethod
+    def Light(cls, **kwargs: object) -> FakeLight:
+        light = FakeLight(**kwargs)
+        cls.created.append(light)
+        return light
 
 
 class FakePyVista:
@@ -424,6 +444,7 @@ def test_preview_scene_controller_camera_lighting_uses_smooth_actor_interpolatio
 def test_preview_scene_controller_reuses_predefined_light_presets(monkeypatch) -> None:
     import impression.preview as preview_module
 
+    FakeLightingPyVista.created = []
     plotter = FakePlotter()
     pv_mesh = FakePvMesh()
     monkeypatch.setattr(preview_module, "mesh_to_pyvista", lambda mesh: pv_mesh)
@@ -464,14 +485,16 @@ def test_preview_scene_controller_reuses_predefined_light_presets(monkeypatch) -
         smooth_shading=False,
     )
 
-    assert [light.kwargs for light in plotter.light_calls] == [
+    assert [light.kwargs for light in FakeLightingPyVista.created] == [
         {"light_type": "headlight", "intensity": 0.9},
         {"light_type": "camera light", "intensity": 0.35},
     ]
-    head, fill = plotter.light_calls
+    head, fill = FakeLightingPyVista.created
     assert head.switch_calls == ["on", "on", "off"]
     assert fill.switch_calls == ["off", "on", "off"]
-    assert len(plotter.light_calls) == 2
+    assert len(FakeLightingPyVista.created) == 2
+    assert plotter.light_calls == [head, fill, head, fill, head, fill]
+    assert plotter.active_lights == [head, fill]
 
 
 def test_preview_scene_controller_resets_camera_from_combined_bounds() -> None:
