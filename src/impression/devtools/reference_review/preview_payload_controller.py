@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import contextlib
 import io
-from concurrent.futures import Future, ProcessPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import Callable
 
 from .async_core import (
@@ -145,7 +146,9 @@ class PreviewPayloadProcessController:
         self._dispatcher = dispatcher
         self._owns_dispatcher = dispatcher is None
         self._process_executor = None if dispatcher is not None else ProcessPoolExecutor(max_workers=1)
+        self._launch_executor = None if dispatcher is not None else ThreadPoolExecutor(max_workers=1)
         self._process_futures: list[Future[WorkerResultEnvelope]] = []
+        self._process_lock = Lock()
         self._request_ids = request_ids or RequestIdAllocator()
         self._payload_dir = payload_dir
         self._cwd = cwd
@@ -174,9 +177,14 @@ class PreviewPayloadProcessController:
         for future in self._process_futures:
             future.cancel()
         self._process_futures = []
+        if self._launch_executor is not None:
+            self._launch_executor.shutdown(wait=False, cancel_futures=True)
+            self._launch_executor = None
         if self._process_executor is not None:
-            self._process_executor.shutdown(wait=False, cancel_futures=True)
-            self._process_executor = None
+            with self._process_lock:
+                process_executor = self._process_executor
+                self._process_executor = None
+            process_executor.shutdown(wait=False, cancel_futures=True)
         if self._dispatcher is not None and self._owns_dispatcher:
             self._dispatcher.close()
 
@@ -372,7 +380,7 @@ class PreviewPayloadProcessController:
         *,
         generation: int,
     ) -> DispatchResult:
-        if self._process_executor is None:
+        if self._process_executor is None or self._launch_executor is None:
             return DispatchResult(False, message, diagnostic="preview_executor_closed")
         retained: list[Future[WorkerResultEnvelope]] = []
         for future in self._process_futures:
@@ -381,18 +389,52 @@ class PreviewPayloadProcessController:
             future.cancel()
             if not future.cancelled():
                 retained.append(future)
-        future = self._process_executor.submit(
-            _run_payload_worker_envelope,
+        future = self._launch_executor.submit(
+            self._submit_process_payload,
             message,
             record,
             generation=generation,
-            payload_dir=self._payload_dir,
-            cwd=self._cwd,
-            home=self._home,
         )
         retained.append(future)
         self._process_futures = retained
         return DispatchResult(True, message, future=future)
+
+    def _submit_process_payload(
+        self,
+        message: ReviewWorkbenchMessage,
+        record: ReviewSourceModelRecord,
+        *,
+        generation: int,
+    ) -> WorkerResultEnvelope:
+        with self._process_lock:
+            process_executor = self._process_executor
+            if process_executor is None:
+                return WorkerResultEnvelope(
+                    request=message,
+                    ok=False,
+                    error="preview_executor_closed",
+                )
+            future = process_executor.submit(
+                _run_payload_worker_envelope,
+                message,
+                record,
+                generation=generation,
+                payload_dir=self._payload_dir,
+                cwd=self._cwd,
+                home=self._home,
+            )
+        try:
+            return future.result()
+        except Exception as exc:
+            return WorkerResultEnvelope(
+                request=message,
+                ok=False,
+                error=sanitize_error_text(
+                    str(exc) or exc.__class__.__name__,
+                    cwd=self._cwd,
+                    home=self._home,
+                ),
+            )
 
 
 def _run_payload_worker_envelope(

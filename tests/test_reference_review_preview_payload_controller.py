@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from concurrent.futures import Future
 from pathlib import Path
+from threading import Event
+from time import monotonic
 
 from impression.devtools.reference_review import (
     PreviewPayload,
@@ -16,6 +19,7 @@ from impression.devtools.reference_review.async_core import (
     DispatchResult,
     ReviewTaskKind,
     ReviewWorkbenchMessage,
+    WorkerResultEnvelope,
 )
 
 
@@ -100,6 +104,54 @@ def test_preview_payload_process_controller_records_launch_rejection() -> None:
     assert not dispatch.accepted
     assert controller.diagnostics[0].code == "preview-payload-launch-rejected"
     assert controller.diagnostics[0].message == "queue_full"
+
+
+def test_preview_payload_process_launch_does_not_block_on_process_submit(tmp_path: Path) -> None:
+    source = tmp_path / "model.py"
+    source.write_text("def build():\n    return None\n")
+    record = ReviewSourceModelRecord(
+        fixture_id="fixture/nonblocking-launch",
+        feature_name="Nonblocking",
+        source_path=source,
+    )
+    entered_submit = Event()
+    release_submit = Event()
+
+    class BlockingProcessExecutor:
+        def submit(self, _worker, message, *_args, **_kwargs):
+            entered_submit.set()
+            release_submit.wait(timeout=2)
+            future: Future[WorkerResultEnvelope] = Future()
+            future.set_result(
+                WorkerResultEnvelope(
+                    request=message,
+                    ok=False,
+                    error="controlled-test-submit",
+                )
+            )
+            return future
+
+        def shutdown(self, *, wait=True, cancel_futures=False):
+            release_submit.set()
+
+    controller = PreviewPayloadProcessController(payload_dir=tmp_path, cwd=tmp_path)
+    assert controller._process_executor is not None
+    controller._process_executor.shutdown(wait=False, cancel_futures=True)
+    controller._process_executor = BlockingProcessExecutor()  # type: ignore[assignment]
+
+    start = monotonic()
+    dispatch = controller.launch(record)
+    elapsed = monotonic() - start
+
+    assert dispatch.accepted
+    assert elapsed < 0.2
+    assert entered_submit.wait(timeout=1)
+    release_submit.set()
+    assert dispatch.future is not None
+    envelope = dispatch.future.result(timeout=2)
+    controller.close()
+
+    assert envelope.error == "controlled-test-submit"
 
 
 def _payload_for_cleanup(tmp_path: Path, *, request_id: int = 1) -> PreviewPayload:
