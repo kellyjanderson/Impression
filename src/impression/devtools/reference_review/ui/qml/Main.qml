@@ -13,7 +13,11 @@ ApplicationWindow {
     title: "Reference Review Workbench"
     color: "#f7f7f2"
     property var reviewFixtures: fixtureItems
-    property int selectedFixtureIndex: reviewFixtures.length > 0 ? 0 : -1
+    property bool showApproved: false
+    property var filteredReviewFixtures: reviewFixtures.filter(function(fixture) {
+        return root.showApproved || fixture.status !== "approved"
+    })
+    property int selectedFixtureIndex: filteredReviewFixtures.length > 0 ? 0 : -1
     property string queueStatusText: initialQueueStatus
     property string selectedMessageText: "Select a fixture to begin review."
     property bool hasFixture: selectedFixtureIndex >= 0
@@ -22,11 +26,11 @@ ApplicationWindow {
         if (!hasFixture) {
             return null
         }
-        return reviewFixtures[selectedFixtureIndex]
+        return filteredReviewFixtures[selectedFixtureIndex]
     }
 
     function selectFixture(index) {
-        if (index < 0 || index >= reviewFixtures.length) {
+        if (index < 0 || index >= filteredReviewFixtures.length) {
             selectedFixtureIndex = -1
             selectedMessageText = "No fixture selected."
             return
@@ -37,7 +41,7 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
-        if (reviewFixtures.length > 0) {
+        if (filteredReviewFixtures.length > 0) {
             selectFixture(0)
         } else {
             selectedMessageText = "Load a fixture file or database to begin review."
@@ -74,10 +78,10 @@ ApplicationWindow {
                         objectName: "refreshQueueButton"
                         text: "Refresh"
                         onClicked: {
-                            root.queueStatusText = root.reviewFixtures.length > 0
-                                ? root.reviewFixtures.length + " fixture" + (root.reviewFixtures.length === 1 ? "" : "s") + " loaded"
+                            root.queueStatusText = root.filteredReviewFixtures.length > 0
+                                ? root.filteredReviewFixtures.length + " fixture" + (root.filteredReviewFixtures.length === 1 ? "" : "s") + " shown"
                                 : "No fixtures loaded"
-                            if (root.reviewFixtures.length > 0) {
+                            if (root.filteredReviewFixtures.length > 0) {
                                 root.selectFixture(Math.max(root.selectedFixtureIndex, 0))
                             } else {
                                 root.selectFixture(-1)
@@ -89,14 +93,24 @@ ApplicationWindow {
                 Components.StatusBadge {
                     Layout.fillWidth: true
                     label: root.queueStatusText
-                    tone: root.reviewFixtures.length > 0 ? "ready" : "warning"
+                    tone: root.filteredReviewFixtures.length > 0 ? "ready" : "warning"
+                }
+
+                CheckBox {
+                    objectName: "showApprovedCheckBox"
+                    text: "show approved"
+                    checked: false
+                    onToggled: {
+                        root.showApproved = checked
+                        root.selectFixture(root.filteredReviewFixtures.length > 0 ? 0 : -1)
+                    }
                 }
 
                 ListView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     clip: true
-                    model: root.reviewFixtures
+                    model: root.filteredReviewFixtures
                     delegate: ItemDelegate {
                         width: ListView.view.width
                         height: 44
@@ -115,7 +129,7 @@ ApplicationWindow {
                             }
                             Text {
                                 width: parent.width
-                                text: modelData.artifact_display_path || modelData.source_display_path
+                                text: (modelData.status || "unreviewed") + " - " + (modelData.artifact_display_path || modelData.source_display_path)
                                 color: "#565a51"
                                 font.pixelSize: 11
                                 elide: Text.ElideMiddle

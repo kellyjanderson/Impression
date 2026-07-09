@@ -14,10 +14,10 @@ import pytest
 import numpy as np
 from PySide6.QtCore import QObject, QSize, Qt
 from PySide6.QtGui import QIcon, QImage, QPainter
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTabWidget, QToolButton, QWidget
+from PySide6.QtWidgets import QApplication, QCheckBox, QLabel, QListWidget, QPushButton, QTabWidget, QToolButton, QWidget
 
 from impression.mesh import Mesh, Polyline
-from impression.devtools.reference_review import ReviewSourceModelRecord
+from impression.devtools.reference_review import ReferenceReviewStatus, ReviewSourceModelRecord
 from impression.devtools.reference_review.ui import (
     BridgeRecord,
     BridgeRegistry,
@@ -325,7 +325,7 @@ def test_empty_shell_commands_give_immediate_visible_feedback() -> None:
     assert isinstance(decline, QPushButton)
     assert approve.text() == "Approve"
     refresh.click()
-    assert root.property("queueStatusText") == "No fixtures loaded"
+    assert root.property("queueStatusText") == "No fixtures shown"
     assert root.property("selectedMessageText") == "No fixture selected."
     assert root.findChild(QObject, "sendPromptButton") is None
 
@@ -360,9 +360,60 @@ def test_shell_loads_fixture_file_into_selectable_queue(tmp_path: Path) -> None:
 
     assert result.launched
     assert diagnostics == ()
-    assert root.property("queueStatusText") == "1 fixture loaded"
+    assert root.property("queueStatusText") == "1 fixture shown"
     assert root.property("selectedMessageText") == "demo/selectable"
     assert root.property("hasFixture")
+
+
+def test_fixture_queue_hides_approved_until_checkbox_is_checked(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    approved_source = tmp_path / "approved.py"
+    declined_source = tmp_path / "declined.py"
+    unreviewed_source = tmp_path / "unreviewed.py"
+    for source in (approved_source, declined_source, unreviewed_source):
+        source.write_text("def build():\n    return None\n")
+    records = (
+        ReviewSourceModelRecord(
+            fixture_id="demo/approved",
+            feature_name="demo",
+            source_path=approved_source,
+            review_status=ReferenceReviewStatus.APPROVED,
+        ),
+        ReviewSourceModelRecord(
+            fixture_id="demo/declined",
+            feature_name="demo",
+            source_path=declined_source,
+            review_status=ReferenceReviewStatus.DECLINED,
+        ),
+        ReviewSourceModelRecord(
+            fixture_id="demo/unreviewed",
+            feature_name="demo",
+            source_path=unreviewed_source,
+            review_status=ReferenceReviewStatus.UNREVIEWED,
+        ),
+    )
+
+    result = launch_workbench(fixture_records=records, offscreen=True)
+    root = result.engine.rootObjects()[0]
+    show_approved = root.findChild(QObject, "showApprovedCheckBox")
+    queue = root.findChild(QObject, "fixtureQueueList")
+
+    assert isinstance(show_approved, QCheckBox)
+    assert not show_approved.isChecked()
+    assert isinstance(queue, QListWidget)
+    assert queue.count() == 2
+    assert root.property("queueStatusText") == "2 fixtures shown"
+    assert "demo/approved" not in "\n".join(queue.item(index).text() for index in range(queue.count()))
+    assert root.property("reviewFixtures")[0]["status"] == "declined"
+    assert root.property("reviewFixtures")[1]["status"] == "unreviewed"
+    assert root.property("selectedMessageText") == "demo/unreviewed"
+
+    show_approved.setChecked(True)
+
+    assert queue.count() == 3
+    labels = "\n".join(queue.item(index).text() for index in range(queue.count()))
+    assert "demo/approved [approved]" in labels
+    assert root.property("showApproved")
 
 
 def test_decline_button_marks_fixture_file_declined(tmp_path: Path) -> None:

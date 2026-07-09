@@ -305,6 +305,7 @@ class ReferenceReviewWindow(QWidget):
             QFrame,
             QGridLayout,
             QHBoxLayout,
+            QCheckBox,
             QLabel,
             QListWidget,
             QPushButton,
@@ -327,7 +328,10 @@ class ReferenceReviewWindow(QWidget):
         self._offscreen = offscreen
         self._interactive_preview_ready = True
         self._selected_index = queue.selected_index if queue.selected_index is not None else -1
-        self._fixture_items = _fixture_items_for_qml(queue, artifact_previews)
+        self._all_fixture_items = _fixture_items_for_qml(queue, artifact_previews)
+        self._show_approved = False
+        self._visible_record_indices: list[int] = []
+        self._fixture_items = self._filtered_fixture_items()
         self._preview_load_generation = 0
         self._preview_display_options = PreviewDisplayOptions()
         self._preview_controller = PreviewPayloadProcessController(
@@ -370,7 +374,12 @@ class ReferenceReviewWindow(QWidget):
         self.queue_status = QLabel(_queue_status_text(queue, startup_diagnostics))
         self.queue_status.setStyleSheet("background: #d8f0f2; border: 1px solid #89bec4; padding: 6px;")
         sidebar_layout.addWidget(self.queue_status)
+        self.show_approved_checkbox = QCheckBox("show approved")
+        self.show_approved_checkbox.setObjectName("showApprovedCheckBox")
+        self.show_approved_checkbox.setChecked(False)
+        sidebar_layout.addWidget(self.show_approved_checkbox)
         self.list_widget = QListWidget()
+        self.list_widget.setObjectName("fixtureQueueList")
         sidebar_layout.addWidget(self.list_widget, 1)
         splitter.addWidget(sidebar)
 
@@ -456,6 +465,7 @@ class ReferenceReviewWindow(QWidget):
         splitter.setStretchFactor(1, 1)
 
         self._populate_queue_items()
+        self.queue_status.setText(_visible_queue_status_text(self._fixture_items))
 
         self.refresh_button.clicked.connect(self._refresh_queue)
         self.reset_view_button.clicked.connect(self.preview_surface.reset_view)
@@ -464,7 +474,8 @@ class ReferenceReviewWindow(QWidget):
         self.decline_button.clicked.connect(self._decline_fixture)
         self.previous_button.clicked.connect(self._previous_fixture)
         self.next_button.clicked.connect(self._next_fixture)
-        self.list_widget.currentRowChanged.connect(self._select_index)
+        self.show_approved_checkbox.toggled.connect(self._set_show_approved)
+        self.list_widget.currentRowChanged.connect(self._select_visible_index)
         self.show()
         self.raise_()
         self.activateWindow()
@@ -474,46 +485,85 @@ class ReferenceReviewWindow(QWidget):
             self._sync_properties()
 
     def _select_initial_fixture(self, index: int) -> None:
+        row = self._visible_row_for_record_index(index)
         if self._offscreen:
-            self.list_widget.setCurrentRow(index)
+            self.list_widget.setCurrentRow(row)
             return
         from PySide6.QtCore import QTimer
 
         self._sync_properties()
-        QTimer.singleShot(75, lambda: self._apply_initial_selection(index))
+        QTimer.singleShot(75, lambda: self._apply_initial_selection(row))
 
     def _apply_initial_selection(self, index: int) -> None:
         if self.list_widget.count() == 0:
             return
         self.list_widget.setCurrentRow(max(0, min(index, self.list_widget.count() - 1)))
 
+    def _filtered_fixture_items(self) -> list[dict[str, object]]:
+        visible: list[dict[str, object]] = []
+        self._visible_record_indices = []
+        for index, item in enumerate(self._all_fixture_items):
+            if not self._show_approved and item.get("status") == ReferenceReviewStatus.APPROVED.value:
+                continue
+            visible.append(item)
+            self._visible_record_indices.append(index)
+        return visible
+
+    def _visible_row_for_record_index(self, record_index: int) -> int:
+        try:
+            return self._visible_record_indices.index(record_index)
+        except ValueError:
+            return 0 if self._visible_record_indices else -1
+
     def _populate_queue_items(self) -> None:
         from PySide6.QtWidgets import QListWidgetItem
 
-        self.list_widget.clear()
-        for item in self._fixture_items:
-            label = (
-                f"{item['fixture_id']} [{item['status']}]\n"
-                f"{item['artifact_display_path'] or item['source_display_path']}"
-            )
-            widget_item = QListWidgetItem(label)
-            widget_item.setData(256, item["fixture_id"])
-            self.list_widget.addItem(widget_item)
+        blocked = self.list_widget.blockSignals(True)
+        try:
+            self.list_widget.clear()
+            for row, item in enumerate(self._fixture_items):
+                label = (
+                    f"{item['fixture_id']} [{item['status']}]\n"
+                    f"{item['artifact_display_path'] or item['source_display_path']}"
+                )
+                widget_item = QListWidgetItem(label)
+                widget_item.setData(256, item["fixture_id"])
+                widget_item.setData(257, self._visible_record_indices[row])
+                self.list_widget.addItem(widget_item)
+        finally:
+            self.list_widget.blockSignals(blocked)
 
     def _refresh_queue(self) -> None:
         if self._fixture_items:
-            suffix = "s" if len(self._fixture_items) != 1 else ""
-            self.queue_status.setText(f"{len(self._fixture_items)} fixture{suffix} loaded")
-            self._select_index(max(self._selected_index, 0))
+            self.queue_status.setText(_visible_queue_status_text(self._fixture_items))
+            self.list_widget.setCurrentRow(self._visible_row_for_record_index(self._selected_index))
         else:
-            self.queue_status.setText("No fixtures loaded")
+            self.queue_status.setText("No fixtures shown")
             self._select_index(-1)
 
     def _previous_fixture(self) -> None:
-        self.list_widget.setCurrentRow(max(0, self._selected_index - 1))
+        self.list_widget.setCurrentRow(max(0, self.list_widget.currentRow() - 1))
 
     def _next_fixture(self) -> None:
-        self.list_widget.setCurrentRow(min(len(self._fixture_items) - 1, self._selected_index + 1))
+        self.list_widget.setCurrentRow(min(len(self._fixture_items) - 1, self.list_widget.currentRow() + 1))
+
+    def _set_show_approved(self, checked: bool) -> None:
+        selected_fixture_id = self.queue.records[self._selected_index].fixture_id if self._selected_record() else None
+        self._show_approved = checked
+        self._fixture_items = self._filtered_fixture_items()
+        self._populate_queue_items()
+        if not self._fixture_items:
+            self._select_index(-1)
+            self.queue_status.setText("No fixtures shown")
+            return
+        next_row = 0
+        if selected_fixture_id is not None:
+            for row, item in enumerate(self._fixture_items):
+                if item["fixture_id"] == selected_fixture_id:
+                    next_row = row
+                    break
+        self.list_widget.setCurrentRow(next_row)
+        self.queue_status.setText(_visible_queue_status_text(self._fixture_items))
 
     def _approve_fixture(self) -> None:
         record = self._selected_record()
@@ -597,13 +647,25 @@ class ReferenceReviewWindow(QWidget):
         records[self._selected_index] = record
         self.queue.records = tuple(records)
         self.queue.statuses[record.fixture_id] = record.review_status.value
-        self._fixture_items = _fixture_items_for_qml(self.queue, self.artifact_previews)
+        self._all_fixture_items = _fixture_items_for_qml(self.queue, self.artifact_previews)
+        self._fixture_items = self._filtered_fixture_items()
         self._populate_queue_items()
-        self.list_widget.setCurrentRow(self._selected_index)
-        self._select_index(self._selected_index)
+        row = self._visible_row_for_record_index(self._selected_index)
+        if row < 0:
+            self._select_index(-1)
+            return
+        self.list_widget.setCurrentRow(row)
+        if self.list_widget.currentRow() != row:
+            self._select_visible_index(row)
+
+    def _select_visible_index(self, row: int) -> None:
+        if row < 0 or row >= len(self._visible_record_indices):
+            self._select_index(-1)
+            return
+        self._select_index(self._visible_record_indices[row])
 
     def _select_index(self, index: int) -> None:
-        if index < 0 or index >= len(self._fixture_items):
+        if index < 0 or index >= len(self.queue.records):
             self._selected_index = -1
             self.preview_surface.set_artifact(None)
             self.preview_display_controls.set_ready(False)
@@ -612,7 +674,7 @@ class ReferenceReviewWindow(QWidget):
             self._sync_properties()
             return
         self._selected_index = index
-        item = self._fixture_items[index]
+        item = self._all_fixture_items[index]
         self.context_text.setText(
             f"{item['fixture_id']}\n\n"
             f"Review: {item['status']}\n"
@@ -799,12 +861,13 @@ class ReferenceReviewWindow(QWidget):
         )
 
     def _sync_properties(self) -> None:
-        has_fixture = self._selected_index >= 0
-        selected = self._fixture_items[self._selected_index] if has_fixture else None
+        has_fixture = 0 <= self._selected_index < len(self._all_fixture_items)
+        selected = self._all_fixture_items[self._selected_index] if has_fixture else None
         self.setProperty("reviewFixtures", self._fixture_items)
         self.setProperty("queueStatusText", self.queue_status.text())
         self.setProperty("selectedMessageText", selected["fixture_id"] if selected else "No fixture selected.")
         self.setProperty("hasFixture", has_fixture)
+        self.setProperty("showApproved", self._show_approved)
         self.setProperty("interactivePreviewReady", self._interactive_preview_ready)
 
     def closeEvent(self, event) -> None:
@@ -882,6 +945,12 @@ def _queue_status_text(queue: FixtureQueueViewModel, diagnostics: tuple[str, ...
     if diagnostics:
         return "No valid fixtures loaded"
     return "No fixture file loaded"
+
+
+def _visible_queue_status_text(items: list[dict[str, object]]) -> str:
+    if items:
+        return f"{len(items)} fixture{'s' if len(items) != 1 else ''} shown"
+    return "No fixtures shown"
 
 
 def _diagnostic_summary(prefix: str, diagnostics: tuple[object, ...]) -> str:
