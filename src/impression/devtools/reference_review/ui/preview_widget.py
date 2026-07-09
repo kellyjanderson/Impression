@@ -632,7 +632,10 @@ class PyVistaQtPreviewSurface(QWidget):
 
 
 def _should_use_pyvistaqt_preview() -> bool:
-    return os.environ.get("QT_QPA_PLATFORM") != "offscreen"
+    return (
+        os.environ.get("IMPRESSION_REFERENCE_REVIEW_USE_PYVISTAQT") == "1"
+        and os.environ.get("QT_QPA_PLATFORM") != "offscreen"
+    )
 
 
 def _apply_pyvistaqt_scene(

@@ -1175,10 +1175,13 @@ def test_preview_renderer_lifecycle_widget_reports_invalid_payload(
 def test_default_renderer_policy_avoids_vtk_qt_interactor_in_offscreen_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delenv("IMPRESSION_REFERENCE_REVIEW_USE_PYVISTAQT", raising=False)
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+    assert not _should_use_pyvistaqt_preview()
+    monkeypatch.setenv("IMPRESSION_REFERENCE_REVIEW_USE_PYVISTAQT", "1")
+    assert _should_use_pyvistaqt_preview()
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     assert not _should_use_pyvistaqt_preview()
-    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
-    assert _should_use_pyvistaqt_preview()
 
 
 def test_pyvistaqt_preview_surface_uses_lightweight_scene_handoff(
