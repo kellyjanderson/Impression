@@ -135,6 +135,19 @@ class QtPreviewSurface(QWidget):
             self._camera_aligned = False
         self._apply_scene(align_camera=align_camera)
 
+    def replace_scene(
+        self,
+        datasets: Iterable[Mesh | Polyline],
+        *,
+        apply_options: PreviewSceneApplyOptions,
+        align_camera: bool = True,
+    ) -> None:
+        self._apply_options = apply_options
+        self._datasets = tuple(datasets)
+        if align_camera:
+            self._camera_aligned = False
+        self._apply_scene(align_camera=align_camera)
+
     def clear(self) -> None:
         self._datasets = ()
         self._camera_aligned = False

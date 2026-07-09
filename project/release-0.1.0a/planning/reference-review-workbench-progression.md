@@ -123,6 +123,26 @@ display-control button bar.
 - [x] [Reference Review Spec 74: Preview Display Control Row Composition](../specifications/reference-review-74-preview-display-control-row-composition-v1_0.md)
 - [x] [Reference Review Spec 74 Test: Preview Display Control Row Composition](../test-specifications/reference-review-74-preview-display-control-row-composition-v1_0.md)
 
+## Preview Concurrency Remediation
+
+These final leaves implement the ad hoc message-queue remediation captured in
+[Reference Review Spec 75: Preview Render Command Queue](../specifications/reference-review-75-preview-render-command-queue-v1_0.md).
+
+- [x] [Reference Review Spec 75a1: Preview Render Command Record Contract](../specifications/reference-review-75a1-preview-render-command-record-contract-v1_0.md)
+- [x] [Reference Review Spec 75a1 Test: Preview Render Command Record Contract](../test-specifications/reference-review-75a1-preview-render-command-record-contract-v1_0.md)
+- [x] [Reference Review Spec 75a2: Preview Render Coalescing Queue](../specifications/reference-review-75a2-preview-render-coalescing-queue-v1_0.md)
+- [x] [Reference Review Spec 75a2 Test: Preview Render Coalescing Queue](../test-specifications/reference-review-75a2-preview-render-coalescing-queue-v1_0.md)
+- [x] [Reference Review Spec 75b1: Preview Future Identity And Stale Exception Guard](../specifications/reference-review-75b1-preview-future-identity-and-stale-exception-guard-v1_0.md)
+- [x] [Reference Review Spec 75b1 Test: Preview Future Identity And Stale Exception Guard](../test-specifications/reference-review-75b1-preview-future-identity-and-stale-exception-guard-v1_0.md)
+- [x] [Reference Review Spec 75b2: Preview Completion To Command Routing](../specifications/reference-review-75b2-preview-completion-to-command-routing-v1_0.md)
+- [x] [Reference Review Spec 75b2 Test: Preview Completion To Command Routing](../test-specifications/reference-review-75b2-preview-completion-to-command-routing-v1_0.md)
+- [x] [Reference Review Spec 75c1: Preview Widget Queue Drain Scheduler](../specifications/reference-review-75c1-preview-widget-queue-drain-scheduler-v1_0.md)
+- [x] [Reference Review Spec 75c1 Test: Preview Widget Queue Drain Scheduler](../test-specifications/reference-review-75c1-preview-widget-queue-drain-scheduler-v1_0.md)
+- [x] [Reference Review Spec 75c2: Preview Command Application Efficiency](../specifications/reference-review-75c2-preview-command-application-efficiency-v1_0.md)
+- [x] [Reference Review Spec 75c2 Test: Preview Command Application Efficiency](../test-specifications/reference-review-75c2-preview-command-application-efficiency-v1_0.md)
+- [x] [Reference Review Spec 75d: Preview Render Queue Regression Tests](../specifications/reference-review-75d-preview-render-queue-regression-tests-v1_0.md)
+- [x] [Reference Review Spec 75d Test: Preview Render Queue Regression Tests](../test-specifications/reference-review-75d-preview-render-queue-regression-tests-v1_0.md)
+
 ## UI Evidence And Review Quality
 
 - [x] [Reference Review Spec 38: Component Gallery](../specifications/reference-review-38-component-gallery-v1_0.md)
@@ -154,4 +174,9 @@ payload boundary work is completed.
 2026-07-08: Specs 63-74 and their paired test specifications were added for
 the preview display-control icon assets, reusable icon controls, option-group
 controls, display option state, renderer option application, and composed
-button bar. They are intentionally unchecked until implemented and verified.
+button bar, then implemented and verified.
+
+2026-07-08: Specs 75a1-75d and their paired test specifications were
+implemented with a coalesced preview render command queue, stale future
+exception guards, queued shell-to-widget handoff, single-drain display command
+application, and focused regression coverage.

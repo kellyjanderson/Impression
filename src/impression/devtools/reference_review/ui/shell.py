@@ -16,6 +16,12 @@ from .preview_controls import (
     PreviewDisplayOptions,
     route_preview_display_command,
 )
+from .preview_render_queue import (
+    PreviewRenderCommand,
+    PreviewRenderCommandKind,
+    PreviewRenderCommandResult,
+    PreviewRenderIdentity,
+)
 from .preview_widget import PreviewRendererLifecycleWidget
 from .queue_context import FixtureQueueViewModel
 from ..source_registry import (
@@ -306,6 +312,10 @@ class ReferenceReviewWindow(QWidget):
         self._preview_display_options = PreviewDisplayOptions()
         self._preview_controller = PreviewPayloadProcessController(cwd=Path.cwd())
         self._preview_futures: list[Future[WorkerResultEnvelope]] = []
+        self._preview_future_identities: dict[
+            Future[WorkerResultEnvelope],
+            PreviewRenderIdentity | None,
+        ] = {}
         self._preview_poll_timer = QTimer(self)
         self._preview_poll_timer.setInterval(30)
         self._preview_poll_timer.timeout.connect(self._poll_preview_payloads)
@@ -363,6 +373,9 @@ class ReferenceReviewWindow(QWidget):
         self.preview_layout = QVBoxLayout(self.preview_frame)
         self.preview_layout.setContentsMargins(0, 0, 0, 0)
         self.preview_surface = InteractiveStlPreviewLabel(self.preview_frame)
+        self.preview_surface.renderCommandApplied.connect(
+            self._handle_preview_render_command_result
+        )
         self.preview_layout.addWidget(self.preview_surface)
         main_layout.addWidget(self.preview_frame, 1, 0)
 
@@ -519,15 +532,26 @@ class ReferenceReviewWindow(QWidget):
         self._preview_load_generation += 1
         self.artifact_thumb.setText(str(item.get("artifact_display_path", "")))
         self.preview_surface.prepare_artifact(live_artifact)
+        self.preview_surface.enqueue_render_command(PreviewRenderCommand.loading())
         self.preview_display_controls.set_ready(False)
         if live_artifact is None:
-            self.preview_surface.set_artifact(None)
+            self.preview_surface.enqueue_render_command(PreviewRenderCommand.clear())
             return
         result = self._preview_controller.launch(record)
         if not result.accepted or result.future is None:
-            self.preview_surface.clear_preview(f"Preview unavailable: {result.diagnostic or 'queue_full'}")
+            identity = self._preview_identity_for_dispatch_request(getattr(result, "request", None))
+            self.preview_surface.enqueue_render_command(
+                PreviewRenderCommand.failure(
+                    f"Preview unavailable: {result.diagnostic or 'queue_full'}",
+                    diagnostic=result.diagnostic,
+                    identity=identity,
+                )
+            )
             return
         self._preview_futures.append(result.future)
+        self._preview_future_identities[result.future] = (
+            self._preview_identity_for_dispatch_request(getattr(result, "request", None))
+        )
         if not self._preview_poll_timer.isActive():
             self._preview_poll_timer.start()
 
@@ -545,8 +569,17 @@ class ReferenceReviewWindow(QWidget):
             try:
                 envelope = future.result()
             except Exception as exc:
-                self.preview_surface.clear_preview(f"Preview unavailable: {exc.__class__.__name__}")
+                identity = self._preview_future_identities.pop(future, None)
+                if self._preview_identity_is_current(identity):
+                    self.preview_surface.enqueue_render_command(
+                        PreviewRenderCommand.failure(
+                            f"Preview unavailable: {exc.__class__.__name__}",
+                            diagnostic=str(exc) or exc.__class__.__name__,
+                            identity=identity,
+                        )
+                    )
                 continue
+            self._preview_future_identities.pop(future, None)
             self._preview_controller.handle_completion(
                 envelope,
                 self._apply_preview_payload_ready,
@@ -557,14 +590,59 @@ class ReferenceReviewWindow(QWidget):
             self._preview_poll_timer.stop()
 
     def _apply_preview_payload_ready(self, event: PreviewPayloadReadyEvent) -> None:
-        state = self.preview_surface.set_preview_payload(event.payload)
-        if state.ready:
-            self.preview_display_controls.set_ready(True)
-            self._preview_controller.cleanup_payload(event.payload, reason="completed")
+        self.preview_surface.enqueue_render_command(
+            PreviewRenderCommand.payload_ready(
+                event.payload,
+                display_options=self._preview_display_options,
+            )
+        )
 
     def _apply_preview_payload_failed(self, event: PreviewPayloadFailedEvent) -> None:
-        self.preview_surface.clear_preview(f"Preview unavailable: {event.diagnostic.message}")
+        self.preview_surface.enqueue_render_command(
+            PreviewRenderCommand.failure(
+                f"Preview unavailable: {event.diagnostic.message}",
+                diagnostic=event.diagnostic.message,
+                identity=self._preview_controller.active_identity,
+            )
+        )
         self.preview_display_controls.set_ready(False)
+
+    def _handle_preview_render_command_result(
+        self,
+        result: PreviewRenderCommandResult,
+    ) -> None:
+        if result.command.kind is PreviewRenderCommandKind.PAYLOAD:
+            self.preview_display_controls.set_ready(result.ready)
+            if result.ready and result.command.payload is not None:
+                self._preview_controller.cleanup_payload(result.command.payload, reason="completed")
+            return
+        if result.command.kind in {
+            PreviewRenderCommandKind.CLEAR,
+            PreviewRenderCommandKind.FAILURE,
+            PreviewRenderCommandKind.LOADING,
+        }:
+            self.preview_display_controls.set_ready(False)
+
+    def _preview_identity_for_dispatch_request(
+        self,
+        request: object,
+    ) -> PreviewRenderIdentity | None:
+        owner = getattr(request, "owner", None)
+        request_id = getattr(request, "request_id", None)
+        fixture_id = getattr(request, "fixture_id", None)
+        payload = getattr(request, "payload", None)
+        generation = payload.get("generation") if isinstance(payload, dict) else None
+        if (
+            not isinstance(owner, str)
+            or not isinstance(request_id, int)
+            or not isinstance(fixture_id, str)
+            or not isinstance(generation, int)
+        ):
+            return None
+        return (owner, request_id, fixture_id, generation)
+
+    def _preview_identity_is_current(self, identity: PreviewRenderIdentity | None) -> bool:
+        return identity is not None and identity == self._preview_controller.active_identity
 
     def _route_preview_display_command(self, command: str) -> None:
         result = route_preview_display_command(
@@ -576,7 +654,12 @@ class ReferenceReviewWindow(QWidget):
             return
         self._preview_display_options = result.options
         self.preview_display_controls.set_options(result.options)
-        self.preview_surface.set_display_options(result.options)
+        self.preview_surface.enqueue_render_command(
+            PreviewRenderCommand.display(
+                result.options,
+                identity=self._preview_controller.active_identity,
+            )
+        )
 
     def _sync_properties(self) -> None:
         has_fixture = self._selected_index >= 0
@@ -593,6 +676,7 @@ class ReferenceReviewWindow(QWidget):
         for future in self._preview_futures:
             future.cancel()
         self._preview_futures = []
+        self._preview_future_identities = {}
         self._preview_controller.close()
         self.preview_surface.shutdown()
         super().closeEvent(event)
