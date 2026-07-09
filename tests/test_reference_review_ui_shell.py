@@ -314,17 +314,17 @@ def test_empty_shell_commands_give_immediate_visible_feedback() -> None:
     assert result.launched
     root = result.engine.rootObjects()[0]
     refresh = root.findChild(QObject, "refreshQueueButton")
-    send = root.findChild(QObject, "sendPromptButton")
+    approve = root.findChild(QObject, "approveFixtureButton")
 
     assert refresh is not None
-    assert send is not None
+    assert approve is not None
     assert isinstance(refresh, QPushButton)
+    assert isinstance(approve, QPushButton)
+    assert approve.text() == "Approve"
     refresh.click()
     assert root.property("queueStatusText") == "No fixtures loaded"
     assert root.property("selectedMessageText") == "No fixture selected."
-    assert isinstance(send, QPushButton)
-    send.click()
-    assert root.property("codexStreamText") == "No fixture selected."
+    assert root.findChild(QObject, "sendPromptButton") is None
 
 
 def test_shell_loads_fixture_file_into_selectable_queue(tmp_path: Path) -> None:
@@ -861,6 +861,8 @@ def test_dirty_impress_fixture_selects_embedded_preview_surface(project_root: Pa
     assert root.findChild(QObject, "openPreviewButton") is None
     assert root.findChild(QObject, "embeddedPreviewSurface") is not None
     assert root.findChild(QObject, "resetPreviewButton") is not None
+    assert root.findChild(QObject, "approveFixtureButton") is not None
+    assert root.findChild(QObject, "sendPromptButton") is None
     assert root.findChild(QObject, "previewDisplayControlBar") is not None
     assert root.findChild(QObject, "previewDisplayColorGroup") is not None
     assert root.findChild(QObject, "previewDisplayLightingGroup") is not None

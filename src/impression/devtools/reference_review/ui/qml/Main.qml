@@ -16,7 +16,6 @@ ApplicationWindow {
     property int selectedFixtureIndex: reviewFixtures.length > 0 ? 0 : -1
     property string queueStatusText: initialQueueStatus
     property string selectedMessageText: "Select a fixture to begin review."
-    property string codexStreamText: ""
     property bool hasFixture: selectedFixtureIndex >= 0
 
     function currentFixture() {
@@ -151,9 +150,10 @@ ApplicationWindow {
                         elide: Text.ElideRight
                     }
 
-                    Components.StatusBadge {
-                        label: startupDiagnostics.length > 0 ? "Diagnostics" : "Ready"
-                        tone: startupDiagnostics.length > 0 ? "warning" : "ready"
+                    Button {
+                        objectName: "approveFixtureButton"
+                        text: startupDiagnostics.length > 0 ? "Diagnostics" : "Approve"
+                        enabled: root.hasFixture && startupDiagnostics.length === 0
                     }
 
                     Button {
@@ -229,18 +229,6 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 180
                     noteText: ""
-                }
-
-                Components.CodexPanel {
-                    Layout.columnSpan: 2
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 220
-                    streamText: root.codexStreamText
-                    onSendRequested: function(prompt) {
-                        root.codexStreamText = root.hasFixture
-                            ? "Request queued."
-                            : "No fixture selected."
-                    }
                 }
             }
         }

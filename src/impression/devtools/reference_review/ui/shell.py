@@ -364,8 +364,8 @@ class ReferenceReviewWindow(QWidget):
         main_layout.setHorizontalSpacing(12)
         main_layout.setVerticalSpacing(12)
         header = QHBoxLayout()
-        self.ready_badge = QLabel("Ready" if not startup_diagnostics else "Diagnostics")
-        self.ready_badge.setStyleSheet("background: #d8f0f2; border: 1px solid #89bec4; padding: 6px 18px;")
+        self.approve_button = QPushButton("Approve" if not startup_diagnostics else "Diagnostics")
+        self.approve_button.setObjectName("approveFixtureButton")
         self.previous_button = QPushButton("Previous")
         self.previous_button.setObjectName("previousFixtureButton")
         self.next_button = QPushButton("Next")
@@ -375,7 +375,7 @@ class ReferenceReviewWindow(QWidget):
         self.preview_display_controls = PreviewDisplayControlBar(options=self._preview_display_options)
         self.preview_display_controls.set_ready(False)
         header.addWidget(self.preview_display_controls, 1)
-        header.addWidget(self.ready_badge)
+        header.addWidget(self.approve_button)
         header.addWidget(self.reset_view_button)
         header.addWidget(self.previous_button)
         header.addWidget(self.next_button)
@@ -430,28 +430,9 @@ class ReferenceReviewWindow(QWidget):
         self.detail_tabs.addTab(artifacts, "Artifacts")
         main_layout.addWidget(self.detail_tabs, 1, 1)
 
-        codex = QFrame()
-        codex.setFrameShape(QFrame.Shape.StyledPanel)
-        codex_layout = QVBoxLayout(codex)
-        codex_title = QLabel("Codex")
-        codex_title.setStyleSheet("font-size: 16px; font-weight: 700;")
-        self.codex_stream = QLabel("No active stream.")
-        prompt_row = QHBoxLayout()
-        self.prompt = QTextEdit()
-        self.prompt.setFixedHeight(40)
-        self.prompt.setPlaceholderText("Fixture-scoped prompt")
-        self.send_button = QPushButton("Send")
-        self.send_button.setObjectName("sendPromptButton")
-        prompt_row.addWidget(self.prompt, 1)
-        prompt_row.addWidget(self.send_button)
-        codex_layout.addWidget(codex_title)
-        codex_layout.addWidget(self.codex_stream, 1)
-        codex_layout.addLayout(prompt_row)
-        main_layout.addWidget(codex, 2, 0, 1, 2)
         main_layout.setColumnStretch(0, 3)
         main_layout.setColumnStretch(1, 2)
         main_layout.setRowStretch(1, 3)
-        main_layout.setRowStretch(2, 2)
         splitter.addWidget(main)
         splitter.setStretchFactor(1, 1)
 
@@ -462,7 +443,6 @@ class ReferenceReviewWindow(QWidget):
         self.preview_display_controls.commandTriggered.connect(self._route_preview_display_command)
         self.previous_button.clicked.connect(self._previous_fixture)
         self.next_button.clicked.connect(self._next_fixture)
-        self.send_button.clicked.connect(self._send_prompt)
         self.list_widget.currentRowChanged.connect(self._select_index)
         self.show()
         self.raise_()
@@ -510,14 +490,6 @@ class ReferenceReviewWindow(QWidget):
 
     def _next_fixture(self) -> None:
         self.list_widget.setCurrentRow(min(len(self._fixture_items) - 1, self._selected_index + 1))
-
-    def _send_prompt(self) -> None:
-        if self._selected_index < 0:
-            self.codex_stream.setText("No fixture selected.")
-            self.setProperty("codexStreamText", "No fixture selected.")
-        else:
-            self.codex_stream.setText("Request queued.")
-            self.setProperty("codexStreamText", "Request queued.")
 
     def _select_index(self, index: int) -> None:
         if index < 0 or index >= len(self._fixture_items):
@@ -721,7 +693,6 @@ class ReferenceReviewWindow(QWidget):
         self.setProperty("queueStatusText", self.queue_status.text())
         self.setProperty("selectedMessageText", selected["fixture_id"] if selected else "No fixture selected.")
         self.setProperty("hasFixture", has_fixture)
-        self.setProperty("codexStreamText", self.codex_stream.text())
         self.setProperty("interactivePreviewReady", self._interactive_preview_ready)
 
     def closeEvent(self, event) -> None:
