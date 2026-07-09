@@ -775,6 +775,7 @@ def _preview_scene_apply_options(
         show_polylines=options.show_polylines,
         smooth_shading=smooth_shading,
         lighting=lighting,
+        lighting_profile=options.lighting_mode,
         specular=0.2 if options.lighting_mode == LIGHTING_MODE_CAMERA else 0.0,
         background="#07111f",
         background_top="#10223a" if options.show_gradient_background else None,

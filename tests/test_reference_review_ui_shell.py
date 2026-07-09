@@ -16,7 +16,7 @@ from PySide6.QtCore import QObject, QSize, Qt
 from PySide6.QtGui import QIcon, QImage, QPainter
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTabWidget, QToolButton, QWidget
 
-from impression.mesh import Mesh
+from impression.mesh import Mesh, Polyline
 from impression.devtools.reference_review import ReviewSourceModelRecord
 from impression.devtools.reference_review.ui import (
     BridgeRecord,
@@ -1222,6 +1222,7 @@ def test_pyvistaqt_preview_surface_uses_lightweight_scene_handoff(
         "show_polylines": True,
         "smooth_shading": False,
         "lighting": True,
+        "lighting_profile": "face_normals",
         "specular": 0.0,
         "background": "#07111f",
         "background_top": "#10223a",
@@ -1251,9 +1252,27 @@ def test_pyvistaqt_preview_scene_options_map_display_controls() -> None:
     assert apply_options.show_polylines is False
     assert apply_options.smooth_shading is True
     assert apply_options.lighting is True
+    assert apply_options.lighting_profile == "camera"
     assert apply_options.specular == 0.2
     assert apply_options.background == "#07111f"
     assert apply_options.background_top is None
+
+
+def test_pyvistaqt_preview_dataset_filtering_hides_polylines() -> None:
+    mesh = Mesh(
+        vertices=np.asarray(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))),
+        faces=np.asarray(((0, 1, 2),)),
+    )
+    polyline = Polyline(np.asarray(((0.0, 0.0, 0.0), (1.0, 1.0, 0.0))))
+
+    filtered = preview_widget._datasets_for_display_options(
+        (mesh, polyline),
+        PreviewDisplayOptions(show_polylines=False),
+    )
+
+    assert len(filtered) == 1
+    assert filtered[0] is not polyline
+    assert isinstance(filtered[0], Mesh)
 
 
 def test_preview_render_command_records_and_queue_coalesce_by_lane(tmp_path: Path) -> None:

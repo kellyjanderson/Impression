@@ -27,10 +27,16 @@ class FakePlotter:
     def __init__(self) -> None:
         self.background_calls: list[tuple[str, str | None]] = []
         self.eye_dome_calls = 0
+        self.eye_dome_disabled_calls = 0
         self.axes_calls: list[dict[str, object]] = []
+        self.hide_axes_all_calls = 0
+        self.hide_axes_calls = 0
         self.bounds_calls: list[dict[str, object]] = []
+        self.remove_bounds_axes_calls = 0
+        self.remove_bounding_box_calls = 0
         self.clear_calls = 0
         self.mesh_calls: list[dict[str, object]] = []
+        self.actors: list[FakeActor] = []
         self.camera_position = None
 
     def set_background(self, background: str, *, top: str | None = None) -> None:
@@ -39,19 +45,62 @@ class FakePlotter:
     def enable_eye_dome_lighting(self) -> None:
         self.eye_dome_calls += 1
 
+    def disable_eye_dome_lighting(self) -> None:
+        self.eye_dome_disabled_calls += 1
+
     def add_axes(self, **kwargs: object) -> None:
         self.axes_calls.append(dict(kwargs))
+
+    def hide_axes_all(self) -> None:
+        self.hide_axes_all_calls += 1
+
+    def hide_axes(self) -> None:
+        self.hide_axes_calls += 1
 
     def show_bounds(self, **kwargs: object) -> None:
         self.bounds_calls.append(dict(kwargs))
 
+    def remove_bounds_axes(self) -> None:
+        self.remove_bounds_axes_calls += 1
+
+    def remove_bounding_box(self) -> None:
+        self.remove_bounding_box_calls += 1
+
     def clear(self) -> None:
         self.clear_calls += 1
 
-    def add_mesh(self, mesh: object, **kwargs: object) -> None:
+    def add_mesh(self, mesh: object, **kwargs: object) -> "FakeActor":
         call = dict(kwargs)
         call["mesh"] = mesh
         self.mesh_calls.append(call)
+        actor = FakeActor()
+        self.actors.append(actor)
+        return actor
+
+
+class FakeActor:
+    def __init__(self) -> None:
+        self.property = FakeActorProperty()
+
+    def GetProperty(self) -> "FakeActorProperty":
+        return self.property
+
+
+class FakeActorProperty:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def LightingOn(self) -> None:
+        self.calls.append("LightingOn")
+
+    def LightingOff(self) -> None:
+        self.calls.append("LightingOff")
+
+    def SetInterpolationToFlat(self) -> None:
+        self.calls.append("SetInterpolationToFlat")
+
+    def SetInterpolationToPhong(self) -> None:
+        self.calls.append("SetInterpolationToPhong")
 
 
 class FakePyVista:
@@ -230,6 +279,7 @@ def test_preview_scene_controller_applies_mesh_scene_and_feature_edges(monkeypat
         "lighting": True,
         "specular": 0.2,
     }
+    assert plotter.actors[0].property.calls == ["LightingOn", "SetInterpolationToPhong"]
     edge_call = plotter.mesh_calls[1]
     assert isinstance(edge_call.pop("mesh"), FakeFeatureEdges)
     assert edge_call == {
@@ -288,7 +338,67 @@ def test_preview_scene_controller_can_render_edges_without_object_fill(monkeypat
         "line_width": 1.0,
         "lighting": False,
     }
+    assert plotter.actors[0].property.calls == ["LightingOff", "SetInterpolationToFlat"]
     assert isinstance(plotter.mesh_calls[1]["mesh"], FakeFeatureEdges)
+
+
+def test_preview_scene_controller_resets_persistent_axes_and_bounds(monkeypatch) -> None:
+    import impression.preview as preview_module
+
+    plotter = FakePlotter()
+    pv_mesh = FakePvMesh()
+    monkeypatch.setattr(preview_module, "mesh_to_pyvista", lambda mesh: pv_mesh)
+    controller = PreviewSceneController(unit_settings=UnitSettings("millimeters", "mm", 1.0))
+    mesh = Mesh(
+        vertices=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]]),
+        faces=np.array([[0, 1, 2]]),
+    )
+
+    controller.apply_scene(
+        plotter,
+        [mesh],
+        show_bounds=False,
+        show_axes=False,
+        lighting=True,
+        lighting_profile="face_normals",
+        smooth_shading=False,
+        specular=0.0,
+    )
+
+    assert plotter.hide_axes_all_calls == 1
+    assert plotter.hide_axes_calls == 1
+    assert plotter.remove_bounds_axes_calls == 1
+    assert plotter.remove_bounding_box_calls == 1
+    assert plotter.eye_dome_disabled_calls == 1
+    assert plotter.axes_calls == []
+    assert plotter.bounds_calls == []
+    assert plotter.actors[0].property.calls == ["LightingOn", "SetInterpolationToFlat"]
+
+
+def test_preview_scene_controller_camera_lighting_uses_smooth_actor_interpolation(monkeypatch) -> None:
+    import impression.preview as preview_module
+
+    plotter = FakePlotter()
+    pv_mesh = FakePvMesh()
+    monkeypatch.setattr(preview_module, "mesh_to_pyvista", lambda mesh: pv_mesh)
+    controller = PreviewSceneController(unit_settings=UnitSettings("millimeters", "mm", 1.0))
+    mesh = Mesh(
+        vertices=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]]),
+        faces=np.array([[0, 1, 2]]),
+    )
+
+    controller.apply_scene(
+        plotter,
+        [mesh],
+        show_bounds=False,
+        show_axes=False,
+        lighting=True,
+        lighting_profile="camera",
+        smooth_shading=True,
+        specular=0.2,
+    )
+
+    assert plotter.actors[0].property.calls == ["LightingOn", "SetInterpolationToPhong"]
 
 
 def test_preview_scene_controller_resets_camera_from_combined_bounds() -> None:
@@ -472,6 +582,7 @@ def test_qt_preview_scene_handoff_delegates_to_shared_controller() -> None:
                 "show_polylines": True,
                 "smooth_shading": True,
                 "lighting": True,
+                "lighting_profile": "camera",
                 "specular": 0.2,
                 "background": None,
                 "background_top": None,
@@ -491,6 +602,7 @@ def test_qt_preview_preserves_display_options_when_resolving_camera_alignment() 
         show_polylines=False,
         smooth_shading=False,
         lighting=False,
+        lighting_profile="flat",
         specular=0.0,
         background="#07111f",
         background_top="#10223a",
@@ -512,6 +624,7 @@ def test_qt_preview_preserves_display_options_when_resolving_camera_alignment() 
         show_polylines=False,
         smooth_shading=False,
         lighting=False,
+        lighting_profile="flat",
         specular=0.0,
         background="#07111f",
         background_top="#10223a",

@@ -79,6 +79,7 @@ def apply_qt_preview_scene(
         show_polylines=options.show_polylines,
         smooth_shading=options.smooth_shading,
         lighting=options.lighting,
+        lighting_profile=options.lighting_profile,
         specular=options.specular,
         background=options.background,
         background_top=options.background_top,

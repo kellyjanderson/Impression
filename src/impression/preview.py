@@ -131,6 +131,7 @@ class PreviewSceneApplyOptions:
     show_polylines: bool = True
     smooth_shading: bool = True
     lighting: bool = True
+    lighting_profile: str = "camera"
     specular: float = 0.2
     background: str | None = None
     background_top: str | None = None
@@ -231,6 +232,7 @@ class PreviewSceneController:
         show_polylines: bool = True,
         smooth_shading: bool = True,
         lighting: bool = True,
+        lighting_profile: str = "camera",
         specular: float = 0.2,
         background: str | None = None,
         background_top: str | None = None,
@@ -240,6 +242,7 @@ class PreviewSceneController:
         datasets = list(datasets)
         style = self.style
         plotter.clear()
+        self._clear_scene_decoration_state(plotter)
         if background is not None:
             if background_top is None:
                 plotter.set_background(background)
@@ -256,25 +259,35 @@ class PreviewSceneController:
                 if not show_polylines:
                     continue
                 pv_mesh = self.polyline_to_pyvista(mesh)
-                plotter.add_mesh(
+                actor = plotter.add_mesh(
                     pv_mesh,
                     name=f"mesh-{index}",
                     color=mesh.color or style.default_polyline_color,
                     line_width=2.0,
                     render_lines_as_tubes=False,
                 )
+                self._configure_actor_lighting(
+                    actor,
+                    lighting=False,
+                    lighting_profile="flat",
+                )
                 continue
 
             pv_mesh = mesh_to_pyvista(mesh)
             if not show_object_fill:
                 if show_edges:
-                    plotter.add_mesh(
+                    actor = plotter.add_mesh(
                         pv_mesh,
                         name=f"mesh-{index}-wireframe",
                         color=style.feature_edge_color,
                         style="wireframe",
                         line_width=1.0,
                         lighting=False,
+                    )
+                    self._configure_actor_lighting(
+                        actor,
+                        lighting=False,
+                        lighting_profile="flat",
                     )
                 if face_edges:
                     self.add_feature_edges(plotter, pv_mesh, index)
@@ -285,7 +298,7 @@ class PreviewSceneController:
                 scalars = np.asarray(cell_colors)
                 rgba_mode = scalars.shape[1] >= 4
                 rgb_mode = scalars.shape[1] == 3
-                plotter.add_mesh(
+                actor = plotter.add_mesh(
                     pv_mesh,
                     name=f"mesh-{index}",
                     show_edges=show_edges,
@@ -295,6 +308,11 @@ class PreviewSceneController:
                     smooth_shading=smooth_shading,
                     lighting=lighting,
                     specular=specular,
+                )
+                self._configure_actor_lighting(
+                    actor,
+                    lighting=lighting,
+                    lighting_profile=lighting_profile,
                 )
                 if face_edges:
                     self.add_feature_edges(plotter, pv_mesh, index)
@@ -309,7 +327,7 @@ class PreviewSceneController:
                 color = style.color_cycle[index % len(style.color_cycle)]
                 opacity = 1.0
 
-            plotter.add_mesh(
+            actor = plotter.add_mesh(
                 pv_mesh,
                 name=f"mesh-{index}",
                 show_edges=show_edges,
@@ -319,11 +337,56 @@ class PreviewSceneController:
                 lighting=lighting,
                 specular=specular,
             )
+            self._configure_actor_lighting(
+                actor,
+                lighting=lighting,
+                lighting_profile=lighting_profile,
+            )
             if face_edges:
                 self.add_feature_edges(plotter, pv_mesh, index)
 
         if align_camera:
             self.reset_camera(plotter, datasets)
+
+    def _clear_scene_decoration_state(self, plotter) -> None:
+        for method_name in (
+            "hide_axes_all",
+            "hide_axes",
+            "remove_bounds_axes",
+            "remove_bounding_box",
+            "disable_eye_dome_lighting",
+        ):
+            method = getattr(plotter, method_name, None)
+            if callable(method):
+                method()
+
+    def _configure_actor_lighting(
+        self,
+        actor,
+        *,
+        lighting: bool,
+        lighting_profile: str,
+    ) -> None:
+        get_property = getattr(actor, "GetProperty", None)
+        if not callable(get_property):
+            return
+        prop = get_property()
+        if prop is None:
+            return
+        if lighting:
+            lighting_on = getattr(prop, "LightingOn", None)
+            if callable(lighting_on):
+                lighting_on()
+        else:
+            lighting_off = getattr(prop, "LightingOff", None)
+            if callable(lighting_off):
+                lighting_off()
+        if lighting_profile == "camera":
+            interpolation = getattr(prop, "SetInterpolationToPhong", None)
+        else:
+            interpolation = getattr(prop, "SetInterpolationToFlat", None)
+        if callable(interpolation):
+            interpolation()
 
     def add_feature_edges(self, plotter, mesh, index: int) -> None:
         if not hasattr(mesh, "extract_feature_edges"):
