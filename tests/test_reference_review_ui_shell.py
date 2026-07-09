@@ -1279,6 +1279,36 @@ def test_preview_widget_drains_latest_display_command_once() -> None:
     assert applied == [PreviewDisplayOptions(show_axis_triad=True)]
 
 
+def test_preview_widget_drains_one_render_command_per_turn() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    widget = PreviewRendererLifecycleWidget()
+    applied = []
+
+    class FakePlotter(QWidget):
+        def clear(self) -> None:
+            pass
+
+        def set_display_options(self, options) -> None:
+            applied.append(options)
+
+    widget.ensure_renderer(renderer_factory=lambda parent: FakePlotter(parent))
+    applied.clear()
+
+    widget.enqueue_render_command(PreviewRenderCommand.loading())
+    widget.enqueue_render_command(
+        PreviewRenderCommand.display(PreviewDisplayOptions(show_axis_triad=False))
+    )
+
+    widget._drain_preview_render_queue()
+
+    assert widget._status.text() == "Loading preview..."
+    assert applied == []
+
+    widget._drain_preview_render_queue()
+
+    assert applied == [PreviewDisplayOptions(show_axis_triad=False)]
+
+
 def test_pyvistaqt_display_options_replace_scene_once(monkeypatch: pytest.MonkeyPatch) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     QApplication.instance() or QApplication([])
@@ -1372,6 +1402,7 @@ def test_window_preview_controller_launches_and_polls_payload(tmp_path: Path) ->
     window._load_artifact_preview(window._fixture_items[0])
     future.set_result(SimpleNamespace(ok=True))
     window._poll_preview_payloads()
+    window.preview_surface._drain_preview_render_queue()
     window.preview_surface._drain_preview_render_queue()
 
     assert launched == [record]
@@ -1467,6 +1498,91 @@ def test_window_preview_ignores_stale_future_exception(tmp_path: Path) -> None:
 
     assert enqueued == []
     assert window._preview_futures == [current_future]
+
+
+def test_window_preview_retries_latest_coalesced_request(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    artifact = tmp_path / "part.impress"
+    artifact.write_text('{"format": "impress"}\n')
+    source = tmp_path / "model.py"
+    source.write_text("def build():\n    return None\n")
+    record = ReviewSourceModelRecord(
+        "demo/part",
+        "demo",
+        source,
+        artifact_paths=(artifact,),
+    )
+    result = launch_workbench(fixture_records=(record,), offscreen=True)
+    window = result.engine.rootObjects()[0]
+    first_future: Future = Future()
+    second_future: Future = Future()
+    launched = []
+
+    class CoalescingPreviewController:
+        def __init__(self) -> None:
+            self.active_identity = None
+            self._calls = 0
+
+        def launch(self, record):
+            self._calls += 1
+            launched.append(record)
+            request = SimpleNamespace(
+                owner="preview-payload",
+                request_id=self._calls,
+                fixture_id=record.fixture_id,
+                payload={"generation": self._calls},
+            )
+            self.active_identity = (
+                request.owner,
+                request.request_id,
+                request.fixture_id,
+                self._calls,
+            )
+            if self._calls == 1:
+                return SimpleNamespace(
+                    accepted=True,
+                    future=first_future,
+                    request=request,
+                    diagnostic=None,
+                )
+            if self._calls == 2:
+                return SimpleNamespace(
+                    accepted=False,
+                    future=None,
+                    request=request,
+                    diagnostic="coalesced",
+                )
+            return SimpleNamespace(
+                accepted=True,
+                future=second_future,
+                request=request,
+                diagnostic=None,
+            )
+
+        def handle_completion(self, envelope, handoff, diagnostic_handoff=None):
+            return None
+
+        def close(self):
+            pass
+
+    window._preview_controller.close()
+    window._preview_futures = []
+    window._preview_future_identities = {}
+    window._pending_preview_record = None
+    window._preview_controller = CoalescingPreviewController()
+
+    window._load_artifact_preview(window._fixture_items[0])
+    window._load_artifact_preview(window._fixture_items[0])
+
+    assert window._preview_futures == [first_future]
+    assert window._pending_preview_record is record
+
+    first_future.set_result(SimpleNamespace(ok=False, result=None, error="stale"))
+    window._poll_preview_payloads()
+
+    assert launched == [record, record, record]
+    assert window._preview_futures == [second_future]
+    assert window._pending_preview_record is None
 
 
 def test_live_preview_process_target_is_non_ui_module() -> None:

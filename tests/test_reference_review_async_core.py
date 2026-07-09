@@ -131,6 +131,33 @@ def test_dispatcher_rejects_when_bounded_queue_is_full() -> None:
     assert len(hold) == 1
 
 
+def test_dispatcher_coalesces_without_submitting_extra_work() -> None:
+    release = Event()
+    hold: list[ReviewWorkbenchMessage] = []
+
+    def worker(message: ReviewWorkbenchMessage) -> str:
+        hold.append(message)
+        release.wait(timeout=2)
+        return "done"
+
+    dispatcher = TaskDispatcher(
+        max_workers=1,
+        policies={ReviewTaskKind.PREVIEW_BUILD: WorkerPolicy(max_pending=1, coalesce=True)},
+    )
+
+    first = dispatcher.dispatch(_message(1), worker)
+    second = dispatcher.dispatch(_message(2), worker)
+    release.set()
+    if first.future:
+        first.future.result(timeout=2)
+    dispatcher.close()
+
+    assert first.accepted
+    assert not second.accepted
+    assert second.diagnostic == "coalesced"
+    assert len(hold) == 1
+
+
 def test_latest_request_tracker_rejects_stale_completions_and_cancels_old_tokens() -> None:
     tracker = LatestRequestTracker()
     old = _message(1)

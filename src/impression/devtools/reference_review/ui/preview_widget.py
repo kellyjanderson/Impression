@@ -345,7 +345,8 @@ class PreviewRendererLifecycleWidget(QWidget):
 
     def _drain_preview_render_queue(self) -> None:
         self._render_drain_scheduled = False
-        for command in self._render_queue.drain():
+        command = self._render_queue.pop_next()
+        if command is not None:
             result = self._apply_render_command(command)
             self.renderCommandApplied.emit(result)
         if self._render_queue.state.pending_count and not self._render_drain_scheduled:

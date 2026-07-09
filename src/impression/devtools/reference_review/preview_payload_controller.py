@@ -187,7 +187,7 @@ class PreviewPayloadProcessController:
                 self._process_executor = None
             process_executor.shutdown(wait=False, cancel_futures=True)
         if self._dispatcher is not None and self._owns_dispatcher:
-            self._dispatcher.close()
+            self._dispatcher.close(wait=False, cancel_futures=True)
 
     def adopt_payload(self, payload: PreviewPayload) -> None:
         if payload.payload_path is None:

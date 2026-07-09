@@ -326,6 +326,7 @@ class ReferenceReviewWindow(QWidget):
             Future[WorkerResultEnvelope],
             PreviewRenderIdentity | None,
         ] = {}
+        self._pending_preview_record: ReviewSourceModelRecord | None = None
         self._preview_poll_timer = QTimer(self)
         self._preview_poll_timer.setInterval(30)
         self._preview_poll_timer.timeout.connect(self._poll_preview_payloads)
@@ -549,6 +550,11 @@ class ReferenceReviewWindow(QWidget):
             return
         result = self._preview_controller.launch(record)
         if not result.accepted or result.future is None:
+            if result.diagnostic in {"queue_full", "coalesced"} and self._preview_futures:
+                self._pending_preview_record = record
+                if not self._preview_poll_timer.isActive():
+                    self._preview_poll_timer.start()
+                return
             identity = self._preview_identity_for_dispatch_request(getattr(result, "request", None))
             self.preview_surface.enqueue_render_command(
                 PreviewRenderCommand.failure(
@@ -598,6 +604,40 @@ class ReferenceReviewWindow(QWidget):
         self._preview_futures = pending
         if not self._preview_futures:
             self._preview_poll_timer.stop()
+            self._launch_pending_preview_record()
+
+    def _launch_pending_preview_record(self) -> None:
+        record = self._pending_preview_record
+        self._pending_preview_record = None
+        if record is None:
+            return
+        if self._selected_index < 0 or self._selected_index >= len(self.queue.records):
+            return
+        if self.queue.records[self._selected_index].fixture_id != record.fixture_id:
+            return
+        self.preview_surface.enqueue_render_command(PreviewRenderCommand.loading())
+        result = self._preview_controller.launch(record)
+        if not result.accepted or result.future is None:
+            if result.diagnostic in {"queue_full", "coalesced"} and self._preview_futures:
+                self._pending_preview_record = record
+                if not self._preview_poll_timer.isActive():
+                    self._preview_poll_timer.start()
+                return
+            identity = self._preview_identity_for_dispatch_request(getattr(result, "request", None))
+            self.preview_surface.enqueue_render_command(
+                PreviewRenderCommand.failure(
+                    f"Preview unavailable: {result.diagnostic or 'queue_full'}",
+                    diagnostic=result.diagnostic,
+                    identity=identity,
+                )
+            )
+            return
+        self._preview_futures.append(result.future)
+        self._preview_future_identities[result.future] = (
+            self._preview_identity_for_dispatch_request(getattr(result, "request", None))
+        )
+        if not self._preview_poll_timer.isActive():
+            self._preview_poll_timer.start()
 
     def _apply_preview_payload_ready(self, event: PreviewPayloadReadyEvent) -> None:
         self.preview_surface.enqueue_render_command(
@@ -687,6 +727,7 @@ class ReferenceReviewWindow(QWidget):
             future.cancel()
         self._preview_futures = []
         self._preview_future_identities = {}
+        self._pending_preview_record = None
         self._preview_controller.close()
         self.preview_surface.shutdown()
         super().closeEvent(event)

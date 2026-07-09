@@ -10,6 +10,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from types import ModuleType
 from typing import Any, Callable, Iterator
 
@@ -29,6 +30,7 @@ from .preview_payload import (
 )
 
 PREVIEW_PAYLOAD_FORMAT = "impression.reference-review.preview-payload.v1"
+_PREVIEW_SOURCE_IMPORT_LOCK = Lock()
 
 
 @dataclass(frozen=True)
@@ -120,17 +122,18 @@ def load_preview_source(
 
     entrypoint = request.entrypoint
     kwargs = {parameter.name: parameter.value for parameter in request.parameters}
-    with _temporary_import_roots(_source_import_roots(request, import_roots)):
-        if "." in entrypoint and not request.source_path.is_file():
-            module_name, function_name = entrypoint.rsplit(".", 1)
-            module = importlib.import_module(module_name)
-            builder = getattr(module, function_name, None)
-        else:
-            module = _load_module_from_path(request.source_path, request)
-            builder = _resolve_entrypoint(module, entrypoint)
-    if builder is None or not callable(builder):
-        raise ValueError(f"entrypoint {entrypoint!r} is not callable")
-    return builder(**kwargs)
+    with _PREVIEW_SOURCE_IMPORT_LOCK:
+        with _temporary_import_roots(_source_import_roots(request, import_roots)):
+            if "." in entrypoint and not request.source_path.is_file():
+                module_name, function_name = entrypoint.rsplit(".", 1)
+                module = importlib.import_module(module_name)
+                builder = getattr(module, function_name, None)
+            else:
+                module = _load_module_from_path(request.source_path, request)
+                builder = _resolve_entrypoint(module, entrypoint)
+            if builder is None or not callable(builder):
+                raise ValueError(f"entrypoint {entrypoint!r} is not callable")
+            return builder(**kwargs)
 
 
 def tessellate_preview_source(

@@ -227,6 +227,13 @@ class PreviewRenderCommandQueue:
                 commands.append(command)
         return tuple(commands)
 
+    def pop_next(self) -> PreviewRenderCommand | None:
+        for lane in self._LANE_ORDER:
+            command = self._pending.pop(lane, None)
+            if command is not None:
+                return command
+        return None
+
     def clear(self) -> PreviewRenderQueueState:
         self._pending.clear()
         return self.state

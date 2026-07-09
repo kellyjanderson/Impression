@@ -54,8 +54,8 @@ class TaskDispatcher:
         self._lock = Lock()
         self._pending: dict[tuple[str, ReviewTaskKind], int] = {}
 
-    def close(self) -> None:
-        self._executor.shutdown(wait=True)
+    def close(self, *, wait: bool = True, cancel_futures: bool = False) -> None:
+        self._executor.shutdown(wait=wait, cancel_futures=cancel_futures)
 
     def dispatch(
         self,
@@ -77,6 +77,14 @@ class TaskDispatcher:
                 return DispatchResult(False, request, diagnostic="queue_full")
             if policy.coalesce and pending >= policy.max_pending:
                 self._tracker.cancel(request)
+                self._audit.emit(
+                    build_audit_event(
+                        "dispatch_coalesced",
+                        request,
+                        details={"reason": "queue_full"},
+                    )
+                )
+                return DispatchResult(False, request, diagnostic="coalesced")
             self._pending[pending_key] = pending + 1
 
         self._tracker.register(request)
@@ -112,4 +120,3 @@ class TaskDispatcher:
                 else:
                     self._pending.pop(pending_key, None)
         return envelope
-
