@@ -12,9 +12,9 @@ from types import SimpleNamespace
 
 import pytest
 import numpy as np
-from PySide6.QtCore import QObject, Qt
-from PySide6.QtGui import QImage, QPainter
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTabWidget
+from PySide6.QtCore import QObject, QSize, Qt
+from PySide6.QtGui import QIcon, QImage, QPainter
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTabWidget, QToolButton
 
 from impression.mesh import Mesh
 from impression.devtools.reference_review import ReviewSourceModelRecord
@@ -24,11 +24,22 @@ from impression.devtools.reference_review.ui import (
     DependencyPolicyRecord,
     PackageResourceManifest,
     PREVIEW_DISPLAY_CONTROL_ICON_FILES,
+    PREVIEW_DISPLAY_CONTROL_ICON_RECORDS,
+    ExclusiveIconGroupState,
+    ExclusiveIconOptionGroup,
+    ExclusiveIconOptionRecord,
+    PreviewDisplayControlBar,
+    PreviewDisplayOptions,
+    WorkbenchIconToggleButton,
     build_dependency_policy_report,
     launch_workbench,
     load_style_tokens,
     PreviewRendererLifecycleWidget,
     SoftwarePreviewSurface,
+    preview_display_control_icon_record,
+    preview_display_control_icon_records,
+    route_preview_display_command,
+    select_exclusive_icon_option,
     verify_qml_resource_layout,
 )
 from impression.devtools.reference_review import (
@@ -42,8 +53,11 @@ from impression.devtools.reference_review.ui import artifact_preview
 from impression.devtools.reference_review.ui.preview_widget import (
     _SOFTWARE_PREVIEW_DEFAULT_MESH,
     _object_edge_keys,
+    _apply_pyvistaqt_scene,
     _project_prepared_geometry,
     _project_datasets,
+    _should_use_pyvistaqt_preview,
+    _wheel_zoom_direction,
 )
 from impression.devtools.reference_review.ui import shell
 from impression.devtools.reference_review.ui.shell import InteractiveStlPreviewLabel
@@ -107,9 +121,141 @@ def test_preview_display_control_icons_are_packaged_and_valid_xml() -> None:
     for relative in PREVIEW_DISPLAY_CONTROL_ICON_FILES:
         path = qml_root / relative
         assert path.is_file(), relative
+        assert "currentColor" in path.read_text()
         root = ET.parse(path).getroot()
         assert root.tag.endswith("svg")
         assert root.attrib["viewBox"] == "0 0 24 24"
+
+
+def test_preview_display_control_icon_metadata_registry_resolves_packaged_paths() -> None:
+    qml_root = Path("src/impression/devtools/reference_review/ui/qml")
+    records = preview_display_control_icon_records()
+
+    assert records == PREVIEW_DISPLAY_CONTROL_ICON_RECORDS
+    assert {record.id for record in records} == {
+        "authored-colors",
+        "inspection-color",
+        "lighting-flat",
+        "lighting-face-normals",
+        "lighting-camera",
+        "object-fill",
+        "object-edges",
+        "triangle-wireframe",
+        "bounds-grid",
+        "axis-triad",
+        "gradient-background",
+        "polylines",
+    }
+    for record in records:
+        assert record.tooltip
+        assert record.accessible_name
+        assert (qml_root / record.resource_path).is_file()
+        assert preview_display_control_icon_record(record.id) == record
+    with pytest.raises(KeyError, match="unknown-preview-display-control-icon"):
+        preview_display_control_icon_record("missing")
+
+
+def test_workbench_icon_toggle_button_states_and_command_contract() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    QApplication.instance() or QApplication([])
+    icon = preview_display_control_icon_record("object-fill")
+    button = WorkbenchIconToggleButton(icon)
+    emitted = []
+    button.commandTriggered.connect(emitted.append)
+    original_size = button.size()
+
+    assert isinstance(button, QToolButton)
+    assert button.text() == ""
+    assert button.toolTip() == icon.tooltip
+    assert button.accessibleName() == icon.accessible_name
+    style = button.styleSheet()
+    assert "background: #1b2430" in style
+    assert "border: 1px solid #65788e" in style
+    assert "color: #dbe8f5" in style
+    assert "QToolButton:checked" in style
+    assert "color: #ffffff" in style
+    inactive_colors = _visible_icon_colors(
+        button.icon().pixmap(QSize(18, 18), QIcon.Mode.Normal, QIcon.State.Off).toImage()
+    )
+    active_colors = _visible_icon_colors(
+        button.icon().pixmap(QSize(18, 18), QIcon.Mode.Normal, QIcon.State.On).toImage()
+    )
+    disabled_colors = _visible_icon_colors(
+        button.icon().pixmap(QSize(18, 18), QIcon.Mode.Disabled, QIcon.State.Off).toImage()
+    )
+    assert inactive_colors
+    assert min(color.red() + color.green() + color.blue() for color in inactive_colors) > 520
+    assert min(color.red() + color.green() + color.blue() for color in active_colors) > 700
+    assert min(color.red() + color.green() + color.blue() for color in disabled_colors) > 350
+    button.setChecked(True)
+    assert button.size() == original_size
+    button.click()
+    assert emitted[-1].command == "object-fill"
+    button.setEnabled(False)
+    button.click()
+    assert len(emitted) == 1
+
+
+def _visible_icon_colors(image: QImage) -> list:
+    return [
+        image.pixelColor(x, y)
+        for y in range(image.height())
+        for x in range(image.width())
+        if image.pixelColor(x, y).alpha() > 32
+    ]
+
+
+def test_exclusive_icon_group_selection_model_and_component() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    QApplication.instance() or QApplication([])
+    options = (
+        ExclusiveIconOptionRecord("flat", "lighting-flat", "lighting-flat"),
+        ExclusiveIconOptionRecord("face_normals", "lighting-face-normals", "lighting-face-normals"),
+        ExclusiveIconOptionRecord("camera", "lighting-camera", "lighting-camera"),
+    )
+    state = ExclusiveIconGroupState(options, "face_normals")
+    group = ExclusiveIconOptionGroup(state)
+    selected = []
+    group.optionSelected.connect(selected.append)
+
+    assert group.option_ids() == ("flat", "face_normals", "camera")
+    assert select_exclusive_icon_option(state, "camera").selected_id == "camera"
+    with pytest.raises(ValueError, match="unknown-exclusive-icon-option"):
+        select_exclusive_icon_option(state, "missing")
+    group.select_option("camera")
+    assert selected == ["camera"]
+    assert group.state.selected_id == "camera"
+    group.set_state(ExclusiveIconGroupState(options, "camera", enabled=False))
+    group.select_option("flat")
+    assert group.state.selected_id == "camera"
+
+
+def test_preview_display_options_and_command_routing_are_deterministic() -> None:
+    options = PreviewDisplayOptions()
+
+    assert options.color_mode == "inspection"
+    assert options.lighting_mode == "face_normals"
+    assert options.show_object_fill
+    assert not options.show_triangle_wireframe
+    assert options.updated(show_bounds_grid=False).show_bounds_grid is False
+    with pytest.raises(ValueError, match="unsupported-preview-color-mode"):
+        PreviewDisplayOptions(color_mode="neon")
+    with pytest.raises(ValueError, match="unsupported-preview-lighting-mode"):
+        PreviewDisplayOptions(lighting_mode="studio")
+
+    authored = route_preview_display_command(options, "authored-colors", ready=True)
+    assert authored.executed
+    assert authored.options.color_mode == "authored"
+    lit = route_preview_display_command(authored.options, "lighting-camera", ready=True)
+    assert lit.options.lighting_mode == "camera"
+    toggled = route_preview_display_command(lit.options, "object-fill", ready=True)
+    assert toggled.options.show_object_fill is False
+    assert toggled.options.color_mode == "authored"
+    disabled = route_preview_display_command(options, "object-fill", ready=False)
+    assert not disabled.executed
+    assert disabled.diagnostic == "preview-display-controls-disabled"
+    unknown = route_preview_display_command(options, "explode", ready=True)
+    assert unknown.diagnostic == "unsupported-preview-display-command"
 
 
 def test_qml_resource_layout_reports_missing_files(tmp_path: Path) -> None:
@@ -250,12 +396,231 @@ def test_software_preview_projects_object_edges_not_triangle_wireframe() -> None
     assert len(scene.faces) == 2
     assert _object_edge_keys(mesh) == {(0, 1), (1, 2), (2, 3), (0, 3)}
     assert sum(len(face.edge_segments) for face in scene.faces) == 4
+    assert sum(len(face.triangle_segments) for face in scene.faces) == 0
     assert len(scene.grid_lines) == 10
     assert len(scene.axis_lines) == 3
     assert any(
         face.color.name() != _SOFTWARE_PREVIEW_DEFAULT_MESH.name()
         for face in scene.faces
     )
+
+
+def test_software_preview_layer_options_are_projected_without_topology_rebuild(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mesh = Mesh(
+        vertices=np.asarray(
+            (
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (0.0, 1.0, 0.0),
+            )
+        ),
+        faces=np.asarray(((0, 1, 2), (0, 2, 3))),
+    )
+    calls = 0
+    original_object_edge_keys = preview_widget._object_edge_keys
+
+    def counting_object_edge_keys(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_object_edge_keys(*args, **kwargs)
+
+    monkeypatch.setattr(preview_widget, "_object_edge_keys", counting_object_edge_keys)
+    surface = SoftwarePreviewSurface()
+    surface.set_datasets((mesh,))
+    assert calls == 1
+    assert surface._geometry is not None
+
+    overlays_off = _project_prepared_geometry(
+        surface._geometry,
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+        options=PreviewDisplayOptions(
+            show_object_edges=False,
+            show_bounds_grid=False,
+            show_axis_triad=False,
+            show_polylines=False,
+        ),
+    )
+    wireframe = _project_prepared_geometry(
+        surface._geometry,
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+        options=PreviewDisplayOptions(show_triangle_wireframe=True),
+    )
+
+    assert overlays_off.grid_lines == ()
+    assert overlays_off.axis_lines == ()
+    assert sum(len(face.edge_segments) for face in overlays_off.faces) == 0
+    assert sum(len(face.triangle_segments) for face in wireframe.faces) == 6
+    assert calls == 1
+
+
+def test_software_preview_authored_color_and_lighting_modes() -> None:
+    mesh = Mesh(
+        vertices=np.asarray(
+            (
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (0.0, 1.0, 0.0),
+            )
+        ),
+        faces=np.asarray(((0, 1, 2), (0, 2, 3))),
+        color=(0.0, 1.0, 0.0, 1.0),
+        face_colors=np.asarray(((0.5, 0.0, 0.0, 1.0), (0.0, 0.0, 0.5, 1.0))),
+    )
+
+    authored_flat = _project_datasets(
+        (mesh,),
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+        options=PreviewDisplayOptions(color_mode="authored", lighting_mode="flat"),
+    )
+    inspection_flat = _project_datasets(
+        (mesh,),
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+        options=PreviewDisplayOptions(lighting_mode="flat"),
+    )
+    camera_lit = _project_datasets(
+        (mesh,),
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+        options=PreviewDisplayOptions(color_mode="authored", lighting_mode="camera"),
+    )
+
+    assert {face.color.name() for face in authored_flat.faces} == {"#800000", "#000080"}
+    assert {face.color.name() for face in inspection_flat.faces} == {
+        _SOFTWARE_PREVIEW_DEFAULT_MESH.name()
+    }
+    assert {face.color.name() for face in camera_lit.faces} != {"#800000", "#000080"}
+
+
+def test_software_preview_forces_mesh_fill_opaque_for_review() -> None:
+    mesh = Mesh(
+        vertices=np.asarray(
+            (
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (0.0, 1.0, 0.0),
+            )
+        ),
+        faces=np.asarray(((0, 1, 2), (0, 2, 3))),
+        color=(0.0, 1.0, 0.0, 0.2),
+        face_colors=np.asarray(((0.5, 0.0, 0.0, 0.2), (0.0, 0.0, 0.5, 0.3))),
+    )
+
+    authored_flat = _project_datasets(
+        (mesh,),
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+        options=PreviewDisplayOptions(color_mode="authored", lighting_mode="flat"),
+    )
+    authored_lit = _project_datasets(
+        (mesh,),
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+        options=PreviewDisplayOptions(color_mode="authored", lighting_mode="face_normals"),
+    )
+
+    assert {face.color.alpha() for face in authored_flat.faces} == {255}
+    assert {face.color.alpha() for face in authored_lit.faces} == {255}
+
+
+def test_software_preview_depth_order_hides_far_faces_without_normal_culling() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    QApplication.instance() or QApplication([])
+    mesh = Mesh(
+        vertices=np.asarray(
+            (
+                (0.0, 0.0, 0.0),
+                (1.0, 0.0, 0.0),
+                (1.0, 1.0, 0.0),
+                (0.0, 1.0, 0.0),
+                (0.0, 0.0, 1.0),
+                (1.0, 0.0, 1.0),
+                (1.0, 1.0, 1.0),
+                (0.0, 1.0, 1.0),
+            )
+        ),
+        faces=np.asarray(
+            (
+                (0, 2, 1),
+                (0, 3, 2),
+                (4, 5, 6),
+                (4, 6, 7),
+            )
+        ),
+        face_colors=np.asarray(
+            (
+                (1.0, 0.0, 0.0, 1.0),
+                (1.0, 0.0, 0.0, 1.0),
+                (0.0, 0.0, 1.0, 1.0),
+                (0.0, 0.0, 1.0, 1.0),
+            )
+        ),
+    )
+
+    surface = SoftwarePreviewSurface()
+    surface.resize(200, 200)
+    surface.set_display_options(
+        PreviewDisplayOptions(
+            color_mode="authored",
+            lighting_mode="flat",
+            show_object_edges=False,
+            show_bounds_grid=False,
+            show_axis_triad=False,
+            show_gradient_background=False,
+            show_polylines=False,
+        )
+    )
+    surface.set_datasets((mesh,))
+    surface._rotation_x = 0.0
+    surface._rotation_y = 0.0
+    image = QImage(surface.size(), QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+
+    surface.render(painter)
+    painter.end()
+
+    scene = _project_datasets(
+        (mesh,),
+        width=200,
+        height=200,
+        rotation_x=0.0,
+        rotation_y=0.0,
+        zoom=1.0,
+        options=surface.display_options,
+    )
+    assert len(scene.faces) == 4
+    assert {face.color.name() for face in scene.faces} == {"#ff0000", "#0000ff"}
+    assert image.pixelColor(100, 100).name() == "#0000ff"
 
 
 def test_software_preview_caches_object_edges_between_repaints(
@@ -359,6 +724,94 @@ def test_software_preview_renders_to_qt_paint_device() -> None:
     assert any(color.startswith("#") and int(color[1:3], 16) > 100 for color in sampled_colors)
 
 
+def test_software_preview_latches_trackpad_zoom_direction_during_gesture() -> None:
+    latched = None
+    first = _wheel_zoom_direction(_FakeWheelEvent(120, Qt.ScrollPhase.ScrollUpdate), latched)
+    latched = first
+    noisy_opposite = _wheel_zoom_direction(
+        _FakeWheelEvent(-120, Qt.ScrollPhase.ScrollUpdate),
+        latched,
+    )
+    momentum_opposite = _wheel_zoom_direction(
+        _FakeWheelEvent(-120, Qt.ScrollPhase.ScrollMomentum),
+        latched,
+    )
+    after_end = _wheel_zoom_direction(_FakeWheelEvent(-120), None)
+
+    assert first == 1
+    assert noisy_opposite == 1
+    assert momentum_opposite == 1
+    assert after_end == -1
+
+
+def test_software_preview_wheel_event_keeps_long_swipe_zoom_monotonic() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    QApplication.instance() or QApplication([])
+    surface = SoftwarePreviewSurface()
+
+    surface.wheelEvent(_FakeWheelEvent(120, Qt.ScrollPhase.ScrollUpdate))
+    first_zoom = surface._zoom
+    surface.wheelEvent(_FakeWheelEvent(-120, Qt.ScrollPhase.ScrollUpdate))
+    second_zoom = surface._zoom
+    surface.wheelEvent(_FakeWheelEvent(0, Qt.ScrollPhase.ScrollEnd))
+    surface.wheelEvent(_FakeWheelEvent(-120, Qt.ScrollPhase.ScrollUpdate))
+
+    assert first_zoom > 1.0
+    assert second_zoom > first_zoom
+    assert surface._zoom < second_zoom
+
+
+def test_software_preview_wheel_event_can_reverse_direction_without_finger_lift() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    QApplication.instance() or QApplication([])
+    surface = SoftwarePreviewSurface()
+
+    surface.wheelEvent(_FakeWheelEvent(120, Qt.ScrollPhase.ScrollUpdate))
+    first_zoom = surface._zoom
+    surface.wheelEvent(_FakeWheelEvent(-120, Qt.ScrollPhase.ScrollUpdate))
+    jitter_ignored_zoom = surface._zoom
+    surface.wheelEvent(_FakeWheelEvent(-120, Qt.ScrollPhase.ScrollUpdate))
+    reversed_zoom = surface._zoom
+
+    assert first_zoom > 1.0
+    assert jitter_ignored_zoom > first_zoom
+    assert reversed_zoom < jitter_ignored_zoom
+
+
+class _FakeDelta:
+    def __init__(self, y: int) -> None:
+        self._y = y
+
+    def y(self) -> int:
+        return self._y
+
+
+class _FakeWheelEvent:
+    def __init__(
+        self,
+        angle_y: int,
+        phase: Qt.ScrollPhase = Qt.ScrollPhase.NoScrollPhase,
+        *,
+        pixel_y: int = 0,
+    ) -> None:
+        self._angle_y = angle_y
+        self._pixel_y = pixel_y
+        self._phase = phase
+        self.accepted = False
+
+    def angleDelta(self) -> _FakeDelta:
+        return _FakeDelta(self._angle_y)
+
+    def pixelDelta(self) -> _FakeDelta:
+        return _FakeDelta(self._pixel_y)
+
+    def phase(self) -> Qt.ScrollPhase:
+        return self._phase
+
+    def accept(self) -> None:
+        self.accepted = True
+
+
 def test_dirty_impress_fixture_launch_exposes_artifact_without_startup_render(project_root: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     fixture_file = project_root / "tests/reference_review_fixtures/dirty-impress-fixtures.json"
@@ -404,6 +857,9 @@ def test_dirty_impress_fixture_selects_embedded_preview_surface(project_root: Pa
     assert root.findChild(QObject, "openPreviewButton") is None
     assert root.findChild(QObject, "embeddedPreviewSurface") is not None
     assert root.findChild(QObject, "resetPreviewButton") is not None
+    assert root.findChild(QObject, "previewDisplayControlBar") is not None
+    assert root.findChild(QObject, "previewDisplayColorGroup") is not None
+    assert root.findChild(QObject, "previewDisplayLightingGroup") is not None
     detail_tabs = root.findChild(QObject, "reviewDetailTabs")
     assert isinstance(detail_tabs, QTabWidget)
     assert [detail_tabs.tabText(index) for index in range(detail_tabs.count())] == [
@@ -412,6 +868,38 @@ def test_dirty_impress_fixture_selects_embedded_preview_surface(project_root: Pa
         "Artifacts",
     ]
     assert root.property("interactivePreviewReady")
+
+
+def test_preview_display_control_bar_order_and_ready_state() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    QApplication.instance() or QApplication([])
+    bar = PreviewDisplayControlBar()
+
+    assert bar.control_ids() == (
+        "authored-colors",
+        "inspection-color",
+        "separator",
+        "lighting-flat",
+        "lighting-face-normals",
+        "lighting-camera",
+        "separator",
+        "object-fill",
+        "object-edges",
+        "triangle-wireframe",
+        "bounds-grid",
+        "axis-triad",
+        "gradient-background",
+        "polylines",
+    )
+    bar.set_ready(False)
+    assert not bar.findChild(QObject, "previewDisplayControl-object-fill").isEnabled()
+    bar.set_ready(True)
+    object_fill = bar.findChild(QObject, "previewDisplayControl-object-fill")
+    assert object_fill.isEnabled()
+    assert object_fill.isChecked()
+    bar.set_options(PreviewDisplayOptions(show_object_fill=False, lighting_mode="camera"))
+    assert not object_fill.isChecked()
+    assert bar.findChild(QObject, "previewDisplayControl-lighting-camera").isChecked()
 
 
 def test_live_preview_loads_impress_artifact_into_plotter(
@@ -682,6 +1170,51 @@ def test_preview_renderer_lifecycle_widget_reports_invalid_payload(
     assert not state.ready
     assert state.diagnostic == "unsupported-preview-payload-format"
     assert widget._status.text() == "Preview unavailable: unsupported-preview-payload-format"
+
+
+def test_default_renderer_policy_avoids_vtk_qt_interactor_in_offscreen_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("IMPRESSION_REFERENCE_REVIEW_FORCE_SOFTWARE", raising=False)
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+    assert _should_use_pyvistaqt_preview()
+    monkeypatch.setenv("IMPRESSION_REFERENCE_REVIEW_FORCE_SOFTWARE", "1")
+    assert not _should_use_pyvistaqt_preview()
+    monkeypatch.setenv("IMPRESSION_REFERENCE_REVIEW_FORCE_SOFTWARE", "0")
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    assert not _should_use_pyvistaqt_preview()
+
+
+def test_pyvistaqt_preview_surface_uses_lightweight_scene_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    datasets = (
+        Mesh(
+            vertices=np.asarray(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))),
+            faces=np.asarray(((0, 1, 2),)),
+        ),
+    )
+    calls = []
+
+    class FakeSceneController:
+        def apply_scene(self, plotter, datasets, **kwargs):
+            calls.append(("apply", tuple(datasets), kwargs))
+
+    _apply_pyvistaqt_scene(
+        FakeSceneController(),
+        object(),
+        datasets,
+        PreviewDisplayOptions(),
+        align_camera=True,
+    )
+
+    assert calls[0][2] == {
+        "show_edges": False,
+        "face_edges": True,
+        "show_bounds": True,
+        "show_axes": True,
+        "align_camera": True,
+    }
 
 
 def test_window_preview_controller_launches_and_polls_payload(tmp_path: Path) -> None:

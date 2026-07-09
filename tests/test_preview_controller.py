@@ -8,9 +8,15 @@ from impression.mesh import Mesh, Polyline
 from impression.preview import (
     PreviewControllerOptions,
     PreviewInteractionPolicy,
+    PreviewSceneApplyOptions,
     PreviewSceneController,
     PreviewStyle,
     PyVistaPreviewer,
+)
+from impression.preview_qt import (
+    QtPreviewSurfaceConfig,
+    apply_qt_preview_scene,
+    qt_preview_supported_environment,
 )
 
 
@@ -337,6 +343,66 @@ def test_preview_module_does_not_import_reference_review_ui() -> None:
 
     assert "impression.devtools.reference_review" not in preview_source
     assert "PySide6" not in preview_source
+
+
+def test_qt_preview_surface_config_has_workbench_defaults() -> None:
+    config = QtPreviewSurfaceConfig.workbench_default()
+
+    assert config.controller_options.style.background == "#07111f"
+    assert config.controller_options.interaction.show_bounds is False
+    assert config.controller_options.interaction.show_axes is False
+    assert config.controller_options.interaction.enable_eye_dome_lighting is False
+    assert config.apply_options.show_edges is False
+    assert config.apply_options.face_edges is False
+    assert config.apply_options.show_bounds is False
+    assert config.apply_options.show_axes is False
+    assert config.apply_options.align_camera is True
+    assert config.auto_update is False
+
+
+def test_qt_preview_supported_environment_rejects_offscreen_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+    assert qt_preview_supported_environment()
+
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    assert not qt_preview_supported_environment()
+    assert qt_preview_supported_environment(allow_offscreen=True)
+
+
+def test_qt_preview_scene_handoff_delegates_to_shared_controller() -> None:
+    calls = []
+
+    class FakeController:
+        def apply_scene(self, plotter, datasets, **kwargs):
+            calls.append((plotter, tuple(datasets), kwargs))
+
+    mesh = Mesh(
+        vertices=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]]),
+        faces=np.array([[0, 1, 2]]),
+    )
+    options = PreviewSceneApplyOptions(
+        show_edges=True,
+        face_edges=True,
+        show_bounds=False,
+        show_axes=False,
+        align_camera=True,
+    )
+
+    apply_qt_preview_scene(FakeController(), "plotter", [mesh], options)
+
+    assert calls == [
+        (
+            "plotter",
+            (mesh,),
+            {
+                "show_edges": True,
+                "face_edges": True,
+                "show_bounds": False,
+                "show_axes": False,
+                "align_camera": True,
+            },
+        )
+    ]
 
 
 def test_reference_review_shell_does_not_apply_preview_scenes() -> None:

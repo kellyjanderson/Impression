@@ -11,6 +11,11 @@ from typing import Sequence
 
 from .bridge import BridgeRecord, BridgeRegistry
 from .packaging import qml_resource_root
+from .preview_controls import (
+    PreviewDisplayControlBar,
+    PreviewDisplayOptions,
+    route_preview_display_command,
+)
 from .preview_widget import PreviewRendererLifecycleWidget
 from .queue_context import FixtureQueueViewModel
 from ..source_registry import (
@@ -240,12 +245,12 @@ class LiveArtifactPreviewWidget(PreviewRendererLifecycleWidget):
         try:
             plotter = self._ensure_plotter()
             self._status.hide()
-            plotter.clear()
             self._current_datasets = list(result.datasets)
             set_datasets = getattr(plotter, "set_datasets", None)
             if not callable(set_datasets):
                 raise RuntimeError("preview-renderer-missing-set-datasets")
             set_datasets(tuple(self._current_datasets))
+            self._apply_display_options_to_plotter()
             self.reset_view()
         except Exception as exc:
             self._clear_scene(f"Preview unavailable: {exc.__class__.__name__}")
@@ -298,6 +303,7 @@ class ReferenceReviewWindow(QWidget):
         self._selected_index = queue.selected_index if queue.selected_index is not None else -1
         self._fixture_items = _fixture_items_for_qml(queue, artifact_previews)
         self._preview_load_generation = 0
+        self._preview_display_options = PreviewDisplayOptions()
         self._preview_controller = PreviewPayloadProcessController(cwd=Path.cwd())
         self._preview_futures: list[Future[WorkerResultEnvelope]] = []
         self._preview_poll_timer = QTimer(self)
@@ -334,8 +340,6 @@ class ReferenceReviewWindow(QWidget):
         main_layout.setHorizontalSpacing(12)
         main_layout.setVerticalSpacing(12)
         header = QHBoxLayout()
-        selected_title = QLabel("Selected Fixture")
-        selected_title.setStyleSheet("font-size: 18px; font-weight: 700;")
         self.ready_badge = QLabel("Ready" if not startup_diagnostics else "Diagnostics")
         self.ready_badge.setStyleSheet("background: #d8f0f2; border: 1px solid #89bec4; padding: 6px 18px;")
         self.previous_button = QPushButton("Previous")
@@ -344,7 +348,9 @@ class ReferenceReviewWindow(QWidget):
         self.next_button.setObjectName("nextFixtureButton")
         self.reset_view_button = QPushButton("Reset View")
         self.reset_view_button.setObjectName("resetPreviewButton")
-        header.addWidget(selected_title, 1)
+        self.preview_display_controls = PreviewDisplayControlBar(options=self._preview_display_options)
+        self.preview_display_controls.set_ready(False)
+        header.addWidget(self.preview_display_controls, 1)
         header.addWidget(self.ready_badge)
         header.addWidget(self.reset_view_button)
         header.addWidget(self.previous_button)
@@ -426,6 +432,7 @@ class ReferenceReviewWindow(QWidget):
 
         self.refresh_button.clicked.connect(self._refresh_queue)
         self.reset_view_button.clicked.connect(self.preview_surface.reset_view)
+        self.preview_display_controls.commandTriggered.connect(self._route_preview_display_command)
         self.previous_button.clicked.connect(self._previous_fixture)
         self.next_button.clicked.connect(self._next_fixture)
         self.send_button.clicked.connect(self._send_prompt)
@@ -489,6 +496,7 @@ class ReferenceReviewWindow(QWidget):
         if index < 0 or index >= len(self._fixture_items):
             self._selected_index = -1
             self.preview_surface.set_artifact(None)
+            self.preview_display_controls.set_ready(False)
             self.context_text.setText("No fixture context loaded.")
             self.artifact_thumb.setText("")
             self._sync_properties()
@@ -511,6 +519,7 @@ class ReferenceReviewWindow(QWidget):
         self._preview_load_generation += 1
         self.artifact_thumb.setText(str(item.get("artifact_display_path", "")))
         self.preview_surface.prepare_artifact(live_artifact)
+        self.preview_display_controls.set_ready(False)
         if live_artifact is None:
             self.preview_surface.set_artifact(None)
             return
@@ -550,10 +559,24 @@ class ReferenceReviewWindow(QWidget):
     def _apply_preview_payload_ready(self, event: PreviewPayloadReadyEvent) -> None:
         state = self.preview_surface.set_preview_payload(event.payload)
         if state.ready:
+            self.preview_display_controls.set_ready(True)
             self._preview_controller.cleanup_payload(event.payload, reason="completed")
 
     def _apply_preview_payload_failed(self, event: PreviewPayloadFailedEvent) -> None:
         self.preview_surface.clear_preview(f"Preview unavailable: {event.diagnostic.message}")
+        self.preview_display_controls.set_ready(False)
+
+    def _route_preview_display_command(self, command: str) -> None:
+        result = route_preview_display_command(
+            self._preview_display_options,
+            command,
+            ready=bool(self.preview_surface.payload_state.ready),
+        )
+        if not result.executed:
+            return
+        self._preview_display_options = result.options
+        self.preview_display_controls.set_options(result.options)
+        self.preview_surface.set_display_options(result.options)
 
     def _sync_properties(self) -> None:
         has_fixture = self._selected_index >= 0

@@ -24,6 +24,90 @@ PREVIEW_DISPLAY_CONTROL_ICON_FILES: tuple[str, ...] = (
 
 
 @dataclass(frozen=True)
+class PreviewDisplayControlIconRecord:
+    id: str
+    resource_path: str
+    tooltip: str
+    accessible_name: str
+
+
+PREVIEW_DISPLAY_CONTROL_ICON_RECORDS: tuple[PreviewDisplayControlIconRecord, ...] = (
+    PreviewDisplayControlIconRecord(
+        "authored-colors",
+        "icons/preview-display/authored-colors.svg",
+        "Use authored mesh and face colors",
+        "Use authored colors",
+    ),
+    PreviewDisplayControlIconRecord(
+        "inspection-color",
+        "icons/preview-display/inspection-color.svg",
+        "Use inspection color",
+        "Use inspection color",
+    ),
+    PreviewDisplayControlIconRecord(
+        "lighting-flat",
+        "icons/preview-display/lighting-flat.svg",
+        "Use flat lighting",
+        "Use flat lighting",
+    ),
+    PreviewDisplayControlIconRecord(
+        "lighting-face-normals",
+        "icons/preview-display/lighting-face-normals.svg",
+        "Shade by face normals",
+        "Shade by face normals",
+    ),
+    PreviewDisplayControlIconRecord(
+        "lighting-camera",
+        "icons/preview-display/lighting-camera.svg",
+        "Use camera-fixed fill and point light",
+        "Use camera lighting",
+    ),
+    PreviewDisplayControlIconRecord(
+        "object-fill",
+        "icons/preview-display/object-fill.svg",
+        "Toggle object fill",
+        "Toggle object fill",
+    ),
+    PreviewDisplayControlIconRecord(
+        "object-edges",
+        "icons/preview-display/object-edges.svg",
+        "Toggle object edges",
+        "Toggle object edges",
+    ),
+    PreviewDisplayControlIconRecord(
+        "triangle-wireframe",
+        "icons/preview-display/triangle-wireframe.svg",
+        "Toggle triangle wireframe",
+        "Toggle triangle wireframe",
+    ),
+    PreviewDisplayControlIconRecord(
+        "bounds-grid",
+        "icons/preview-display/bounds-grid.svg",
+        "Toggle bounds grid",
+        "Toggle bounds grid",
+    ),
+    PreviewDisplayControlIconRecord(
+        "axis-triad",
+        "icons/preview-display/axis-triad.svg",
+        "Toggle axis triad",
+        "Toggle axis triad",
+    ),
+    PreviewDisplayControlIconRecord(
+        "gradient-background",
+        "icons/preview-display/gradient-background.svg",
+        "Toggle gradient background",
+        "Toggle gradient background",
+    ),
+    PreviewDisplayControlIconRecord(
+        "polylines",
+        "icons/preview-display/polylines.svg",
+        "Toggle polylines",
+        "Toggle polylines",
+    ),
+)
+
+
+@dataclass(frozen=True)
 class DependencyPolicyRecord:
     extra_name: str = "reference-review-ui"
     required_dependencies: tuple[str, ...] = ("PySide6",)
@@ -83,6 +167,17 @@ def build_dependency_policy_report(
 
 def qml_resource_root() -> Path:
     return Path(str(resources.files(__package__) / "qml"))
+
+
+def preview_display_control_icon_records() -> tuple[PreviewDisplayControlIconRecord, ...]:
+    return PREVIEW_DISPLAY_CONTROL_ICON_RECORDS
+
+
+def preview_display_control_icon_record(icon_id: str) -> PreviewDisplayControlIconRecord:
+    for record in PREVIEW_DISPLAY_CONTROL_ICON_RECORDS:
+        if record.id == icon_id:
+            return record
+    raise KeyError(f"unknown-preview-display-control-icon:{icon_id}")
 
 
 def verify_qml_resource_layout(
