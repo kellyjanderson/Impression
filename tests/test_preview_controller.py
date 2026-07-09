@@ -601,10 +601,10 @@ def test_qt_preview_surface_config_has_workbench_defaults() -> None:
     assert config.apply_options.show_axes is False
     assert config.apply_options.align_camera is True
     assert config.auto_update is False
-    assert config.qvtk_base == "QOpenGLWidget"
+    assert config.qvtk_base == "QWidget"
 
 
-def test_qt_preview_configures_qopengl_backend_before_pyvistaqt_import() -> None:
+def test_qt_preview_configures_selected_backend_before_pyvistaqt_import() -> None:
     import sys
     import vtkmodules.qt
 
@@ -628,7 +628,7 @@ def test_qt_preview_configures_opengl_compatibility_surface_format() -> None:
     fmt = QSurfaceFormat.defaultFormat()
     assert fmt.renderableType() == QSurfaceFormat.RenderableType.OpenGL
     assert fmt.profile() == QSurfaceFormat.OpenGLContextProfile.CompatibilityProfile
-    assert fmt.majorVersion() == 2
+    assert fmt.majorVersion() == 4
     assert fmt.minorVersion() == 1
     assert fmt.depthBufferSize() == 24
     assert fmt.stencilBufferSize() == 8

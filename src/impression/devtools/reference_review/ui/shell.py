@@ -71,6 +71,7 @@ def _ensure_qt_app(argv: Sequence[str], *, offscreen: bool, widgets: bool = Fals
     if offscreen:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     if widgets:
+        os.environ.setdefault("QT_OPENGL", "desktop")
         from PySide6.QtWidgets import QApplication
 
         app = QApplication.instance()
@@ -831,6 +832,7 @@ def _parse_args(args: Sequence[str]) -> tuple[list[Path], list[Path], list[Path]
 def main(argv: Sequence[str] | None = None) -> int:
     global _ACTIVE_LAUNCH
 
+    configure_qt_preview_surface_format()
     argv = tuple(argv or sys.argv)
     args = argv[1:]
     if any(arg in {"-h", "--help"} for arg in args):

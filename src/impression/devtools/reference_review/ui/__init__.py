@@ -1,5 +1,9 @@
 """Qt/QML shell support for the Reference Review Workbench."""
 
+import os
+
+os.environ.setdefault("QT_OPENGL", "desktop")
+
 from .artifact_preview import ArtifactPreviewRecord, render_stl_preview
 from .bridge import BridgeAvailabilityDiagnostic, BridgeRecord, BridgeRegistry
 from .evidence import (
