@@ -18,6 +18,7 @@ from impression.preview_qt import (
     apply_qt_preview_scene,
     configure_qt_preview_surface_format,
     configure_qvtk_backend,
+    preview_scene_options_for_camera_state,
     qt_preview_supported_environment,
 )
 
@@ -477,6 +478,44 @@ def test_qt_preview_scene_handoff_delegates_to_shared_controller() -> None:
             },
         )
     ]
+
+
+def test_qt_preview_preserves_display_options_when_resolving_camera_alignment() -> None:
+    options = PreviewSceneApplyOptions(
+        show_edges=True,
+        face_edges=False,
+        show_bounds=False,
+        show_axes=True,
+        align_camera=False,
+        show_object_fill=False,
+        show_polylines=False,
+        smooth_shading=False,
+        lighting=False,
+        specular=0.0,
+        background="#07111f",
+        background_top="#10223a",
+    )
+
+    resolved = preview_scene_options_for_camera_state(
+        options,
+        align_camera=True,
+        camera_aligned=False,
+    )
+
+    assert resolved == PreviewSceneApplyOptions(
+        show_edges=True,
+        face_edges=False,
+        show_bounds=False,
+        show_axes=True,
+        align_camera=True,
+        show_object_fill=False,
+        show_polylines=False,
+        smooth_shading=False,
+        lighting=False,
+        specular=0.0,
+        background="#07111f",
+        background_top="#10223a",
+    )
 
 
 def test_reference_review_shell_does_not_apply_preview_scenes() -> None:

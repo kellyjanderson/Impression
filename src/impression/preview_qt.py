@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Iterable
 
 from PySide6.QtWidgets import QVBoxLayout, QWidget
@@ -83,6 +83,17 @@ def apply_qt_preview_scene(
         background=options.background,
         background_top=options.background_top,
     )
+
+
+def preview_scene_options_for_camera_state(
+    options: PreviewSceneApplyOptions,
+    *,
+    align_camera: bool,
+    camera_aligned: bool,
+) -> PreviewSceneApplyOptions:
+    """Return scene options preserving display flags while resolving camera alignment."""
+
+    return replace(options, align_camera=align_camera and not camera_aligned)
 
 
 def configure_qvtk_backend(base: str | None) -> None:
@@ -217,12 +228,10 @@ class QtPreviewSurface(QWidget):
         )
 
     def _apply_scene(self, *, align_camera: bool) -> None:
-        options = PreviewSceneApplyOptions(
-            show_edges=self._apply_options.show_edges,
-            face_edges=self._apply_options.face_edges,
-            show_bounds=self._apply_options.show_bounds,
-            show_axes=self._apply_options.show_axes,
-            align_camera=align_camera and not self._camera_aligned,
+        options = preview_scene_options_for_camera_state(
+            self._apply_options,
+            align_camera=align_camera,
+            camera_aligned=self._camera_aligned,
         )
         self._configure_plotter()
         apply_qt_preview_scene(
