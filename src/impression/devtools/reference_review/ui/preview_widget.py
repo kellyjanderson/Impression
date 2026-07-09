@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 import numpy as np
-from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtCore import QPoint, QPointF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
@@ -22,6 +22,7 @@ from impression.preview_qt import (
     QtPreviewSurface,
     QtPreviewSurfaceConfig,
     apply_qt_preview_scene,
+    configure_qt_preview_surface_format,
     qt_preview_supported_environment,
 )
 from ..async_core.qt_handoff import sanitize_error_text
@@ -33,6 +34,12 @@ from .preview_controls import (
     LIGHTING_MODE_FACE_NORMALS,
     LIGHTING_MODE_FLAT,
     PreviewDisplayOptions,
+)
+from .preview_render_queue import (
+    PreviewRenderCommand,
+    PreviewRenderCommandKind,
+    PreviewRenderCommandQueue,
+    PreviewRenderCommandResult,
 )
 
 _PREVIEW_WIDGET_APP: QApplication | None = None
@@ -274,6 +281,8 @@ def route_preview_toolbar_command(
 class PreviewRendererLifecycleWidget(QWidget):
     """Widget host that owns one long-lived embedded preview renderer."""
 
+    renderCommandApplied = Signal(object)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         _ensure_widget_app()
         super().__init__(parent)
@@ -290,6 +299,8 @@ class PreviewRendererLifecycleWidget(QWidget):
         self._payload_state = PreviewWidgetPayloadState()
         self._current_datasets: list[Mesh | Polyline] = []
         self._display_options = PreviewDisplayOptions()
+        self._render_queue = PreviewRenderCommandQueue()
+        self._render_drain_scheduled = False
 
     @property
     def renderer_state(self) -> PreviewRendererLifecycleState:
@@ -323,6 +334,113 @@ class PreviewRendererLifecycleWidget(QWidget):
         self._display_options = options
         self._apply_display_options_to_plotter()
 
+    def enqueue_render_command(
+        self,
+        command: PreviewRenderCommand,
+    ) -> PreviewRenderCommandResult:
+        result = self._render_queue.enqueue(command)
+        if not self._render_drain_scheduled:
+            self._render_drain_scheduled = True
+            QTimer.singleShot(0, self._drain_preview_render_queue)
+        return result
+
+    def _drain_preview_render_queue(self) -> None:
+        self._render_drain_scheduled = False
+        command = self._render_queue.pop_next()
+        if command is not None:
+            result = self._apply_render_command(command)
+            self.renderCommandApplied.emit(result)
+        if self._render_queue.state.pending_count and not self._render_drain_scheduled:
+            self._render_drain_scheduled = True
+            QTimer.singleShot(0, self._drain_preview_render_queue)
+
+    def _apply_render_command(
+        self,
+        command: PreviewRenderCommand,
+    ) -> PreviewRenderCommandResult:
+        try:
+            if command.kind is PreviewRenderCommandKind.PAYLOAD:
+                if command.payload is None:
+                    return PreviewRenderCommandResult(
+                        command=command,
+                        accepted=False,
+                        status="missing-payload",
+                        diagnostic="preview-render-command-missing-payload",
+                    )
+                if command.display_options is not None:
+                    self._display_options = command.display_options
+                state = self.set_preview_payload(command.payload)
+                return PreviewRenderCommandResult(
+                    command=command,
+                    accepted=state.ready,
+                    status="applied" if state.ready else "failed",
+                    ready=state.ready,
+                    diagnostic=state.diagnostic,
+                )
+            if command.kind is PreviewRenderCommandKind.DISPLAY:
+                if command.display_options is None:
+                    return PreviewRenderCommandResult(
+                        command=command,
+                        accepted=False,
+                        status="missing-display-options",
+                        diagnostic="preview-render-command-missing-display-options",
+                    )
+                self.set_display_options(command.display_options)
+                return PreviewRenderCommandResult(
+                    command=command,
+                    accepted=True,
+                    status="applied",
+                    ready=self._payload_state.ready,
+                )
+            if command.kind is PreviewRenderCommandKind.RESET_CAMERA:
+                self.reset_view()
+                return PreviewRenderCommandResult(
+                    command=command,
+                    accepted=True,
+                    status="applied",
+                    ready=self._payload_state.ready,
+                )
+            if command.kind is PreviewRenderCommandKind.LOADING:
+                message = command.message or "Loading preview..."
+                self._status.setText(message)
+                self._status.show()
+                return PreviewRenderCommandResult(command=command, accepted=True, status="applied")
+            if command.kind is PreviewRenderCommandKind.CLEAR:
+                state = self.clear_preview(command.message or "No fixture selected.")
+                return PreviewRenderCommandResult(
+                    command=command,
+                    accepted=True,
+                    status="applied",
+                    ready=state.ready,
+                    diagnostic=state.diagnostic,
+                )
+            if command.kind is PreviewRenderCommandKind.FAILURE:
+                message = command.message or "Preview unavailable."
+                diagnostic = command.diagnostic or message
+                state = self.clear_preview(message)
+                return PreviewRenderCommandResult(
+                    command=command,
+                    accepted=False,
+                    status="failed",
+                    ready=state.ready,
+                    diagnostic=diagnostic,
+                )
+        except Exception as exc:
+            diagnostic = sanitize_error_text(str(exc) or exc.__class__.__name__)
+            self.clear_preview(f"Preview unavailable: {diagnostic}")
+            return PreviewRenderCommandResult(
+                command=command,
+                accepted=False,
+                status="exception",
+                diagnostic=diagnostic,
+            )
+        return PreviewRenderCommandResult(
+            command=command,
+            accepted=False,
+            status="unsupported",
+            diagnostic="unsupported-preview-render-command",
+        )
+
     def clear_renderer_scene(self, message: str) -> None:
         if self._plotter is not None:
             self._plotter.clear()
@@ -334,6 +452,19 @@ class PreviewRendererLifecycleWidget(QWidget):
         self._payload_state = PreviewWidgetPayloadState(diagnostic=message)
         self.clear_renderer_scene(message)
         return self._payload_state
+
+    def reset_view(self) -> None:
+        if self._plotter is None:
+            return
+        reset_camera = getattr(self._plotter, "reset_camera", None)
+        if callable(reset_camera):
+            reset_camera()
+        reset_clipping = getattr(self._plotter, "reset_camera_clipping_range", None)
+        if callable(reset_clipping):
+            reset_clipping()
+        render = getattr(self._plotter, "render", None)
+        if callable(render):
+            render()
 
     def set_preview_payload(
         self,
@@ -367,6 +498,8 @@ class PreviewRendererLifecycleWidget(QWidget):
             return self._fail_payload(payload, str(exc) or exc.__class__.__name__)
 
     def dispose_renderer(self) -> None:
+        self._render_queue.clear()
+        self._render_drain_scheduled = False
         if self._plotter is not None:
             self._plotter.close()
             self._plotter = None
@@ -565,18 +698,22 @@ class PyVistaQtPreviewSurface(QWidget):
 
     def set_display_options(self, options: PreviewDisplayOptions) -> None:
         self._display_options = options
-        self._surface.set_apply_options(_preview_scene_apply_options(options, align_camera=False))
         if self._datasets:
-            self._surface.set_datasets(
+            self._surface.replace_scene(
                 _datasets_for_display_options(self._datasets, options),
+                apply_options=_preview_scene_apply_options(options, align_camera=False),
                 align_camera=False,
+            )
+        else:
+            self._surface.set_apply_options(
+                _preview_scene_apply_options(options, align_camera=False)
             )
 
     def set_datasets(self, datasets: tuple[Mesh | Polyline, ...]) -> None:
         self._datasets = tuple(datasets)
-        self._surface.set_apply_options(_preview_scene_apply_options(self._display_options, align_camera=True))
-        self._surface.set_datasets(
+        self._surface.replace_scene(
             _datasets_for_display_options(self._datasets, self._display_options),
+            apply_options=_preview_scene_apply_options(self._display_options, align_camera=True),
             align_camera=True,
         )
 
@@ -626,12 +763,22 @@ def _preview_scene_apply_options(
     *,
     align_camera: bool,
 ) -> PreviewSceneApplyOptions:
+    lighting = options.lighting_mode != LIGHTING_MODE_FLAT
+    smooth_shading = options.lighting_mode == LIGHTING_MODE_CAMERA
     return PreviewSceneApplyOptions(
         show_edges=options.show_triangle_wireframe,
         face_edges=options.show_object_edges,
         show_bounds=options.show_bounds_grid,
         show_axes=options.show_axis_triad,
         align_camera=align_camera,
+        show_object_fill=options.show_object_fill,
+        show_polylines=options.show_polylines,
+        smooth_shading=smooth_shading,
+        lighting=lighting,
+        lighting_profile=options.lighting_mode,
+        specular=0.2 if options.lighting_mode == LIGHTING_MODE_CAMERA else 0.0,
+        background="#07111f",
+        background_top="#10223a" if options.show_gradient_background else None,
     )
 
 
@@ -640,7 +787,11 @@ def _datasets_for_display_options(
     options: PreviewDisplayOptions,
 ) -> tuple[Mesh | Polyline, ...]:
     if options.color_mode == COLOR_MODE_AUTHORED:
-        return datasets
+        return tuple(
+            dataset
+            for dataset in datasets
+            if not isinstance(dataset, Polyline) or options.show_polylines
+        )
     prepared: list[Mesh | Polyline] = []
     for dataset in datasets:
         if isinstance(dataset, Mesh):
@@ -654,6 +805,8 @@ def _datasets_for_display_options(
                 )
             )
         else:
+            if not options.show_polylines:
+                continue
             prepared.append(
                 Polyline(
                     np.asarray(dataset.points, dtype=float),
@@ -1207,6 +1360,7 @@ def _ensure_widget_app() -> QApplication:
     app = QApplication.instance()
     if app is not None:
         return app
+    configure_qt_preview_surface_format()
     _PREVIEW_WIDGET_APP = QApplication([])
     return _PREVIEW_WIDGET_APP
 

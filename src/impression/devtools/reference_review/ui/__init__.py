@@ -39,6 +39,13 @@ from .preview_controls import (
     route_preview_display_command,
     select_exclusive_icon_option,
 )
+from .preview_render_queue import (
+    PreviewRenderCommand,
+    PreviewRenderCommandKind,
+    PreviewRenderCommandQueue,
+    PreviewRenderCommandResult,
+    PreviewRenderQueueState,
+)
 from .markdown_context import BlockedLinkDiagnostic, MarkdownContextRenderer, RenderedMarkdownContext
 from .preview_bridge import (
     PreviewAdapterDecision,
@@ -136,6 +143,11 @@ __all__ = [
     "PreviewDisplayCommandRecord",
     "PreviewDisplayControlBar",
     "PreviewDisplayOptions",
+    "PreviewRenderCommand",
+    "PreviewRenderCommandKind",
+    "PreviewRenderCommandQueue",
+    "PreviewRenderCommandResult",
+    "PreviewRenderQueueState",
     "RenderedMarkdownContext",
     "RefusalDisplayState",
     "ScreenshotArtifact",

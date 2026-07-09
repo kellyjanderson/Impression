@@ -14,9 +14,9 @@ import pytest
 import numpy as np
 from PySide6.QtCore import QObject, QSize, Qt
 from PySide6.QtGui import QIcon, QImage, QPainter
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTabWidget, QToolButton
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTabWidget, QToolButton, QWidget
 
-from impression.mesh import Mesh
+from impression.mesh import Mesh, Polyline
 from impression.devtools.reference_review import ReviewSourceModelRecord
 from impression.devtools.reference_review.ui import (
     BridgeRecord,
@@ -30,6 +30,9 @@ from impression.devtools.reference_review.ui import (
     ExclusiveIconOptionRecord,
     PreviewDisplayControlBar,
     PreviewDisplayOptions,
+    PreviewRenderCommand,
+    PreviewRenderCommandKind,
+    PreviewRenderCommandQueue,
     WorkbenchIconToggleButton,
     build_dependency_policy_report,
     launch_workbench,
@@ -44,6 +47,7 @@ from impression.devtools.reference_review.ui import (
 )
 from impression.devtools.reference_review import (
     LoadedPreviewDataset,
+    PreviewPayload,
     PreviewPayloadRequest,
     build_impress_preview_result,
     write_preview_payload_file,
@@ -1214,7 +1218,192 @@ def test_pyvistaqt_preview_surface_uses_lightweight_scene_handoff(
         "show_bounds": True,
         "show_axes": True,
         "align_camera": True,
+        "show_object_fill": True,
+        "show_polylines": True,
+        "smooth_shading": False,
+        "lighting": True,
+        "lighting_profile": "face_normals",
+        "specular": 0.0,
+        "background": "#07111f",
+        "background_top": "#10223a",
     }
+
+
+def test_pyvistaqt_preview_scene_options_map_display_controls() -> None:
+    options = PreviewDisplayOptions(
+        lighting_mode="camera",
+        show_object_fill=False,
+        show_triangle_wireframe=True,
+        show_object_edges=False,
+        show_bounds_grid=False,
+        show_axis_triad=False,
+        show_gradient_background=False,
+        show_polylines=False,
+    )
+
+    apply_options = preview_widget._preview_scene_apply_options(options, align_camera=False)
+
+    assert apply_options.show_edges is True
+    assert apply_options.face_edges is False
+    assert apply_options.show_bounds is False
+    assert apply_options.show_axes is False
+    assert apply_options.align_camera is False
+    assert apply_options.show_object_fill is False
+    assert apply_options.show_polylines is False
+    assert apply_options.smooth_shading is True
+    assert apply_options.lighting is True
+    assert apply_options.lighting_profile == "camera"
+    assert apply_options.specular == 0.2
+    assert apply_options.background == "#07111f"
+    assert apply_options.background_top is None
+
+
+def test_pyvistaqt_preview_dataset_filtering_hides_polylines() -> None:
+    mesh = Mesh(
+        vertices=np.asarray(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))),
+        faces=np.asarray(((0, 1, 2),)),
+    )
+    polyline = Polyline(np.asarray(((0.0, 0.0, 0.0), (1.0, 1.0, 0.0))))
+
+    filtered = preview_widget._datasets_for_display_options(
+        (mesh, polyline),
+        PreviewDisplayOptions(show_polylines=False),
+    )
+
+    assert len(filtered) == 1
+    assert filtered[0] is not polyline
+    assert isinstance(filtered[0], Mesh)
+
+
+def test_preview_render_command_records_and_queue_coalesce_by_lane(tmp_path: Path) -> None:
+    source = tmp_path / "model.py"
+    source.write_text("def build():\n    return None\n")
+    record = ReviewSourceModelRecord("fixture/queue", "feature", source)
+    request = PreviewPayloadRequest.from_source_record(
+        record,
+        owner="preview-payload",
+        request_id=4,
+        generation=2,
+    )
+    payload = PreviewPayload.success(request, payload_path=tmp_path / "payload.json")
+    first_display = PreviewDisplayOptions(show_bounds_grid=True)
+    second_display = PreviewDisplayOptions(show_bounds_grid=False)
+    queue = PreviewRenderCommandQueue()
+
+    first = queue.enqueue(PreviewRenderCommand.display(first_display))
+    second = queue.enqueue(PreviewRenderCommand.display(second_display))
+    queue.enqueue(PreviewRenderCommand.payload_ready(payload))
+
+    assert not first.replaced
+    assert second.replaced
+    assert queue.state.pending_lanes == ("payload", "display")
+    commands = queue.drain()
+    assert [command.kind for command in commands] == [
+        PreviewRenderCommandKind.PAYLOAD,
+        PreviewRenderCommandKind.DISPLAY,
+    ]
+    assert commands[0].identity == payload.identity
+    assert commands[1].display_options == second_display
+    assert queue.state.pending_count == 0
+
+
+def test_preview_widget_drains_latest_display_command_once() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    widget = PreviewRendererLifecycleWidget()
+    applied = []
+
+    class FakePlotter(QWidget):
+        def clear(self) -> None:
+            pass
+
+        def set_display_options(self, options) -> None:
+            applied.append(options)
+
+    widget.ensure_renderer(renderer_factory=lambda parent: FakePlotter(parent))
+    applied.clear()
+
+    widget.enqueue_render_command(
+        PreviewRenderCommand.display(PreviewDisplayOptions(show_axis_triad=False))
+    )
+    widget.enqueue_render_command(
+        PreviewRenderCommand.display(PreviewDisplayOptions(show_axis_triad=True))
+    )
+    widget._drain_preview_render_queue()
+
+    assert applied == [PreviewDisplayOptions(show_axis_triad=True)]
+
+
+def test_preview_widget_drains_one_render_command_per_turn() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    widget = PreviewRendererLifecycleWidget()
+    applied = []
+
+    class FakePlotter(QWidget):
+        def clear(self) -> None:
+            pass
+
+        def set_display_options(self, options) -> None:
+            applied.append(options)
+
+    widget.ensure_renderer(renderer_factory=lambda parent: FakePlotter(parent))
+    applied.clear()
+
+    widget.enqueue_render_command(PreviewRenderCommand.loading())
+    widget.enqueue_render_command(
+        PreviewRenderCommand.display(PreviewDisplayOptions(show_axis_triad=False))
+    )
+
+    widget._drain_preview_render_queue()
+
+    assert widget._status.text() == "Loading preview..."
+    assert applied == []
+
+    widget._drain_preview_render_queue()
+
+    assert applied == [PreviewDisplayOptions(show_axis_triad=False)]
+
+
+def test_pyvistaqt_display_options_replace_scene_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    QApplication.instance() or QApplication([])
+    mesh = Mesh(
+        vertices=np.asarray(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))),
+        faces=np.asarray(((0, 1, 2),)),
+    )
+
+    class FakeQtPreviewSurface(QWidget):
+        def __init__(self, parent=None, *, config=None):
+            super().__init__(parent)
+            self.calls = []
+
+        @property
+        def plotter(self):
+            return object()
+
+        def replace_scene(self, datasets, *, apply_options, align_camera=True):
+            self.calls.append(("replace", tuple(datasets), apply_options, align_camera))
+
+        def set_apply_options(self, options):
+            self.calls.append(("set_apply_options", options))
+
+        def set_datasets(self, datasets, *, align_camera=True):
+            self.calls.append(("set_datasets", tuple(datasets), align_camera))
+
+        def clear(self):
+            pass
+
+    monkeypatch.setattr(preview_widget, "QtPreviewSurface", FakeQtPreviewSurface)
+    surface = preview_widget.PyVistaQtPreviewSurface()
+
+    surface.set_datasets((mesh,))
+    fake_surface = surface._surface
+    assert [call[0] for call in fake_surface.calls] == ["replace"]
+    fake_surface.calls.clear()
+
+    surface.set_display_options(PreviewDisplayOptions(show_triangle_wireframe=True))
+
+    assert [call[0] for call in fake_surface.calls] == ["replace"]
+    assert fake_surface.calls[0][3] is False
 
 
 def test_window_preview_controller_launches_and_polls_payload(tmp_path: Path) -> None:
@@ -1232,6 +1421,13 @@ def test_window_preview_controller_launches_and_polls_payload(tmp_path: Path) ->
     result = launch_workbench(fixture_records=(record,), offscreen=True)
     window = result.engine.rootObjects()[0]
     future: Future = Future()
+    request = PreviewPayloadRequest.from_source_record(
+        record,
+        owner="preview-payload",
+        request_id=1,
+        generation=1,
+    )
+    payload = PreviewPayload.success(request, payload_path=tmp_path / "payload.json")
     launched = []
     applied = []
     cleaned = []
@@ -1242,7 +1438,7 @@ def test_window_preview_controller_launches_and_polls_payload(tmp_path: Path) ->
             return SimpleNamespace(accepted=True, future=future, diagnostic=None)
 
         def handle_completion(self, envelope, handoff, diagnostic_handoff=None):
-            handoff(SimpleNamespace(payload="payload"))
+            handoff(SimpleNamespace(payload=payload))
 
         def cleanup_payload(self, payload, *, reason: str):
             cleaned.append((payload, reason))
@@ -1254,17 +1450,265 @@ def test_window_preview_controller_launches_and_polls_payload(tmp_path: Path) ->
     window._preview_futures = []
     window._preview_controller = FakePreviewController()
     window.preview_surface.set_preview_payload = lambda payload: (
-        applied.append(payload) or SimpleNamespace(ready=True)
+        applied.append(payload) or SimpleNamespace(ready=True, diagnostic=None)
     )
 
     window._load_artifact_preview(window._fixture_items[0])
     future.set_result(SimpleNamespace(ok=True))
     window._poll_preview_payloads()
+    window.preview_surface._drain_preview_render_queue()
+    window.preview_surface._drain_preview_render_queue()
 
     assert launched == [record]
-    assert applied == ["payload"]
-    assert cleaned == [("payload", "completed")]
+    assert applied == [payload]
+    assert cleaned == [(payload, "completed")]
     assert window._preview_futures == []
+
+
+def test_window_preview_display_button_updates_live_surface(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    artifact = tmp_path / "part.impress"
+    artifact.write_text('{"format": "impress"}\n')
+    source = tmp_path / "model.py"
+    source.write_text("def build():\n    return None\n")
+    record = ReviewSourceModelRecord(
+        "demo/part",
+        "demo",
+        source,
+        artifact_paths=(artifact,),
+    )
+    result = launch_workbench(fixture_records=(record,), offscreen=True)
+    window = result.engine.rootObjects()[0]
+    future: Future = Future()
+    request = PreviewPayloadRequest.from_source_record(
+        record,
+        owner="preview-payload",
+        request_id=7,
+        generation=1,
+    )
+    payload = PreviewPayload.success(request, payload_path=tmp_path / "payload.json")
+    applied_options = []
+
+    class FakePreviewController:
+        active_identity = payload.identity
+
+        def launch(self, record):
+            return SimpleNamespace(accepted=True, future=future, diagnostic=None, request=request)
+
+        def handle_completion(self, envelope, handoff, diagnostic_handoff=None):
+            handoff(SimpleNamespace(payload=payload))
+
+        def cleanup_payload(self, payload, *, reason: str):
+            return None
+
+        def close(self):
+            pass
+
+    window._preview_controller.close()
+    window._preview_futures = []
+    window._preview_controller = FakePreviewController()
+
+    def apply_payload(payload):
+        window.preview_surface._payload_state = preview_widget.PreviewWidgetPayloadState(
+            generation=payload.request.generation,
+            fixture_id=payload.request.fixture_id,
+            ready=True,
+        )
+        return window.preview_surface._payload_state
+
+    window.preview_surface.set_preview_payload = apply_payload
+    window.preview_surface.set_display_options = lambda options: applied_options.append(options)
+
+    window._load_artifact_preview(window._fixture_items[0])
+    future.set_result(SimpleNamespace(ok=True))
+    window._poll_preview_payloads()
+    window.preview_surface._drain_preview_render_queue()
+    window.preview_surface._drain_preview_render_queue()
+
+    button = window.findChild(QToolButton, "previewDisplayControl-triangle-wireframe")
+    assert button is not None
+    button.click()
+    window.preview_surface._drain_preview_render_queue()
+
+    assert applied_options[-1].show_triangle_wireframe is True
+    assert window.preview_display_controls.findChild(
+        QToolButton,
+        "previewDisplayControl-triangle-wireframe",
+    ).isChecked()
+
+
+def test_window_preview_controller_uses_thread_dispatcher_not_process_pool(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    artifact = tmp_path / "part.impress"
+    artifact.write_text('{"format": "impress"}\n')
+    source = tmp_path / "model.py"
+    source.write_text("def build():\n    return None\n")
+    record = ReviewSourceModelRecord(
+        "demo/part",
+        "demo",
+        source,
+        artifact_paths=(artifact,),
+    )
+
+    result = launch_workbench(fixture_records=(record,), offscreen=True)
+    window = result.engine.rootObjects()[0]
+
+    assert window._preview_controller._dispatcher is not None
+    assert window._preview_controller._owns_dispatcher
+    assert window._preview_controller._process_executor is None
+
+
+def test_window_preview_ignores_stale_future_exception(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    artifact = tmp_path / "part.impress"
+    artifact.write_text('{"format": "impress"}\n')
+    source = tmp_path / "model.py"
+    source.write_text("def build():\n    return None\n")
+    record = ReviewSourceModelRecord(
+        "demo/part",
+        "demo",
+        source,
+        artifact_paths=(artifact,),
+    )
+    result = launch_workbench(fixture_records=(record,), offscreen=True)
+    window = result.engine.rootObjects()[0]
+    stale_future: Future = Future()
+    current_future: Future = Future()
+    futures = [stale_future, current_future]
+    enqueued = []
+
+    class FakePreviewController:
+        def __init__(self) -> None:
+            self.active_identity = None
+            self._request_id = 0
+
+        def launch(self, record):
+            self._request_id += 1
+            generation = self._request_id
+            request = SimpleNamespace(
+                owner="preview-payload",
+                request_id=self._request_id,
+                fixture_id=record.fixture_id,
+                payload={"generation": generation},
+            )
+            self.active_identity = (
+                request.owner,
+                request.request_id,
+                request.fixture_id,
+                generation,
+            )
+            return SimpleNamespace(
+                accepted=True,
+                future=futures[self._request_id - 1],
+                request=request,
+                diagnostic=None,
+            )
+
+        def handle_completion(self, envelope, handoff, diagnostic_handoff=None):
+            raise AssertionError("stale exception should not reach completion handling")
+
+        def close(self):
+            pass
+
+    window._preview_controller.close()
+    window._preview_futures = []
+    window._preview_future_identities = {}
+    window._preview_controller = FakePreviewController()
+    window.preview_surface.enqueue_render_command = lambda command: enqueued.append(command)
+
+    window._load_artifact_preview(window._fixture_items[0])
+    window._load_artifact_preview(window._fixture_items[0])
+    enqueued.clear()
+    stale_future.set_exception(RuntimeError("stale failure"))
+    window._poll_preview_payloads()
+
+    assert enqueued == []
+    assert window._preview_futures == [current_future]
+
+
+def test_window_preview_retries_latest_coalesced_request(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    artifact = tmp_path / "part.impress"
+    artifact.write_text('{"format": "impress"}\n')
+    source = tmp_path / "model.py"
+    source.write_text("def build():\n    return None\n")
+    record = ReviewSourceModelRecord(
+        "demo/part",
+        "demo",
+        source,
+        artifact_paths=(artifact,),
+    )
+    result = launch_workbench(fixture_records=(record,), offscreen=True)
+    window = result.engine.rootObjects()[0]
+    first_future: Future = Future()
+    second_future: Future = Future()
+    launched = []
+
+    class CoalescingPreviewController:
+        def __init__(self) -> None:
+            self.active_identity = None
+            self._calls = 0
+
+        def launch(self, record):
+            self._calls += 1
+            launched.append(record)
+            request = SimpleNamespace(
+                owner="preview-payload",
+                request_id=self._calls,
+                fixture_id=record.fixture_id,
+                payload={"generation": self._calls},
+            )
+            self.active_identity = (
+                request.owner,
+                request.request_id,
+                request.fixture_id,
+                self._calls,
+            )
+            if self._calls == 1:
+                return SimpleNamespace(
+                    accepted=True,
+                    future=first_future,
+                    request=request,
+                    diagnostic=None,
+                )
+            if self._calls == 2:
+                return SimpleNamespace(
+                    accepted=False,
+                    future=None,
+                    request=request,
+                    diagnostic="coalesced",
+                )
+            return SimpleNamespace(
+                accepted=True,
+                future=second_future,
+                request=request,
+                diagnostic=None,
+            )
+
+        def handle_completion(self, envelope, handoff, diagnostic_handoff=None):
+            return None
+
+        def close(self):
+            pass
+
+    window._preview_controller.close()
+    window._preview_futures = []
+    window._preview_future_identities = {}
+    window._pending_preview_record = None
+    window._preview_controller = CoalescingPreviewController()
+
+    window._load_artifact_preview(window._fixture_items[0])
+    window._load_artifact_preview(window._fixture_items[0])
+
+    assert window._preview_futures == [first_future]
+    assert window._pending_preview_record is record
+
+    first_future.set_result(SimpleNamespace(ok=False, result=None, error="stale"))
+    window._poll_preview_payloads()
+
+    assert launched == [record, record, record]
+    assert window._preview_futures == [second_future]
+    assert window._pending_preview_record is None
 
 
 def test_live_preview_process_target_is_non_ui_module() -> None:

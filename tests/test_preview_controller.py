@@ -16,6 +16,9 @@ from impression.preview import (
 from impression.preview_qt import (
     QtPreviewSurfaceConfig,
     apply_qt_preview_scene,
+    configure_qt_preview_surface_format,
+    configure_qvtk_backend,
+    preview_scene_options_for_camera_state,
     qt_preview_supported_environment,
 )
 
@@ -24,11 +27,20 @@ class FakePlotter:
     def __init__(self) -> None:
         self.background_calls: list[tuple[str, str | None]] = []
         self.eye_dome_calls = 0
+        self.eye_dome_disabled_calls = 0
         self.axes_calls: list[dict[str, object]] = []
+        self.hide_axes_all_calls = 0
+        self.hide_axes_calls = 0
         self.bounds_calls: list[dict[str, object]] = []
+        self.remove_bounds_axes_calls = 0
+        self.remove_bounding_box_calls = 0
         self.clear_calls = 0
         self.mesh_calls: list[dict[str, object]] = []
+        self.actors: list[FakeActor] = []
+        self.light_calls: list[FakeLight] = []
+        self.active_lights: list[FakeLight] = []
         self.camera_position = None
+        self.renderer = FakeRenderer(self)
 
     def set_background(self, background: str, *, top: str | None = None) -> None:
         self.background_calls.append((background, top))
@@ -36,19 +48,99 @@ class FakePlotter:
     def enable_eye_dome_lighting(self) -> None:
         self.eye_dome_calls += 1
 
+    def disable_eye_dome_lighting(self) -> None:
+        self.eye_dome_disabled_calls += 1
+
     def add_axes(self, **kwargs: object) -> None:
         self.axes_calls.append(dict(kwargs))
+
+    def hide_axes_all(self) -> None:
+        self.hide_axes_all_calls += 1
+
+    def hide_axes(self) -> None:
+        self.hide_axes_calls += 1
 
     def show_bounds(self, **kwargs: object) -> None:
         self.bounds_calls.append(dict(kwargs))
 
+    def remove_bounds_axes(self) -> None:
+        self.remove_bounds_axes_calls += 1
+
+    def remove_bounding_box(self) -> None:
+        self.remove_bounding_box_calls += 1
+
+    def add_light(self, light: "FakeLight") -> None:
+        self.light_calls.append(light)
+        if light not in self.active_lights:
+            self.active_lights.append(light)
+
     def clear(self) -> None:
         self.clear_calls += 1
+        self.active_lights.clear()
 
-    def add_mesh(self, mesh: object, **kwargs: object) -> None:
+    def add_mesh(self, mesh: object, **kwargs: object) -> "FakeActor":
         call = dict(kwargs)
         call["mesh"] = mesh
         self.mesh_calls.append(call)
+        actor = FakeActor()
+        self.actors.append(actor)
+        return actor
+
+
+class FakeActor:
+    def __init__(self) -> None:
+        self.property = FakeActorProperty()
+
+    def GetProperty(self) -> "FakeActorProperty":
+        return self.property
+
+
+class FakeActorProperty:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def LightingOn(self) -> None:
+        self.calls.append("LightingOn")
+
+    def LightingOff(self) -> None:
+        self.calls.append("LightingOff")
+
+    def SetInterpolationToFlat(self) -> None:
+        self.calls.append("SetInterpolationToFlat")
+
+    def SetInterpolationToPhong(self) -> None:
+        self.calls.append("SetInterpolationToPhong")
+
+
+class FakeRenderer:
+    def __init__(self, plotter: FakePlotter) -> None:
+        self._plotter = plotter
+
+    @property
+    def lights(self) -> tuple["FakeLight", ...]:
+        return tuple(self._plotter.active_lights)
+
+
+class FakeLight:
+    def __init__(self, **kwargs: object) -> None:
+        self.kwargs = dict(kwargs)
+        self.switch_calls: list[str] = []
+
+    def switch_on(self) -> None:
+        self.switch_calls.append("on")
+
+    def switch_off(self) -> None:
+        self.switch_calls.append("off")
+
+
+class FakeLightingPyVista:
+    created: list[FakeLight] = []
+
+    @classmethod
+    def Light(cls, **kwargs: object) -> FakeLight:
+        light = FakeLight(**kwargs)
+        cls.created.append(light)
+        return light
 
 
 class FakePyVista:
@@ -224,8 +316,10 @@ def test_preview_scene_controller_applies_mesh_scene_and_feature_edges(monkeypat
         "color": "#6ab0ff",
         "opacity": 1.0,
         "smooth_shading": True,
+        "lighting": True,
         "specular": 0.2,
     }
+    assert plotter.actors[0].property.calls == ["LightingOn", "SetInterpolationToPhong"]
     edge_call = plotter.mesh_calls[1]
     assert isinstance(edge_call.pop("mesh"), FakeFeatureEdges)
     assert edge_call == {
@@ -252,6 +346,155 @@ def test_preview_scene_controller_supports_legacy_feature_edge_signature(monkeyp
 
     assert pv_mesh.feature_angles == [60.0]
     assert len(plotter.mesh_calls) == 2
+
+
+def test_preview_scene_controller_can_render_edges_without_object_fill(monkeypatch) -> None:
+    import impression.preview as preview_module
+
+    plotter = FakePlotter()
+    pv_mesh = FakePvMesh()
+    monkeypatch.setattr(preview_module, "mesh_to_pyvista", lambda mesh: pv_mesh)
+    controller = PreviewSceneController(unit_settings=UnitSettings("millimeters", "mm", 1.0))
+    mesh = Mesh(
+        vertices=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]]),
+        faces=np.array([[0, 1, 2]]),
+    )
+
+    controller.apply_scene(
+        plotter,
+        [mesh],
+        show_edges=True,
+        face_edges=True,
+        show_bounds=False,
+        show_axes=False,
+        show_object_fill=False,
+    )
+
+    assert plotter.mesh_calls[0] == {
+        "mesh": pv_mesh,
+        "name": "mesh-0-wireframe",
+        "color": "#cdd7ff",
+        "style": "wireframe",
+        "line_width": 1.0,
+        "lighting": False,
+    }
+    assert plotter.actors[0].property.calls == ["LightingOff", "SetInterpolationToFlat"]
+    assert isinstance(plotter.mesh_calls[1]["mesh"], FakeFeatureEdges)
+
+
+def test_preview_scene_controller_resets_persistent_axes_and_bounds(monkeypatch) -> None:
+    import impression.preview as preview_module
+
+    plotter = FakePlotter()
+    pv_mesh = FakePvMesh()
+    monkeypatch.setattr(preview_module, "mesh_to_pyvista", lambda mesh: pv_mesh)
+    controller = PreviewSceneController(unit_settings=UnitSettings("millimeters", "mm", 1.0))
+    mesh = Mesh(
+        vertices=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]]),
+        faces=np.array([[0, 1, 2]]),
+    )
+
+    controller.apply_scene(
+        plotter,
+        [mesh],
+        show_bounds=False,
+        show_axes=False,
+        lighting=True,
+        lighting_profile="face_normals",
+        smooth_shading=False,
+        specular=0.0,
+    )
+
+    assert plotter.hide_axes_all_calls == 1
+    assert plotter.hide_axes_calls == 1
+    assert plotter.remove_bounds_axes_calls == 1
+    assert plotter.remove_bounding_box_calls == 1
+    assert plotter.eye_dome_disabled_calls == 1
+    assert plotter.axes_calls == []
+    assert plotter.bounds_calls == []
+    assert plotter.actors[0].property.calls == ["LightingOn", "SetInterpolationToFlat"]
+
+
+def test_preview_scene_controller_camera_lighting_uses_smooth_actor_interpolation(monkeypatch) -> None:
+    import impression.preview as preview_module
+
+    plotter = FakePlotter()
+    pv_mesh = FakePvMesh()
+    monkeypatch.setattr(preview_module, "mesh_to_pyvista", lambda mesh: pv_mesh)
+    controller = PreviewSceneController(unit_settings=UnitSettings("millimeters", "mm", 1.0))
+    mesh = Mesh(
+        vertices=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]]),
+        faces=np.array([[0, 1, 2]]),
+    )
+
+    controller.apply_scene(
+        plotter,
+        [mesh],
+        show_bounds=False,
+        show_axes=False,
+        lighting=True,
+        lighting_profile="camera",
+        smooth_shading=True,
+        specular=0.2,
+    )
+
+    assert plotter.actors[0].property.calls == ["LightingOn", "SetInterpolationToPhong"]
+
+
+def test_preview_scene_controller_reuses_predefined_light_presets(monkeypatch) -> None:
+    import impression.preview as preview_module
+
+    FakeLightingPyVista.created = []
+    plotter = FakePlotter()
+    pv_mesh = FakePvMesh()
+    monkeypatch.setattr(preview_module, "mesh_to_pyvista", lambda mesh: pv_mesh)
+    controller = PreviewSceneController(
+        unit_settings=UnitSettings("millimeters", "mm", 1.0),
+        pyvista_provider=lambda: FakeLightingPyVista,
+    )
+    mesh = Mesh(
+        vertices=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]]),
+        faces=np.array([[0, 1, 2]]),
+    )
+
+    controller.apply_scene(
+        plotter,
+        [mesh],
+        show_bounds=False,
+        show_axes=False,
+        lighting=True,
+        lighting_profile="face_normals",
+        smooth_shading=False,
+    )
+    controller.apply_scene(
+        plotter,
+        [mesh],
+        show_bounds=False,
+        show_axes=False,
+        lighting=True,
+        lighting_profile="camera",
+        smooth_shading=True,
+    )
+    controller.apply_scene(
+        plotter,
+        [mesh],
+        show_bounds=False,
+        show_axes=False,
+        lighting=False,
+        lighting_profile="flat",
+        smooth_shading=False,
+    )
+
+    assert [light.kwargs for light in FakeLightingPyVista.created] == [
+        {"light_type": "headlight", "intensity": 0.9},
+        {"light_type": "camera light", "intensity": 0.35},
+    ]
+    head, fill = FakeLightingPyVista.created
+    assert head.switch_calls == ["on", "on", "off"]
+    assert fill.switch_calls == ["off", "on", "off"]
+    assert len(FakeLightingPyVista.created) == 2
+    assert plotter.light_calls == [head, fill, head, fill, head, fill]
+    assert plotter.active_lights == [head, fill]
 
 
 def test_preview_scene_controller_resets_camera_from_combined_bounds() -> None:
@@ -358,6 +601,37 @@ def test_qt_preview_surface_config_has_workbench_defaults() -> None:
     assert config.apply_options.show_axes is False
     assert config.apply_options.align_camera is True
     assert config.auto_update is False
+    assert config.qvtk_base == "QOpenGLWidget"
+
+
+def test_qt_preview_configures_qopengl_backend_before_pyvistaqt_import() -> None:
+    import sys
+    import vtkmodules.qt
+
+    original_base = getattr(vtkmodules.qt, "QVTKRWIBase", None)
+    sys.modules.pop("pyvistaqt.rwi", None)
+    try:
+        vtkmodules.qt.QVTKRWIBase = "QWidget"
+        configure_qvtk_backend("QOpenGLWidget")
+
+        assert vtkmodules.qt.QVTKRWIBase == "QOpenGLWidget"
+    finally:
+        if original_base is not None:
+            vtkmodules.qt.QVTKRWIBase = original_base
+
+
+def test_qt_preview_configures_opengl_compatibility_surface_format() -> None:
+    from PySide6.QtGui import QSurfaceFormat
+
+    configure_qt_preview_surface_format()
+
+    fmt = QSurfaceFormat.defaultFormat()
+    assert fmt.renderableType() == QSurfaceFormat.RenderableType.OpenGL
+    assert fmt.profile() == QSurfaceFormat.OpenGLContextProfile.CompatibilityProfile
+    assert fmt.majorVersion() == 2
+    assert fmt.minorVersion() == 1
+    assert fmt.depthBufferSize() == 24
+    assert fmt.stencilBufferSize() == 8
 
 
 def test_qt_preview_supported_environment_rejects_offscreen_by_default(monkeypatch) -> None:
@@ -400,9 +674,57 @@ def test_qt_preview_scene_handoff_delegates_to_shared_controller() -> None:
                 "show_bounds": False,
                 "show_axes": False,
                 "align_camera": True,
+                "show_object_fill": True,
+                "show_polylines": True,
+                "smooth_shading": True,
+                "lighting": True,
+                "lighting_profile": "camera",
+                "specular": 0.2,
+                "background": None,
+                "background_top": None,
             },
         )
     ]
+
+
+def test_qt_preview_preserves_display_options_when_resolving_camera_alignment() -> None:
+    options = PreviewSceneApplyOptions(
+        show_edges=True,
+        face_edges=False,
+        show_bounds=False,
+        show_axes=True,
+        align_camera=False,
+        show_object_fill=False,
+        show_polylines=False,
+        smooth_shading=False,
+        lighting=False,
+        lighting_profile="flat",
+        specular=0.0,
+        background="#07111f",
+        background_top="#10223a",
+    )
+
+    resolved = preview_scene_options_for_camera_state(
+        options,
+        align_camera=True,
+        camera_aligned=False,
+    )
+
+    assert resolved == PreviewSceneApplyOptions(
+        show_edges=True,
+        face_edges=False,
+        show_bounds=False,
+        show_axes=True,
+        align_camera=True,
+        show_object_fill=False,
+        show_polylines=False,
+        smooth_shading=False,
+        lighting=False,
+        lighting_profile="flat",
+        specular=0.0,
+        background="#07111f",
+        background_top="#10223a",
+    )
 
 
 def test_reference_review_shell_does_not_apply_preview_scenes() -> None:

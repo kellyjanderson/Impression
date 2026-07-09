@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from impression.mesh import Mesh
+import impression.devtools.reference_review.preview_payload_builder as preview_payload_builder
 from impression.devtools.reference_review import (
     EntrypointParameterRecord,
     LoadedPreviewDataset,
@@ -63,6 +64,30 @@ def test_preview_source_loader_invokes_fixture_entrypoint_with_parameters(
     assert dataset.request is request
     assert dataset.dataset_count == 1
     assert dataset.datasets[0].vertices.shape[0] > 0
+
+
+def test_preview_source_loader_serializes_process_import_state(tmp_path: Path) -> None:
+    source = tmp_path / "simple.py"
+    source.write_text("def build():\n    return None\n")
+    record = ReviewSourceModelRecord("fixture/import-lock", "Import Lock", source)
+    request = _request_from_record(record)
+    acquired = []
+
+    class RecordingLock:
+        def __enter__(self):
+            acquired.append("enter")
+
+        def __exit__(self, exc_type, exc, tb):
+            acquired.append("exit")
+
+    original_lock = preview_payload_builder._PREVIEW_SOURCE_IMPORT_LOCK
+    preview_payload_builder._PREVIEW_SOURCE_IMPORT_LOCK = RecordingLock()  # type: ignore[assignment]
+    try:
+        assert load_preview_source(request) is None
+    finally:
+        preview_payload_builder._PREVIEW_SOURCE_IMPORT_LOCK = original_lock
+
+    assert acquired == ["enter", "exit"]
 
 
 def test_preview_dataset_builder_tessellates_real_dirty_impress_source_fixture(

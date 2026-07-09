@@ -127,6 +127,14 @@ class PreviewSceneApplyOptions:
     show_bounds: bool = True
     show_axes: bool = True
     align_camera: bool = False
+    show_object_fill: bool = True
+    show_polylines: bool = True
+    smooth_shading: bool = True
+    lighting: bool = True
+    lighting_profile: str = "camera"
+    specular: float = 0.2
+    background: str | None = None
+    background_top: str | None = None
 
 
 @dataclass(frozen=True)
@@ -151,6 +159,7 @@ class PreviewSceneController:
         self.options = options or PreviewControllerOptions()
         self._pyvista_provider = pyvista_provider
         self._home_camera = None
+        self._lighting_presets: dict[int, PreviewLightingPresetController] = {}
 
     @property
     def style(self) -> PreviewStyle:
@@ -220,12 +229,31 @@ class PreviewSceneController:
         show_bounds: bool = True,
         show_axes: bool = True,
         align_camera: bool = False,
+        show_object_fill: bool = True,
+        show_polylines: bool = True,
+        smooth_shading: bool = True,
+        lighting: bool = True,
+        lighting_profile: str = "camera",
+        specular: float = 0.2,
+        background: str | None = None,
+        background_top: str | None = None,
     ) -> None:
         """Apply datasets to a caller-owned plotter using shared preview semantics."""
 
         datasets = list(datasets)
         style = self.style
         plotter.clear()
+        self._clear_scene_decoration_state(plotter)
+        self._apply_lighting_preset(
+            plotter,
+            lighting=lighting,
+            lighting_profile=lighting_profile,
+        )
+        if background is not None:
+            if background_top is None:
+                plotter.set_background(background)
+            else:
+                plotter.set_background(background, top=background_top)
         if not _pyvista_safe_mode():
             if show_bounds:
                 self.show_bounds_with_units(plotter)
@@ -234,31 +262,63 @@ class PreviewSceneController:
 
         for index, mesh in enumerate(datasets):
             if isinstance(mesh, Polyline):
+                if not show_polylines:
+                    continue
                 pv_mesh = self.polyline_to_pyvista(mesh)
-                plotter.add_mesh(
+                actor = plotter.add_mesh(
                     pv_mesh,
                     name=f"mesh-{index}",
                     color=mesh.color or style.default_polyline_color,
                     line_width=2.0,
                     render_lines_as_tubes=False,
                 )
+                self._configure_actor_lighting(
+                    actor,
+                    lighting=False,
+                    lighting_profile="flat",
+                )
                 continue
 
             pv_mesh = mesh_to_pyvista(mesh)
+            if not show_object_fill:
+                if show_edges:
+                    actor = plotter.add_mesh(
+                        pv_mesh,
+                        name=f"mesh-{index}-wireframe",
+                        color=style.feature_edge_color,
+                        style="wireframe",
+                        line_width=1.0,
+                        lighting=False,
+                    )
+                    self._configure_actor_lighting(
+                        actor,
+                        lighting=False,
+                        lighting_profile="flat",
+                    )
+                if face_edges:
+                    self.add_feature_edges(plotter, pv_mesh, index)
+                continue
+
             cell_colors = mesh.face_colors
             if cell_colors is not None and len(cell_colors) == mesh.n_faces:
                 scalars = np.asarray(cell_colors)
                 rgba_mode = scalars.shape[1] >= 4
                 rgb_mode = scalars.shape[1] == 3
-                plotter.add_mesh(
+                actor = plotter.add_mesh(
                     pv_mesh,
                     name=f"mesh-{index}",
                     show_edges=show_edges,
                     scalars=scalars,
                     rgb=rgb_mode,
                     rgba=rgba_mode,
-                    smooth_shading=True,
-                    specular=0.2,
+                    smooth_shading=smooth_shading,
+                    lighting=lighting,
+                    specular=specular,
+                )
+                self._configure_actor_lighting(
+                    actor,
+                    lighting=lighting,
+                    lighting_profile=lighting_profile,
                 )
                 if face_edges:
                     self.add_feature_edges(plotter, pv_mesh, index)
@@ -273,20 +333,82 @@ class PreviewSceneController:
                 color = style.color_cycle[index % len(style.color_cycle)]
                 opacity = 1.0
 
-            plotter.add_mesh(
+            actor = plotter.add_mesh(
                 pv_mesh,
                 name=f"mesh-{index}",
                 show_edges=show_edges,
                 color=color,
                 opacity=opacity,
-                smooth_shading=True,
-                specular=0.2,
+                smooth_shading=smooth_shading,
+                lighting=lighting,
+                specular=specular,
+            )
+            self._configure_actor_lighting(
+                actor,
+                lighting=lighting,
+                lighting_profile=lighting_profile,
             )
             if face_edges:
                 self.add_feature_edges(plotter, pv_mesh, index)
 
         if align_camera:
             self.reset_camera(plotter, datasets)
+
+    def _clear_scene_decoration_state(self, plotter) -> None:
+        for method_name in (
+            "hide_axes_all",
+            "hide_axes",
+            "remove_bounds_axes",
+            "remove_bounding_box",
+            "disable_eye_dome_lighting",
+        ):
+            method = getattr(plotter, method_name, None)
+            if callable(method):
+                method()
+
+    def _configure_actor_lighting(
+        self,
+        actor,
+        *,
+        lighting: bool,
+        lighting_profile: str,
+    ) -> None:
+        get_property = getattr(actor, "GetProperty", None)
+        if not callable(get_property):
+            return
+        prop = get_property()
+        if prop is None:
+            return
+        if lighting:
+            lighting_on = getattr(prop, "LightingOn", None)
+            if callable(lighting_on):
+                lighting_on()
+        else:
+            lighting_off = getattr(prop, "LightingOff", None)
+            if callable(lighting_off):
+                lighting_off()
+        if lighting_profile == "camera":
+            interpolation = getattr(prop, "SetInterpolationToPhong", None)
+        else:
+            interpolation = getattr(prop, "SetInterpolationToFlat", None)
+        if callable(interpolation):
+            interpolation()
+
+    def _apply_lighting_preset(
+        self,
+        plotter,
+        *,
+        lighting: bool,
+        lighting_profile: str,
+    ) -> None:
+        preset = self._lighting_presets.get(id(plotter))
+        if preset is None:
+            preset = PreviewLightingPresetController(
+                plotter,
+                pyvista_provider=self._pyvista_provider,
+            )
+            self._lighting_presets[id(plotter)] = preset
+        preset.apply("flat" if not lighting else lighting_profile)
 
     def add_feature_edges(self, plotter, mesh, index: int) -> None:
         if not hasattr(mesh, "extract_feature_edges"):
@@ -405,6 +527,89 @@ class PreviewSceneController:
                 bounds[4] = min(bounds[4], mesh_bounds[4])
                 bounds[5] = max(bounds[5], mesh_bounds[5])
         return bounds
+
+
+class PreviewLightingPresetController:
+    """Long-lived light presets for a caller-owned PyVista plotter."""
+
+    def __init__(
+        self,
+        plotter,
+        *,
+        pyvista_provider: Callable[[], object] | None = None,
+    ) -> None:
+        self._plotter = plotter
+        self._pyvista_provider = pyvista_provider
+        self._initialized = False
+        self._supported = True
+        self._head_light = None
+        self._fill_light = None
+
+    @property
+    def supported(self) -> bool:
+        return self._supported
+
+    def apply(self, profile: str) -> None:
+        if not self._supported:
+            return
+        if not self._initialized:
+            self._initialize()
+        if not self._supported:
+            return
+        normalized = profile if profile in {"flat", "face_normals", "camera"} else "camera"
+        self._ensure_attached(self._head_light)
+        self._ensure_attached(self._fill_light)
+        self._set_light(self._head_light, normalized in {"face_normals", "camera"})
+        self._set_light(self._fill_light, normalized == "camera")
+
+    def _initialize(self) -> None:
+        try:
+            pv = self._pyvista_provider() if self._pyvista_provider is not None else __import__("pyvista")
+            self._head_light = pv.Light(light_type="headlight", intensity=0.9)
+            self._fill_light = pv.Light(light_type="camera light", intensity=0.35)
+            add_light = getattr(self._plotter, "add_light", None)
+            if not callable(add_light):
+                self._supported = False
+                return
+            add_light(self._head_light)
+            add_light(self._fill_light)
+            self._initialized = True
+        except Exception:
+            self._supported = False
+
+    def _ensure_attached(self, light) -> None:
+        if light is None:
+            return
+        lights = self._renderer_lights()
+        if lights is not None and any(item is light for item in lights):
+            return
+        add_light = getattr(self._plotter, "add_light", None)
+        if callable(add_light):
+            add_light(light)
+
+    def _renderer_lights(self):
+        renderer = getattr(self._plotter, "renderer", None)
+        lights = getattr(renderer, "lights", None)
+        if lights is None:
+            lights = getattr(self._plotter, "lights", None)
+        if lights is None:
+            return None
+        try:
+            return tuple(lights)
+        except TypeError:
+            return None
+
+    def _set_light(self, light, enabled: bool) -> None:
+        if light is None:
+            return
+        method_name = "switch_on" if enabled else "switch_off"
+        method = getattr(light, method_name, None)
+        if callable(method):
+            method()
+            return
+        fallback = getattr(light, "SetSwitch", None)
+        if callable(fallback):
+            fallback(1 if enabled else 0)
 
 
 def _pyvista_safe_mode() -> bool:

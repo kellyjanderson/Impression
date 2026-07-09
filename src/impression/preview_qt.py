@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+import sys
+from dataclasses import dataclass, field, replace
 from typing import Iterable
 
 from PySide6.QtWidgets import QVBoxLayout, QWidget
@@ -26,6 +27,7 @@ class QtPreviewSurfaceConfig:
     apply_options: PreviewSceneApplyOptions = field(default_factory=PreviewSceneApplyOptions)
     allow_offscreen: bool = False
     auto_update: bool | float = False
+    qvtk_base: str | None = None
 
     @classmethod
     def workbench_default(cls) -> "QtPreviewSurfaceConfig":
@@ -47,6 +49,7 @@ class QtPreviewSurfaceConfig:
             ),
             allow_offscreen=False,
             auto_update=False,
+            qvtk_base="QOpenGLWidget",
         )
 
 
@@ -72,7 +75,52 @@ def apply_qt_preview_scene(
         show_bounds=options.show_bounds,
         show_axes=options.show_axes,
         align_camera=options.align_camera,
+        show_object_fill=options.show_object_fill,
+        show_polylines=options.show_polylines,
+        smooth_shading=options.smooth_shading,
+        lighting=options.lighting,
+        lighting_profile=options.lighting_profile,
+        specular=options.specular,
+        background=options.background,
+        background_top=options.background_top,
     )
+
+
+def preview_scene_options_for_camera_state(
+    options: PreviewSceneApplyOptions,
+    *,
+    align_camera: bool,
+    camera_aligned: bool,
+) -> PreviewSceneApplyOptions:
+    """Return scene options preserving display flags while resolving camera alignment."""
+
+    return replace(options, align_camera=align_camera and not camera_aligned)
+
+
+def configure_qvtk_backend(base: str | None) -> None:
+    """Configure the QVTK widget backend before pyvistaqt imports it."""
+
+    if base is None:
+        return
+    if "pyvistaqt.rwi" in sys.modules:
+        return
+    import vtkmodules.qt
+
+    vtkmodules.qt.QVTKRWIBase = base
+
+
+def configure_qt_preview_surface_format() -> None:
+    """Configure the OpenGL surface format used by embedded preview widgets."""
+
+    from PySide6.QtGui import QSurfaceFormat
+
+    fmt = QSurfaceFormat()
+    fmt.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
+    fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CompatibilityProfile)
+    fmt.setVersion(2, 1)
+    fmt.setDepthBufferSize(24)
+    fmt.setStencilBufferSize(8)
+    QSurfaceFormat.setDefaultFormat(fmt)
 
 
 class QtPreviewSurface(QWidget):
@@ -99,6 +147,7 @@ class QtPreviewSurface(QWidget):
         self._datasets: tuple[Mesh | Polyline, ...] = ()
         self._camera_aligned = False
 
+        configure_qvtk_backend(self._config.qvtk_base)
         from pyvistaqt import QtInteractor
 
         layout = QVBoxLayout(self)
@@ -130,6 +179,19 @@ class QtPreviewSurface(QWidget):
         *,
         align_camera: bool = True,
     ) -> None:
+        self._datasets = tuple(datasets)
+        if align_camera:
+            self._camera_aligned = False
+        self._apply_scene(align_camera=align_camera)
+
+    def replace_scene(
+        self,
+        datasets: Iterable[Mesh | Polyline],
+        *,
+        apply_options: PreviewSceneApplyOptions,
+        align_camera: bool = True,
+    ) -> None:
+        self._apply_options = apply_options
         self._datasets = tuple(datasets)
         if align_camera:
             self._camera_aligned = False
@@ -167,12 +229,10 @@ class QtPreviewSurface(QWidget):
         )
 
     def _apply_scene(self, *, align_camera: bool) -> None:
-        options = PreviewSceneApplyOptions(
-            show_edges=self._apply_options.show_edges,
-            face_edges=self._apply_options.face_edges,
-            show_bounds=self._apply_options.show_bounds,
-            show_axes=self._apply_options.show_axes,
-            align_camera=align_camera and not self._camera_aligned,
+        options = preview_scene_options_for_camera_state(
+            self._apply_options,
+            align_camera=align_camera,
+            camera_aligned=self._camera_aligned,
         )
         self._configure_plotter()
         apply_qt_preview_scene(

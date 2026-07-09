@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from concurrent.futures import Future
 from pathlib import Path
+from threading import Event
+from time import monotonic
 
 from impression.devtools.reference_review import (
     PreviewPayload,
@@ -15,7 +18,9 @@ from impression.devtools.reference_review import (
 from impression.devtools.reference_review.async_core import (
     DispatchResult,
     ReviewTaskKind,
+    TaskDispatcher,
     ReviewWorkbenchMessage,
+    WorkerResultEnvelope,
 )
 
 
@@ -100,6 +105,101 @@ def test_preview_payload_process_controller_records_launch_rejection() -> None:
     assert not dispatch.accepted
     assert controller.diagnostics[0].code == "preview-payload-launch-rejected"
     assert controller.diagnostics[0].message == "queue_full"
+
+
+def test_preview_payload_controller_dispatcher_route_builds_payload(tmp_path: Path) -> None:
+    source = tmp_path / "model.py"
+    source.write_text("from impression.modeling import make_box\n\ndef build():\n    return make_box(backend='surface')\n")
+    record = ReviewSourceModelRecord(
+        fixture_id="fixture/dispatcher",
+        feature_name="Dispatcher",
+        source_path=source,
+    )
+    dispatcher = TaskDispatcher(max_workers=1)
+    controller = PreviewPayloadProcessController(
+        dispatcher=dispatcher,
+        owns_dispatcher=True,
+        payload_dir=tmp_path,
+        cwd=tmp_path,
+    )
+
+    dispatch = controller.launch(record)
+    envelope = dispatch.future.result(timeout=2) if dispatch.future else None
+    controller.close()
+
+    assert envelope is not None
+    assert envelope.ok
+    assert isinstance(envelope.result, PreviewPayloadProcessResult)
+    assert envelope.result.payload.payload_path is not None
+    assert envelope.result.payload.payload_path.exists()
+
+
+def test_preview_payload_controller_closes_owned_dispatcher_without_waiting() -> None:
+    calls = []
+
+    class RecordingDispatcher:
+        def dispatch(self, _request, _worker):
+            raise AssertionError("not used")
+
+        def close(self, *, wait=True, cancel_futures=False):
+            calls.append((wait, cancel_futures))
+
+    controller = PreviewPayloadProcessController(
+        dispatcher=RecordingDispatcher(),  # type: ignore[arg-type]
+        owns_dispatcher=True,
+    )
+
+    controller.close()
+
+    assert calls == [(False, True)]
+
+
+def test_preview_payload_process_launch_does_not_block_on_process_submit(tmp_path: Path) -> None:
+    source = tmp_path / "model.py"
+    source.write_text("def build():\n    return None\n")
+    record = ReviewSourceModelRecord(
+        fixture_id="fixture/nonblocking-launch",
+        feature_name="Nonblocking",
+        source_path=source,
+    )
+    entered_submit = Event()
+    release_submit = Event()
+
+    class BlockingProcessExecutor:
+        def submit(self, _worker, message, *_args, **_kwargs):
+            entered_submit.set()
+            release_submit.wait(timeout=2)
+            future: Future[WorkerResultEnvelope] = Future()
+            future.set_result(
+                WorkerResultEnvelope(
+                    request=message,
+                    ok=False,
+                    error="controlled-test-submit",
+                )
+            )
+            return future
+
+        def shutdown(self, *, wait=True, cancel_futures=False):
+            release_submit.set()
+
+    controller = PreviewPayloadProcessController(payload_dir=tmp_path, cwd=tmp_path)
+    assert controller._process_executor is not None
+    controller._process_executor.shutdown(wait=False, cancel_futures=True)
+    controller._process_executor = BlockingProcessExecutor()  # type: ignore[assignment]
+
+    start = monotonic()
+    dispatch = controller.launch(record)
+    elapsed = monotonic() - start
+
+    assert dispatch.accepted
+    assert elapsed < 0.2
+    assert entered_submit.wait(timeout=1)
+    release_submit.set()
+    assert dispatch.future is not None
+    envelope = dispatch.future.result(timeout=2)
+    controller.close()
+
+    assert envelope.error == "controlled-test-submit"
 
 
 def _payload_for_cleanup(tmp_path: Path, *, request_id: int = 1) -> PreviewPayload:
