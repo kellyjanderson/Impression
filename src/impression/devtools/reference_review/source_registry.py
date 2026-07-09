@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sqlite3
 from dataclasses import dataclass, field
@@ -574,7 +575,4 @@ def _gold_path_for_dirty_artifact(path: Path) -> Path | None:
 
 def _path_for_fixture_storage(path: Path, *, base_dir: Path) -> str:
     path = Path(path)
-    try:
-        return path.resolve().relative_to(base_dir.resolve()).as_posix()
-    except ValueError:
-        return path.as_posix()
+    return Path(os.path.relpath(path.resolve(), base_dir.resolve())).as_posix()

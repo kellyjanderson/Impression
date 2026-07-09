@@ -163,6 +163,49 @@ def test_fixture_file_persists_review_status_and_gold_artifact_path(tmp_path: Pa
     assert reloaded.artifact_paths[0].read_text() == "solid demo\nendsolid demo\n"
 
 
+def test_fixture_file_stores_promoted_artifacts_relative_to_fixture_file_directory(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "tests" / "reference_review_fixtures"
+    fixture_dir.mkdir(parents=True)
+    source = _write_source(fixture_dir, "fixture_model.py")
+    dirty = tmp_path / "project" / "release" / "reference-stl" / "dirty" / "demo" / "fixture.stl"
+    dirty.parent.mkdir(parents=True)
+    dirty.write_text("solid demo\nendsolid demo\n")
+    fixture_file = fixture_dir / "review-fixtures.json"
+    fixture_file.write_text(
+        json.dumps(
+            {
+                "allowed_root": "../..",
+                "fixtures": [
+                    {
+                        "fixture_id": "demo/file",
+                        "feature_name": "demo",
+                        "source_path": source.name,
+                        "artifact_paths": ["../../project/release/reference-stl/dirty/demo/fixture.stl"],
+                    }
+                ],
+            }
+        )
+    )
+    record = load_source_records_from_file(fixture_file).valid_items[0].record
+
+    promotion = approve_reference_artifacts(record)
+    result = update_fixture_review_status_in_file(
+        fixture_file,
+        fixture_id=record.fixture_id,
+        status=ReferenceReviewStatus.APPROVED,
+        artifact_paths=promotion.artifact_paths,
+    )
+    payload = json.loads(fixture_file.read_text())
+    reloaded = load_source_records_from_file(fixture_file)
+
+    assert result.updated
+    assert payload["fixtures"][0]["artifact_paths"] == [
+        "../../project/release/reference-stl/gold/demo/fixture.stl"
+    ]
+    assert len(reloaded.valid_items) == 1
+    assert reloaded.valid_items[0].record.review_status is ReferenceReviewStatus.APPROVED
+
+
 def test_fixture_database_loads_review_source_records(tmp_path: Path) -> None:
     source = _write_source(tmp_path, "db_model.py")
     database = tmp_path / "review-fixtures.sqlite"
