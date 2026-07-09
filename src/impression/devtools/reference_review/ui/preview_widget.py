@@ -16,10 +16,13 @@ from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from impression.mesh import Mesh, Polyline
 from impression.preview import (
-    PreviewControllerOptions,
-    PreviewInteractionPolicy,
-    PreviewSceneController,
-    PreviewStyle,
+    PreviewSceneApplyOptions,
+)
+from impression.preview_qt import (
+    QtPreviewSurface,
+    QtPreviewSurfaceConfig,
+    apply_qt_preview_scene,
+    qt_preview_supported_environment,
 )
 from ..async_core.qt_handoff import sanitize_error_text
 from ..preview_payload import PreviewPayload
@@ -538,35 +541,19 @@ class SoftwarePreviewSurface(QWidget):
 
 
 class PyVistaQtPreviewSurface(QWidget):
-    """Qt-embedded VTK preview surface using the shared CLI preview controller."""
+    """Reference Review adapter for the shared Qt preview surface."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setMinimumSize(360, 260)
-        self._datasets: tuple[Mesh | Polyline, ...] = ()
         self._display_options = PreviewDisplayOptions()
-        self._camera_aligned = False
-        self._scene_controller = PreviewSceneController(
-            options=PreviewControllerOptions(
-                style=PreviewStyle.workbench_default(),
-                interaction=PreviewInteractionPolicy(
-                    show_bounds=False,
-                    show_axes=False,
-                    enable_eye_dome_lighting=False,
-                ),
-            )
-        )
-        from pyvistaqt import QtInteractor
-
+        self._datasets: tuple[Mesh | Polyline, ...] = ()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self._plotter = QtInteractor(
+        self._surface = QtPreviewSurface(
             self,
-            off_screen=os.environ.get("QT_QPA_PLATFORM") == "offscreen",
-            auto_update=False,
+            config=QtPreviewSurfaceConfig.workbench_default(),
         )
-        layout.addWidget(self._plotter)
-        self._configure_plotter()
+        layout.addWidget(self._surface)
 
     @property
     def display_options(self) -> PreviewDisplayOptions:
@@ -574,85 +561,76 @@ class PyVistaQtPreviewSurface(QWidget):
 
     @property
     def plotter(self):
-        return self._plotter
+        return self._surface.plotter
 
     def set_display_options(self, options: PreviewDisplayOptions) -> None:
         self._display_options = options
+        self._surface.set_apply_options(_preview_scene_apply_options(options, align_camera=False))
         if self._datasets:
-            self._apply_scene(align_camera=False)
+            self._surface.set_datasets(
+                _datasets_for_display_options(self._datasets, options),
+                align_camera=False,
+            )
 
     def set_datasets(self, datasets: tuple[Mesh | Polyline, ...]) -> None:
         self._datasets = tuple(datasets)
-        self._camera_aligned = False
-        self._apply_scene(align_camera=True)
+        self._surface.set_apply_options(_preview_scene_apply_options(self._display_options, align_camera=True))
+        self._surface.set_datasets(
+            _datasets_for_display_options(self._datasets, self._display_options),
+            align_camera=True,
+        )
 
     def clear(self) -> None:
         self._datasets = ()
-        self._camera_aligned = False
-        self._plotter.clear()
-        self._plotter.set_background(PreviewStyle.workbench_default().background)
-        self._plotter.render()
+        self._surface.clear()
 
     def reset_camera(self) -> None:
-        self._scene_controller.reset_camera(self._plotter, self._datasets)
-        self._camera_aligned = True
-        self._plotter.render()
+        self._surface.reset_camera()
 
     def reset_camera_clipping_range(self) -> None:
-        reset = getattr(self._plotter, "reset_camera_clipping_range", None)
-        if callable(reset):
-            reset()
+        self._surface.reset_camera_clipping_range()
 
     def render(self, *args, **kwargs):
-        return self._plotter.render(*args, **kwargs)
+        return self._surface.render(*args, **kwargs)
 
     def close(self) -> bool:
-        self._plotter.close()
+        self._surface.close()
         return super().close()
-
-    def _configure_plotter(self) -> None:
-        self._scene_controller.configure_plotter(
-            self._plotter,
-            show_bounds=False,
-            show_axes=False,
-        )
-
-    def _apply_scene(self, *, align_camera: bool) -> None:
-        self._configure_plotter()
-        _apply_pyvistaqt_scene(
-            self._scene_controller,
-            self._plotter,
-            self._datasets,
-            self._display_options,
-            align_camera=align_camera and not self._camera_aligned,
-        )
-        if align_camera:
-            self._camera_aligned = True
-        self._plotter.render()
 
 
 def _should_use_pyvistaqt_preview() -> bool:
     return (
-        os.environ.get("IMPRESSION_REFERENCE_REVIEW_USE_PYVISTAQT") == "1"
-        and os.environ.get("QT_QPA_PLATFORM") != "offscreen"
+        os.environ.get("IMPRESSION_REFERENCE_REVIEW_FORCE_SOFTWARE") != "1"
+        and qt_preview_supported_environment()
     )
 
 
 def _apply_pyvistaqt_scene(
-    scene_controller: PreviewSceneController,
+    scene_controller: object,
     plotter: object,
     datasets: tuple[Mesh | Polyline, ...],
     options: PreviewDisplayOptions,
     *,
     align_camera: bool,
 ) -> None:
-    scene_controller.apply_scene(
+    apply_qt_preview_scene(
+        scene_controller,
         plotter,
         _datasets_for_display_options(datasets, options),
+        _preview_scene_apply_options(options, align_camera=align_camera),
+    )
+
+
+def _preview_scene_apply_options(
+    options: PreviewDisplayOptions,
+    *,
+    align_camera: bool,
+) -> PreviewSceneApplyOptions:
+    return PreviewSceneApplyOptions(
         show_edges=options.show_triangle_wireframe,
-        face_edges=False,
-        show_bounds=False,
-        show_axes=False,
+        face_edges=options.show_object_edges,
+        show_bounds=options.show_bounds_grid,
+        show_axes=options.show_axis_triad,
         align_camera=align_camera,
     )
 
