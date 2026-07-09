@@ -8,6 +8,8 @@ import traceback
 import sys
 import signal
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, List, MutableMapping
 
@@ -52,6 +54,562 @@ def _next_available_path(path: Path) -> Path:
 
 class PreviewBackendError(RuntimeError):
     """Raised when a preview backend cannot run."""
+
+
+@dataclass(frozen=True)
+class PreviewStyle:
+    """Visual defaults for Impression preview scenes."""
+
+    background: str = "#090c10"
+    background_top: str | None = "#1b2333"
+    light_background: str = "#e6e9ef"
+    bounds_color: str = "#5a677d"
+    default_polyline_color: str = "#9aa6bf"
+    feature_edge_color: str = "#cdd7ff"
+    feature_edge_angle: float = 60.0
+    color_cycle: tuple[str, ...] = (
+        "#6ab0ff",
+        "#f58f7c",
+        "#9cdcfe",
+        "#fadb5f",
+        "#9ae6b4",
+        "#d4b5ff",
+    )
+
+    @classmethod
+    def workbench_default(cls) -> "PreviewStyle":
+        """Return the Reference Review Workbench preview color defaults."""
+
+        return cls(
+            background="#07111f",
+            background_top=None,
+            color_cycle=("#f4a261",),
+            default_polyline_color="#f4a261",
+            feature_edge_color="#ffd2a8",
+        )
+
+
+@dataclass(frozen=True)
+class PreviewInteractionPolicy:
+    """Host-neutral interaction and plotter decoration defaults."""
+
+    show_bounds: bool = True
+    show_axes: bool = True
+    enable_eye_dome_lighting: bool = True
+
+
+@dataclass(frozen=True)
+class PreviewControllerOptions:
+    """Configuration passed to the shared preview controller."""
+
+    style: PreviewStyle = field(default_factory=PreviewStyle)
+    interaction: PreviewInteractionPolicy = field(default_factory=PreviewInteractionPolicy)
+
+
+@dataclass(frozen=True)
+class PreviewStyleDiagnostic:
+    """Resolved plotter configuration reported by the preview controller."""
+
+    background: str
+    background_top: str | None
+    show_bounds: bool
+    show_axes: bool
+    eye_dome_lighting: bool
+    safe_mode: bool
+
+
+@dataclass(frozen=True)
+class PreviewSceneApplyOptions:
+    """Scene application options for a caller-owned preview render surface."""
+
+    show_edges: bool = False
+    face_edges: bool = False
+    show_bounds: bool = True
+    show_axes: bool = True
+    align_camera: bool = False
+    show_object_fill: bool = True
+    show_polylines: bool = True
+    smooth_shading: bool = True
+    lighting: bool = True
+    lighting_profile: str = "camera"
+    specular: float = 0.2
+    background: str | None = None
+    background_top: str | None = None
+
+
+@dataclass(frozen=True)
+class PreviewCameraDiagnostic:
+    """Camera reset result for a preview scene."""
+
+    bounds: tuple[float, float, float, float, float, float] | None
+    camera_position: object | None
+
+
+class PreviewSceneController:
+    """Shared host-neutral preview behavior for CLI and embedded workbench previews."""
+
+    def __init__(
+        self,
+        *,
+        unit_settings: UnitSettings | None = None,
+        options: PreviewControllerOptions | None = None,
+        pyvista_provider: Callable[[], object] | None = None,
+    ) -> None:
+        self._unit_settings = unit_settings or get_unit_settings()
+        self.options = options or PreviewControllerOptions()
+        self._pyvista_provider = pyvista_provider
+        self._home_camera = None
+        self._lighting_presets: dict[int, PreviewLightingPresetController] = {}
+
+    @property
+    def style(self) -> PreviewStyle:
+        return self.options.style
+
+    @property
+    def interaction(self) -> PreviewInteractionPolicy:
+        return self.options.interaction
+
+    @property
+    def home_camera(self):
+        return self._home_camera
+
+    def configure_plotter(
+        self,
+        plotter,
+        *,
+        show_bounds: bool | None = None,
+        show_axes: bool | None = None,
+    ) -> PreviewStyleDiagnostic:
+        """Apply shared preview style and plotter decorations to a caller-owned plotter."""
+
+        safe_mode = _pyvista_safe_mode()
+        resolved_show_bounds = self.interaction.show_bounds if show_bounds is None else show_bounds
+        resolved_show_axes = self.interaction.show_axes if show_axes is None else show_axes
+        eye_dome = self.interaction.enable_eye_dome_lighting and not safe_mode
+
+        style = self.style
+        if style.background_top is None:
+            plotter.set_background(style.background)
+        else:
+            plotter.set_background(style.background, top=style.background_top)
+
+        if eye_dome:
+            plotter.enable_eye_dome_lighting()
+            if resolved_show_axes:
+                plotter.add_axes(interactive=True)
+            if resolved_show_bounds:
+                self.show_bounds_with_units(plotter)
+
+        return PreviewStyleDiagnostic(
+            background=style.background,
+            background_top=style.background_top,
+            show_bounds=resolved_show_bounds and eye_dome,
+            show_axes=resolved_show_axes and eye_dome,
+            eye_dome_lighting=eye_dome,
+            safe_mode=safe_mode,
+        )
+
+    def show_bounds_with_units(self, plotter) -> None:
+        label = self._unit_settings.label
+        plotter.show_bounds(
+            grid="front",
+            color=self.style.bounds_color,
+            xtitle=f"X ({label})",
+            ytitle=f"Y ({label})",
+            ztitle=f"Z ({label})",
+        )
+
+    def apply_scene(
+        self,
+        plotter,
+        datasets: Iterable[Mesh | Polyline],
+        *,
+        show_edges: bool = False,
+        face_edges: bool = False,
+        show_bounds: bool = True,
+        show_axes: bool = True,
+        align_camera: bool = False,
+        show_object_fill: bool = True,
+        show_polylines: bool = True,
+        smooth_shading: bool = True,
+        lighting: bool = True,
+        lighting_profile: str = "camera",
+        specular: float = 0.2,
+        background: str | None = None,
+        background_top: str | None = None,
+    ) -> None:
+        """Apply datasets to a caller-owned plotter using shared preview semantics."""
+
+        datasets = list(datasets)
+        style = self.style
+        plotter.clear()
+        self._clear_scene_decoration_state(plotter)
+        self._apply_lighting_preset(
+            plotter,
+            lighting=lighting,
+            lighting_profile=lighting_profile,
+        )
+        if background is not None:
+            if background_top is None:
+                plotter.set_background(background)
+            else:
+                plotter.set_background(background, top=background_top)
+        if not _pyvista_safe_mode():
+            if show_bounds:
+                self.show_bounds_with_units(plotter)
+            if show_axes:
+                plotter.add_axes(interactive=True)
+
+        for index, mesh in enumerate(datasets):
+            if isinstance(mesh, Polyline):
+                if not show_polylines:
+                    continue
+                pv_mesh = self.polyline_to_pyvista(mesh)
+                actor = plotter.add_mesh(
+                    pv_mesh,
+                    name=f"mesh-{index}",
+                    color=mesh.color or style.default_polyline_color,
+                    line_width=2.0,
+                    render_lines_as_tubes=False,
+                )
+                self._configure_actor_lighting(
+                    actor,
+                    lighting=False,
+                    lighting_profile="flat",
+                )
+                continue
+
+            pv_mesh = mesh_to_pyvista(mesh)
+            if not show_object_fill:
+                if show_edges:
+                    actor = plotter.add_mesh(
+                        pv_mesh,
+                        name=f"mesh-{index}-wireframe",
+                        color=style.feature_edge_color,
+                        style="wireframe",
+                        line_width=1.0,
+                        lighting=False,
+                    )
+                    self._configure_actor_lighting(
+                        actor,
+                        lighting=False,
+                        lighting_profile="flat",
+                    )
+                if face_edges:
+                    self.add_feature_edges(plotter, pv_mesh, index)
+                continue
+
+            cell_colors = mesh.face_colors
+            if cell_colors is not None and len(cell_colors) == mesh.n_faces:
+                scalars = np.asarray(cell_colors)
+                rgba_mode = scalars.shape[1] >= 4
+                rgb_mode = scalars.shape[1] == 3
+                actor = plotter.add_mesh(
+                    pv_mesh,
+                    name=f"mesh-{index}",
+                    show_edges=show_edges,
+                    scalars=scalars,
+                    rgb=rgb_mode,
+                    rgba=rgba_mode,
+                    smooth_shading=smooth_shading,
+                    lighting=lighting,
+                    specular=specular,
+                )
+                self._configure_actor_lighting(
+                    actor,
+                    lighting=lighting,
+                    lighting_profile=lighting_profile,
+                )
+                if face_edges:
+                    self.add_feature_edges(plotter, pv_mesh, index)
+                continue
+
+            color_info = get_mesh_color(mesh)
+            if color_info:
+                rgb, alpha = color_info
+                color = rgb
+                opacity = alpha
+            else:
+                color = style.color_cycle[index % len(style.color_cycle)]
+                opacity = 1.0
+
+            actor = plotter.add_mesh(
+                pv_mesh,
+                name=f"mesh-{index}",
+                show_edges=show_edges,
+                color=color,
+                opacity=opacity,
+                smooth_shading=smooth_shading,
+                lighting=lighting,
+                specular=specular,
+            )
+            self._configure_actor_lighting(
+                actor,
+                lighting=lighting,
+                lighting_profile=lighting_profile,
+            )
+            if face_edges:
+                self.add_feature_edges(plotter, pv_mesh, index)
+
+        if align_camera:
+            self.reset_camera(plotter, datasets)
+
+    def _clear_scene_decoration_state(self, plotter) -> None:
+        for method_name in (
+            "hide_axes_all",
+            "hide_axes",
+            "remove_bounds_axes",
+            "remove_bounding_box",
+            "disable_eye_dome_lighting",
+        ):
+            method = getattr(plotter, method_name, None)
+            if callable(method):
+                method()
+
+    def _configure_actor_lighting(
+        self,
+        actor,
+        *,
+        lighting: bool,
+        lighting_profile: str,
+    ) -> None:
+        get_property = getattr(actor, "GetProperty", None)
+        if not callable(get_property):
+            return
+        prop = get_property()
+        if prop is None:
+            return
+        if lighting:
+            lighting_on = getattr(prop, "LightingOn", None)
+            if callable(lighting_on):
+                lighting_on()
+        else:
+            lighting_off = getattr(prop, "LightingOff", None)
+            if callable(lighting_off):
+                lighting_off()
+        if lighting_profile == "camera":
+            interpolation = getattr(prop, "SetInterpolationToPhong", None)
+        else:
+            interpolation = getattr(prop, "SetInterpolationToFlat", None)
+        if callable(interpolation):
+            interpolation()
+
+    def _apply_lighting_preset(
+        self,
+        plotter,
+        *,
+        lighting: bool,
+        lighting_profile: str,
+    ) -> None:
+        preset = self._lighting_presets.get(id(plotter))
+        if preset is None:
+            preset = PreviewLightingPresetController(
+                plotter,
+                pyvista_provider=self._pyvista_provider,
+            )
+            self._lighting_presets[id(plotter)] = preset
+        preset.apply("flat" if not lighting else lighting_profile)
+
+    def add_feature_edges(self, plotter, mesh, index: int) -> None:
+        if not hasattr(mesh, "extract_feature_edges"):
+            return
+        edges = self._extract_feature_edges(mesh)
+        if edges is None:
+            return
+        if edges.n_cells == 0:
+            return
+        plotter.add_mesh(
+            edges,
+            name=f"mesh-{index}-edges",
+            color=self.style.feature_edge_color,
+            line_width=1.0,
+            render_lines_as_tubes=False,
+        )
+
+    def _extract_feature_edges(self, mesh):
+        extractor = getattr(mesh, "extract_feature_edges", None)
+        if not callable(extractor):
+            return None
+        try:
+            return extractor(angle=self.style.feature_edge_angle)
+        except TypeError as exc:
+            if "angle" not in str(exc):
+                raise
+        try:
+            return extractor(
+                boundary_edges=True,
+                feature_edges=True,
+                non_manifold_edges=True,
+                manifold_edges=False,
+                feature_angle=self.style.feature_edge_angle,
+            )
+        except TypeError:
+            return None
+
+    def reset_camera(self, plotter, datasets: Iterable[Mesh | Polyline]) -> PreviewCameraDiagnostic:
+        bounds = self._combined_bounds(datasets)
+        if bounds is None:
+            return PreviewCameraDiagnostic(bounds=None, camera_position=None)
+
+        x_center = (bounds[0] + bounds[1]) / 2.0
+        y_center = (bounds[2] + bounds[3]) / 2.0
+        z_center = (bounds[4] + bounds[5]) / 2.0
+
+        diag = math.sqrt(
+            (bounds[1] - bounds[0]) ** 2
+            + (bounds[3] - bounds[2]) ** 2
+            + (bounds[5] - bounds[4]) ** 2
+        )
+        distance = max(diag, 1.0) * 1.4
+
+        camera_pos = (
+            x_center + distance * 0.6,
+            y_center + distance * 0.6,
+            z_center + distance * 0.5,
+        )
+        focal_point = (x_center, y_center, z_center)
+        view_up = (0.0, 0.0, 1.0)
+        plotter.camera_position = [camera_pos, focal_point, view_up]
+        self._home_camera = plotter.camera_position
+        return PreviewCameraDiagnostic(bounds=tuple(bounds), camera_position=plotter.camera_position)
+
+    def polyline_to_pyvista(self, polyline: Polyline):
+        pv = self._ensure_pyvista()
+        pts = polyline.points
+        if polyline.closed and len(pts) > 1 and not np.allclose(pts[0], pts[-1]):
+            pts = np.vstack([pts, pts[0]])
+        n_pts = len(pts)
+        if n_pts == 0:
+            return pv.PolyData()
+        cells = np.hstack(([n_pts], np.arange(n_pts)))
+        return pv.PolyData(pts, cells, deep=True)
+
+    def _ensure_pyvista(self):
+        if self._pyvista_provider is not None:
+            return self._pyvista_provider()
+        _prepare_vtk_runtime()
+        try:
+            import pyvista as pv
+        except ImportError as exc:  # pragma: no cover - runtime dep
+            raise PreviewBackendError(
+                "PyVista is required for previewing. Install impression with `pip install -e .`."
+            ) from exc
+        return pv
+
+    def _combined_bounds(
+        self,
+        datasets: Iterable[Mesh | Polyline],
+    ) -> list[float] | None:
+        bounds = None
+        for mesh in datasets:
+            if isinstance(mesh, Polyline):
+                if mesh.points.size == 0:
+                    continue
+                mins = mesh.points.min(axis=0)
+                maxs = mesh.points.max(axis=0)
+                mesh_bounds = (
+                    float(mins[0]),
+                    float(maxs[0]),
+                    float(mins[1]),
+                    float(maxs[1]),
+                    float(mins[2]),
+                    float(maxs[2]),
+                )
+            else:
+                mesh_bounds = mesh.bounds
+            if bounds is None:
+                bounds = list(mesh_bounds)
+            else:
+                bounds[0] = min(bounds[0], mesh_bounds[0])
+                bounds[1] = max(bounds[1], mesh_bounds[1])
+                bounds[2] = min(bounds[2], mesh_bounds[2])
+                bounds[3] = max(bounds[3], mesh_bounds[3])
+                bounds[4] = min(bounds[4], mesh_bounds[4])
+                bounds[5] = max(bounds[5], mesh_bounds[5])
+        return bounds
+
+
+class PreviewLightingPresetController:
+    """Long-lived light presets for a caller-owned PyVista plotter."""
+
+    def __init__(
+        self,
+        plotter,
+        *,
+        pyvista_provider: Callable[[], object] | None = None,
+    ) -> None:
+        self._plotter = plotter
+        self._pyvista_provider = pyvista_provider
+        self._initialized = False
+        self._supported = True
+        self._head_light = None
+        self._fill_light = None
+
+    @property
+    def supported(self) -> bool:
+        return self._supported
+
+    def apply(self, profile: str) -> None:
+        if not self._supported:
+            return
+        if not self._initialized:
+            self._initialize()
+        if not self._supported:
+            return
+        normalized = profile if profile in {"flat", "face_normals", "camera"} else "camera"
+        self._ensure_attached(self._head_light)
+        self._ensure_attached(self._fill_light)
+        self._set_light(self._head_light, normalized in {"face_normals", "camera"})
+        self._set_light(self._fill_light, normalized == "camera")
+
+    def _initialize(self) -> None:
+        try:
+            pv = self._pyvista_provider() if self._pyvista_provider is not None else __import__("pyvista")
+            self._head_light = pv.Light(light_type="headlight", intensity=0.9)
+            self._fill_light = pv.Light(light_type="camera light", intensity=0.35)
+            add_light = getattr(self._plotter, "add_light", None)
+            if not callable(add_light):
+                self._supported = False
+                return
+            add_light(self._head_light)
+            add_light(self._fill_light)
+            self._initialized = True
+        except Exception:
+            self._supported = False
+
+    def _ensure_attached(self, light) -> None:
+        if light is None:
+            return
+        lights = self._renderer_lights()
+        if lights is not None and any(item is light for item in lights):
+            return
+        add_light = getattr(self._plotter, "add_light", None)
+        if callable(add_light):
+            add_light(light)
+
+    def _renderer_lights(self):
+        renderer = getattr(self._plotter, "renderer", None)
+        lights = getattr(renderer, "lights", None)
+        if lights is None:
+            lights = getattr(self._plotter, "lights", None)
+        if lights is None:
+            return None
+        try:
+            return tuple(lights)
+        except TypeError:
+            return None
+
+    def _set_light(self, light, enabled: bool) -> None:
+        if light is None:
+            return
+        method_name = "switch_on" if enabled else "switch_off"
+        method = getattr(light, method_name, None)
+        if callable(method):
+            method()
+            return
+        fallback = getattr(light, "SetSwitch", None)
+        if callable(fallback):
+            fallback(1 if enabled else 0)
 
 
 def _pyvista_safe_mode() -> bool:
@@ -136,10 +694,20 @@ def _collect_datasets_from_scene(scene: object) -> List[Mesh | Polyline]:
 class PyVistaPreviewer:
     """Render scenes using PyVista and provide optional hot reload support."""
 
-    def __init__(self, console: Console, unit_settings: UnitSettings | None = None):
+    def __init__(
+        self,
+        console: Console,
+        unit_settings: UnitSettings | None = None,
+        preview_options: PreviewControllerOptions | None = None,
+    ):
         self.console = console
         self._pv = None
         self._unit_settings = unit_settings or get_unit_settings()
+        self._scene_controller = PreviewSceneController(
+            unit_settings=self._unit_settings,
+            options=preview_options,
+            pyvista_provider=self._ensure_backend,
+        )
         self._home_camera = None
 
     def show(
@@ -200,6 +768,13 @@ class PyVistaPreviewer:
         watcher_thread = None
         watch_roots: list[Path] = []
         current_datasets: list[Mesh | Polyline] = list(datasets) if datasets else []
+        build_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="impression-preview-build")
+        build_state: dict[str, object] = {
+            "future": None,
+            "generation": 0,
+            "path": None,
+            "queued": False,
+        }
         render_state = {
             "show_edges": show_edges,
             "face_edges": face_edges,
@@ -249,7 +824,10 @@ class PyVistaPreviewer:
 
         def _start_watcher(current_path: Path) -> None:
             nonlocal stop_event, watcher_thread, watch_roots
+            previous_thread = watcher_thread
             stop_event.set()
+            if previous_thread is not None and previous_thread.is_alive():
+                previous_thread.join(timeout=1.0)
             stop_event = threading.Event()
             watch_roots = _watch_roots_for(current_path)
             watcher_thread = threading.Thread(
@@ -272,6 +850,51 @@ class PyVistaPreviewer:
         def request_reload_with_message(message: str) -> None:
             self.console.print(message)
             request_reload()
+
+        def _build_scene_datasets() -> list[Mesh | Polyline]:
+            return _collect_datasets_from_scene(scene_factory())
+
+        def _submit_scene_build(message: str | None = None) -> None:
+            future = build_state["future"]
+            if isinstance(future, Future) and not future.done():
+                build_state["queued"] = True
+                return
+            if message is not None:
+                self.console.print(message)
+            generation = int(build_state["generation"]) + 1
+            build_state["generation"] = generation
+            build_state["path"] = model_state["path"]
+            build_state["queued"] = False
+            build_state["future"] = build_executor.submit(_build_scene_datasets)
+
+        def _poll_scene_build() -> None:
+            future = build_state["future"]
+            if not isinstance(future, Future) or not future.done():
+                return
+            build_state["future"] = None
+            build_path = build_state["path"]
+            try:
+                datasets = future.result()
+            except Exception as exc:
+                panel = Panel.fit(_format_exception(exc), title="Preview rebuild failed", style="red")
+                self.console.print(panel)
+            else:
+                if build_path == model_state["path"]:
+                    current_datasets.clear()
+                    current_datasets.extend(datasets)
+                    self._apply_scene(
+                        plotter,
+                        datasets,
+                        show_edges=render_state["show_edges"],
+                        face_edges=render_state["face_edges"],
+                        show_bounds=show_bounds,
+                        show_axes=show_axes,
+                        align_camera=False,
+                    )
+                    plotter.render()
+                    self.console.print(f"[green]Reloaded {model_state['path']}[/green]")
+            if build_state["queued"]:
+                _submit_scene_build(f"[yellow]Reloading {model_state['path']}…[/yellow]")
 
         def maybe_switch_model() -> bool:
             new_path = _read_control_file()
@@ -317,21 +940,7 @@ class PyVistaPreviewer:
                 return
             maybe_switch_model()
             current_path = model_state["path"]
-            self.console.print(f"[yellow]Reloading {current_path}…[/yellow]")
-            datasets = self.collect_datasets(scene_factory())
-            current_datasets.clear()
-            current_datasets.extend(datasets)
-            self._apply_scene(
-                plotter,
-                datasets,
-                show_edges=render_state["show_edges"],
-                face_edges=render_state["face_edges"],
-                show_bounds=show_bounds,
-                show_axes=show_axes,
-                align_camera=False,
-            )
-            plotter.render()
-            self.console.print(f"[green]Reloaded {current_path}[/green]")
+            _submit_scene_build(f"[yellow]Reloading {current_path}…[/yellow]")
 
         interval_seconds = max(1.0 / max(target_fps, 1), 0.05)
         callback_cleanup = None
@@ -348,28 +957,13 @@ class PyVistaPreviewer:
                 if now - last_auto_rebuild["time"] < interval:
                     return
                 last_auto_rebuild["time"] = now
-                try:
-                    datasets = self.collect_datasets(scene_factory())
-                    current_datasets.clear()
-                    current_datasets.extend(datasets)
-                    self._apply_scene(
-                        plotter,
-                        datasets,
-                        show_edges=render_state["show_edges"],
-                        face_edges=render_state["face_edges"],
-                        show_bounds=show_bounds,
-                        show_axes=show_axes,
-                        align_camera=False,
-                    )
-                    plotter.render()
-                except Exception as exc:  # pragma: no cover - surfaced via console
-                    panel = Panel.fit(_format_exception(exc), title="Animation tick failed", style="red")
-                    self.console.print(panel)
+                _submit_scene_build()
 
             def guarded_process_queue() -> None:
                 try:
                     process_queue()
                     _maybe_auto_rebuild()
+                    _poll_scene_build()
                     if render_dirty["value"]:
                         render_dirty["value"] = False
                         _render_current()
@@ -437,10 +1031,13 @@ class PyVistaPreviewer:
             plotter.show(title="Impression Preview", auto_close=False)
         finally:
             stop_event.set()
+            if watcher_thread is not None and watcher_thread.is_alive():
+                watcher_thread.join(timeout=1.0)
             if callback_cleanup is not None:
                 callback_cleanup()
             if previous_handler is not None and hasattr(signal, "SIGUSR1"):
                 signal.signal(signal.SIGUSR1, previous_handler)
+            build_executor.shutdown(wait=False, cancel_futures=True)
             plotter.close()
 
     # Internal helpers -----------------------------------------------------
@@ -488,14 +1085,12 @@ class PyVistaPreviewer:
         return combine_meshes(datasets)
 
     def _configure_plotter(self, plotter, *, show_bounds: bool = True, show_axes: bool = True) -> None:
-        plotter.set_background("#090c10", top="#1b2333")
-        safe_mode = _pyvista_safe_mode()
-        if not safe_mode:
-            plotter.enable_eye_dome_lighting()
-            if show_axes:
-                plotter.add_axes(interactive=True)
-            if show_bounds:
-                self._show_bounds_with_units(plotter)
+        diagnostic = self._scene_controller.configure_plotter(
+            plotter,
+            show_bounds=show_bounds,
+            show_axes=show_axes,
+        )
+        if diagnostic.eye_dome_lighting:
             self._install_home_button(plotter)
 
     def _apply_scene(
@@ -508,138 +1103,23 @@ class PyVistaPreviewer:
         show_axes: bool = True,
         align_camera: bool = False,
     ) -> None:
-        datasets = list(datasets)
-        color_cycle = ["#6ab0ff", "#f58f7c", "#9cdcfe", "#fadb5f", "#9ae6b4", "#d4b5ff"]
-        edge_color = "#cdd7ff"
-        edge_angle = 60.0
-        plotter.clear()
-        if not _pyvista_safe_mode():
-            if show_bounds:
-                self._show_bounds_with_units(plotter)
-            if show_axes:
-                plotter.add_axes(interactive=True)
-
-        for index, mesh in enumerate(datasets):
-            if isinstance(mesh, Polyline):
-                pv_mesh = self._polyline_to_pyvista(mesh)
-                plotter.add_mesh(
-                    pv_mesh,
-                    name=f"mesh-{index}",
-                    color=mesh.color or "#9aa6bf",
-                    line_width=2.0,
-                    render_lines_as_tubes=False,
-                )
-                continue
-
-            pv_mesh = mesh_to_pyvista(mesh)
-            cell_colors = mesh.face_colors
-            if cell_colors is not None and len(cell_colors) == mesh.n_faces:
-                scalars = np.asarray(cell_colors)
-                rgba_mode = scalars.shape[1] >= 4
-                rgb_mode = scalars.shape[1] == 3
-                plotter.add_mesh(
-                    pv_mesh,
-                    name=f"mesh-{index}",
-                    show_edges=show_edges,
-                    scalars=scalars,
-                    rgb=rgb_mode,
-                    rgba=rgba_mode,
-                    smooth_shading=True,
-                    specular=0.2,
-                )
-                if face_edges:
-                    self._add_feature_edges(plotter, pv_mesh, edge_color, edge_angle, index)
-                continue
-
-            color_info = get_mesh_color(mesh)
-            if color_info:
-                rgb, alpha = color_info
-                color = rgb
-                opacity = alpha
-            else:
-                color = color_cycle[index % len(color_cycle)]
-                opacity = 1.0
-
-            plotter.add_mesh(
-                pv_mesh,
-                name=f"mesh-{index}",
-                show_edges=show_edges,
-                color=color,
-                opacity=opacity,
-                smooth_shading=True,
-                specular=0.2,
-            )
-            if face_edges:
-                self._add_feature_edges(plotter, pv_mesh, edge_color, edge_angle, index)
-
-        if align_camera:
-            self._reset_camera(plotter, datasets)
+        self._scene_controller.apply_scene(
+            plotter,
+            datasets,
+            show_edges=show_edges,
+            face_edges=face_edges,
+            show_bounds=show_bounds,
+            show_axes=show_axes,
+            align_camera=align_camera,
+        )
+        self._home_camera = self._scene_controller.home_camera
 
     def _add_feature_edges(self, plotter, mesh, color: str, angle: float, index: int) -> None:
-        if not hasattr(mesh, "extract_feature_edges"):
-            return
-        edges = mesh.extract_feature_edges(angle=angle)
-        if edges.n_cells == 0:
-            return
-        plotter.add_mesh(
-            edges,
-            name=f"mesh-{index}-edges",
-            color=color,
-            line_width=1.0,
-            render_lines_as_tubes=False,
-        )
+        self._scene_controller.add_feature_edges(plotter, mesh, index)
 
     def _reset_camera(self, plotter, datasets: Iterable[Mesh | Polyline]) -> None:
-        bounds = None
-        for mesh in datasets:
-            if isinstance(mesh, Polyline):
-                if mesh.points.size == 0:
-                    continue
-                mins = mesh.points.min(axis=0)
-                maxs = mesh.points.max(axis=0)
-                mesh_bounds = (
-                    float(mins[0]),
-                    float(maxs[0]),
-                    float(mins[1]),
-                    float(maxs[1]),
-                    float(mins[2]),
-                    float(maxs[2]),
-                )
-            else:
-                mesh_bounds = mesh.bounds
-            if bounds is None:
-                bounds = list(mesh_bounds)
-            else:
-                bounds[0] = min(bounds[0], mesh_bounds[0])
-                bounds[1] = max(bounds[1], mesh_bounds[1])
-                bounds[2] = min(bounds[2], mesh_bounds[2])
-                bounds[3] = max(bounds[3], mesh_bounds[3])
-                bounds[4] = min(bounds[4], mesh_bounds[4])
-                bounds[5] = max(bounds[5], mesh_bounds[5])
-
-        if bounds is None:
-            return
-
-        x_center = (bounds[0] + bounds[1]) / 2.0
-        y_center = (bounds[2] + bounds[3]) / 2.0
-        z_center = (bounds[4] + bounds[5]) / 2.0
-
-        diag = math.sqrt(
-            (bounds[1] - bounds[0]) ** 2
-            + (bounds[3] - bounds[2]) ** 2
-            + (bounds[5] - bounds[4]) ** 2
-        )
-        distance = max(diag, 1.0) * 1.4
-
-        camera_pos = (
-            x_center + distance * 0.6,
-            y_center + distance * 0.6,
-            z_center + distance * 0.5,
-        )
-        focal_point = (x_center, y_center, z_center)
-        view_up = (0.0, 0.0, 1.0)
-        plotter.camera_position = [camera_pos, focal_point, view_up]
-        self._home_camera = plotter.camera_position
+        diagnostic = self._scene_controller.reset_camera(plotter, datasets)
+        self._home_camera = diagnostic.camera_position
 
     def _install_home_button(self, plotter) -> None:
         """Add a simple 'home' button to reset the camera to the stored default."""
@@ -716,14 +1196,7 @@ class PyVistaPreviewer:
         return cleanup
 
     def _show_bounds_with_units(self, plotter) -> None:
-        label = self._unit_settings.label
-        plotter.show_bounds(
-            grid="front",
-            color="#5a677d",
-            xtitle=f"X ({label})",
-            ytitle=f"Y ({label})",
-            ztitle=f"Z ({label})",
-        )
+        self._scene_controller.show_bounds_with_units(plotter)
 
     def _log_mesh_analysis(self, datasets: Iterable[Mesh | Polyline]) -> None:
         for index, mesh in enumerate(datasets):
@@ -737,15 +1210,7 @@ class PyVistaPreviewer:
             self.console.print(f"[yellow]Mesh {index} analysis: {issue_text}.[/yellow]")
 
     def _polyline_to_pyvista(self, polyline: Polyline):
-        pv = self._ensure_backend()
-        pts = polyline.points
-        if polyline.closed and len(pts) > 1 and not np.allclose(pts[0], pts[-1]):
-            pts = np.vstack([pts, pts[0]])
-        n_pts = len(pts)
-        if n_pts == 0:
-            return pv.PolyData()
-        cells = np.hstack(([n_pts], np.arange(n_pts)))
-        return pv.PolyData(pts, cells, deep=True)
+        return self._scene_controller.polyline_to_pyvista(polyline)
 
     def _watch_model_file(
         self,

@@ -86,6 +86,28 @@ That idea has two complementary forms:
 
 - [Trajectory-Guided Loft Architecture](trajectory-guided-loft-architecture.md)
 
+## Reference Review Workbench
+
+### Idea
+
+Add a development-facing workbench for reviewing dirty reference artifacts,
+recording fixture notes, promoting accepted artifacts to gold references, and
+working with a constrained Codex sidecar on candidate reference model updates.
+
+### Why It Matters
+
+- turns dirty reference review into a guided queue instead of a filesystem hunt
+- keeps dirty artifacts distinct from promoted evidence
+- records failed review notes next to the reference test stack
+- lets Codex help with candidate models without giving it arbitrary repository
+  access or promotion authority
+- builds on the existing preview/export and reference-artifact lifecycle without
+  pulling the full next-release preview redesign into the current release
+
+### Architecture Note
+
+- [Reference Review Workbench Architecture](../release-0.1.0a/architecture/reference-review-workbench-architecture.md)
+
 ## Model-Assisted Mesh Repair
 
 ### Idea
