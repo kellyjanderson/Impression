@@ -40,6 +40,34 @@ ApplicationWindow {
         selectedMessageText = fixture.fixture_id
     }
 
+    function reviewStatusLabel() {
+        if (!hasFixture) {
+            return "UNREVIEWED"
+        }
+        var status = currentFixture().status || "unreviewed"
+        if (status === "approved") {
+            return "APPROVED"
+        }
+        if (status === "declined") {
+            return "DECLINED"
+        }
+        return "UNREVIEWED"
+    }
+
+    function reviewStatusColor() {
+        if (!hasFixture) {
+            return "#5f6368"
+        }
+        var status = currentFixture().status || "unreviewed"
+        if (status === "approved") {
+            return "#1f7a4d"
+        }
+        if (status === "declined") {
+            return "#b42318"
+        }
+        return "#5f6368"
+    }
+
     Component.onCompleted: {
         if (filteredReviewFixtures.length > 0) {
             selectFixture(0)
@@ -222,6 +250,23 @@ ApplicationWindow {
                         wrapMode: Text.WordWrap
                         color: "#565a51"
                         visible: !selectedArtifactPreview.visible
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 30
+                    radius: 4
+                    color: root.reviewStatusColor()
+                    border.color: "#ffffff"
+                    border.width: 1
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: root.reviewStatusLabel()
+                        color: "#ffffff"
+                        font.pixelSize: 12
+                        font.bold: true
                     }
                 }
 

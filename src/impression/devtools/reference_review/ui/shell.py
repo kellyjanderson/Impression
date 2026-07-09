@@ -419,7 +419,15 @@ class ReferenceReviewWindow(QWidget):
             self._handle_preview_render_command_result
         )
         self.preview_layout.addWidget(self.preview_surface)
-        main_layout.addWidget(self.preview_frame, 1, 0)
+        main_layout.addWidget(self.preview_frame, 1, 0, 2, 1)
+
+        self.review_status_badge = QLabel("UNREVIEWED")
+        self.review_status_badge.setObjectName("reviewStatusBadge")
+        self.review_status_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.review_status_badge.setMinimumHeight(28)
+        self.review_status_badge.setMaximumHeight(34)
+        self._set_review_status_badge(ReferenceReviewStatus.UNREVIEWED.value)
+        main_layout.addWidget(self.review_status_badge, 1, 1)
 
         self.detail_tabs = QTabWidget()
         self.detail_tabs.setObjectName("reviewDetailTabs")
@@ -456,11 +464,12 @@ class ReferenceReviewWindow(QWidget):
         self.detail_tabs.addTab(context, "Context")
         self.detail_tabs.addTab(notes, "Notes")
         self.detail_tabs.addTab(artifacts, "Artifacts")
-        main_layout.addWidget(self.detail_tabs, 1, 1)
+        main_layout.addWidget(self.detail_tabs, 2, 1)
 
         main_layout.setColumnStretch(0, 3)
         main_layout.setColumnStretch(1, 2)
-        main_layout.setRowStretch(1, 3)
+        main_layout.setRowStretch(1, 0)
+        main_layout.setRowStretch(2, 3)
         splitter.addWidget(main)
         splitter.setStretchFactor(1, 1)
 
@@ -671,10 +680,12 @@ class ReferenceReviewWindow(QWidget):
             self.preview_display_controls.set_ready(False)
             self.context_text.setText("No fixture context loaded.")
             self.artifact_thumb.setText("")
+            self._set_review_status_badge(ReferenceReviewStatus.UNREVIEWED.value)
             self._sync_properties()
             return
         self._selected_index = index
         item = self._all_fixture_items[index]
+        self._set_review_status_badge(str(item["status"]))
         self.context_text.setText(
             f"{item['fixture_id']}\n\n"
             f"Review: {item['status']}\n"
@@ -870,6 +881,11 @@ class ReferenceReviewWindow(QWidget):
         self.setProperty("showApproved", self._show_approved)
         self.setProperty("interactivePreviewReady", self._interactive_preview_ready)
 
+    def _set_review_status_badge(self, status: str) -> None:
+        label, stylesheet = _review_status_badge_style(status)
+        self.review_status_badge.setText(label)
+        self.review_status_badge.setStyleSheet(stylesheet)
+
     def closeEvent(self, event) -> None:
         self._preview_poll_timer.stop()
         for future in self._preview_futures:
@@ -951,6 +967,25 @@ def _visible_queue_status_text(items: list[dict[str, object]]) -> str:
     if items:
         return f"{len(items)} fixture{'s' if len(items) != 1 else ''} shown"
     return "No fixtures shown"
+
+
+def _review_status_badge_style(status: str) -> tuple[str, str]:
+    normalized = status if status in {item.value for item in ReferenceReviewStatus} else ReferenceReviewStatus.UNREVIEWED.value
+    palette = {
+        ReferenceReviewStatus.APPROVED.value: ("APPROVED", "#1f7a4d", "#ffffff"),
+        ReferenceReviewStatus.DECLINED.value: ("DECLINED", "#b42318", "#ffffff"),
+        ReferenceReviewStatus.UNREVIEWED.value: ("UNREVIEWED", "#5f6368", "#ffffff"),
+    }
+    label, background, foreground = palette[normalized]
+    return (
+        label,
+        (
+            f"background: {background}; color: {foreground};"
+            " border: 1px solid rgba(255, 255, 255, 0.22);"
+            " border-radius: 4px; padding: 4px 12px;"
+            " font-size: 12px; font-weight: 700;"
+        ),
+    )
 
 
 def _diagnostic_summary(prefix: str, diagnostics: tuple[object, ...]) -> str:

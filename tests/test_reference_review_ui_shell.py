@@ -397,23 +397,31 @@ def test_fixture_queue_hides_approved_until_checkbox_is_checked(tmp_path: Path) 
     root = result.engine.rootObjects()[0]
     show_approved = root.findChild(QObject, "showApprovedCheckBox")
     queue = root.findChild(QObject, "fixtureQueueList")
+    badge = root.findChild(QObject, "reviewStatusBadge")
 
     assert isinstance(show_approved, QCheckBox)
     assert not show_approved.isChecked()
     assert isinstance(queue, QListWidget)
+    assert isinstance(badge, QLabel)
     assert queue.count() == 2
     assert root.property("queueStatusText") == "2 fixtures shown"
     assert "demo/approved" not in "\n".join(queue.item(index).text() for index in range(queue.count()))
     assert root.property("reviewFixtures")[0]["status"] == "declined"
     assert root.property("reviewFixtures")[1]["status"] == "unreviewed"
     assert root.property("selectedMessageText") == "demo/unreviewed"
+    assert badge.text() == "UNREVIEWED"
+    assert "#5f6368" in badge.styleSheet()
 
     show_approved.setChecked(True)
+    queue.setCurrentRow(0)
 
     assert queue.count() == 3
     labels = "\n".join(queue.item(index).text() for index in range(queue.count()))
     assert "demo/approved [approved]" in labels
     assert root.property("showApproved")
+    assert root.property("selectedMessageText") == "demo/approved"
+    assert badge.text() == "APPROVED"
+    assert "#1f7a4d" in badge.styleSheet()
 
 
 def test_decline_button_marks_fixture_file_declined(tmp_path: Path) -> None:
@@ -455,6 +463,10 @@ def test_decline_button_marks_fixture_file_declined(tmp_path: Path) -> None:
     payload = json.loads(fixture_file.read_text())
     assert payload["fixtures"][0]["review_status"] == "declined"
     assert root.property("queueStatusText") == "demo/selectable declined"
+    badge = root.findChild(QObject, "reviewStatusBadge")
+    assert isinstance(badge, QLabel)
+    assert badge.text() == "DECLINED"
+    assert "#b42318" in badge.styleSheet()
 
 
 def test_impress_preview_edge_overlay_uses_object_edges_not_triangle_wireframe(project_root: Path) -> None:
