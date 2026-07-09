@@ -137,6 +137,7 @@ class PreviewPayloadProcessController:
         *,
         owner: str = "preview-payload",
         dispatcher: TaskDispatcher | None = None,
+        owns_dispatcher: bool | None = None,
         request_ids: RequestIdAllocator | None = None,
         payload_dir: Path | None = None,
         cwd: Path | None = None,
@@ -144,7 +145,7 @@ class PreviewPayloadProcessController:
     ) -> None:
         self._owner = owner
         self._dispatcher = dispatcher
-        self._owns_dispatcher = dispatcher is None
+        self._owns_dispatcher = dispatcher is None if owns_dispatcher is None else owns_dispatcher
         self._process_executor = None if dispatcher is not None else ProcessPoolExecutor(max_workers=1)
         self._launch_executor = None if dispatcher is not None else ThreadPoolExecutor(max_workers=1)
         self._process_futures: list[Future[WorkerResultEnvelope]] = []
@@ -357,7 +358,7 @@ class PreviewPayloadProcessController:
                     payload_dir=self._payload_dir,
                     cwd=self._cwd,
                     home=self._home,
-                ).result,
+                ),
             )
         else:
             result = self._launch_process(message, record, generation=generation)

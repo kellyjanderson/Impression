@@ -42,6 +42,7 @@ from ..preview_payload_controller import (
     PreviewPayloadReadyEvent,
 )
 from ..async_core import WorkerResultEnvelope
+from ..async_core import ReviewTaskKind, TaskDispatcher, WorkerPolicy
 
 _ACTIVE_LAUNCH: "WorkbenchLaunchResult | None" = None
 _USAGE = """usage: impression-reference-review [--fixture-file PATH] [--fixture-root PATH] [--fixture-db PATH] [--check] [--offscreen]
@@ -310,7 +311,16 @@ class ReferenceReviewWindow(QWidget):
         self._fixture_items = _fixture_items_for_qml(queue, artifact_previews)
         self._preview_load_generation = 0
         self._preview_display_options = PreviewDisplayOptions()
-        self._preview_controller = PreviewPayloadProcessController(cwd=Path.cwd())
+        self._preview_controller = PreviewPayloadProcessController(
+            cwd=Path.cwd(),
+            dispatcher=TaskDispatcher(
+                max_workers=1,
+                policies={
+                    ReviewTaskKind.PREVIEW_BUILD: WorkerPolicy(max_pending=1, coalesce=True),
+                },
+            ),
+            owns_dispatcher=True,
+        )
         self._preview_futures: list[Future[WorkerResultEnvelope]] = []
         self._preview_future_identities: dict[
             Future[WorkerResultEnvelope],

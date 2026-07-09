@@ -1380,6 +1380,27 @@ def test_window_preview_controller_launches_and_polls_payload(tmp_path: Path) ->
     assert window._preview_futures == []
 
 
+def test_window_preview_controller_uses_thread_dispatcher_not_process_pool(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    artifact = tmp_path / "part.impress"
+    artifact.write_text('{"format": "impress"}\n')
+    source = tmp_path / "model.py"
+    source.write_text("def build():\n    return None\n")
+    record = ReviewSourceModelRecord(
+        "demo/part",
+        "demo",
+        source,
+        artifact_paths=(artifact,),
+    )
+
+    result = launch_workbench(fixture_records=(record,), offscreen=True)
+    window = result.engine.rootObjects()[0]
+
+    assert window._preview_controller._dispatcher is not None
+    assert window._preview_controller._owns_dispatcher
+    assert window._preview_controller._process_executor is None
+
+
 def test_window_preview_ignores_stale_future_exception(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     artifact = tmp_path / "part.impress"
