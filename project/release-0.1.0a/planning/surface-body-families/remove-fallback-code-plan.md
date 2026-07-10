@@ -14,9 +14,9 @@ truth or returns placeholder geometry.
 
 ### Surface API Builds Mesh Then Rewraps Surface
 
-- `heightmap(...)` builds a mesh and wraps triangle faces as
+- `heightmap(..., backend="surface")` builds a mesh and wraps triangle faces as
   planar patches.
-- `displace_heightmap(...)` tessellates surface input to a
+- `displace_heightmap(..., backend="surface")` tessellates surface input to a
   mesh, displaces mesh vertices, then wraps triangle faces as planar patches.
 
 Required outcome:
@@ -105,7 +105,7 @@ Exit criteria:
 - [ ] replace triangle-face wrapping with a surface-native heightfield patch
   when output is a sheet.
 - [ ] define solidified heightfield behavior separately from sheet heightfields.
-- [ ] make `displace_heightmap(...)` operate on surface
+- [ ] make `displace_heightmap(..., backend="surface")` operate on surface
   patches directly or return explicit unsupported status.
 
 Exit criteria:

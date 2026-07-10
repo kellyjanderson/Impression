@@ -331,8 +331,8 @@ def make_surface_cone(
     """Internal surface-native cone/frustum constructor.
 
     This stays private until primitive API migration is ready. The sidewall is
-    modeled as four quarter-turn revolution patches with planar caps for every
-    non-zero end radius.
+    modeled as four quarter-turn revolution patches with an optional planar
+    base cap when the bottom radius is non-zero.
     """
 
     if radius is not None:
@@ -394,24 +394,10 @@ def make_surface_cone(
                 metadata={"kernel": {"primitive_family": "cone", "surface_role": "bottom-cap"}},
             )
         )
-    if top_radius > 0.0:
-        domain = ParameterDomain((-top_radius, top_radius), (-top_radius, top_radius))
-        circle_trim = TrimLoop(_circle_loop(top_radius, samples=max(16, resolution)), category="outer")
-        patches.append(
-            PlanarSurfacePatch(
-                family="planar",
-                domain=domain,
-                trim_loops=(circle_trim,),
-                origin=(0.0, 0.0, z1),
-                u_axis=(1.0, 0.0, 0.0),
-                v_axis=(0.0, 1.0, 0.0),
-                metadata={"kernel": {"primitive_family": "cone", "surface_role": "top-cap"}},
-            )
-        )
 
     shell = make_surface_shell(
         tuple(patches),
-        connected=False if bottom_radius > 0.0 or top_radius > 0.0 else True,
+        connected=False if bottom_radius > 0.0 else True,
         seams=seams,
         metadata={"kernel": {"primitive_family": "cone"}},
     )

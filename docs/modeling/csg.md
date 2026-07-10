@@ -36,8 +36,8 @@ from impression.modeling import (
     surface_boolean_intersection_stage,
 )
 
-left = make_box(size=(1.0, 1.0, 1.0))
-right = make_box(size=(1.0, 1.0, 1.0), center=(0.25, 0.0, 0.0))
+left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+right = make_box(size=(1.0, 1.0, 1.0), center=(0.25, 0.0, 0.0), backend="surface")
 
 prepared_union = prepare_surface_boolean_operands("union", [left, right])
 prepared_difference = prepare_surface_boolean_difference_operands(left, [right])
@@ -72,7 +72,7 @@ intentionally small initial scope:
 More general surfaced boolean execution is still tracked by the remaining open
 surface boolean execution leaves.
 
-The public boolean helpers are surfacebody-result APIs. Today that surfacebody route:
+The public boolean helpers now also accept `backend="surface"` as an explicit migration boundary. Today that surfaced branch:
 
 - validates and canonicalizes `SurfaceBody` operands
 - can return a structured `SurfaceBooleanResult`
@@ -98,10 +98,11 @@ Within that surfaced lane, result posture is now explicit across three caller-fa
 
 ## Migration Posture
 
-The public boolean APIs now separate surfacebody modeling from explicit mesh compatibility:
+The public boolean APIs are now split into two explicit lanes:
 
-- surfacebody-result APIs: public boolean helpers validate `SurfaceBody` operands and return `SurfaceBooleanResult`
-- explicit mesh compatibility: `union_meshes(...)` and `make_*_mesh(...)` stay behind mesh-named helpers
+- default mesh lane: returns executable mesh geometry today and expects
+  mesh-specific inputs such as `make_*_mesh(...)`
+- surfaced lane: `backend="surface"` returns `SurfaceBooleanResult`
 
 The surfaced lane is the migration contract for downstream callers that want to stop depending on mesh-primary boolean truth. It is intentionally honest:
 
@@ -112,7 +113,10 @@ The surfaced lane is the migration contract for downstream callers that want to 
 - unsupported execution stays surfaced and does not fall back to mesh
 - legacy mesh deprecation posture remains in place for the executable mesh lane
 
-If you need triangle output, tessellate accepted `SurfaceBody` results or use explicit mesh compatibility helpers at mesh-consumer boundaries.
+If you need renderable boolean output today, keep using the default mesh lane
+with explicit mesh compatibility inputs. If you are migrating consumers or
+tests onto the surface-first contract, use `backend="surface"` and inspect the
+returned `SurfaceBooleanResult`.
 
 ## Reference Readiness
 

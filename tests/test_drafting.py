@@ -13,27 +13,32 @@ FONT_PATH = (
 
 
 def test_make_dimension_arrow_only_when_text_missing():
-    collection = make_dimension((0.0, 0.0, 0.0), (2.0, 0.0, 0.0), offset=0.2, text=None)
-    assert len(collection.items) == 1
+    meshes = make_dimension((0.0, 0.0, 0.0), (2.0, 0.0, 0.0), offset=0.2, text=None, backend="mesh")
+    assert len(meshes) == 1
+    assert meshes[0].n_faces > 0
 
 
-def test_make_dimension_with_text_label_surface_collection():
-    collection = make_dimension(
+def test_make_dimension_with_text_label_mesh():
+    meshes = make_dimension(
         (0.0, 0.0, 0.0),
         (2.0, 0.0, 0.0),
         offset=0.2,
         text="2.00",
         font_path=str(FONT_PATH),
+        backend="mesh",
     )
-    assert len(collection.items) == 2
+    assert len(meshes) == 2
+    assert meshes[1].n_faces > 0
 
 
 def test_make_dimension_missing_font_keeps_arrow():
-    collection = make_dimension(
+    meshes = make_dimension(
         (0.0, 0.0, 0.0),
         (2.0, 0.0, 0.0),
         offset=0.2,
         text="2.00",
         font_path="does-not-exist.ttf",
+        backend="mesh",
     )
-    assert len(collection.items) == 1
+    assert len(meshes) == 1
+    assert meshes[0].n_faces > 0

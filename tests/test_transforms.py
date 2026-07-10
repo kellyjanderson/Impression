@@ -11,7 +11,6 @@ from impression.modeling import (
     TransformMeshCompatibilityResult,
     group,
     make_box,
-    make_box_mesh,
     translate,
     rotate,
     rotate_euler,
@@ -28,13 +27,13 @@ def _bounds(mesh):
 
 
 def test_translate_bounds():
-    base = make_box_mesh(size=(2.0, 4.0, 6.0))
+    base = make_box(size=(2.0, 4.0, 6.0), backend="mesh")
     moved = translate(base.copy(), (1.0, 2.0, 3.0))
     assert np.allclose(_bounds(moved), np.array([0.0, 2.0, 0.0, 4.0, 0.0, 6.0]))
 
 
 def test_rotate_axis_z_90():
-    base = make_box_mesh(size=(2.0, 4.0, 1.0))
+    base = make_box(size=(2.0, 4.0, 1.0), backend="mesh")
     turned = rotate(base.copy(), axis=(0.0, 0.0, 1.0), angle_deg=90.0)
     bounds = _bounds(turned)
     assert np.allclose(bounds[[0, 1]], [-2.0, 2.0], atol=1e-6)
@@ -42,7 +41,7 @@ def test_rotate_axis_z_90():
 
 
 def test_rotate_euler_matches_sequential():
-    base = make_box_mesh(size=(1.0, 2.0, 3.0))
+    base = make_box(size=(1.0, 2.0, 3.0), backend="mesh")
     sequential = rotate(base.copy(), axis=(1.0, 0.0, 0.0), angle_deg=10.0)
     sequential = rotate(sequential, axis=(0.0, 1.0, 0.0), angle_deg=20.0)
     sequential = rotate(sequential, axis=(0.0, 0.0, 1.0), angle_deg=30.0)
@@ -52,25 +51,25 @@ def test_rotate_euler_matches_sequential():
 
 
 def test_scale_bounds():
-    base = make_box_mesh(size=(2.0, 4.0, 6.0))
+    base = make_box(size=(2.0, 4.0, 6.0), backend="mesh")
     scaled = scale(base.copy(), (2.0, 0.5, 1.0))
     assert np.allclose(_bounds(scaled), np.array([-2.0, 2.0, -1.0, 1.0, -3.0, 3.0]))
 
 
 def test_resize_auto_axes():
-    base = make_box_mesh(size=(2.0, 4.0, 6.0))
+    base = make_box(size=(2.0, 4.0, 6.0), backend="mesh")
     resized = resize(base.copy(), (4.0, 0.0, 0.0), auto=[False, True, True])
     assert np.allclose(_bounds(resized), np.array([-2.0, 2.0, -4.0, 4.0, -6.0, 6.0]))
 
 
 def test_mirror_flips_axis():
-    base = make_box_mesh(size=(2.0, 2.0, 2.0), center=(2.0, 0.0, 0.0))
+    base = make_box(size=(2.0, 2.0, 2.0), center=(2.0, 0.0, 0.0), backend="mesh")
     flipped = mirror(base.copy(), (1.0, 0.0, 0.0))
     assert np.allclose(_bounds(flipped)[[0, 1]], [-3.0, -1.0])
 
 
 def test_multmatrix_translation():
-    base = make_box_mesh(size=(2.0, 2.0, 2.0))
+    base = make_box(size=(2.0, 2.0, 2.0), backend="mesh")
     mat = np.eye(4)
     mat[:3, 3] = [1.0, 2.0, 3.0]
     moved = multmatrix(base.copy(), mat)
@@ -110,7 +109,7 @@ def test_surface_transform_family_returns_surface_bodies():
 
 
 def test_mesh_transform_records_explicit_compatibility_boundary():
-    mesh = make_box_mesh(size=(1.0, 1.0, 1.0))
+    mesh = make_box(size=(1.0, 1.0, 1.0), backend="mesh")
 
     moved = translate(mesh, (1.0, 0.0, 0.0))
 
@@ -121,7 +120,7 @@ def test_mesh_transform_records_explicit_compatibility_boundary():
 
 
 def test_mesh_group_is_explicit_compatibility_api():
-    mesh = make_box_mesh(size=(1.0, 1.0, 1.0))
+    mesh = make_box(size=(1.0, 1.0, 1.0), backend="mesh")
 
     grp = group([mesh])
 

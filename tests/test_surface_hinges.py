@@ -28,7 +28,7 @@ def _combined_collection_mesh(collection: SurfaceConsumerCollection):
 def test_surface_traditional_hinge_leaf_returns_surface_body_without_deprecation() -> None:
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", DeprecationWarning)
-        leaf = make_traditional_hinge_leaf(width=24.0, knuckle_count=5)
+        leaf = make_traditional_hinge_leaf(width=24.0, knuckle_count=5, backend="surface")
 
     assert isinstance(leaf, SurfaceBody)
     mesh = tessellate_surface_body(leaf).mesh
@@ -62,12 +62,12 @@ def test_hinge_feature_csg_dependencies_name_surface_and_explicit_mesh_routes() 
         "hinges.make_bistable_hinge",
     }.issubset(caller_ids)
     assert all(record.surface_builder.startswith("make_") for record in dependencies)
-    assert all(record.explicit_mesh_route == "make_*_mesh compatibility helpers" for record in dependencies)
+    assert all(record.explicit_mesh_route == "backend='mesh'" for record in dependencies)
     assert any(record.operation == "union" for record in dependencies)
 
 
 def test_surface_hinge_paths_preserve_consumer_color_metadata() -> None:
-    leaf = make_traditional_hinge_leaf(width=24.0, knuckle_count=5, color="#7f8fa6")
+    leaf = make_traditional_hinge_leaf(width=24.0, knuckle_count=5, color="#7f8fa6", backend="surface")
     pair = make_traditional_hinge_pair(
         width=24.0,
         knuckle_count=5,
@@ -75,9 +75,10 @@ def test_surface_hinge_paths_preserve_consumer_color_metadata() -> None:
         leaf_a_color="#7f8fa6",
         leaf_b_color="#8f7f6a",
         pin_color="#b0b0b0",
+        backend="surface",
     )
-    living = make_living_hinge(width=48.0, height=20.0, hinge_band_width=12.0, slit_pitch=1.8, color="#7d8f7a")
-    bistable = make_bistable_hinge(width=40.0, preload_offset=2.0, color="#8e7a9c")
+    living = make_living_hinge(width=48.0, height=20.0, hinge_band_width=12.0, slit_pitch=1.8, color="#7d8f7a", backend="surface")
+    bistable = make_bistable_hinge(width=40.0, preload_offset=2.0, color="#8e7a9c", backend="surface")
 
     assert leaf.consumer_metadata() == {"color": "#7f8fa6"}
     pair_collection = handoff_hinge_surface(pair)
@@ -94,6 +95,7 @@ def test_surface_traditional_hinge_pair_handoff_is_deterministic_and_tessellates
         knuckle_count=5,
         include_pin=True,
         opened_angle_deg=32.0,
+        backend="surface",
     )
 
     assert isinstance(assembly, HingeSurfaceAssembly)
@@ -105,6 +107,7 @@ def test_surface_traditional_hinge_pair_handoff_is_deterministic_and_tessellates
         knuckle_count=5,
         include_pin=True,
         opened_angle_deg=32.0,
+        backend="surface",
     ).stable_identity
 
     collection = handoff_hinge_surface(assembly, metadata={"fixture": "traditional"})

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Mapping, Sequence, Tuple
+from typing import TYPE_CHECKING, Literal, Mapping, Sequence, Tuple, cast
 
 import numpy as np
 
@@ -13,6 +13,7 @@ from ._color import set_mesh_color
 if TYPE_CHECKING:
     from .surface import SurfaceBody
 
+Backend = Literal["mesh", "surface"]
 LegacyPrimitiveMeshAssumptionKind = Literal[
     "surface-native consumer",
     "tessellation-boundary consumer",
@@ -150,7 +151,7 @@ class UnsupportedPrimitiveProducerDiagnostic:
 
     caller_id: str
     primitive: str
-    requested_surface_route: str
+    requested_backend: str
     reason: str
 
     @property
@@ -165,7 +166,7 @@ class UnsupportedPrimitiveProducerDiagnostic:
             "caller_id": self.caller_id,
             "primitive": self.primitive,
             "reason": self.reason,
-            "requested_surface_route": self.requested_surface_route,
+            "requested_backend": self.requested_backend,
         }
 
 
@@ -224,10 +225,10 @@ def classify_legacy_primitive_mesh_assumption(
         raise ValueError("Legacy primitive mesh assumption context must be non-empty.")
     if primitive not in _primitive_constructor_names():
         raise ValueError(f"Unsupported primitive constructor {primitive_constructor!r}.")
-    if f"{primitive}_mesh(" in stripped:
+    if f"{primitive}_mesh(" in stripped or f"backend=\"mesh\"" in stripped or f"backend='mesh'" in stripped:
         return LegacyPrimitiveMeshAssumptionClassificationRecord(
             classification="explicit mesh compatibility consumer",
-            rewrite_rule="keep mesh-specific intent behind make_*_mesh(...)",
+            rewrite_rule="keep mesh-specific intent behind make_*_mesh(...) or backend='mesh'",
         )
     if "tessellate_surface_body(" in stripped or "mesh_from_surface_body(" in stripped:
         return LegacyPrimitiveMeshAssumptionClassificationRecord(
@@ -350,7 +351,7 @@ def select_primitive_patch_producer(caller_id: str) -> PrimitivePatchProducerSel
 def unsupported_primitive_producer_diagnostic(
     caller_id: str,
     *,
-    requested_surface_route: str,
+    requested_backend: str,
     reason: str,
 ) -> UnsupportedPrimitiveProducerDiagnostic:
     """Build an explicit unsupported producer diagnostic without falling back to mesh."""
@@ -359,9 +360,16 @@ def unsupported_primitive_producer_diagnostic(
     return UnsupportedPrimitiveProducerDiagnostic(
         caller_id=caller_id,
         primitive=primitive,
-        requested_surface_route=requested_surface_route,
+        requested_backend=requested_backend,
         reason=reason,
     )
+
+
+def _ensure_backend(backend: Backend) -> None:
+    if backend not in {"mesh", "surface"}:
+        raise ValueError(
+            f"Unsupported backend '{backend}'. Only 'mesh' and 'surface' are available right now."
+        )
 
 
 def _surface_metadata(*, color: Sequence[float] | str | None) -> dict[str, object] | None:
@@ -379,7 +387,7 @@ def _surface_primitive_result(caller_id: str, result: SurfaceBody) -> SurfaceBod
     if not isinstance(checked, SurfaceBody):
         diagnostic = unsupported_primitive_producer_diagnostic(
             caller_id,
-            requested_surface_route="surfacebody",
+            requested_backend="surface",
             reason=f"producer returned {type(checked).__name__}, expected SurfaceBody",
         )
         raise TypeError(diagnostic.message)
@@ -388,256 +396,32 @@ def _surface_primitive_result(caller_id: str, result: SurfaceBody) -> SurfaceBod
     if not emitted_families <= expected_families:
         diagnostic = unsupported_primitive_producer_diagnostic(
             caller_id,
-            requested_surface_route="surfacebody",
+            requested_backend="surface",
             reason=(
                 f"producer emitted patch families {sorted(emitted_families)} outside "
                 f"selected families {sorted(expected_families)}"
             ),
         )
         raise ValueError(diagnostic.message)
-    return checked
+    return cast("SurfaceBody", checked)
 
 
 def make_box(
     size: Sequence[float] = (1.0, 1.0, 1.0),
     center: Sequence[float] = (0.0, 0.0, 0.0),
+    backend: Backend = "surface",
     color: Sequence[float] | str | None = None,
-) -> SurfaceBody:
+) -> Mesh | SurfaceBody:
     """Axis-aligned box specified by size (dx, dy, dz) and center."""
 
-    from ._surface_primitives import make_surface_box
+    _ensure_backend(backend)
+    if backend == "surface":
+        from ._surface_primitives import make_surface_box
 
-    return _surface_primitive_result(
-        "primitive.make_box",
-        make_surface_box(size=size, center=center, metadata=_surface_metadata(color=color)),
-    )
-
-
-def make_cylinder(
-    radius: float = 0.5,
-    height: float = 1.0,
-    center: Sequence[float] = (0.0, 0.0, 0.0),
-    direction: Sequence[float] = (0.0, 0.0, 1.0),
-    resolution: int = 128,
-    capping: bool = True,
-    color: Sequence[float] | str | None = None,
-) -> SurfaceBody:
-    """Right circular cylinder aligned with `direction`."""
-
-    from ._surface_primitives import make_surface_cylinder
-
-    return _surface_primitive_result(
-        "primitive.make_cylinder",
-        make_surface_cylinder(
-            radius=radius,
-            height=height,
-            center=center,
-            direction=direction,
-            resolution=resolution,
-            capping=capping,
-            metadata=_surface_metadata(color=color),
-        ),
-    )
-
-
-def make_ngon(
-    sides: int = 6,
-    radius: float = 0.5,
-    height: float = 1.0,
-    center: Sequence[float] = (0.0, 0.0, 0.0),
-    direction: Sequence[float] = (0.0, 0.0, 1.0),
-    color: Sequence[float] | str | None = None,
-    *,
-    side_length: float | None = None,
-) -> SurfaceBody:
-    """Regular n-gon prism aligned to `direction`."""
-
-    sides = int(sides)
-    if sides < 3:
-        raise ValueError("sides must be >= 3.")
-    if side_length is not None:
-        inferred = float(side_length) / (2.0 * np.sin(np.pi / sides))
-        if radius != 0.5 and not np.isclose(radius, inferred):
-            raise ValueError("Specify either radius or side_length, not both.")
-        radius = inferred
-
-    from ._surface_primitives import make_surface_ngon
-
-    return _surface_primitive_result(
-        "primitive.make_ngon",
-        make_surface_ngon(
-            sides=sides,
-            radius=radius,
-            height=height,
-            center=center,
-            direction=direction,
-            side_length=side_length,
-            metadata=_surface_metadata(color=color),
-        ),
-    )
-
-
-def make_polyhedron(
-    faces: int = 6,
-    radius: float = 0.5,
-    center: Sequence[float] = (0.0, 0.0, 0.0),
-    color: Sequence[float] | str | None = None,
-) -> SurfaceBody:
-    """Regular polyhedron specified by number of faces (4, 6, 8, 12, 20)."""
-
-    faces = int(faces)
-    if radius <= 0:
-        raise ValueError("radius must be positive.")
-    from ._surface_primitives import make_surface_polyhedron
-
-    return _surface_primitive_result(
-        "primitive.make_polyhedron",
-        make_surface_polyhedron(
-            faces=faces,
-            radius=radius,
-            center=center,
-            metadata=_surface_metadata(color=color),
-        ),
-    )
-
-
-def make_nhedron(
-    faces: int = 6,
-    radius: float = 0.5,
-    center: Sequence[float] = (0.0, 0.0, 0.0),
-    color: Sequence[float] | str | None = None,
-) -> SurfaceBody:
-    """Compatibility wrapper for make_polyhedron."""
-
-    result = make_polyhedron(
-        faces=faces,
-        radius=radius,
-        center=center,
-        color=color,
-    )
-    return _surface_primitive_result("primitive.make_nhedron", result)
-
-
-def make_sphere(
-    radius: float = 0.5,
-    center: Sequence[float] = (0.0, 0.0, 0.0),
-    theta_resolution: int = 64,
-    phi_resolution: int = 64,
-    color: Sequence[float] | str | None = None,
-) -> SurfaceBody:
-    from ._surface_primitives import make_surface_sphere
-
-    return _surface_primitive_result(
-        "primitive.make_sphere",
-        make_surface_sphere(
-            radius=radius,
-            center=center,
-            theta_resolution=theta_resolution,
-            phi_resolution=phi_resolution,
-            metadata=_surface_metadata(color=color),
-        ),
-    )
-
-
-def make_torus(
-    major_radius: float = 1.0,
-    minor_radius: float = 0.25,
-    center: Sequence[float] = (0.0, 0.0, 0.0),
-    direction: Sequence[float] = (0.0, 0.0, 1.0),
-    n_theta: int = 64,
-    n_phi: int = 32,
-    color: Sequence[float] | str | None = None,
-) -> SurfaceBody:
-    """Generate a torus (donut) with given major/minor radii."""
-
-    from ._surface_primitives import make_surface_torus
-
-    return _surface_primitive_result(
-        "primitive.make_torus",
-        make_surface_torus(
-            major_radius=major_radius,
-            minor_radius=minor_radius,
-            center=center,
-            direction=direction,
-            n_theta=n_theta,
-            n_phi=n_phi,
-            metadata=_surface_metadata(color=color),
-        ),
-    )
-
-
-def make_cone(
-    bottom_diameter: float = 1.0,
-    top_diameter: float = 0.0,
-    height: float = 1.0,
-    center: Sequence[float] = (0.0, 0.0, 0.0),
-    direction: Sequence[float] = (0.0, 0.0, 1.0),
-    resolution: int = 64,
-    color: Sequence[float] | str | None = None,
-    *,
-    radius: float | None = None,
-) -> SurfaceBody:
-    """Circular frustum. Set top_diameter=0 for a classic cone."""
-
-    if radius is not None:
-        inferred_bottom = 2.0 * float(radius)
-        if bottom_diameter != 1.0 and not np.isclose(bottom_diameter, inferred_bottom):
-            raise ValueError("Specify either bottom_diameter or radius, not both.")
-        bottom_diameter = inferred_bottom
-
-    bottom_radius = bottom_diameter / 2.0
-    top_radius = top_diameter / 2.0
-    if bottom_radius <= 0 and top_radius <= 0:
-        raise ValueError("At least one of bottom_diameter or top_diameter must be > 0.")
-    from ._surface_primitives import make_surface_cone
-
-    return _surface_primitive_result(
-        "primitive.make_cone",
-        make_surface_cone(
-            bottom_diameter=bottom_diameter,
-            top_diameter=top_diameter,
-            height=height,
-            center=center,
-            direction=direction,
-            resolution=resolution,
-            metadata=_surface_metadata(color=color),
-        ),
-    )
-
-
-def make_prism(
-    base_size: Sequence[float] = (1.0, 1.0),
-    top_size: Sequence[float] | None = None,
-    height: float = 1.0,
-    center: Sequence[float] = (0.0, 0.0, 0.0),
-    direction: Sequence[float] = (0.0, 0.0, 1.0),
-    color: Sequence[float] | str | None = None,
-) -> SurfaceBody:
-    """
-    Rectangular frustum (pyramid/prism). Set top_size=(0,0) for a pyramid, or None to match base.
-    """
-
-    from ._surface_primitives import make_surface_prism
-
-    return _surface_primitive_result(
-        "primitive.make_prism",
-        make_surface_prism(
-            base_size=base_size,
-            top_size=top_size,
-            height=height,
-            center=center,
-            direction=direction,
-            metadata=_surface_metadata(color=color),
-        ),
-    )
-
-
-def make_box_mesh(
-    size: Sequence[float] = (1.0, 1.0, 1.0),
-    center: Sequence[float] = (0.0, 0.0, 0.0),
-    color: Sequence[float] | str | None = None,
-) -> Mesh:
-    """Explicit mesh compatibility constructor for :func:`make_box`."""
+        return _surface_primitive_result(
+            "primitive.make_box",
+            make_surface_box(size=size, center=center, metadata=_surface_metadata(color=color)),
+        )
 
     from ._legacy_mesh_primitives import box_mesh
 
@@ -647,41 +431,60 @@ def make_box_mesh(
     return mesh
 
 
-def make_cylinder_mesh(
+def make_cylinder(
     radius: float = 0.5,
     height: float = 1.0,
     center: Sequence[float] = (0.0, 0.0, 0.0),
     direction: Sequence[float] = (0.0, 0.0, 1.0),
     resolution: int = 128,
     capping: bool = True,
+    backend: Backend = "surface",
     color: Sequence[float] | str | None = None,
-) -> Mesh:
-    """Explicit mesh compatibility constructor for :func:`make_cylinder`."""
+) -> Mesh | SurfaceBody:
+    """Right circular cylinder aligned with `direction`."""
 
+    _ensure_backend(backend)
+    if backend == "surface":
+        from ._surface_primitives import make_surface_cylinder
+
+        return _surface_primitive_result(
+            "primitive.make_cylinder",
+            make_surface_cylinder(
+                radius=radius,
+                height=height,
+                center=center,
+                direction=direction,
+                resolution=resolution,
+                capping=capping,
+                metadata=_surface_metadata(color=color),
+            ),
+        )
+
+    direction = _normalize(direction)
     from ._legacy_mesh_primitives import circular_frustum_mesh, orient_mesh
 
     mesh = circular_frustum_mesh(radius, radius, height, resolution, capping=capping)
-    mesh = orient_mesh(mesh, _normalize(direction))
+    mesh = orient_mesh(mesh, direction)
     mesh.translate(center, inplace=True)
     if color is not None:
         set_mesh_color(mesh, color)
     return mesh
 
 
-def make_ngon_mesh(
+def make_ngon(
     sides: int = 6,
     radius: float = 0.5,
     height: float = 1.0,
     center: Sequence[float] = (0.0, 0.0, 0.0),
     direction: Sequence[float] = (0.0, 0.0, 1.0),
+    backend: Backend = "surface",
     color: Sequence[float] | str | None = None,
     *,
     side_length: float | None = None,
-) -> Mesh:
-    """Explicit mesh compatibility constructor for :func:`make_ngon`."""
+) -> Mesh | SurfaceBody:
+    """Regular n-gon prism aligned to `direction`."""
 
-    from ._legacy_mesh_primitives import circular_frustum_mesh, orient_mesh
-
+    _ensure_backend(backend)
     sides = int(sides)
     if sides < 3:
         raise ValueError("sides must be >= 3.")
@@ -690,25 +493,60 @@ def make_ngon_mesh(
         if radius != 0.5 and not np.isclose(radius, inferred):
             raise ValueError("Specify either radius or side_length, not both.")
         radius = inferred
+
+    if backend == "surface":
+        from ._surface_primitives import make_surface_ngon
+
+        return _surface_primitive_result(
+            "primitive.make_ngon",
+            make_surface_ngon(
+                sides=sides,
+                radius=radius,
+                height=height,
+                center=center,
+                direction=direction,
+                side_length=side_length,
+                metadata=_surface_metadata(color=color),
+            ),
+        )
+
+    direction = _normalize(direction)
+    from ._legacy_mesh_primitives import circular_frustum_mesh, orient_mesh
+
     mesh = circular_frustum_mesh(radius, radius, height, sides, capping=True)
-    mesh = orient_mesh(mesh, _normalize(direction))
+    mesh = orient_mesh(mesh, direction)
     mesh.translate(center, inplace=True)
     if color is not None:
         set_mesh_color(mesh, color)
     return mesh
 
 
-def make_polyhedron_mesh(
+def make_polyhedron(
     faces: int = 6,
     radius: float = 0.5,
     center: Sequence[float] = (0.0, 0.0, 0.0),
+    backend: Backend = "surface",
     color: Sequence[float] | str | None = None,
-) -> Mesh:
-    """Explicit mesh compatibility constructor for :func:`make_polyhedron`."""
+) -> Mesh | SurfaceBody:
+    """Regular polyhedron specified by number of faces (4, 6, 8, 12, 20)."""
 
+    _ensure_backend(backend)
     faces = int(faces)
     if radius <= 0:
         raise ValueError("radius must be positive.")
+    if backend == "surface":
+        from ._surface_primitives import make_surface_polyhedron
+
+        return _surface_primitive_result(
+            "primitive.make_polyhedron",
+            make_surface_polyhedron(
+                faces=faces,
+                radius=radius,
+                center=center,
+                metadata=_surface_metadata(color=color),
+            ),
+        )
+
     vertices, face_list = _regular_polyhedron_data(faces)
     vertices = np.asarray(vertices, dtype=float)
     faces_arr = triangulate_faces(face_list)
@@ -726,6 +564,264 @@ def make_polyhedron_mesh(
     return mesh
 
 
+def make_nhedron(
+    faces: int = 6,
+    radius: float = 0.5,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    backend: Backend = "surface",
+    color: Sequence[float] | str | None = None,
+) -> Mesh | SurfaceBody:
+    """Compatibility wrapper for make_polyhedron."""
+
+    result = make_polyhedron(
+        faces=faces,
+        radius=radius,
+        center=center,
+        backend=backend,
+        color=color,
+    )
+    if backend == "surface":
+        return _surface_primitive_result("primitive.make_nhedron", cast("SurfaceBody", result))
+    return result
+
+
+def make_sphere(
+    radius: float = 0.5,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    theta_resolution: int = 64,
+    phi_resolution: int = 64,
+    backend: Backend = "surface",
+    color: Sequence[float] | str | None = None,
+) -> Mesh | SurfaceBody:
+    _ensure_backend(backend)
+    if backend == "surface":
+        from ._surface_primitives import make_surface_sphere
+
+        return _surface_primitive_result(
+            "primitive.make_sphere",
+            make_surface_sphere(
+                radius=radius,
+                center=center,
+                theta_resolution=theta_resolution,
+                phi_resolution=phi_resolution,
+                metadata=_surface_metadata(color=color),
+            ),
+        )
+    from ._legacy_mesh_primitives import sphere_mesh
+
+    mesh = sphere_mesh(radius, theta_resolution, phi_resolution)
+    mesh.translate(center, inplace=True)
+    if color is not None:
+        set_mesh_color(mesh, color)
+    return mesh
+
+
+def make_torus(
+    major_radius: float = 1.0,
+    minor_radius: float = 0.25,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    direction: Sequence[float] = (0.0, 0.0, 1.0),
+    n_theta: int = 64,
+    n_phi: int = 32,
+    backend: Backend = "surface",
+    color: Sequence[float] | str | None = None,
+) -> Mesh | SurfaceBody:
+    """Generate a torus (donut) with given major/minor radii."""
+
+    _ensure_backend(backend)
+    if backend == "surface":
+        from ._surface_primitives import make_surface_torus
+
+        return _surface_primitive_result(
+            "primitive.make_torus",
+            make_surface_torus(
+                major_radius=major_radius,
+                minor_radius=minor_radius,
+                center=center,
+                direction=direction,
+                n_theta=n_theta,
+                n_phi=n_phi,
+                metadata=_surface_metadata(color=color),
+            ),
+        )
+
+    direction = _normalize(direction)
+    from ._legacy_mesh_primitives import orient_mesh, torus_mesh
+
+    base = torus_mesh(major_radius, minor_radius, n_theta, n_phi)
+    aligned = orient_mesh(base, direction)
+    aligned.translate(center, inplace=True)
+    if color is not None:
+        set_mesh_color(aligned, color)
+    return aligned
+
+
+def make_cone(
+    bottom_diameter: float = 1.0,
+    top_diameter: float = 0.0,
+    height: float = 1.0,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    direction: Sequence[float] = (0.0, 0.0, 1.0),
+    resolution: int = 64,
+    backend: Backend = "surface",
+    color: Sequence[float] | str | None = None,
+    *,
+    radius: float | None = None,
+) -> Mesh | SurfaceBody:
+    """Circular frustum. Set top_diameter=0 for a classic cone."""
+
+    _ensure_backend(backend)
+    if radius is not None:
+        inferred_bottom = 2.0 * float(radius)
+        if bottom_diameter != 1.0 and not np.isclose(bottom_diameter, inferred_bottom):
+            raise ValueError("Specify either bottom_diameter or radius, not both.")
+        bottom_diameter = inferred_bottom
+
+    bottom_radius = bottom_diameter / 2.0
+    top_radius = top_diameter / 2.0
+    if bottom_radius <= 0 and top_radius <= 0:
+        raise ValueError("At least one of bottom_diameter or top_diameter must be > 0.")
+    if backend == "surface":
+        from ._surface_primitives import make_surface_cone
+
+        return _surface_primitive_result(
+            "primitive.make_cone",
+            make_surface_cone(
+                bottom_diameter=bottom_diameter,
+                top_diameter=top_diameter,
+                height=height,
+                center=center,
+                direction=direction,
+                resolution=resolution,
+                metadata=_surface_metadata(color=color),
+            ),
+        )
+
+    from ._legacy_mesh_primitives import circular_frustum_mesh, orient_mesh
+
+    mesh = circular_frustum_mesh(bottom_radius, top_radius, height, resolution)
+    mesh = orient_mesh(mesh, direction)
+    mesh.translate(center, inplace=True)
+    if color is not None:
+        set_mesh_color(mesh, color)
+    return mesh
+
+
+def make_prism(
+    base_size: Sequence[float] = (1.0, 1.0),
+    top_size: Sequence[float] | None = None,
+    height: float = 1.0,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    direction: Sequence[float] = (0.0, 0.0, 1.0),
+    backend: Backend = "surface",
+    color: Sequence[float] | str | None = None,
+) -> Mesh | SurfaceBody:
+    """
+    Rectangular frustum (pyramid/prism). Set top_size=(0,0) for a pyramid, or None to match base.
+    """
+
+    _ensure_backend(backend)
+    if backend == "surface":
+        from ._surface_primitives import make_surface_prism
+
+        return _surface_primitive_result(
+            "primitive.make_prism",
+            make_surface_prism(
+                base_size=base_size,
+                top_size=top_size,
+                height=height,
+                center=center,
+                direction=direction,
+                metadata=_surface_metadata(color=color),
+            ),
+        )
+
+    if top_size is None:
+        top_size = tuple(base_size)
+    from ._legacy_mesh_primitives import orient_mesh, rectangular_frustum_mesh
+
+    mesh = rectangular_frustum_mesh(tuple(base_size), tuple(top_size), height)
+    mesh = orient_mesh(mesh, direction)
+    mesh.translate(center, inplace=True)
+    if color is not None:
+        set_mesh_color(mesh, color)
+    return mesh
+
+
+def make_box_mesh(
+    size: Sequence[float] = (1.0, 1.0, 1.0),
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    color: Sequence[float] | str | None = None,
+) -> Mesh:
+    """Explicit mesh compatibility constructor for :func:`make_box`."""
+
+    return cast(Mesh, make_box(size=size, center=center, backend="mesh", color=color))
+
+
+def make_cylinder_mesh(
+    radius: float = 0.5,
+    height: float = 1.0,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    direction: Sequence[float] = (0.0, 0.0, 1.0),
+    resolution: int = 128,
+    capping: bool = True,
+    color: Sequence[float] | str | None = None,
+) -> Mesh:
+    """Explicit mesh compatibility constructor for :func:`make_cylinder`."""
+
+    return cast(
+        Mesh,
+        make_cylinder(
+            radius=radius,
+            height=height,
+            center=center,
+            direction=direction,
+            resolution=resolution,
+            capping=capping,
+            backend="mesh",
+            color=color,
+        ),
+    )
+
+
+def make_ngon_mesh(
+    sides: int = 6,
+    radius: float = 0.5,
+    height: float = 1.0,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    direction: Sequence[float] = (0.0, 0.0, 1.0),
+    color: Sequence[float] | str | None = None,
+    *,
+    side_length: float | None = None,
+) -> Mesh:
+    """Explicit mesh compatibility constructor for :func:`make_ngon`."""
+
+    return cast(
+        Mesh,
+        make_ngon(
+            sides=sides,
+            radius=radius,
+            height=height,
+            center=center,
+            direction=direction,
+            backend="mesh",
+            color=color,
+            side_length=side_length,
+        ),
+    )
+
+
+def make_polyhedron_mesh(
+    faces: int = 6,
+    radius: float = 0.5,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    color: Sequence[float] | str | None = None,
+) -> Mesh:
+    """Explicit mesh compatibility constructor for :func:`make_polyhedron`."""
+
+    return cast(Mesh, make_polyhedron(faces=faces, radius=radius, center=center, backend="mesh", color=color))
+
+
 def make_nhedron_mesh(
     faces: int = 6,
     radius: float = 0.5,
@@ -734,7 +830,7 @@ def make_nhedron_mesh(
 ) -> Mesh:
     """Explicit mesh compatibility constructor for :func:`make_nhedron`."""
 
-    return make_polyhedron_mesh(faces=faces, radius=radius, center=center, color=color)
+    return cast(Mesh, make_nhedron(faces=faces, radius=radius, center=center, backend="mesh", color=color))
 
 
 def make_sphere_mesh(
@@ -746,13 +842,17 @@ def make_sphere_mesh(
 ) -> Mesh:
     """Explicit mesh compatibility constructor for :func:`make_sphere`."""
 
-    from ._legacy_mesh_primitives import sphere_mesh
-
-    mesh = sphere_mesh(radius, theta_resolution, phi_resolution)
-    mesh.translate(center, inplace=True)
-    if color is not None:
-        set_mesh_color(mesh, color)
-    return mesh
+    return cast(
+        Mesh,
+        make_sphere(
+            radius=radius,
+            center=center,
+            theta_resolution=theta_resolution,
+            phi_resolution=phi_resolution,
+            backend="mesh",
+            color=color,
+        ),
+    )
 
 
 def make_torus_mesh(
@@ -766,14 +866,19 @@ def make_torus_mesh(
 ) -> Mesh:
     """Explicit mesh compatibility constructor for :func:`make_torus`."""
 
-    from ._legacy_mesh_primitives import orient_mesh, torus_mesh
-
-    base = torus_mesh(major_radius, minor_radius, n_theta, n_phi)
-    aligned = orient_mesh(base, _normalize(direction))
-    aligned.translate(center, inplace=True)
-    if color is not None:
-        set_mesh_color(aligned, color)
-    return aligned
+    return cast(
+        Mesh,
+        make_torus(
+            major_radius=major_radius,
+            minor_radius=minor_radius,
+            center=center,
+            direction=direction,
+            n_theta=n_theta,
+            n_phi=n_phi,
+            backend="mesh",
+            color=color,
+        ),
+    )
 
 
 def make_cone_mesh(
@@ -789,23 +894,20 @@ def make_cone_mesh(
 ) -> Mesh:
     """Explicit mesh compatibility constructor for :func:`make_cone`."""
 
-    from ._legacy_mesh_primitives import circular_frustum_mesh, orient_mesh
-
-    if radius is not None:
-        inferred_bottom = 2.0 * float(radius)
-        if bottom_diameter != 1.0 and not np.isclose(bottom_diameter, inferred_bottom):
-            raise ValueError("Specify either bottom_diameter or radius, not both.")
-        bottom_diameter = inferred_bottom
-    bottom_radius = bottom_diameter / 2.0
-    top_radius = top_diameter / 2.0
-    if bottom_radius <= 0 and top_radius <= 0:
-        raise ValueError("At least one of bottom_diameter or top_diameter must be > 0.")
-    mesh = circular_frustum_mesh(bottom_radius, top_radius, height, resolution)
-    mesh = orient_mesh(mesh, _normalize(direction))
-    mesh.translate(center, inplace=True)
-    if color is not None:
-        set_mesh_color(mesh, color)
-    return mesh
+    return cast(
+        Mesh,
+        make_cone(
+            bottom_diameter=bottom_diameter,
+            top_diameter=top_diameter,
+            height=height,
+            center=center,
+            direction=direction,
+            resolution=resolution,
+            backend="mesh",
+            color=color,
+            radius=radius,
+        ),
+    )
 
 
 def make_prism_mesh(
@@ -818,16 +920,18 @@ def make_prism_mesh(
 ) -> Mesh:
     """Explicit mesh compatibility constructor for :func:`make_prism`."""
 
-    from ._legacy_mesh_primitives import orient_mesh, rectangular_frustum_mesh
-
-    if top_size is None:
-        top_size = tuple(base_size)
-    mesh = rectangular_frustum_mesh(tuple(base_size), tuple(top_size), height)
-    mesh = orient_mesh(mesh, _normalize(direction))
-    mesh.translate(center, inplace=True)
-    if color is not None:
-        set_mesh_color(mesh, color)
-    return mesh
+    return cast(
+        Mesh,
+        make_prism(
+            base_size=base_size,
+            top_size=top_size,
+            height=height,
+            center=center,
+            direction=direction,
+            backend="mesh",
+            color=color,
+        ),
+    )
 
 
 def _normalize(vector: Sequence[float]) -> Tuple[float, float, float]:

@@ -46,7 +46,7 @@ def test_preview_source_loader_invokes_fixture_entrypoint_with_parameters(
     source.write_text(
         "from impression.modeling import make_box\n"
         "def make(width):\n"
-        "    return make_box(size=(width, 1, 1))\n"
+        "    return make_box(size=(width, 1, 1), backend='surface')\n"
     )
     record = ReviewSourceModelRecord(
         fixture_id="fixture/parameterized",
@@ -117,7 +117,7 @@ def test_preview_dataset_builder_adds_workspace_root_for_fixture_imports(
     (support / "fixture_helpers.py").write_text(
         "from impression.modeling import make_box\n"
         "def build_box():\n"
-        "    return make_box(size=(1, 1, 1))\n"
+        "    return make_box(size=(1, 1, 1), backend='surface')\n"
     )
     fixtures = tmp_path / "fixtures"
     fixtures.mkdir()
@@ -202,7 +202,7 @@ def test_serialized_preview_payload_reports_serialization_diagnostic(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "model.py"
-    source.write_text("from impression.modeling import make_box\n\ndef build():\n    return make_box()\n")
+    source.write_text("from impression.modeling import make_box\n\ndef build():\n    return make_box(backend='surface')\n")
     blocked_dir = tmp_path / "not-a-directory"
     blocked_dir.write_text("already a file")
     record = ReviewSourceModelRecord(

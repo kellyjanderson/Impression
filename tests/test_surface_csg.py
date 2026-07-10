@@ -213,7 +213,6 @@ from impression.modeling import (
     make_surface_csg_curve,
     make_surface_csg_line_curve,
     make_box,
-    make_box_mesh,
     make_plane,
     make_sphere,
     make_surface_body,
@@ -948,7 +947,7 @@ def test_surface_csg_fragment_builder_reports_invalid_arrangement_and_missing_fa
 
 
 def test_surface_csg_fragment_classifier_collects_classifications_and_coincident_ownership() -> None:
-    opposing = make_box(size=(2.0, 2.0, 2.0))
+    opposing = make_box(size=(2.0, 2.0, 2.0), backend="surface")
     patch = PlanarSurfacePatch(
         family="planar",
         origin=(-0.5, -0.5, 1.0),
@@ -977,7 +976,7 @@ def test_surface_csg_fragment_classifier_collects_classifications_and_coincident
 
 
 def test_surface_csg_coincident_ownership_refuses_boundary_fragments_without_cut_provenance() -> None:
-    opposing = make_box(size=(2.0, 2.0, 2.0))
+    opposing = make_box(size=(2.0, 2.0, 2.0), backend="surface")
     patch = PlanarSurfacePatch(
         family="planar",
         origin=(-0.5, -0.5, 1.0),
@@ -998,7 +997,7 @@ def test_surface_csg_coincident_ownership_refuses_boundary_fragments_without_cut
 
 
 def test_surface_csg_fragment_classification_distinguishes_inside_outside_and_on_boundary() -> None:
-    opposing = make_box(size=(2.0, 2.0, 2.0))
+    opposing = make_box(size=(2.0, 2.0, 2.0), backend="surface")
     patch_ref = SurfaceBooleanPatchRef(0, 0)
     inside_patch = PlanarSurfacePatch(family="planar", origin=(-0.25, -0.25, 0.0), u_axis=(0.5, 0.0, 0.0), v_axis=(0.0, 0.5, 0.0))
     outside_patch = PlanarSurfacePatch(family="planar", origin=(2.0, 2.0, 2.0), u_axis=(0.5, 0.0, 0.0), v_axis=(0.0, 0.5, 0.0))
@@ -1023,7 +1022,7 @@ def test_surface_csg_fragment_classification_distinguishes_inside_outside_and_on
 
 
 def test_surface_csg_fragment_classification_reports_ambiguous_and_domain_failures() -> None:
-    opposing = make_box(size=(2.0, 2.0, 2.0))
+    opposing = make_box(size=(2.0, 2.0, 2.0), backend="surface")
     patch_ref = SurfaceBooleanPatchRef(0, 0)
     boundary_patch = PlanarSurfacePatch(family="planar", origin=(-0.5, -0.5, 1.0), u_axis=(1.0, 0.0, 0.0), v_axis=(0.0, 1.0, 0.0))
     outside_loop = TrimLoop(((2.0, 2.0), (3.0, 2.0), (2.5, 3.0)), category="outer")
@@ -1884,8 +1883,8 @@ def test_surface_csg_operation_plan_accumulates_invalid_operand_diagnostics() ->
 
 
 def test_surface_csg_operation_plan_dispatches_family_pairs_and_refuses_unsupported_registry_entries() -> None:
-    left = make_box(size=(1.0, 1.0, 1.0))
-    right = make_sphere(radius=0.5)
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_sphere(radius=0.5, backend="surface")
     operands = prepare_surface_boolean_operands("union", (left, right))
     supported = plan_prepared_surface_csg_operation(operands)
 
@@ -1914,8 +1913,8 @@ def test_surface_csg_operation_plan_dispatches_family_pairs_and_refuses_unsuppor
 
 def test_surface_csg_negative_diagnostic_fixtures_feed_matrix() -> None:
     invalid_plan = plan_surface_csg_operation("union", (object(), object()))
-    left = make_box(size=(1.0, 1.0, 1.0))
-    right = make_sphere(radius=0.5)
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_sphere(radius=0.5, backend="surface")
     operands = prepare_surface_boolean_operands("union", (left, right))
     broken_matrix = dict(SURFACE_BOOLEAN_FAMILY_PAIR_SUPPORT_MATRIX)
     broken_matrix[("union", "planar", "revolution")] = SurfaceBooleanFamilyPairSupport(
@@ -1996,8 +1995,8 @@ def test_surface_csg_negative_diagnostic_fixtures_feed_matrix() -> None:
 
 
 def test_surface_csg_feature_gate_reports_supported_and_unsupported_without_mesh_fallback() -> None:
-    left = make_box(size=(1.0, 1.0, 1.0))
-    right = make_box(size=(1.0, 1.0, 1.0), center=(1.25, 0.0, 0.0))
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_box(size=(1.0, 1.0, 1.0), center=(1.25, 0.0, 0.0), backend="surface")
 
     supported = surface_csg_feature_gate("fixture.boolean_union", "union", (left, right))
     unsupported = surface_csg_feature_gate("fixture.boolean_union", "union", (left, object()))
@@ -2011,7 +2010,7 @@ def test_surface_csg_feature_gate_reports_supported_and_unsupported_without_mesh
 
 
 def test_surface_csg_no_hidden_mesh_fallback_assertion_rejects_mesh_results() -> None:
-    mesh = make_box_mesh(size=(1.0, 1.0, 1.0))
+    mesh = make_box(size=(1.0, 1.0, 1.0), backend="mesh")
 
     with pytest.raises(BooleanOperationError, match="explicit mesh compatibility"):
         assert_no_hidden_surface_csg_mesh_fallback("fixture.boolean_union", mesh)
@@ -2139,7 +2138,7 @@ def test_surface_csg_orients_selected_fragment_collection_in_patch_order() -> No
 
 
 def test_surface_csg_seam_rebuild_deduplicates_seams_and_records_boundary_uses() -> None:
-    body = make_box(size=(1.0, 1.0, 1.0))
+    body = make_box(size=(1.0, 1.0, 1.0), backend="surface")
     shell = body.iter_shells(world=True)[0]
     duplicate = replace(shell.seams[0], seam_id=f"{shell.seams[0].seam_id}-copy")
     dirty_shell = replace(shell, seams=shell.seams + (duplicate,))
@@ -2155,7 +2154,7 @@ def test_surface_csg_seam_rebuild_deduplicates_seams_and_records_boundary_uses()
 
 
 def test_surface_csg_seam_rebuild_reports_open_boundaries() -> None:
-    body = make_box(size=(1.0, 1.0, 1.0))
+    body = make_box(size=(1.0, 1.0, 1.0), backend="surface")
     shell = body.iter_shells(world=True)[0]
     open_shell = replace(shell, seams=shell.seams[:-1])
 
@@ -2167,7 +2166,7 @@ def test_surface_csg_seam_rebuild_reports_open_boundaries() -> None:
 
 
 def test_surface_csg_continuity_handoff_records_enforceable_c0_g0_only() -> None:
-    shell = make_box(size=(1.0, 1.0, 1.0)).iter_shells(world=True)[0]
+    shell = make_box(size=(1.0, 1.0, 1.0), backend="surface").iter_shells(world=True)[0]
     seam_rebuild = rebuild_surface_csg_shell_seams(shell)
 
     handoff = record_surface_csg_continuity_handoff(
@@ -2184,7 +2183,7 @@ def test_surface_csg_continuity_handoff_records_enforceable_c0_g0_only() -> None
 
 
 def test_surface_csg_continuity_handoff_reports_invalid_seam_rebuild() -> None:
-    shell = make_box(size=(1.0, 1.0, 1.0)).iter_shells(world=True)[0]
+    shell = make_box(size=(1.0, 1.0, 1.0), backend="surface").iter_shells(world=True)[0]
     open_shell = replace(shell, seams=shell.seams[:-1])
     seam_rebuild = rebuild_surface_csg_shell_seams(open_shell)
 
@@ -2195,8 +2194,8 @@ def test_surface_csg_continuity_handoff_reports_invalid_seam_rebuild() -> None:
 
 
 def test_surface_csg_validity_gate_accepts_closed_body_and_records_provenance() -> None:
-    left = make_box(size=(1.0, 1.0, 1.0))
-    right = make_box(size=(1.0, 1.0, 1.0), center=(1.25, 0.0, 0.0))
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_box(size=(1.0, 1.0, 1.0), center=(1.25, 0.0, 0.0), backend="surface")
     operands = prepare_surface_boolean_operands("union", [left, right])
 
     gate = finalize_surface_csg_validity_gate("union", operands, left)
@@ -2208,15 +2207,15 @@ def test_surface_csg_validity_gate_accepts_closed_body_and_records_provenance() 
     assert gate.diagnostics == ()
     assert isinstance(gate.provenance, SurfaceCSGProvenanceMetadataRecord)
     assert gate.provenance.canonical_payload() == {
+        "backend": "surface",
         "operand_ids": operands.body_ids,
         "operation": "union",
-        "surface_route": "surfacebody",
     }
 
 
 def test_surface_csg_validity_gate_rejects_open_shell_with_diagnostics() -> None:
-    left = make_box(size=(1.0, 1.0, 1.0))
-    right = make_box(size=(1.0, 1.0, 1.0), center=(1.25, 0.0, 0.0))
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_box(size=(1.0, 1.0, 1.0), center=(1.25, 0.0, 0.0), backend="surface")
     operands = prepare_surface_boolean_operands("union", [left, right])
     shell = left.iter_shells(world=True)[0]
     invalid_body = make_surface_body((replace(shell, seams=shell.seams[:-1]),), metadata=left.metadata)
@@ -2235,8 +2234,8 @@ def test_surface_csg_runtime_validity_report_rejects_mesh_results_and_unresolved
     operands = prepare_surface_boolean_operands(
         "union",
         [
-            make_box(size=(1.0, 1.0, 1.0)),
-            make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0)),
+            make_box(size=(1.0, 1.0, 1.0), backend="surface"),
+            make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0), backend="surface"),
         ],
     )
     mesh = Mesh(
@@ -2264,8 +2263,8 @@ def test_surface_csg_runtime_validity_report_detects_dangling_trims() -> None:
     operands = prepare_surface_boolean_operands(
         "union",
         [
-            make_box(size=(1.0, 1.0, 1.0)),
-            make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0)),
+            make_box(size=(1.0, 1.0, 1.0), backend="surface"),
+            make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0), backend="surface"),
         ],
     )
     dangling_patch = PlanarSurfacePatch(family="planar")
@@ -2286,7 +2285,7 @@ def test_surface_csg_runtime_validity_report_detects_dangling_trims() -> None:
 
 
 def test_surface_csg_persistence_tessellation_evidence_promotes_clean_reference() -> None:
-    body = make_box(size=(1.0, 1.0, 1.0))
+    body = make_box(size=(1.0, 1.0, 1.0), backend="surface")
 
     report = verify_surface_csg_persistence_tessellation_evidence(
         body,
@@ -2307,7 +2306,7 @@ def test_surface_csg_persistence_tessellation_evidence_promotes_clean_reference(
 
 
 def test_surface_csg_persistence_tessellation_evidence_rejects_dirty_reference() -> None:
-    body = make_box(size=(1.0, 1.0, 1.0))
+    body = make_box(size=(1.0, 1.0, 1.0), backend="surface")
 
     report = verify_surface_csg_persistence_tessellation_evidence(
         body,
@@ -2322,8 +2321,8 @@ def test_surface_csg_persistence_tessellation_evidence_rejects_dirty_reference()
 
 
 def test_surface_csg_validity_handoff_accepts_assembled_closed_shell_candidate() -> None:
-    left = make_box(size=(1.0, 1.0, 1.0))
-    right = make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0))
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0), backend="surface")
     operands = prepare_surface_boolean_operands("union", [left, right])
     assembly = SurfaceCSGShellAssemblyRecord(
         operation="union",
@@ -2345,8 +2344,8 @@ def test_surface_csg_validity_handoff_accepts_assembled_closed_shell_candidate()
 
 
 def test_surface_csg_validity_handoff_preserves_empty_success_without_body() -> None:
-    left = make_box(size=(1.0, 1.0, 1.0))
-    right = make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0))
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0), backend="surface")
     operands = prepare_surface_boolean_operands("intersection", [left, right])
     assembly = SurfaceCSGShellAssemblyRecord(operation="intersection", classification="empty")
 
@@ -2359,8 +2358,8 @@ def test_surface_csg_validity_handoff_preserves_empty_success_without_body() -> 
 
 
 def test_surface_csg_validity_handoff_reports_invalid_reconstructed_shells() -> None:
-    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.25, 0.0, 0.0))
-    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.25, 0.0, 0.0))
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
     operands = prepare_surface_boolean_difference_operands(left, [right])
     graph = build_surface_csg_fragment_graph(plan_surface_csg_operation("difference", (left, right)))
     caps = build_surface_csg_cap_patches(graph)
@@ -2381,8 +2380,8 @@ def test_surface_csg_validity_handoff_reports_invalid_reconstructed_shells() -> 
 
 
 def test_surface_csg_operand_ordering_normalizer_sorts_commutative_operations_only() -> None:
-    left = make_box(size=(1.0, 1.0, 1.0))
-    right = make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0))
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_box(size=(1.0, 1.0, 1.0), center=(2.0, 0.0, 0.0), backend="surface")
     union_operands = prepare_surface_boolean_operands("union", [right, left])
     difference_operands = prepare_surface_boolean_difference_operands(right, [left])
 
@@ -2396,8 +2395,8 @@ def test_surface_csg_operand_ordering_normalizer_sorts_commutative_operations_on
 
 
 def test_surface_csg_result_provenance_map_tracks_fragments_caps_and_boundaries() -> None:
-    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.25, 0.0, 0.0))
-    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.25, 0.0, 0.0))
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
     operands = prepare_surface_boolean_difference_operands(left, [right])
     graph = build_surface_csg_fragment_graph(plan_surface_csg_operation("difference", (left, right)))
     caps = build_surface_csg_cap_patches(graph)
@@ -2448,7 +2447,7 @@ def test_surface_csg_result_provenance_map_reports_missing_generated_boundary_at
             ),
         ),
     )
-    operands = prepare_surface_boolean_difference_operands(make_box(), [make_box()])
+    operands = prepare_surface_boolean_difference_operands(make_box(backend="surface"), [make_box(backend="surface")])
     caps = SurfaceCSGCapConstructionRecord(
         operation="difference",
         cap_payloads=(
@@ -2658,8 +2657,8 @@ def _planar_loop_total_area(loops: list[np.ndarray] | tuple[np.ndarray, ...]) ->
 
 
 def test_prepare_surface_boolean_union_operands_accepts_closed_surface_bodies() -> None:
-    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.5, 0.0, 0.0))
-    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.25, 0.0, 0.0))
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.5, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
 
     prepared = prepare_surface_boolean_operands("union", [left, right])
 
@@ -2675,8 +2674,8 @@ def test_prepare_surface_boolean_union_operands_accepts_closed_surface_bodies() 
 
 
 def test_prepare_surface_boolean_difference_canonicalizes_base_and_cutters() -> None:
-    base = _translated(make_box(size=(2.0, 2.0, 2.0)), (1.0, 0.0, 0.0))
-    cutter = _translated(make_box(size=(1.0, 1.0, 3.0)), (1.0, 0.0, 0.0))
+    base = _translated(make_box(size=(2.0, 2.0, 2.0), backend="surface"), (1.0, 0.0, 0.0))
+    cutter = _translated(make_box(size=(1.0, 1.0, 3.0), backend="surface"), (1.0, 0.0, 0.0))
 
     prepared = prepare_surface_boolean_difference_operands(base, [cutter])
 
@@ -2689,47 +2688,47 @@ def test_prepare_surface_boolean_difference_canonicalizes_base_and_cutters() -> 
 
 
 def test_prepare_surface_boolean_operands_rejects_open_multi_shell_and_disconnected_inputs() -> None:
-    open_shell = make_surface_shell(make_plane(size=(2.0, 2.0)).shells[0].patches, connected=True)
+    open_shell = make_surface_shell(make_plane(size=(2.0, 2.0), backend="surface").shells[0].patches, connected=True)
     open_body = make_surface_body([open_shell])
     with pytest.raises(BooleanOperationError, match="closed-valid"):
-        prepare_surface_boolean_operands("union", [make_box(), open_body])
+        prepare_surface_boolean_operands("union", [make_box(backend="surface"), open_body])
 
     shell_a = make_surface_shell([PlanarSurfacePatch(family="planar")])
     shell_b = make_surface_shell([PlanarSurfacePatch(family="planar", origin=(2.0, 0.0, 0.0))])
     multi_shell = make_surface_body([shell_a, shell_b])
     with pytest.raises(BooleanOperationError, match="exactly one shell"):
-        prepare_surface_boolean_operands("union", [make_box(), multi_shell])
+        prepare_surface_boolean_operands("union", [make_box(backend="surface"), multi_shell])
 
     disconnected_shell = SurfaceShell(
-        patches=(make_box().shells[0].patches[0],),
+        patches=(make_box(backend="surface").shells[0].patches[0],),
         connected=False,
     )
     disconnected = make_surface_body([disconnected_shell])
     with pytest.raises(BooleanOperationError, match="connected"):
-        prepare_surface_boolean_operands("union", [make_box(), disconnected])
+        prepare_surface_boolean_operands("union", [make_box(backend="surface"), disconnected])
 
 
 def test_prepare_surface_boolean_operands_rejects_invalid_counts_and_types() -> None:
     with pytest.raises(ValueError, match="at least two"):
-        prepare_surface_boolean_operands("union", [make_box()])
+        prepare_surface_boolean_operands("union", [make_box(backend="surface")])
 
     with pytest.raises(ValueError, match="at least one cutter"):
-        prepare_surface_boolean_difference_operands(make_box(), [])
+        prepare_surface_boolean_difference_operands(make_box(backend="surface"), [])
 
     with pytest.raises(TypeError, match="SurfaceBody"):
-        prepare_surface_boolean_operands("intersection", [make_box(), object()])  # type: ignore[list-item]
+        prepare_surface_boolean_operands("intersection", [make_box(backend="surface"), object()])  # type: ignore[list-item]
 
-def test_public_surface_boolean_returns_structured_result_without_deprecation() -> None:
-    left = make_box(size=(2.0, 2.0, 2.0))
-    inside = make_box(size=(1.0, 1.0, 1.0), center=(0.0, 0.0, 0.0))
-    far = make_box(size=(1.0, 1.0, 1.0), center=(5.0, 0.0, 0.0))
-    overlap = make_box(size=(2.0, 2.0, 2.0), center=(0.5, 0.0, 0.0))
+def test_public_surface_boolean_backend_returns_structured_result_without_deprecation() -> None:
+    left = make_box(size=(2.0, 2.0, 2.0), backend="surface")
+    inside = make_box(size=(1.0, 1.0, 1.0), center=(0.0, 0.0, 0.0), backend="surface")
+    far = make_box(size=(1.0, 1.0, 1.0), center=(5.0, 0.0, 0.0), backend="surface")
+    overlap = make_box(size=(2.0, 2.0, 2.0), center=(0.5, 0.0, 0.0), backend="surface")
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", DeprecationWarning)
-        union_result = boolean_union([left, inside])
-        difference_result = boolean_difference(left, [far])
-        intersection_result = boolean_intersection([left, overlap])
+        union_result = boolean_union([left, inside], backend="surface")
+        difference_result = boolean_difference(left, [far], backend="surface")
+        intersection_result = boolean_intersection([left, overlap], backend="surface")
 
     assert isinstance(union_result, SurfaceBooleanResult)
     assert isinstance(difference_result, SurfaceBooleanResult)
@@ -2751,8 +2750,8 @@ def test_public_surface_boolean_returns_structured_result_without_deprecation() 
 
 
 def test_surface_boolean_result_contract_is_structured_and_unsupported_for_now() -> None:
-    left = make_box(size=(1.0, 1.0, 1.0))
-    right = make_sphere(radius=0.75)
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_sphere(radius=0.75, backend="surface")
     operands = prepare_surface_boolean_operands("union", [left, right])
 
     result = surface_boolean_result("union", operands)
@@ -2768,8 +2767,8 @@ def test_surface_boolean_result_contract_is_structured_and_unsupported_for_now()
 
 
 def test_surface_boolean_result_supports_empty_success_for_disjoint_intersection() -> None:
-    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-2.0, 0.0, 0.0))
-    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (2.0, 0.0, 0.0))
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-2.0, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (2.0, 0.0, 0.0))
     operands = prepare_surface_boolean_operands("intersection", [left, right])
 
     result = surface_boolean_result("intersection", operands)
@@ -2781,8 +2780,8 @@ def test_surface_boolean_result_supports_empty_success_for_disjoint_intersection
 
 
 def test_surface_boolean_result_supports_empty_success_for_touching_intersection() -> None:
-    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-1.0, 0.0, 0.0))
-    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.0, 0.0, 0.0))
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-1.0, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.0, 0.0, 0.0))
     operands = prepare_surface_boolean_operands("intersection", [left, right])
 
     result = surface_boolean_result("intersection", operands)
@@ -2795,8 +2794,8 @@ def test_surface_boolean_result_supports_empty_success_for_touching_intersection
 
 
 def test_surface_boolean_result_supports_multi_shell_union_for_disjoint_boxes() -> None:
-    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-2.0, 0.0, 0.0))
-    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (2.0, 0.0, 0.0))
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-2.0, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (2.0, 0.0, 0.0))
     operands = prepare_surface_boolean_operands("union", [left, right])
 
     result = surface_boolean_result("union", operands)
@@ -2808,7 +2807,7 @@ def test_surface_boolean_result_supports_multi_shell_union_for_disjoint_boxes() 
 
 
 def test_surface_boolean_result_supports_exact_reuse_for_equal_operands() -> None:
-    body = make_box(size=(1.0, 2.0, 3.0))
+    body = make_box(size=(1.0, 2.0, 3.0), backend="surface")
 
     union_result = surface_boolean_result("union", prepare_surface_boolean_operands("union", [body, body]))
     intersection_result = surface_boolean_result(
@@ -2825,8 +2824,8 @@ def test_surface_boolean_result_supports_exact_reuse_for_equal_operands() -> Non
 
 
 def test_surface_boolean_result_supports_disjoint_mixed_family_union() -> None:
-    box = _translated(make_box(size=(1.0, 1.0, 1.0)), (-2.0, 0.0, 0.0))
-    sphere = _translated(make_sphere(radius=0.5), (2.0, 0.0, 0.0))
+    box = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-2.0, 0.0, 0.0))
+    sphere = _translated(make_sphere(radius=0.5, backend="surface"), (2.0, 0.0, 0.0))
     operands = prepare_surface_boolean_operands("union", [box, sphere])
 
     result = surface_boolean_result("union", operands)
@@ -2864,8 +2863,8 @@ def test_surface_boolean_result_supports_overlapping_box_union_with_visible_post
 
 
 def test_surface_boolean_result_supports_box_sphere_containment_cases_without_cut_reconstruction() -> None:
-    box = make_box(size=(4.0, 4.0, 4.0))
-    sphere = make_sphere(radius=0.75)
+    box = make_box(size=(4.0, 4.0, 4.0), backend="surface")
+    sphere = make_sphere(radius=0.75, backend="surface")
 
     union_result = surface_boolean_result("union", prepare_surface_boolean_operands("union", [box, sphere]))
     intersection_result = surface_boolean_result(
@@ -2882,8 +2881,8 @@ def test_surface_boolean_result_supports_box_sphere_containment_cases_without_cu
 
 
 def test_surface_boolean_result_supports_box_contained_by_sphere_without_cut_reconstruction() -> None:
-    box = make_box(size=(1.0, 1.0, 1.0))
-    sphere = make_sphere(radius=2.0)
+    box = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    sphere = make_sphere(radius=2.0, backend="surface")
 
     result = surface_boolean_result(
         "intersection",
@@ -2922,8 +2921,8 @@ def test_surface_boolean_result_supports_overlapping_box_difference_with_side_sl
 
 
 def test_surface_boolean_result_supports_difference_when_cutter_fully_contains_base() -> None:
-    base = make_box(size=(1.0, 1.0, 1.0))
-    cutter = make_sphere(radius=2.0)
+    base = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    cutter = make_sphere(radius=2.0, backend="surface")
 
     result = surface_boolean_result(
         "difference",
@@ -2936,8 +2935,8 @@ def test_surface_boolean_result_supports_difference_when_cutter_fully_contains_b
 
 
 def test_surface_boolean_result_remains_explicitly_unsupported_for_partial_box_sphere_overlap() -> None:
-    box = make_box(size=(2.0, 2.0, 2.0))
-    sphere = make_sphere(radius=1.0, center=(0.75, 0.0, 0.0))
+    box = make_box(size=(2.0, 2.0, 2.0), backend="surface")
+    sphere = make_sphere(radius=1.0, center=(0.75, 0.0, 0.0), backend="surface")
 
     result = surface_boolean_result(
         "intersection",
@@ -2952,11 +2951,11 @@ def test_surface_boolean_result_remains_explicitly_unsupported_for_partial_box_s
 
 def test_surface_boolean_result_propagates_boolean_metadata_for_supported_results() -> None:
     left = replace(
-        make_box(size=(2.0, 2.0, 2.0)),
+        make_box(size=(2.0, 2.0, 2.0), backend="surface"),
         metadata={"kernel": {"source": "left"}, "consumer": {"color": "red"}},
     )
     right = replace(
-        make_box(size=(1.0, 1.0, 1.0)),
+        make_box(size=(1.0, 1.0, 1.0), backend="surface"),
         metadata={"kernel": {"source": "right"}, "consumer": {"label": "tool"}},
     )
     operands = prepare_surface_boolean_operands("union", [left, right])
@@ -2967,12 +2966,12 @@ def test_surface_boolean_result_propagates_boolean_metadata_for_supported_result
     assert result.body is not None
     kernel_metadata = result.body.kernel_metadata()
     consumer_metadata = result.body.consumer_metadata()
-    provenance = {"operation": "union", "operand_ids": operands.body_ids, "surface_route": "surfacebody"}
-    assert kernel_metadata["boolean_surface_route"] == "surfacebody"
+    provenance = {"backend": "surface", "operation": "union", "operand_ids": operands.body_ids}
+    assert kernel_metadata["boolean_backend"] == "surface"
     assert kernel_metadata["boolean_operation"] == "union"
     assert tuple(kernel_metadata["boolean_operand_ids"]) == operands.body_ids
     assert kernel_metadata["boolean_provenance"] == provenance
-    assert consumer_metadata["boolean_surface_route"] == "surfacebody"
+    assert consumer_metadata["boolean_backend"] == "surface"
     assert consumer_metadata["boolean_operation"] == "union"
     assert tuple(consumer_metadata["boolean_operand_ids"]) == operands.body_ids
     assert consumer_metadata["boolean_provenance"] == provenance
@@ -2997,8 +2996,8 @@ def test_surface_boolean_result_applies_bounded_cleanup_to_supported_results(mon
         prepare_surface_boolean_operands(
             "intersection",
             [
-                _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.5, 0.0, 0.0)),
-                _translated(make_box(size=(1.0, 1.0, 1.0)), (0.25, 0.0, 0.0)),
+                _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.5, 0.0, 0.0)),
+                _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0)),
             ],
         ),
     )
@@ -3033,8 +3032,8 @@ def test_surface_boolean_result_returns_explicit_invalid_status_when_validity_ga
         prepare_surface_boolean_operands(
             "intersection",
             [
-                _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.5, 0.0, 0.0)),
-                _translated(make_box(size=(1.0, 1.0, 1.0)), (0.25, 0.0, 0.0)),
+                _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.5, 0.0, 0.0)),
+                _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0)),
             ],
         ),
     )
@@ -3047,8 +3046,8 @@ def test_surface_boolean_result_returns_explicit_invalid_status_when_validity_ga
 
 
 def test_surface_boolean_intersection_stage_is_deterministic_for_overlapping_boxes() -> None:
-    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.5, 0.0, 0.0))
-    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.25, 0.0, 0.0))
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.5, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
     operands = prepare_surface_boolean_operands("union", [left, right])
 
     stage = surface_boolean_intersection_stage(operands)
@@ -3094,8 +3093,8 @@ def test_surface_boolean_intersection_stage_is_deterministic_for_overlapping_box
 
 
 def test_surface_boolean_intersection_stage_supports_disjoint_boxes_with_no_cut_curves() -> None:
-    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-2.0, 0.0, 0.0))
-    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (2.0, 0.0, 0.0))
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-2.0, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (2.0, 0.0, 0.0))
     operands = prepare_surface_boolean_operands("intersection", [left, right])
 
     stage = surface_boolean_intersection_stage(operands)
@@ -3108,8 +3107,8 @@ def test_surface_boolean_intersection_stage_supports_disjoint_boxes_with_no_cut_
 
 
 def test_surface_csg_fragment_graph_preserves_classification_edges_and_cut_provenance() -> None:
-    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.25, 0.0, 0.0))
-    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.25, 0.0, 0.0))
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
     plan = plan_surface_csg_operation("union", (left, right))
 
     graph = build_surface_csg_fragment_graph(plan)
@@ -3138,8 +3137,8 @@ def test_surface_csg_fragment_graph_refuses_non_executable_plans() -> None:
 
 
 def test_surface_csg_cap_patch_builder_generates_planar_payloads_from_cut_cap_edges() -> None:
-    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.25, 0.0, 0.0))
-    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.25, 0.0, 0.0))
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
     graph = build_surface_csg_fragment_graph(plan_surface_csg_operation("difference", (left, right)))
 
     caps = build_surface_csg_cap_patches(graph)
@@ -3157,8 +3156,8 @@ def test_surface_csg_cap_patch_builder_generates_planar_payloads_from_cut_cap_ed
 
 
 def test_surface_csg_cap_patch_builder_refuses_non_planar_cap_families() -> None:
-    left = make_box(size=(1.0, 1.0, 1.0))
-    right = make_sphere(radius=0.5)
+    left = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    right = make_sphere(radius=0.5, backend="surface")
     operands = SurfaceBooleanOperands(operation="difference", bodies=(left, right))
     plan = SurfaceCSGOperationPlan(operation="difference", operands=operands)
     graph = SurfaceCSGFragmentGraphRecord(
@@ -3183,8 +3182,8 @@ def test_surface_csg_cap_patch_builder_refuses_non_planar_cap_families() -> None
 
 
 def test_surface_csg_cut_boundary_trims_attach_generated_cap_payloads() -> None:
-    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.25, 0.0, 0.0))
-    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.25, 0.0, 0.0))
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
     graph = build_surface_csg_fragment_graph(plan_surface_csg_operation("difference", (left, right)))
     caps = build_surface_csg_cap_patches(graph)
 
@@ -3211,7 +3210,7 @@ def test_surface_csg_cut_boundary_trims_report_open_generated_cap_boundaries() -
     )
     plan = SurfaceCSGOperationPlan(
         operation="difference",
-        operands=SurfaceBooleanOperands(operation="difference", bodies=(make_box(), make_box())),
+        operands=SurfaceBooleanOperands(operation="difference", bodies=(make_box(backend="surface"), make_box(backend="surface"))),
     )
     graph = SurfaceCSGFragmentGraphRecord(operation="difference", plan=plan)
     caps = SurfaceCSGCapConstructionRecord(operation="difference", cap_payloads=(payload,))
@@ -3225,8 +3224,8 @@ def test_surface_csg_cut_boundary_trims_report_open_generated_cap_boundaries() -
 
 
 def test_surface_csg_result_shell_assembly_builds_body_candidate_from_graph_and_caps() -> None:
-    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.25, 0.0, 0.0))
-    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.25, 0.0, 0.0))
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
     graph = build_surface_csg_fragment_graph(plan_surface_csg_operation("difference", (left, right)))
     caps = build_surface_csg_cap_patches(graph)
     boundaries = build_surface_csg_cut_boundary_trims(graph, caps)
@@ -3262,7 +3261,7 @@ def test_surface_csg_result_shell_assembly_reports_cut_boundary_diagnostics() ->
         operation="difference",
         operands=SurfaceBooleanOperands(
             operation="difference",
-            bodies=(make_box(), make_box()),
+            bodies=(make_box(backend="surface"), make_box(backend="surface")),
         ),
     )
     graph = SurfaceCSGFragmentGraphRecord(
@@ -3289,8 +3288,8 @@ def test_surface_csg_result_shell_assembly_reports_cut_boundary_diagnostics() ->
 
 
 def test_surface_csg_result_shell_assembly_can_emit_stably_ordered_multi_shells() -> None:
-    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.25, 0.0, 0.0))
-    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.25, 0.0, 0.0))
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.25, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
     graph = build_surface_csg_fragment_graph(plan_surface_csg_operation("union", (left, right)))
     caps = build_surface_csg_cap_patches(graph)
     boundaries = build_surface_csg_cut_boundary_trims(graph, caps)
@@ -3304,8 +3303,8 @@ def test_surface_csg_result_shell_assembly_can_emit_stably_ordered_multi_shells(
 
 
 def test_surface_boolean_intersection_stage_emits_operation_aware_split_records() -> None:
-    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.5, 0.0, 0.0))
-    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.25, 0.0, 0.0))
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.5, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
 
     union_stage = surface_boolean_intersection_stage(prepare_surface_boolean_operands("union", [left, right]))
     intersection_stage = surface_boolean_intersection_stage(
@@ -3329,8 +3328,8 @@ def test_surface_boolean_intersection_stage_emits_operation_aware_split_records(
 
 
 def test_surface_boolean_overlap_fragments_reconstruct_trimmed_box_faces_for_intersection() -> None:
-    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.5, 0.0, 0.0))
-    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.25, 0.0, 0.0))
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.5, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
     operands = prepare_surface_boolean_operands("intersection", [left, right])
 
     fragments = surface_boolean_overlap_fragments(operands)
@@ -3349,8 +3348,8 @@ def test_surface_boolean_overlap_fragments_reconstruct_trimmed_box_faces_for_int
 
 
 def test_surface_boolean_overlap_fragments_are_bounded_to_supported_intersection_slice() -> None:
-    box = make_box(size=(1.0, 1.0, 1.0))
-    sphere = make_sphere(radius=0.75)
+    box = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    sphere = make_sphere(radius=0.75, backend="surface")
 
     unsupported = surface_boolean_overlap_fragments(
         prepare_surface_boolean_operands("intersection", [box, sphere])
@@ -3364,8 +3363,8 @@ def test_surface_boolean_overlap_fragments_are_bounded_to_supported_intersection
 
 
 def test_surface_boolean_result_overlap_intersection_exposes_single_shell_and_explicit_seams() -> None:
-    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.5, 0.0, 0.0))
-    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.25, 0.0, 0.0))
+    left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.5, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
 
     result = surface_boolean_result(
         "intersection",
@@ -3385,12 +3384,12 @@ def test_surface_boolean_result_overlap_intersection_exposes_single_shell_and_ex
 
 
 def test_surface_boolean_result_classifies_supported_initial_slice_outcomes() -> None:
-    overlap_left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.5, 0.0, 0.0))
-    overlap_right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.25, 0.0, 0.0))
-    disjoint_left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-2.0, 0.0, 0.0))
-    disjoint_right = _translated(make_box(size=(1.0, 1.0, 1.0)), (2.0, 0.0, 0.0))
-    contained_box = make_box(size=(4.0, 4.0, 4.0))
-    contained_sphere = make_sphere(radius=0.75)
+    overlap_left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.5, 0.0, 0.0))
+    overlap_right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0))
+    disjoint_left = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-2.0, 0.0, 0.0))
+    disjoint_right = _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (2.0, 0.0, 0.0))
+    contained_box = make_box(size=(4.0, 4.0, 4.0), backend="surface")
+    contained_sphere = make_sphere(radius=0.75, backend="surface")
 
     overlap_result = surface_boolean_result(
         "intersection",
@@ -3421,30 +3420,35 @@ def test_surface_boolean_initial_executable_scope_matrix_is_explicit() -> None:
     difference_fixture = build_csg_difference_slot_fixture()
     disjoint_union = boolean_union(
         [
-            _translated(make_box(size=(1.0, 1.0, 1.0)), (-2.0, 0.0, 0.0)),
-            _translated(make_sphere(radius=0.5), (2.0, 0.0, 0.0)),
+            _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-2.0, 0.0, 0.0)),
+            _translated(make_sphere(radius=0.5, backend="surface"), (2.0, 0.0, 0.0)),
         ],
+        backend="surface",
     )
-    overlap_union = boolean_union([union_fixture["left_operand"], union_fixture["right_operand"]])
+    overlap_union = boolean_union([union_fixture["left_operand"], union_fixture["right_operand"]], backend="surface")
     overlap_intersection = boolean_intersection(
         [
-            _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.5, 0.0, 0.0)),
-            _translated(make_box(size=(1.0, 1.0, 1.0)), (0.25, 0.0, 0.0)),
+            _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (-0.5, 0.0, 0.0)),
+            _translated(make_box(size=(1.0, 1.0, 1.0), backend="surface"), (0.25, 0.0, 0.0)),
         ],
+        backend="surface",
     )
     overlap_difference = boolean_difference(
         difference_fixture["left_operand"],
         [difference_fixture["right_operand"]],
+        backend="surface",
     )
     no_cut_difference = boolean_difference(
-        make_box(size=(1.0, 1.0, 1.0)),
-        [make_sphere(radius=2.0)],
+        make_box(size=(1.0, 1.0, 1.0), backend="surface"),
+        [make_sphere(radius=2.0, backend="surface")],
+        backend="surface",
     )
     unsupported_overlap = boolean_intersection(
         [
-            make_box(size=(2.0, 2.0, 2.0)),
-            make_sphere(radius=1.0, center=(0.75, 0.0, 0.0)),
+            make_box(size=(2.0, 2.0, 2.0), backend="surface"),
+            make_sphere(radius=1.0, center=(0.75, 0.0, 0.0), backend="surface"),
         ],
+        backend="surface",
     )
 
     assert isinstance(disjoint_union, SurfaceBooleanResult)
@@ -3462,8 +3466,8 @@ def test_surface_boolean_initial_executable_scope_matrix_is_explicit() -> None:
 
 
 def test_surface_boolean_intersection_stage_is_explicitly_unsupported_for_non_box_operands() -> None:
-    box = make_box(size=(1.0, 1.0, 1.0))
-    sphere = make_sphere(radius=0.75)
+    box = make_box(size=(1.0, 1.0, 1.0), backend="surface")
+    sphere = make_sphere(radius=0.75, backend="surface")
     operands = prepare_surface_boolean_operands("intersection", [box, sphere])
 
     stage = surface_boolean_intersection_stage(operands)

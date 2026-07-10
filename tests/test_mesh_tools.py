@@ -4,11 +4,11 @@ import numpy as np
 import pytest
 
 from impression.mesh import Mesh, MeshSectionResult, analyze_mesh, repair_mesh, section_mesh_with_plane
-from impression.modeling import make_box_mesh, make_cylinder_mesh
+from impression.modeling import make_box, make_cylinder
 
 
 def test_section_mesh_with_plane_returns_closed_box_slice() -> None:
-    mesh = make_box_mesh(size=(2.0, 2.0, 2.0))
+    mesh = make_box(size=(2.0, 2.0, 2.0), backend="mesh")
 
     result = section_mesh_with_plane(mesh, origin=(0.0, 0.0, 0.0), normal=(0.0, 0.0, 1.0))
 
@@ -29,7 +29,7 @@ def test_section_mesh_with_plane_returns_closed_box_slice() -> None:
 
 
 def test_section_mesh_with_plane_returns_closed_cylinder_slice() -> None:
-    mesh = make_cylinder_mesh(radius=1.0, height=2.0)
+    mesh = make_cylinder(radius=1.0, height=2.0, backend="mesh")
 
     result = section_mesh_with_plane(mesh, origin=(0.0, 0.0, 0.0), normal=(0.0, 0.0, 1.0))
 
@@ -44,7 +44,7 @@ def test_section_mesh_with_plane_returns_closed_cylinder_slice() -> None:
 
 
 def test_section_mesh_with_plane_returns_empty_for_disjoint_plane() -> None:
-    mesh = make_box_mesh(size=(1.0, 1.0, 1.0))
+    mesh = make_box(size=(1.0, 1.0, 1.0), backend="mesh")
 
     result = section_mesh_with_plane(mesh, origin=(0.0, 0.0, 5.0), normal=(0.0, 0.0, 1.0))
 
@@ -66,7 +66,7 @@ def test_section_mesh_with_plane_validates_inputs() -> None:
 
 
 def test_mesh_analysis_and_sectioning_can_be_used_together_for_tooling() -> None:
-    mesh = make_box_mesh(size=(1.0, 1.0, 1.0))
+    mesh = make_box(size=(1.0, 1.0, 1.0), backend="mesh")
 
     analysis = analyze_mesh(mesh)
     section = section_mesh_with_plane(mesh, origin=(0.0, 0.0, 0.0), normal=(0.0, 1.0, 0.0))
@@ -129,7 +129,7 @@ def test_repair_mesh_removes_unreferenced_vertices_and_preserves_face_colors() -
 
 
 def test_repair_mesh_validates_area_epsilon() -> None:
-    mesh = make_box_mesh(size=(1.0, 1.0, 1.0))
+    mesh = make_box(size=(1.0, 1.0, 1.0), backend="mesh")
 
     with pytest.raises(ValueError, match="area_epsilon must be positive"):
         repair_mesh(mesh, area_epsilon=0.0)
