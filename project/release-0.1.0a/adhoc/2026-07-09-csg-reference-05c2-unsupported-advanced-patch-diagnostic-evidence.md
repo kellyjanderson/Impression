@@ -71,7 +71,7 @@ Open questions / nuance discovered:
 | 2 | Limited scope to diagnostics only. | 1 IWU retained. |
 | 3 | Clarified unsupported routes do not get fake STLs. | Manifest score below split threshold. |
 | 4 | Confirmed route support state is input, not owned here. | Cohesive leaf. |
-| 5 | Confirmed diagnostic snapshots are optional evidence helpers. | Final draft score: 19.5. |
+| 5 | Confirmed diagnostic snapshots are optional evidence helpers. | Final draft score: 17. |
 
 ## Manifest Assessment
 
@@ -93,7 +93,7 @@ Score:
 - Async/concurrency behavior: 0 x 3 = 0
 - Cross-screen reusable behavior: 0 x 2 = 0
 - Readiness blockers: 1 x 2 = 2
-- Total: 19
+- Total: 17
 
 Readiness blockers:
 - [ ] Exact route thresholds or fixture tolerances may need confirmation during implementation.

@@ -128,7 +128,7 @@ Open questions / nuance discovered:
 | 2 | Kept multi-operand, lofted, and advanced families out of scope. | 1 IWU retained. |
 | 3 | Confirmed tangent diagnostics remain in scope because they are primitive-pair behavior. | Cohesive leaf. |
 | 4 | Confirmed reference artifacts are verification, not solver implementation. | Score stable. |
-| 5 | Confirmed no-hidden-mesh fallback is explicit verification. | Final draft score: 22.5. |
+| 5 | Confirmed no-hidden-mesh fallback is explicit verification. | Final draft score: 23.5. |
 
 ## Manifest Assessment
 

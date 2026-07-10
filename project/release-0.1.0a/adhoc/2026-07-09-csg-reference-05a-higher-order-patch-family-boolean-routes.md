@@ -92,7 +92,7 @@ Open questions / nuance discovered:
 | 2 | Limited scope to B-spline, NURBS, sweep, and subdivision. | 1 IWU retained. |
 | 3 | Added explicit residual/tolerance diagnostics. | Manifest score remains below split threshold. |
 | 4 | Clarified that fixture generation is out of scope. | Cohesive leaf. |
-| 5 | Confirmed no hidden mesh fallback is a verification requirement. | Final draft score: 20.5. |
+| 5 | Confirmed no hidden mesh fallback is a verification requirement. | Final draft score: 23. |
 
 ## Manifest Assessment
 

@@ -64,7 +64,7 @@ Open questions / nuance discovered:
 | 2 | Limited scope to planar box cutters. | 1 IWU retained. |
 | 3 | Moved unsupported cutter diagnostics out. | Manifest score below split threshold. |
 | 4 | Confirmed trim reconstruction is prerequisite. | Readiness blocker retained. |
-| 5 | Confirmed fixture generation is out of scope. | Final draft score: 21. |
+| 5 | Confirmed fixture generation is out of scope. | Final draft score: 22. |
 
 ## Manifest Assessment
 
@@ -85,8 +85,8 @@ Score:
 - Database queries/tables/migrations: 0 x 2 = 0
 - Async/concurrency behavior: 0 x 3 = 0
 - Cross-screen reusable behavior: 0 x 2 = 0
-- Readiness blockers: 2 x 2 = 4
-- Total: 24
+- Readiness blockers: 1 x 2 = 2
+- Total: 22
 
 Readiness blockers:
 - [ ] Exact route thresholds or fixture tolerances may need confirmation during implementation.

@@ -78,7 +78,7 @@ Open questions / nuance discovered:
 | 2 | Limited scope to field composition/refusal. | 1 IWU retained. |
 | 3 | Added persistence evidence only for successful payloads. | Manifest score below split threshold. |
 | 4 | Excluded contour extraction as authored CSG truth. | Cohesive leaf. |
-| 5 | Confirmed reference fixtures are out of scope. | Final draft score: 20.5. |
+| 5 | Confirmed reference fixtures are out of scope. | Final draft score: 23. |
 
 ## Manifest Assessment
 

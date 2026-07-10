@@ -74,7 +74,7 @@ Open questions / nuance discovered:
 | 2 | Limited scope to `.impress` evidence. | 1 IWU retained. |
 | 3 | Moved result construction out. | Manifest score below split threshold. |
 | 4 | Confirmed dirty STL fixture generation is out of scope. | Cohesive leaf. |
-| 5 | Confirmed persistence is verification/evidence only. | Final draft score: 19. |
+| 5 | Confirmed persistence is verification/evidence only. | Final draft score: 18. |
 
 ## Manifest Assessment
 

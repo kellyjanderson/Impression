@@ -76,7 +76,7 @@ Open questions / nuance discovered:
 | 2 | Limited scope to source identity and compatibility. | 1 IWU retained. |
 | 3 | Moved successful payload persistence out. | Manifest score below split threshold. |
 | 4 | Confirmed reference fixture generation is out of scope. | Cohesive leaf. |
-| 5 | Confirmed no-hidden-mesh evidence applies to refusal routes. | Final draft score: 19.5. |
+| 5 | Confirmed no-hidden-mesh evidence applies to refusal routes. | Final draft score: 21. |
 
 ## Manifest Assessment
 

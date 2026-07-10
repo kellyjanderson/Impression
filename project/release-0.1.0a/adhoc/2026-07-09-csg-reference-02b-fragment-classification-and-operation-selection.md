@@ -64,7 +64,7 @@ Open questions / nuance discovered:
 | 2 | Limited scope to fragment classification and operation selection. | 1 IWU retained. |
 | 3 | Moved graph construction out. | Manifest score below split threshold. |
 | 4 | Moved shell assembly out. | Cohesive leaf. |
-| 5 | Confirmed ambiguity diagnostics are in scope. | Final draft score: 19.5. |
+| 5 | Confirmed ambiguity diagnostics are in scope. | Final draft score: 21. |
 
 ## Manifest Assessment
 

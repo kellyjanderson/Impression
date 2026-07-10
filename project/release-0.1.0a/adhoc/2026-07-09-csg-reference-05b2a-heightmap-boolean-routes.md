@@ -77,7 +77,7 @@ Open questions / nuance discovered:
 | 2 | Limited scope to heightmap sampled-grid truth. | 1 IWU retained. |
 | 3 | Added payload round-trip evidence. | Manifest score below split threshold. |
 | 4 | Excluded displacement source identity. | Cohesive leaf. |
-| 5 | Confirmed reference fixtures are out of scope. | Final draft score: 22.5. |
+| 5 | Confirmed reference fixtures are out of scope. | Final draft score: 24. |
 
 ## Manifest Assessment
 

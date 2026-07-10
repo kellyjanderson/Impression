@@ -66,7 +66,7 @@ Open questions / nuance discovered:
 | 2 | Kept ruled execution out of scope. | 1 IWU retained. |
 | 3 | Added self-intersection risk diagnostic. | Manifest score below split threshold. |
 | 4 | Confirmed loft planner semantics do not change. | Cohesive leaf. |
-| 5 | Confirmed dirty STL fixtures are out of scope. | Final draft score: 19.5. |
+| 5 | Confirmed dirty STL fixtures are out of scope. | Final draft score: 21. |
 
 ## Manifest Assessment
 

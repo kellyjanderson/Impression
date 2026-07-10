@@ -67,7 +67,7 @@ Open questions / nuance discovered:
 | 2 | Limited scope to refusal diagnostics. | 1 IWU retained. |
 | 3 | Moved box-cutter execution out. | Manifest score below split threshold. |
 | 4 | Confirmed fixture generation is out of scope. | Cohesive leaf. |
-| 5 | Confirmed no-hidden-mesh evidence applies to refusal routes. | Final draft score: 18. |
+| 5 | Confirmed no-hidden-mesh evidence applies to refusal routes. | Final draft score: 17. |
 
 ## Manifest Assessment
 

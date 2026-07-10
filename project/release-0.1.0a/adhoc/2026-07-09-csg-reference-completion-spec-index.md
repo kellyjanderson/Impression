@@ -104,6 +104,20 @@ Final implementation leaves:
    05c2 so every planned family either executes or refuses with durable
    diagnostics.
 
+## Manifest Review Loop
+
+Date: 2026-07-10
+
+Five-pass review/update/rescore result:
+
+| Pass | Review focus | Update | Rescore result |
+| --- | --- | --- | --- |
+| 1 | Parent rollup counts versus final executable leaves. | Updated parent program IWU counts and split decisions to name final descendant leaves rather than only immediate child program documents. | Index remains 18 final implementation leaves. Parent rollups now reflect descendant leaf counts. |
+| 2 | Score arithmetic and split thresholds. | Corrected inflated totals for supported advanced dirty STL evidence and unsupported advanced diagnostic evidence. | No candidate remains at 25+. All 16-24 scores retain split/cohesion explanations. |
+| 3 | Template completeness. | No shape changes required after checking readiness fields, open questions, score categories, readiness blockers, and split decisions. | All 28 CSG spec-manifest files match the selected manifest-entry template requirements. |
+| 4 | Readiness blocker scoring. | Corrected readiness-blocker counts and totals for ruled box-cutter execution, loft CSG evidence, and supported advanced dirty STL evidence. | Readiness blocker score lines now match unchecked readiness blockers in every manifest. |
+| 5 | Final consistency and stale prose. | Synced stale `Final draft score` prose with each manifest's current `Total` score. | Final manifest score range is 7.0 to 24.0 across 28 spec-manifest files; no split-required scores remain. |
+
 ## Completion
 
 This ad hoc spec set is complete when every leaf is implemented or explicitly

@@ -105,7 +105,7 @@ Open questions / nuance discovered:
 | 2 | Kept pairwise solver and trim reconstruction out of scope. | 1 IWU retained. |
 | 3 | Confirmed diagnostics must identify failed composition step. | Cohesive leaf. |
 | 4 | Confirmed deterministic ordering is part of the public behavior. | Score stable. |
-| 5 | Confirmed intermediate results stay surfaced. | Final draft score: 21.5. |
+| 5 | Confirmed intermediate results stay surfaced. | Final draft score: 22. |
 
 ## Manifest Assessment
 

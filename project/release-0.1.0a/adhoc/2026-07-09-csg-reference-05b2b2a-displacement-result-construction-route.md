@@ -73,7 +73,7 @@ Open questions / nuance discovered:
 | 2 | Limited scope to valid-source construction. | 1 IWU retained. |
 | 3 | Moved persistence evidence out. | Manifest score below split threshold. |
 | 4 | Confirmed source identity refusal is prerequisite. | Cohesive leaf. |
-| 5 | Confirmed dirty STL fixture generation is out of scope. | Final draft score: 21. |
+| 5 | Confirmed dirty STL fixture generation is out of scope. | Final draft score: 21.5. |
 
 ## Manifest Assessment
 

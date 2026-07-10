@@ -70,7 +70,7 @@ Open questions / nuance discovered:
 | 2 | Limited scope to dirty STL fixtures. | 1 IWU retained. |
 | 3 | Clarified unsupported routes are out of scope. | Manifest score below split threshold. |
 | 4 | Confirmed promotion is out of scope. | Cohesive leaf. |
-| 5 | Confirmed route success is prerequisite. | Final draft score: 21.5. |
+| 5 | Confirmed route success is prerequisite. | Final draft score: 21. |
 
 ## Manifest Assessment
 
@@ -91,8 +91,8 @@ Score:
 - Database queries/tables/migrations: 0 x 2 = 0
 - Async/concurrency behavior: 0 x 3 = 0
 - Cross-screen reusable behavior: 0 x 2 = 0
-- Readiness blockers: 2 x 2 = 4
-- Total: 24
+- Readiness blockers: 1 x 2 = 2
+- Total: 21
 
 Readiness blockers:
 - [ ] Exact route thresholds or fixture tolerances may need confirmation during implementation.
