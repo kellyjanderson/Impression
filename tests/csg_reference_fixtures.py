@@ -39,9 +39,9 @@ def _fixture_metadata(
 
 
 def build_csg_union_box_post_fixture() -> dict[str, object]:
-    base = make_box(size=(2.4, 2.0, 1.2), center=(0.0, 0.0, 0.0))
-    post = make_box(size=(0.50, 0.38, 0.95), center=(1.15, -0.48, 0.28))
-    result = _surface_boolean_body(boolean_union([base, post]))
+    base = make_box(size=(2.4, 2.0, 1.2), center=(0.0, 0.0, 0.0), backend="surface")
+    post = make_box(size=(0.50, 0.38, 0.95), center=(1.15, -0.48, 0.28), backend="surface")
+    result = _surface_boolean_body(boolean_union([base, post], backend="surface"))
     expected_slice = np.asarray(
         [
             (-1.2, -1.0),
@@ -68,9 +68,9 @@ def build_csg_union_box_post_fixture() -> dict[str, object]:
 
 
 def build_csg_difference_slot_fixture() -> dict[str, object]:
-    base = make_box(size=(2.4, 2.0, 1.2), center=(0.0, 0.0, 0.0))
-    cutter = make_box(size=(1.90, 1.40, 1.60), center=(-0.25, 0.50, 0.0))
-    result = _surface_boolean_body(boolean_difference(base, [cutter]))
+    base = make_box(size=(2.4, 2.0, 1.2), center=(0.0, 0.0, 0.0), backend="surface")
+    cutter = make_box(size=(1.90, 1.40, 1.60), center=(-0.25, 0.50, 0.0), backend="surface")
+    result = _surface_boolean_body(boolean_difference(base, [cutter], backend="surface"))
     expected_slice = np.asarray(
         [
             (-1.2, -1.0),

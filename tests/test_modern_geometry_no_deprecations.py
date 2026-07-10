@@ -53,7 +53,7 @@ def test_finished_surface_first_modules_do_not_import_or_call_legacy_deprecation
     for relpath in _FORBIDDEN_DEPRECATION_FILES:
         text = (project_root / relpath).read_text()
         assert "warn_mesh_primary_api" not in text
-        assert "warn_mesh_primary_route" not in text
+        assert "warn_mesh_primary_backend" not in text
         assert "_legacy_mesh_deprecation" not in text
 
 
@@ -78,7 +78,7 @@ def test_planar_and_frustum_mesh_helpers_are_quarantined_outside_primitives(proj
 def test_finished_surface_first_geometry_paths_do_not_emit_deprecation_warnings() -> None:
     section = _simple_section()
 
-    primitive_messages = _deprecation_messages(lambda: make_box(size=(1.0, 1.0, 1.0)))
+    primitive_messages = _deprecation_messages(lambda: make_box(size=(1.0, 1.0, 1.0), backend="mesh"))
     loft_messages = _deprecation_messages(lambda: loft([section, section]))
 
     assert primitive_messages == []

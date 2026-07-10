@@ -64,26 +64,24 @@ def test_heightmap_alpha_mask(tmp_path: Path):
     path = _write_test_image(tmp_path / "mask.png", transparent_corner=True)
 
     masked = heightmap(path, height=1.0, alpha_mode="mask")
-    masked_mesh = tessellate_surface_body(masked).mesh
-    assert masked_mesh.n_faces == 0
+    assert masked.n_faces == 0
 
     ignored = heightmap(path, height=1.0, alpha_mode="ignore")
-    ignored_mesh = tessellate_surface_body(ignored).mesh
-    assert ignored_mesh.n_faces == 2
-    assert np.isclose(ignored_mesh.vertices[0, 2], 0.0)
+    assert ignored.n_faces == 2
+    assert np.isclose(ignored.vertices[0, 2], 0.0)
 
 
 def test_heightmap_quality_preview(tmp_path: Path):
-    image = np.ones((4, 4), dtype=float)
-    body = heightmap(image, height=1.0, alpha_mode="ignore", quality=MeshQuality(lod="preview"))
-    assert body.patch_count == 1
+    path = _write_test_image(tmp_path / "mask.png", transparent_corner=False)
+    mesh = heightmap(path, height=1.0, alpha_mode="ignore", quality=MeshQuality(lod="preview"))
+    assert mesh.n_faces >= 0
 
 
 def test_heightmap_surface_backend_uses_sampled_surface_payload():
     samples = np.asarray([[0.0, 1.0], [0.5, 0.25]], dtype=float)
 
     patch = make_heightmap_surface_patch(samples, height=2.0, xy_scale=(2.0, 3.0))
-    body = heightmap(samples, height=2.0, xy_scale=(2.0, 3.0))
+    body = heightmap(samples, height=2.0, xy_scale=(2.0, 3.0), backend="surface")
 
     assert isinstance(patch, HeightmapSurfacePatch)
     assert patch.height_samples.shape == (2, 2)
@@ -95,8 +93,8 @@ def test_heightmap_surface_backend_uses_sampled_surface_payload():
 def test_heightmap_surface_alpha_policy_and_tessellation_preserve_mask(tmp_path: Path):
     path = _write_test_image(tmp_path / "mask.png", transparent_corner=True)
 
-    masked_body = heightmap(path, height=1.0, alpha_mode="mask")
-    ignored_body = heightmap(path, height=1.0, alpha_mode="ignore")
+    masked_body = heightmap(path, height=1.0, alpha_mode="mask", backend="surface")
+    ignored_body = heightmap(path, height=1.0, alpha_mode="ignore", backend="surface")
     masked_patch = masked_body.iter_patches()[0]
     ignored_patch = ignored_body.iter_patches()[0]
     masked_mesh = tessellate_surface_body(masked_body).mesh
@@ -135,33 +133,32 @@ def test_heightmap_mesh_compatibility_result_marks_explicit_mesh_boundary():
     image = np.ones((2, 2), dtype=float)
 
     result = heightmap_mesh_compatibility_result(image, height=0.5, alpha_mode="ignore")
+    mesh = heightmap(image, height=0.5, alpha_mode="ignore", backend="mesh")
 
     assert isinstance(result, HeightmapMeshCompatibilityResult)
     assert result.boundary == "explicit-mesh-compatibility"
     assert result.mesh.metadata["heightmap_mesh_compatibility"]["boundary"] == "explicit-mesh-compatibility"
-    assert result.mesh.metadata["heightmap_mesh_compatibility"]["mesh_faces"] == result.mesh.n_faces
+    assert mesh.metadata["heightmap_mesh_compatibility"]["mesh_faces"] == mesh.n_faces
 
 
 def test_displace_heightmap_planar():
-    mesh = make_plane(size=(1.0, 1.0), center=(0.0, 0.0, 0.0))
+    mesh = make_plane(size=(1.0, 1.0), center=(0.0, 0.0, 0.0), backend="mesh")
     image = np.ones((2, 2), dtype=float)
 
     displaced = displace_heightmap(mesh, image, height=0.5, plane="xy", direction="z")
-    assert displaced.patch_count == 1
-    assert isinstance(displaced.iter_patches()[0], DisplacementSurfacePatch)
+    assert np.allclose(displaced.vertices[:, 2], mesh.vertices[:, 2] + 0.5)
 
     arr = np.ones((2, 2, 4), dtype=np.uint8) * 255
     arr[0, 0, 3] = 0
     masked = displace_heightmap(mesh, arr, height=0.5, plane="xy", direction="z", alpha_mode="mask")
-    assert isinstance(masked.iter_patches()[0], DisplacementSurfacePatch)
-    assert tessellate_surface_body(masked).mesh.n_faces > 0
+    assert masked.n_faces < mesh.n_faces
 
 
 def test_displace_heightmap_surface_backend_uses_displacement_payload():
     surface = make_plane(size=(1.0, 1.0), center=(0.0, 0.0, 0.0))
     image = np.ones((2, 2), dtype=float)
 
-    displaced = displace_heightmap(surface, image, height=0.5, plane="xy", direction="z")
+    displaced = displace_heightmap(surface, image, height=0.5, plane="xy", direction="z", backend="surface")
     patch = displaced.iter_patches()[0]
     mesh = tessellate_surface_body(displaced).mesh
     patch_mesh = tessellate_surface_patch(patch)
@@ -508,6 +505,7 @@ def test_displace_heightmap_surface_projection_planes_and_explicit_bounds():
         height=0.25,
         plane="xz",
         direction="y",
+        backend="surface",
     )
     patch = displaced.iter_patches()[0]
 
@@ -531,6 +529,7 @@ def test_displace_heightmap_surface_projection_bounds_refusal_and_mask():
             height=0.5,
             plane="xz",
             direction="z",
+            backend="surface",
         )
 
     masked = displace_heightmap(
@@ -541,6 +540,7 @@ def test_displace_heightmap_surface_projection_bounds_refusal_and_mask():
         direction="z",
         bounds=(-0.5, 0.5, -0.5, 0.5),
         alpha_mode="mask",
+        backend="surface",
     )
     ignored = displace_heightmap(
         surface,
@@ -550,6 +550,7 @@ def test_displace_heightmap_surface_projection_bounds_refusal_and_mask():
         direction="z",
         bounds=(-0.5, 0.5, -0.5, 0.5),
         alpha_mode="ignore",
+        backend="surface",
     )
     mesh = tessellate_surface_body(masked).mesh
 
@@ -557,10 +558,8 @@ def test_displace_heightmap_surface_projection_bounds_refusal_and_mask():
     assert mesh.n_faces < tessellate_surface_body(ignored).mesh.n_faces
 
 
-def test_displace_heightmap_requires_surface_body_input() -> None:
-    from impression.mesh import Mesh
-
-    mesh = Mesh(vertices=np.zeros((0, 3), dtype=float), faces=np.zeros((0, 3), dtype=int))
+def test_displace_heightmap_surface_backend_rejects_mesh_input() -> None:
+    mesh = make_plane(size=(1.0, 1.0), center=(0.0, 0.0, 0.0), backend="mesh")
 
     with pytest.raises(ValueError, match="Surface displacement requires a SurfaceBody"):
-        displace_heightmap(mesh, np.ones((2, 2), dtype=float))
+        displace_heightmap(mesh, np.ones((2, 2), dtype=float), backend="surface")

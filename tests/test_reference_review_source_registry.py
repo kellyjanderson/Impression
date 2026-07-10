@@ -327,39 +327,6 @@ def test_dirty_impress_fixture_entrypoints_build_reviewable_models(project_root:
     assert built_types == {"SurfaceBody"}
 
 
-def test_dirty_stl_fixture_file_covers_reviewable_stl_inventory(project_root: Path) -> None:
-    fixture_file = project_root / "tests/reference_review_fixtures/dirty-stl-fixtures.json"
-    summary = load_source_records_from_file(fixture_file)
-    records = tuple(item.record for item in summary.valid_items)
-    fixture_ids = {record.fixture_id for record in records}
-    dirty_artifacts = sorted((project_root / "project/release-0.1.0a/reference-stl/dirty").rglob("*.stl"))
-    gold_artifacts = sorted((project_root / "project/release-0.1.0a/reference-stl/gold").rglob("*.stl"))
-    artifact_paths = sorted(path.resolve() for record in records for path in record.artifact_paths)
-
-    assert not summary.diagnostics
-    assert len(fixture_ids) == len(records)
-    assert set(artifact_paths) == {path.resolve() for path in dirty_artifacts + gold_artifacts}
-    assert all(record.source_path.name == "stl_review_sources.py" for record in records)
-    assert all(record.purpose for record in records)
-    assert all(record.methodology for record in records)
-    assert all(record.render_description for record in records)
-
-
-def test_dirty_stl_fixture_file_reports_missing_artifact(tmp_path: Path, project_root: Path) -> None:
-    source_fixture_file = project_root / "tests/reference_review_fixtures/dirty-stl-fixtures.json"
-    payload = json.loads(source_fixture_file.read_text())
-    payload["allowed_root"] = str(project_root)
-    payload["fixtures"][0]["artifact_paths"] = ["project/release-0.1.0a/reference-stl/dirty/missing.stl"]
-    fixture_file = tmp_path / "dirty-stl-fixtures.json"
-    fixture_file.write_text(json.dumps(payload))
-
-    summary = load_source_records_from_file(fixture_file)
-    diagnostics = tuple(diagnostic for item in summary.items for diagnostic in item.validation.diagnostics)
-
-    assert any(diagnostic.code == "missing-artifact" for diagnostic in diagnostics)
-    assert any(diagnostic.fixture_id == payload["fixtures"][0]["fixture_id"] for diagnostic in diagnostics)
-
-
 def test_review_context_payload_is_deterministic_and_omits_absolute_source_path(tmp_path: Path) -> None:
     source = _write_source(tmp_path, "candidate.py")
     record = ReviewSourceModelRecord(

@@ -11,7 +11,6 @@ from impression.modeling import (
     SurfaceBody,
     group,
     make_box,
-    make_box_mesh,
     translate,
 )
 
@@ -89,7 +88,7 @@ def test_surface_authored_modules_do_not_import_meshgroup_composition_truth() ->
 
 def test_transform_route_keeps_surface_and_meshgroup_boundaries_separate() -> None:
     surface_body = make_box(size=(1.0, 1.0, 1.0))
-    mesh_body = make_box_mesh(size=(1.0, 1.0, 1.0))
+    mesh_body = make_box(size=(1.0, 1.0, 1.0), backend="mesh")
     mesh_group = group([mesh_body])
 
     moved_surface = translate(surface_body, (1.0, 0.0, 0.0))

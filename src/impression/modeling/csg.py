@@ -70,6 +70,7 @@ from .surface_intersections import (
     solve_sweep_surface_intersection_adapter,
 )
 
+BooleanBackend = Literal["manifold", "surface"]
 SurfaceBooleanOperation = Literal["union", "difference", "intersection"]
 SURFACE_BOOLEAN_OPERATIONS: tuple[SurfaceBooleanOperation, ...] = ("union", "difference", "intersection")
 SurfaceBooleanStatus = Literal["succeeded", "invalid", "unsupported"]
@@ -3572,13 +3573,13 @@ class SurfaceCSGProvenanceMetadataRecord:
 
     operation: SurfaceBooleanOperation
     operand_ids: tuple[str, ...]
-    surface_route: str = "surfacebody"
+    backend: str = "surface"
 
     def canonical_payload(self) -> dict[str, object]:
         return {
+            "backend": self.backend,
             "operand_ids": self.operand_ids,
             "operation": self.operation,
-            "surface_route": self.surface_route,
         }
 
 
@@ -8872,6 +8873,11 @@ def intersect_axis_compatible_revolution_pair(
     )
 
 
+def _ensure_backend(backend: BooleanBackend) -> None:
+    if backend not in {"manifold", "surface"}:
+        raise ValueError(f"Unsupported backend '{backend}'. Only 'manifold' and 'surface' are available right now.")
+
+
 def _load_manifold():
     try:
         from manifold3d import Manifold, Mesh as ManifoldMesh
@@ -9608,7 +9614,7 @@ SURFACE_CSG_CALLER_INVENTORY: tuple[SurfaceCSGCallerInventoryRecord, ...] = (
         category="primitive",
         operation=None,
         surface_route="surface primitive constructors",
-        mesh_route="explicit make_*_mesh compatibility constructors",
+        mesh_route="explicit backend='mesh' primitive constructors",
         explicit_mesh_route=True,
     ),
 )
@@ -9727,11 +9733,11 @@ def _surface_boolean_result_metadata(operands: SurfaceBooleanOperands) -> dict[s
         inherited_kernel.update(body.kernel_metadata())
         inherited_consumer.update(body.consumer_metadata())
     provenance = _surface_boolean_provenance_payload(operands)
-    inherited_kernel["boolean_surface_route"] = "surfacebody"
+    inherited_kernel["boolean_backend"] = "surface"
     inherited_kernel["boolean_operation"] = operands.operation
     inherited_kernel["boolean_operand_ids"] = operands.body_ids
     inherited_kernel["boolean_provenance"] = provenance
-    inherited_consumer["boolean_surface_route"] = "surfacebody"
+    inherited_consumer["boolean_backend"] = "surface"
     inherited_consumer["boolean_operation"] = operands.operation
     inherited_consumer["boolean_operand_ids"] = operands.body_ids
     inherited_consumer["boolean_provenance"] = provenance
@@ -12663,66 +12669,96 @@ def _surface_boolean_result_after_family_gate(
 def boolean_union(
     meshes: Iterable[Mesh | MeshGroup | SurfaceBody],
     tolerance: float = 1e-4,
+    backend: BooleanBackend = "manifold",
 ) -> Mesh | SurfaceBooleanResult:
+    _ensure_backend(backend)
     if tolerance <= 0:
         raise ValueError("tolerance must be positive.")
-    bodies = tuple(meshes)
-    gated = _surface_boolean_result_after_family_gate("union", bodies, caller_id="csg.boolean_union")  # type: ignore[arg-type]
-    if gated is not None:
-        return gated
-    operands = prepare_surface_boolean_operands("union", bodies)  # type: ignore[arg-type]
-    return assert_no_hidden_surface_csg_mesh_fallback(
-        "csg.boolean_union",
-        surface_boolean_result("union", operands),
+    if backend == "surface":
+        bodies = tuple(meshes)
+        gated = _surface_boolean_result_after_family_gate("union", bodies, caller_id="csg.boolean_union")  # type: ignore[arg-type]
+        if gated is not None:
+            return gated
+        operands = prepare_surface_boolean_operands("union", bodies)  # type: ignore[arg-type]
+        return assert_no_hidden_surface_csg_mesh_fallback(
+            "csg.boolean_union",
+            surface_boolean_result("union", operands),
+        )
+    warn_mesh_primary_api(
+        "boolean_union",
+        replacement="SurfaceBody boolean operations once the surface-first CSG path lands",
     )
+    return _apply_boolean(_flatten_meshes(meshes), "union")
 
 
 def boolean_difference(
     base: Mesh | MeshGroup | SurfaceBody,
     cutters: Iterable[Mesh | MeshGroup | SurfaceBody],
     tolerance: float = 1e-4,
+    backend: BooleanBackend = "manifold",
 ) -> Mesh | SurfaceBooleanResult:
+    _ensure_backend(backend)
     if tolerance <= 0:
         raise ValueError("tolerance must be positive.")
-    cutter_tuple = tuple(cutters)
-    gated = _surface_boolean_result_after_family_gate(
-        "difference",
-        (base, *cutter_tuple),
-        caller_id="csg.boolean_difference",
-    )  # type: ignore[arg-type]
-    if gated is not None:
-        return gated
-    operands = prepare_surface_boolean_difference_operands(base, cutter_tuple)  # type: ignore[arg-type]
-    return assert_no_hidden_surface_csg_mesh_fallback(
-        "csg.boolean_difference",
-        surface_boolean_result("difference", operands),
+    if backend == "surface":
+        cutter_tuple = tuple(cutters)
+        gated = _surface_boolean_result_after_family_gate(
+            "difference",
+            (base, *cutter_tuple),
+            caller_id="csg.boolean_difference",
+        )  # type: ignore[arg-type]
+        if gated is not None:
+            return gated
+        operands = prepare_surface_boolean_difference_operands(base, cutter_tuple)  # type: ignore[arg-type]
+        return assert_no_hidden_surface_csg_mesh_fallback(
+            "csg.boolean_difference",
+            surface_boolean_result("difference", operands),
+        )
+    warn_mesh_primary_api(
+        "boolean_difference",
+        replacement="SurfaceBody boolean operations once the surface-first CSG path lands",
     )
+    if isinstance(base, MeshGroup):
+        base_mesh = base.to_mesh()
+    else:
+        base_mesh = base
+    meshes = _flatten_meshes([base_mesh]) + _flatten_meshes(cutters)
+    return _apply_boolean(meshes, "difference")
 
 
 def boolean_intersection(
     meshes: Iterable[Mesh | MeshGroup | SurfaceBody],
     tolerance: float = 1e-4,
+    backend: BooleanBackend = "manifold",
 ) -> Mesh | SurfaceBooleanResult:
+    _ensure_backend(backend)
     if tolerance <= 0:
         raise ValueError("tolerance must be positive.")
-    bodies = tuple(meshes)
-    gated = _surface_boolean_result_after_family_gate(
-        "intersection",
-        bodies,
-        caller_id="csg.boolean_intersection",
-    )  # type: ignore[arg-type]
-    if gated is not None:
-        return gated
-    operands = prepare_surface_boolean_operands("intersection", bodies)  # type: ignore[arg-type]
-    return assert_no_hidden_surface_csg_mesh_fallback(
-        "csg.boolean_intersection",
-        surface_boolean_result("intersection", operands),
+    if backend == "surface":
+        bodies = tuple(meshes)
+        gated = _surface_boolean_result_after_family_gate(
+            "intersection",
+            bodies,
+            caller_id="csg.boolean_intersection",
+        )  # type: ignore[arg-type]
+        if gated is not None:
+            return gated
+        operands = prepare_surface_boolean_operands("intersection", bodies)  # type: ignore[arg-type]
+        return assert_no_hidden_surface_csg_mesh_fallback(
+            "csg.boolean_intersection",
+            surface_boolean_result("intersection", operands),
+        )
+    warn_mesh_primary_api(
+        "boolean_intersection",
+        replacement="SurfaceBody boolean operations once the surface-first CSG path lands",
     )
+    return _apply_boolean(_flatten_meshes(meshes), "intersection")
 
 
 def union_meshes(
     meshes: Union[Iterable[Mesh | MeshGroup], Mapping[object, Mesh | MeshGroup]],
     tolerance: float = 1e-4,
+    backend: BooleanBackend = "manifold",
 ) -> Mesh:
     """Retained standalone mesh union tool.
 
@@ -12736,6 +12772,4 @@ def union_meshes(
     )
     if isinstance(meshes, Mapping):
         meshes = meshes.values()
-    if tolerance <= 0:
-        raise ValueError("tolerance must be positive.")
-    return _apply_boolean(_flatten_meshes(meshes), "union")
+    return boolean_union(meshes, tolerance=tolerance, backend=backend)

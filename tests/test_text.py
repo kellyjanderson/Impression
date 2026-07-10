@@ -83,13 +83,14 @@ def test_make_text_mesh_respects_depth_and_direction_axis() -> None:
     assert np.isclose(zmax - zmin, 0.2, atol=1e-9)
     assert xmax - xmin > ymax - ymin
 
-    oriented = make_text_mesh(
+    oriented = make_text(
         "OO",
         depth=0.2,
         center=(1.0, 2.0, 3.0),
         direction=(1.0, 0.0, 0.0),
         font_size=1.0,
         font_path=str(font_path),
+        backend="mesh",
     )
     xmin, xmax, ymin, ymax, zmin, zmax = oriented.bounds
 
@@ -107,6 +108,7 @@ def test_surface_text_tessellates_to_expected_depth_and_patch_count() -> None:
         depth=0.2,
         font_size=1.0,
         font_path=str(font_path),
+        backend="surface",
     )
     mesh = tessellate_surface_body(body, TessellationRequest(intent="preview")).mesh
     xmin, xmax, ymin, ymax, zmin, zmax = mesh.bounds

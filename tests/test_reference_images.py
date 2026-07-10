@@ -749,7 +749,7 @@ def test_text_cv_scope_is_bounded_to_single_line_uppercase_ascii() -> None:
 
 def test_text_cv_classifies_same_text_same_orientation(tmp_path: Path) -> None:
     font_path = str(_require_text_cv_font())
-    body = make_text("TEST", depth=0.2, font_size=1.0, font_path=font_path)
+    body = make_text("TEST", depth=0.2, font_size=1.0, font_path=font_path, backend="surface")
     expected_loops = text_cv_expected_loops(content="TEST", font_path=font_path)
     actual_loops = text_cv_actual_loops(body, slice_z=0.1)
     shared_bounds = planar_loop_bounds(expected_loops, actual_loops)
@@ -889,7 +889,7 @@ def test_camera_contract_detects_declared_drift_categories() -> None:
 
 
 def test_render_mesh_image_with_camera_contract_emits_contract_bound_render(tmp_path: Path) -> None:
-    body = make_arrow((0.0, 0.0, 0.0), (1.25, 0.25, 0.35), color="#ffb703")
+    body = make_arrow((0.0, 0.0, 0.0), (1.25, 0.25, 0.35), color="#ffb703", backend="surface")
     mesh = tessellate_surface_body(body).mesh
     contract = canonical_object_view_camera_contracts(mesh.bounds)["front"]
     output_path = tmp_path / "front.png"
@@ -901,7 +901,7 @@ def test_render_mesh_image_with_camera_contract_emits_contract_bound_render(tmp_
 
 
 def test_canonical_object_view_bundle_emits_stable_view_set_and_diagnostic_beauty(tmp_path: Path) -> None:
-    body = make_arrow((0.0, 0.0, 0.0), (1.25, 0.25, 0.35), color="#ffb703")
+    body = make_arrow((0.0, 0.0, 0.0), (1.25, 0.25, 0.35), color="#ffb703", backend="surface")
     mesh = tessellate_surface_body(body).mesh
 
     bundle = render_canonical_object_view_bundle(
@@ -1074,7 +1074,7 @@ def test_preview_and_reference_files_have_no_stale_public_primitive_mesh_assumpt
 
 
 def test_handedness_classifier_returns_unknown_for_symmetric_witness(tmp_path: Path) -> None:
-    body = make_box(size=(2.0, 2.0, 1.0))
+    body = make_box(size=(2.0, 2.0, 1.0), backend="surface")
     mesh = tessellate_surface_body(body).mesh
     bundle = render_canonical_object_view_bundle(mesh, tmp_path / "expected", stem="box")
 
@@ -1203,7 +1203,7 @@ def test_surfacebody_box_reference_image(
     tmp_path: Path,
     update_dirty_reference_images: bool,
 ) -> None:
-    body = make_box(size=(2.0, 3.0, 1.5), center=(0.0, 0.0, 0.0))
+    body = make_box(size=(2.0, 3.0, 1.5), center=(0.0, 0.0, 0.0), backend="surface")
     render_path = tmp_path / "surfacebody-box.png"
     stl_path = tmp_path / "surfacebody-box.stl"
     render_surface_body_image(body, render_path)
@@ -1553,7 +1553,7 @@ def test_surface_arrow_reference_image(
     tmp_path: Path,
     update_dirty_reference_images: bool,
 ) -> None:
-    body = make_arrow((0.0, 0.0, 0.0), (1.25, 0.25, 0.35), color="#ffb703")
+    body = make_arrow((0.0, 0.0, 0.0), (1.25, 0.25, 0.35), color="#ffb703", backend="surface")
     render_path = tmp_path / "surface-arrow.png"
     stl_path = tmp_path / "surface-arrow.stl"
     render_surface_body_image(body, render_path)
@@ -1587,6 +1587,7 @@ def test_surface_text_reference_image(
         font_size=0.3,
         font_path=str(font_path),
         color="#5b84b1",
+        backend="surface",
     )
     render_path = tmp_path / "surface-text.png"
     stl_path = tmp_path / "surface-text.stl"
@@ -1627,6 +1628,7 @@ def test_surface_heightmap_reference_image(
         height=0.6,
         xy_scale=0.3,
         alpha_mode="ignore",
+        backend="surface",
     )
     render_path = tmp_path / "surface-heightmap.png"
     stl_path = tmp_path / "surface-heightmap.stl"
@@ -1769,7 +1771,7 @@ def test_surface_traditional_hinge_reference_image(
     update_dirty_reference_images: bool,
 ) -> None:
     collection = handoff_hinge_surface(
-        make_traditional_hinge_pair(width=24.0, knuckle_count=5, opened_angle_deg=32.0)
+        make_traditional_hinge_pair(width=24.0, knuckle_count=5, opened_angle_deg=32.0, backend="surface")
     )
     render_path = tmp_path / "surface-hinge-traditional.png"
     stl_path = tmp_path / "surface-hinge-traditional.stl"
@@ -1798,7 +1800,7 @@ def test_surface_living_hinge_reference_image(
     update_dirty_reference_images: bool,
 ) -> None:
     collection = handoff_hinge_surface(
-        make_living_hinge(width=48.0, height=20.0, hinge_band_width=12.0, slit_pitch=1.8)
+        make_living_hinge(width=48.0, height=20.0, hinge_band_width=12.0, slit_pitch=1.8, backend="surface")
     )
     render_path = tmp_path / "surface-hinge-living.png"
     stl_path = tmp_path / "surface-hinge-living.stl"
@@ -1827,7 +1829,7 @@ def test_surface_bistable_hinge_reference_image(
     update_dirty_reference_images: bool,
 ) -> None:
     collection = handoff_hinge_surface(
-        make_bistable_hinge(width=40.0, preload_offset=2.0)
+        make_bistable_hinge(width=40.0, preload_offset=2.0, backend="surface")
     )
     render_path = tmp_path / "surface-hinge-bistable.png"
     stl_path = tmp_path / "surface-hinge-bistable.stl"
