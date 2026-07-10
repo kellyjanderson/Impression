@@ -16,6 +16,7 @@ from impression.devtools.reference_review import (
     load_source_records_from_database,
     load_source_records_from_file,
     resolve_generated_review_module,
+    update_fixture_notes_in_file,
     update_fixture_review_status_in_database,
     update_fixture_review_status_in_file,
     validate_source_record,
@@ -45,6 +46,7 @@ def test_source_model_record_normalizes_mapping_and_exposes_identity(tmp_path: P
             "purpose": "Exercise fixture metadata",
             "methodology": "Compare the canonical rendered STL against the selected artifact.",
             "render_description": "A single centered box with crisp vertical sides.",
+            "notes": "Initial reviewer note.",
             "parameters": [{"name": "width", "value": 12}],
             "artifact_paths": [artifact.name],
         },
@@ -56,6 +58,7 @@ def test_source_model_record_normalizes_mapping_and_exposes_identity(tmp_path: P
     assert record.purpose == "Exercise fixture metadata"
     assert record.methodology == "Compare the canonical rendered STL against the selected artifact."
     assert record.render_description == "A single centered box with crisp vertical sides."
+    assert record.notes == "Initial reviewer note."
     assert record.parameters == (EntrypointParameterRecord("width", 12),)
     assert record.artifact_paths == (artifact,)
 
@@ -167,6 +170,36 @@ def test_fixture_file_persists_review_status_and_gold_artifact_path(tmp_path: Pa
     assert reloaded.review_status is ReferenceReviewStatus.APPROVED
     assert reloaded.artifact_paths[0].parts[-3:] == ("gold", "demo", "fixture.stl")
     assert reloaded.artifact_paths[0].read_text() == "solid demo\nendsolid demo\n"
+
+
+def test_fixture_file_persists_review_notes(tmp_path: Path) -> None:
+    source = _write_source(tmp_path, "fixture_model.py")
+    fixture_file = tmp_path / "review-fixtures.json"
+    fixture_file.write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "fixture_id": "demo/file",
+                        "feature_name": "demo",
+                        "source_path": source.name,
+                    }
+                ]
+            }
+        )
+    )
+
+    result = update_fixture_notes_in_file(
+        fixture_file,
+        fixture_id="demo/file",
+        notes="Approved geometry, but keep an eye on the top edge.",
+    )
+    payload = json.loads(fixture_file.read_text())
+    reloaded = load_source_records_from_file(fixture_file).valid_items[0].record
+
+    assert result.updated
+    assert payload["fixtures"][0]["notes"] == "Approved geometry, but keep an eye on the top edge."
+    assert reloaded.notes == "Approved geometry, but keep an eye on the top edge."
 
 
 def test_fixture_file_stores_promoted_artifacts_relative_to_fixture_file_directory(tmp_path: Path) -> None:
@@ -292,6 +325,39 @@ def test_dirty_impress_fixture_entrypoints_build_reviewable_models(project_root:
     }
 
     assert built_types == {"SurfaceBody"}
+
+
+def test_dirty_stl_fixture_file_covers_reviewable_stl_inventory(project_root: Path) -> None:
+    fixture_file = project_root / "tests/reference_review_fixtures/dirty-stl-fixtures.json"
+    summary = load_source_records_from_file(fixture_file)
+    records = tuple(item.record for item in summary.valid_items)
+    fixture_ids = {record.fixture_id for record in records}
+    dirty_artifacts = sorted((project_root / "project/release-0.1.0a/reference-stl/dirty").rglob("*.stl"))
+    gold_artifacts = sorted((project_root / "project/release-0.1.0a/reference-stl/gold").rglob("*.stl"))
+    artifact_paths = sorted(path.resolve() for record in records for path in record.artifact_paths)
+
+    assert not summary.diagnostics
+    assert len(fixture_ids) == len(records)
+    assert set(artifact_paths) == {path.resolve() for path in dirty_artifacts + gold_artifacts}
+    assert all(record.source_path.name == "stl_review_sources.py" for record in records)
+    assert all(record.purpose for record in records)
+    assert all(record.methodology for record in records)
+    assert all(record.render_description for record in records)
+
+
+def test_dirty_stl_fixture_file_reports_missing_artifact(tmp_path: Path, project_root: Path) -> None:
+    source_fixture_file = project_root / "tests/reference_review_fixtures/dirty-stl-fixtures.json"
+    payload = json.loads(source_fixture_file.read_text())
+    payload["allowed_root"] = str(project_root)
+    payload["fixtures"][0]["artifact_paths"] = ["project/release-0.1.0a/reference-stl/dirty/missing.stl"]
+    fixture_file = tmp_path / "dirty-stl-fixtures.json"
+    fixture_file.write_text(json.dumps(payload))
+
+    summary = load_source_records_from_file(fixture_file)
+    diagnostics = tuple(diagnostic for item in summary.items for diagnostic in item.validation.diagnostics)
+
+    assert any(diagnostic.code == "missing-artifact" for diagnostic in diagnostics)
+    assert any(diagnostic.fixture_id == payload["fixtures"][0]["fixture_id"] for diagnostic in diagnostics)
 
 
 def test_review_context_payload_is_deterministic_and_omits_absolute_source_path(tmp_path: Path) -> None:

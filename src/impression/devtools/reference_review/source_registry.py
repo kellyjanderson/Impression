@@ -73,6 +73,7 @@ class ReviewSourceModelRecord:
     purpose: str | None = None
     methodology: str | None = None
     render_description: str | None = None
+    notes: str = ""
     parameters: tuple[EntrypointParameterRecord, ...] = ()
     artifact_paths: tuple[Path, ...] = ()
     review_status: ReferenceReviewStatus = ReferenceReviewStatus.UNREVIEWED
@@ -128,6 +129,7 @@ class ReviewSourceModelRecord:
             purpose=data.get("purpose"),
             methodology=data.get("methodology"),
             render_description=data.get("render_description"),
+            notes=str(data.get("notes", data.get("review_notes", "")) or ""),
             parameters=parameters,
             artifact_paths=artifact_paths,
             review_status=data.get("review_status", data.get("status", ReferenceReviewStatus.UNREVIEWED)),
@@ -403,6 +405,44 @@ def update_fixture_review_status_in_file(
         ]
     path.write_text(json.dumps(payload, indent=2) + "\n")
     return ReferenceReviewStatusWriteResult(True, artifact_paths=tuple(artifact_paths or ()))
+
+
+def update_fixture_notes_in_file(
+    path: Path,
+    *,
+    fixture_id: str,
+    notes: str,
+) -> ReferenceReviewStatusWriteResult:
+    """Persist review notes into a JSON fixture file."""
+
+    path = Path(path)
+    try:
+        payload = json.loads(path.read_text())
+    except Exception as exc:
+        return ReferenceReviewStatusWriteResult(
+            False,
+            (SourceValidationDiagnostic("invalid-fixture-file", str(exc), fixture_id),),
+        )
+    rows = payload.get("fixtures", payload) if isinstance(payload, Mapping) else payload
+    if isinstance(rows, Mapping):
+        rows = [rows]
+    if not isinstance(rows, list):
+        return ReferenceReviewStatusWriteResult(
+            False,
+            (SourceValidationDiagnostic("invalid-fixture-file", "fixture rows are not editable", fixture_id),),
+        )
+    row = next(
+        (item for item in rows if isinstance(item, dict) and item.get("fixture_id") == fixture_id),
+        None,
+    )
+    if row is None:
+        return ReferenceReviewStatusWriteResult(
+            False,
+            (SourceValidationDiagnostic("missing-fixture-record", fixture_id, fixture_id),),
+        )
+    row["notes"] = notes
+    path.write_text(json.dumps(payload, indent=2) + "\n")
+    return ReferenceReviewStatusWriteResult(True)
 
 
 def update_fixture_review_status_in_database(

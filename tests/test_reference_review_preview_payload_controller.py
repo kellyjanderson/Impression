@@ -28,7 +28,7 @@ def test_preview_payload_process_controller_launches_and_tracks_active_identity(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "model.py"
-    source.write_text("from impression.modeling import make_box\n\ndef build():\n    return make_box(backend='surface')\n")
+    source.write_text("from impression.modeling import make_box\n\ndef build():\n    return make_box()\n")
     record = ReviewSourceModelRecord(
         fixture_id="fixture/controller",
         feature_name="Controller",
@@ -60,7 +60,7 @@ def test_preview_payload_process_controller_captures_sanitized_stdout_and_stderr
         "def build():\n"
         "    print('stdout under %s')\n"
         "    print('stderr under %s', file=sys.stderr)\n"
-        "    return make_box(backend='surface')\n" % (tmp_path, tmp_path)
+        "    return make_box()\n" % (tmp_path, tmp_path)
     )
     record = ReviewSourceModelRecord(
         fixture_id="fixture/noisy",
@@ -109,7 +109,7 @@ def test_preview_payload_process_controller_records_launch_rejection() -> None:
 
 def test_preview_payload_controller_dispatcher_route_builds_payload(tmp_path: Path) -> None:
     source = tmp_path / "model.py"
-    source.write_text("from impression.modeling import make_box\n\ndef build():\n    return make_box(backend='surface')\n")
+    source.write_text("from impression.modeling import make_box\n\ndef build():\n    return make_box()\n")
     record = ReviewSourceModelRecord(
         fixture_id="fixture/dispatcher",
         feature_name="Dispatcher",
@@ -308,7 +308,7 @@ def test_preview_payload_process_controller_hands_off_current_payload(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "model.py"
-    source.write_text("from impression.modeling import make_box\n\ndef build():\n    return make_box(backend='surface')\n")
+    source.write_text("from impression.modeling import make_box\n\ndef build():\n    return make_box()\n")
     record = ReviewSourceModelRecord(
         fixture_id="fixture/current-handoff",
         feature_name="Current",

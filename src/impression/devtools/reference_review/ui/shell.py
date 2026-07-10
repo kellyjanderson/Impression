@@ -32,6 +32,7 @@ from ..source_registry import (
     discover_source_records,
     load_source_records_from_database,
     load_source_records_from_file,
+    update_fixture_notes_in_file,
     update_fixture_review_status_in_database,
     update_fixture_review_status_in_file,
 )
@@ -350,6 +351,7 @@ class ReferenceReviewWindow(QWidget):
             PreviewRenderIdentity | None,
         ] = {}
         self._pending_preview_record: ReviewSourceModelRecord | None = None
+        self._loading_notes = False
         self._preview_poll_timer = QTimer(self)
         self._preview_poll_timer.setInterval(30)
         self._preview_poll_timer.timeout.connect(self._poll_preview_payloads)
@@ -448,6 +450,7 @@ class ReferenceReviewWindow(QWidget):
         notes_title = QLabel("Notes")
         notes_title.setStyleSheet("font-size: 16px; font-weight: 700;")
         self.notes = QTextEdit()
+        self.notes.setObjectName("reviewNotesTextEdit")
         self.notes.setPlaceholderText("Review notes")
         notes_layout.addWidget(notes_title)
         notes_layout.addWidget(self.notes, 1)
@@ -486,6 +489,7 @@ class ReferenceReviewWindow(QWidget):
         self.next_button.clicked.connect(self._next_fixture)
         self.show_approved_checkbox.toggled.connect(self._set_show_approved)
         self.list_widget.currentRowChanged.connect(self._select_visible_index)
+        self.notes.textChanged.connect(self._persist_selected_notes)
         self.show()
         self.raise_()
         self.activateWindow()
@@ -680,6 +684,7 @@ class ReferenceReviewWindow(QWidget):
             self.preview_surface.set_artifact(None)
             self.preview_display_controls.set_ready(False)
             self.context_text.setText("No fixture context loaded.")
+            self._load_selected_notes(None)
             self.artifact_thumb.setText("")
             self._set_review_status_badge(ReferenceReviewStatus.UNREVIEWED.value)
             self._sync_properties()
@@ -698,7 +703,49 @@ class ReferenceReviewWindow(QWidget):
             f"Artifact: {item['artifact_display_path']}"
         )
         self._load_artifact_preview(item)
+        self._load_selected_notes(self.queue.records[index])
         self._sync_properties()
+
+    def _load_selected_notes(self, record: ReviewSourceModelRecord | None) -> None:
+        self._loading_notes = True
+        try:
+            self.notes.setPlainText(record.notes if record is not None else "")
+        finally:
+            self._loading_notes = False
+
+    def _persist_selected_notes(self) -> None:
+        if self._loading_notes:
+            return
+        record = self._selected_record()
+        if record is None:
+            return
+        notes = self.notes.toPlainText()
+        if notes == record.notes:
+            return
+        updated_record = replace(record, notes=notes)
+        self._replace_selected_record_without_reselection(updated_record)
+        if not self._persist_fixture_notes(updated_record):
+            return
+        self._sync_properties()
+
+    def _persist_fixture_notes(self, record: ReviewSourceModelRecord) -> bool:
+        if not self._fixture_files:
+            self.queue_status.setText("Review notes changed locally; no fixture file configured")
+            return True
+        diagnostics: list[str] = []
+        updated = False
+        for fixture_file in self._fixture_files:
+            result = update_fixture_notes_in_file(
+                fixture_file,
+                fixture_id=record.fixture_id,
+                notes=record.notes,
+            )
+            updated = updated or result.updated
+            diagnostics.extend(diagnostic.code for diagnostic in result.diagnostics)
+        if not updated:
+            self.queue_status.setText(f"Review notes not saved: {', '.join(diagnostics) or 'no source'}")
+            return False
+        return True
 
     def _load_artifact_preview(self, item: dict[str, object]) -> None:
         record = self.queue.records[self._selected_index]
@@ -884,6 +931,13 @@ class ReferenceReviewWindow(QWidget):
         self.setProperty("hasFixture", has_fixture)
         self.setProperty("showApproved", self._show_approved)
         self.setProperty("interactivePreviewReady", self._interactive_preview_ready)
+
+    def _replace_selected_record_without_reselection(self, record: ReviewSourceModelRecord) -> None:
+        records = list(self.queue.records)
+        records[self._selected_index] = record
+        self.queue.records = tuple(records)
+        self._all_fixture_items = _fixture_items_for_qml(self.queue, self.artifact_previews)
+        self._fixture_items = self._filtered_fixture_items()
 
     def _set_review_status_badge(self, status: str) -> None:
         label, stylesheet = _review_status_badge_style(status)

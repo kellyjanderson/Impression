@@ -32,9 +32,9 @@ Returns a `MeshAnalysis` report with:
 
 ```python
 from impression.mesh import analyze_mesh
-from impression.modeling import make_box
+from impression.modeling import make_box_mesh
 
-mesh = make_box(size=(2.0, 2.0, 2.0), backend="mesh")
+mesh = make_box_mesh(size=(2.0, 2.0, 2.0))
 report = analyze_mesh(mesh)
 
 assert report.is_watertight
@@ -47,9 +47,9 @@ Intersects a triangle mesh with a plane and returns stitched section polylines.
 
 ```python
 from impression.mesh import section_mesh_with_plane
-from impression.modeling import make_cylinder
+from impression.modeling import make_cylinder_mesh
 
-mesh = make_cylinder(radius=1.0, height=2.0, backend="mesh")
+mesh = make_cylinder_mesh(radius=1.0, height=2.0)
 section = section_mesh_with_plane(mesh, origin=(0.0, 0.0, 0.0), normal=(0.0, 0.0, 1.0))
 
 assert section.closed_count == 1

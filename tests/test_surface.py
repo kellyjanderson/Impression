@@ -559,8 +559,8 @@ def test_internal_surface_box_builder_is_closed_and_public_box_defaults_surface(
 
 
 def test_public_box_supports_surface_backend_and_preserves_explicit_mesh_bridge() -> None:
-    surface_box = make_box(size=(2.0, 4.0, 6.0), center=(1.0, 2.0, 3.0), backend="surface", color="blue")
-    mesh_box = make_box(size=(2.0, 4.0, 6.0), center=(1.0, 2.0, 3.0), backend="mesh")
+    surface_box = make_box(size=(2.0, 4.0, 6.0), center=(1.0, 2.0, 3.0), color="blue")
+    mesh_box = make_box_mesh(size=(2.0, 4.0, 6.0), center=(1.0, 2.0, 3.0))
 
     assert isinstance(surface_box, SurfaceBody)
     assert surface_box.consumer_metadata() == {"color": "blue"}
@@ -659,7 +659,7 @@ def test_internal_surface_rotate_extrude_rejects_profiles_that_cross_axis() -> N
 def test_internal_surface_cylinder_returns_surface_body_and_public_api_defaults_surface() -> None:
     surface_cylinder = make_surface_cylinder(radius=1.0, height=2.0, resolution=32)
     public_cylinder = make_cylinder(radius=1.0, height=2.0, resolution=32)
-    mesh_cylinder = make_cylinder(radius=1.0, height=2.0, resolution=32, backend="mesh")
+    mesh_cylinder = make_cylinder_mesh(radius=1.0, height=2.0, resolution=32)
 
     assert isinstance(surface_cylinder, SurfaceBody)
     assert isinstance(public_cylinder, SurfaceBody)
@@ -691,7 +691,7 @@ def test_internal_surface_cylinder_uses_attached_transform_for_direction_and_cen
 def test_internal_surface_cone_returns_surface_body_and_public_api_defaults_surface() -> None:
     surface_cone = make_surface_cone(bottom_diameter=2.0, top_diameter=0.0, height=2.0, resolution=32)
     public_cone = make_cone(bottom_diameter=2.0, top_diameter=0.0, height=2.0, resolution=32)
-    mesh_cone = make_cone(bottom_diameter=2.0, top_diameter=0.0, height=2.0, resolution=32, backend="mesh")
+    mesh_cone = make_cone_mesh(bottom_diameter=2.0, top_diameter=0.0, height=2.0, resolution=32)
 
     assert isinstance(surface_cone, SurfaceBody)
     assert isinstance(public_cone, SurfaceBody)
@@ -704,6 +704,24 @@ def test_internal_surface_cone_returns_surface_body_and_public_api_defaults_surf
 
     result = tessellate_surface_body(surface_cone, export_tessellation_request(require_watertight=False))
     assert result.classification == "open"
+    assert result.mesh.n_faces > 0
+
+
+def test_internal_surface_cone_frustum_caps_both_nonzero_ends() -> None:
+    surface_cone = make_surface_cone(bottom_diameter=2.0, top_diameter=0.5, height=2.0, resolution=32)
+
+    cap_roles = {
+        patch.kernel_metadata().get("surface_role")
+        for patch in surface_cone.iter_patches(world=False)
+        if patch.family == "planar"
+    }
+
+    assert surface_cone.shell_count == 1
+    assert surface_cone.patch_count == 6
+    assert [patch.family for patch in surface_cone.iter_patches(world=False)].count("revolution") == 4
+    assert cap_roles == {"bottom-cap", "top-cap"}
+
+    result = tessellate_surface_body(surface_cone, export_tessellation_request(require_watertight=False))
     assert result.mesh.n_faces > 0
 
 
@@ -724,7 +742,7 @@ def test_internal_surface_cone_uses_attached_transform_for_direction_and_center(
 def test_internal_surface_ngon_returns_surface_body_and_public_api_defaults_surface() -> None:
     surface_ngon = make_surface_ngon(sides=6, radius=1.0, height=2.0)
     public_ngon = make_ngon(sides=6, radius=1.0, height=2.0)
-    mesh_ngon = make_ngon(sides=6, radius=1.0, height=2.0, backend="mesh")
+    mesh_ngon = make_ngon_mesh(sides=6, radius=1.0, height=2.0)
 
     assert isinstance(surface_ngon, SurfaceBody)
     assert isinstance(public_ngon, SurfaceBody)
@@ -743,7 +761,7 @@ def test_internal_surface_ngon_returns_surface_body_and_public_api_defaults_surf
 def test_internal_surface_prism_returns_surface_body_and_public_api_defaults_surface() -> None:
     surface_prism = make_surface_prism(base_size=(2.0, 1.0), top_size=(1.0, 0.5), height=2.0)
     public_prism = make_prism(base_size=(2.0, 1.0), top_size=(1.0, 0.5), height=2.0)
-    mesh_prism = make_prism(base_size=(2.0, 1.0), top_size=(1.0, 0.5), height=2.0, backend="mesh")
+    mesh_prism = make_prism_mesh(base_size=(2.0, 1.0), top_size=(1.0, 0.5), height=2.0)
 
     assert isinstance(surface_prism, SurfaceBody)
     assert isinstance(public_prism, SurfaceBody)
@@ -762,7 +780,7 @@ def test_internal_surface_prism_returns_surface_body_and_public_api_defaults_sur
 def test_internal_surface_torus_returns_closed_surface_body_and_public_api_defaults_surface() -> None:
     surface_torus = make_surface_torus(major_radius=2.0, minor_radius=0.5, n_theta=32, n_phi=16)
     public_torus = make_torus(major_radius=2.0, minor_radius=0.5, n_theta=32, n_phi=16)
-    mesh_torus = make_torus(major_radius=2.0, minor_radius=0.5, n_theta=32, n_phi=16, backend="mesh")
+    mesh_torus = make_torus_mesh(major_radius=2.0, minor_radius=0.5, n_theta=32, n_phi=16)
 
     assert isinstance(surface_torus, SurfaceBody)
     assert isinstance(public_torus, SurfaceBody)
@@ -785,10 +803,9 @@ def test_public_torus_supports_surface_backend_and_preserves_explicit_mesh_bridg
         minor_radius=0.5,
         n_theta=32,
         n_phi=16,
-        backend="surface",
         color="purple",
     )
-    mesh_torus = make_torus(major_radius=2.0, minor_radius=0.5, n_theta=32, n_phi=16, backend="mesh")
+    mesh_torus = make_torus_mesh(major_radius=2.0, minor_radius=0.5, n_theta=32, n_phi=16)
 
     assert isinstance(surface_torus, SurfaceBody)
     assert surface_torus.consumer_metadata() == {"color": "purple"}
@@ -816,7 +833,7 @@ def test_internal_surface_torus_uses_attached_transform_for_direction_and_center
 def test_internal_surface_sphere_returns_closed_surface_body_and_public_api_defaults_surface() -> None:
     surface_sphere = make_surface_sphere(radius=1.0, center=(0.0, 0.0, 0.0), theta_resolution=32, phi_resolution=16)
     public_sphere = make_sphere(radius=1.0, center=(0.0, 0.0, 0.0), theta_resolution=32, phi_resolution=16)
-    mesh_sphere = make_sphere(radius=1.0, center=(0.0, 0.0, 0.0), theta_resolution=32, phi_resolution=16, backend="mesh")
+    mesh_sphere = make_sphere_mesh(radius=1.0, center=(0.0, 0.0, 0.0), theta_resolution=32, phi_resolution=16)
 
     assert isinstance(surface_sphere, SurfaceBody)
     assert isinstance(public_sphere, SurfaceBody)
@@ -844,7 +861,7 @@ def test_internal_surface_sphere_respects_center() -> None:
 def test_internal_surface_polyhedron_returns_surface_body_and_public_api_defaults_surface() -> None:
     surface_polyhedron = make_surface_polyhedron(faces=6, radius=1.0)
     public_polyhedron = make_polyhedron(faces=6, radius=1.0)
-    mesh_polyhedron = make_polyhedron(faces=6, radius=1.0, backend="mesh")
+    mesh_polyhedron = make_polyhedron_mesh(faces=6, radius=1.0)
 
     assert isinstance(surface_polyhedron, SurfaceBody)
     assert isinstance(public_polyhedron, SurfaceBody)
@@ -862,7 +879,7 @@ def test_internal_surface_polyhedron_returns_surface_body_and_public_api_default
 def test_internal_surface_nhedron_wraps_polyhedron_and_public_api_defaults_surface() -> None:
     surface_nhedron = make_surface_nhedron(faces=8, radius=1.0)
     public_nhedron = make_nhedron(faces=8, radius=1.0)
-    mesh_nhedron = make_nhedron(faces=8, radius=1.0, backend="mesh")
+    mesh_nhedron = make_nhedron_mesh(faces=8, radius=1.0)
 
     assert isinstance(surface_nhedron, SurfaceBody)
     assert isinstance(public_nhedron, SurfaceBody)
@@ -877,9 +894,10 @@ def test_internal_surface_nhedron_wraps_polyhedron_and_public_api_defaults_surfa
     assert result.mesh.n_faces > 0
 
 
-def test_public_surface_backends_reject_unknown_backend_values() -> None:
-    with pytest.raises(ValueError, match="Unsupported backend"):
-        make_box(backend="wireframe")  # type: ignore[arg-type]
+def test_public_surface_constructors_do_not_expose_backend_parameter() -> None:
+    import inspect
+
+    assert "backend" not in inspect.signature(make_box).parameters
 
 
 @pytest.mark.parametrize(
@@ -4312,14 +4330,14 @@ def test_public_primitive_patch_producer_selection_is_explicit_and_surface_nativ
 def test_unsupported_primitive_producer_diagnostic_is_explicit() -> None:
     diagnostic = unsupported_primitive_producer_diagnostic(
         "primitive.make_unknown",
-        requested_backend="surface",
+        requested_surface_route="surfacebody",
         reason="no surface constructor is registered",
     )
 
     assert isinstance(diagnostic, UnsupportedPrimitiveProducerDiagnostic)
     assert diagnostic.primitive == "unknown"
     assert "no surface constructor" in diagnostic.message
-    assert diagnostic.canonical_payload()["requested_backend"] == "surface"
+    assert diagnostic.canonical_payload()["requested_surface_route"] == "surfacebody"
 
 
 def test_planar_patch_tessellates_to_mesh_from_domain_or_trim() -> None:
@@ -4806,7 +4824,7 @@ def test_surface_backend_boolean_api_uses_family_diagnostic_result_for_unsupport
     box = make_surface_box(size=(1.0, 1.0, 1.0), center=(0.0, 0.0, 0.0))
     sweep_body = make_surface_body([make_surface_shell([SweepSurfacePatch(family="sweep")])])
 
-    result = boolean_union((box, sweep_body), backend="surface")
+    result = boolean_union((box, sweep_body))
 
     assert result.status == "unsupported"
     assert result.failure_reason is not None
@@ -4821,7 +4839,7 @@ def test_surface_boolean_family_refusal_gate_never_invokes_mesh_boolean(monkeypa
     box = make_surface_box(size=(1.0, 1.0, 1.0), center=(0.0, 0.0, 0.0))
     sweep_body = make_surface_body([make_surface_shell([SweepSurfacePatch(family="sweep")])])
 
-    result = boolean_union((box, sweep_body), backend="surface")
+    result = boolean_union((box, sweep_body))
 
     assert result.status == "unsupported"
     assert result.body is None

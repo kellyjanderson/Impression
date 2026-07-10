@@ -14,7 +14,7 @@ import pytest
 import numpy as np
 from PySide6.QtCore import QObject, QSize, Qt
 from PySide6.QtGui import QIcon, QImage, QPainter
-from PySide6.QtWidgets import QApplication, QCheckBox, QLabel, QListWidget, QPushButton, QTabWidget, QToolButton, QWidget
+from PySide6.QtWidgets import QApplication, QCheckBox, QLabel, QListWidget, QPushButton, QTabWidget, QTextEdit, QToolButton, QWidget
 
 from impression.mesh import Mesh, Polyline
 from impression.devtools.reference_review import ReferenceReviewStatus, ReviewSourceModelRecord
@@ -497,6 +497,64 @@ def test_decline_button_marks_fixture_file_declined(tmp_path: Path) -> None:
     assert isinstance(badge, QLabel)
     assert badge.text() == "DECLINED"
     assert "#b42318" in badge.styleSheet()
+
+
+def test_notes_editor_persists_to_selected_fixture_file_and_loads_on_selection(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    first_source = tmp_path / "first.py"
+    second_source = tmp_path / "second.py"
+    first_source.write_text("def build():\n    return None\n")
+    second_source.write_text("def build():\n    return None\n")
+    fixture_file = tmp_path / "fixtures.json"
+    fixture_file.write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "fixture_id": "demo/first",
+                        "feature_name": "demo",
+                        "source_path": first_source.name,
+                        "notes": "Existing first note.",
+                    },
+                    {
+                        "fixture_id": "demo/second",
+                        "feature_name": "demo",
+                        "source_path": second_source.name,
+                        "notes": "Existing second note.",
+                    },
+                ]
+            }
+        )
+    )
+    records, diagnostics = shell.load_fixture_records(fixture_files=(fixture_file,))
+    result = launch_workbench(
+        fixture_records=records,
+        fixture_diagnostics=diagnostics,
+        fixture_files=(fixture_file,),
+        offscreen=True,
+    )
+    root = result.engine.rootObjects()[0]
+    queue = root.findChild(QObject, "fixtureQueueList")
+    notes = root.findChild(QObject, "reviewNotesTextEdit")
+
+    assert isinstance(queue, QListWidget)
+    assert isinstance(notes, QTextEdit)
+    assert notes.toPlainText() == "Existing first note."
+
+    notes.setPlainText("Edited first note.")
+    payload = json.loads(fixture_file.read_text())
+    assert payload["fixtures"][0]["notes"] == "Edited first note."
+    assert payload["fixtures"][1]["notes"] == "Existing second note."
+
+    queue.setCurrentRow(1)
+    assert notes.toPlainText() == "Existing second note."
+    notes.setPlainText("Edited second note.")
+    payload = json.loads(fixture_file.read_text())
+    assert payload["fixtures"][0]["notes"] == "Edited first note."
+    assert payload["fixtures"][1]["notes"] == "Edited second note."
+
+    queue.setCurrentRow(0)
+    assert notes.toPlainText() == "Edited first note."
 
 
 def test_impress_preview_edge_overlay_uses_object_edges_not_triangle_wireframe(project_root: Path) -> None:
