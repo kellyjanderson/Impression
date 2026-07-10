@@ -40,28 +40,28 @@ def hinge_feature_csg_dependencies():
             module="impression.modeling.hinges",
             operation=None,
             surface_builder="make_traditional_hinge_leaf",
-            explicit_mesh_route="backend='mesh'",
+            explicit_mesh_route="make_*_mesh compatibility helpers",
         ),
         SurfaceCSGFeatureDependencyRecord(
             caller_id="hinges.make_traditional_hinge_pair",
             module="impression.modeling.hinges",
             operation="union",
             surface_builder="make_traditional_hinge_pair",
-            explicit_mesh_route="backend='mesh'",
+            explicit_mesh_route="make_*_mesh compatibility helpers",
         ),
         SurfaceCSGFeatureDependencyRecord(
             caller_id="hinges.make_living_hinge",
             module="impression.modeling.hinges",
             operation=None,
             surface_builder="make_living_hinge",
-            explicit_mesh_route="backend='mesh'",
+            explicit_mesh_route="make_*_mesh compatibility helpers",
         ),
         SurfaceCSGFeatureDependencyRecord(
             caller_id="hinges.make_bistable_hinge",
             module="impression.modeling.hinges",
             operation=None,
             surface_builder="make_bistable_hinge",
-            explicit_mesh_route="backend='mesh'",
+            explicit_mesh_route="make_*_mesh compatibility helpers",
         ),
     )
 
