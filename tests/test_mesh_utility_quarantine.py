@@ -10,6 +10,7 @@ from impression.modeling import (
     MeshUtilityClassification,
     classify_mesh_utility,
     make_box,
+    make_box_mesh,
 )
 from impression.modeling import mesh_tools
 
@@ -76,7 +77,7 @@ def test_mesh_utility_namespace_classifies_retained_tools() -> None:
 
 
 def test_mesh_tools_namespace_re_exports_retained_mesh_analysis_tooling() -> None:
-    mesh = make_box(size=(1.0, 1.0, 1.0), backend="mesh")
+    mesh = make_box_mesh(size=(1.0, 1.0, 1.0))
 
     analysis = mesh_tools.analyze_mesh(mesh)
 

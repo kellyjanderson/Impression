@@ -3,7 +3,7 @@
 Impression can generate text outlines and turn them into surface bodies. Under
 the hood the text is converted to 2D profiles and then extruded to 3D.
 
-The text API is surface-first by default. Use `backend="mesh"` only for the
+The text API is surface-first by default. Use `make_*_mesh(...)` only for the
 legacy mesh compatibility route.
 
 ```python

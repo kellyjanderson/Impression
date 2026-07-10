@@ -12,20 +12,20 @@ def _warn_once(key: tuple[str, str], message: str, *, stacklevel: int) -> None:
     warnings.warn(message, DeprecationWarning, stacklevel=stacklevel)
 
 
-def warn_mesh_primary_backend(
+def warn_mesh_primary_route(
     api_name: str,
     *,
-    replacement: str = "backend='surface'",
+    replacement: str = "surfacebody-native modeling APIs",
     extra: str | None = None,
     stacklevel: int = 3,
 ) -> None:
     message = (
-        f"{api_name} is still using the legacy mesh-primary backend path and is deprecated. "
+        f"{api_name} is still using the legacy mesh-primary compatibility path and is deprecated. "
         f"Prefer {replacement} and tessellate only at mesh-consumer boundaries."
     )
     if extra:
         message = f"{message} {extra}"
-    _warn_once(("backend", api_name), message, stacklevel=stacklevel)
+    _warn_once(("mesh-primary-route", api_name), message, stacklevel=stacklevel)
 
 
 def warn_mesh_primary_api(
