@@ -64,7 +64,6 @@ def test_surface_text_returns_surface_body() -> None:
         depth=0.1,
         font_size=0.4,
         font_path=str(FONT_PATH),
-        backend="surface",
     )
     assert isinstance(body, SurfaceBody)
     mesh = tessellate_surface_body(body, TessellationRequest(intent="preview")).mesh
@@ -79,14 +78,12 @@ def test_text_alias_surface_backend_matches_make_text() -> None:
         depth=0.08,
         font_size=0.35,
         font_path=str(FONT_PATH),
-        backend="surface",
     )
     direct = make_text(
         "OK",
         depth=0.08,
         font_size=0.35,
         font_path=str(FONT_PATH),
-        backend="surface",
     )
     assert isinstance(body, SurfaceBody)
     assert body.patch_count == direct.patch_count
@@ -106,19 +103,17 @@ def test_surface_heightmap_and_displacement_return_surface_bodies() -> None:
         np.asarray([[0.0, 1.0], [1.0, 0.0]], dtype=float),
         height=0.5,
         alpha_mode="ignore",
-        backend="surface",
     )
     assert isinstance(terrain, SurfaceBody)
     assert tessellate_surface_body(terrain, TessellationRequest(intent="preview")).mesh.n_faces > 0
 
-    plane = make_plane(size=(1.0, 1.0), backend="surface")
+    plane = make_plane(size=(1.0, 1.0))
     displaced = displace_heightmap(
         plane,
         np.asarray([[0.0, 1.0], [1.0, 0.0]], dtype=float),
         height=0.25,
         plane="xy",
         direction="z",
-        backend="surface",
     )
     assert isinstance(displaced, SurfaceBody)
     assert tessellate_surface_body(displaced, TessellationRequest(intent="preview")).mesh.n_faces > 0

@@ -8,7 +8,7 @@ delegated to ``impression.modeling.topology``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, Sequence
+from typing import TYPE_CHECKING, Sequence
 from pathlib import Path
 import math
 import warnings
@@ -29,9 +29,6 @@ _WARNED_TEXT_PROFILE_COLOR = False
 
 if TYPE_CHECKING:
     from .surface import SurfaceBody
-
-Backend = Literal["mesh", "surface"]
-
 
 @dataclass(frozen=True)
 class TextMeshCompatibilityResult:
@@ -61,12 +58,8 @@ def make_text(
     font: str = "Arial",
     font_path: str | None = None,
     color: Sequence[float] | str | None = None,
-    backend: Backend = "surface",
-) -> Mesh | SurfaceBody:
+) -> SurfaceBody:
     """Return 3D text built by extruding text profiles."""
-
-    if backend not in {"mesh", "surface"}:
-        raise ValueError("backend must be 'mesh' or 'surface'.")
 
     depth = float(depth)
     if depth <= 0:
@@ -83,33 +76,38 @@ def make_text(
         font_path=font_path,
     )
 
-    if backend == "surface":
-        if not profiles:
-            from ._surface_primitives import make_surface_box
+    if not profiles:
+        from ._surface_primitives import make_surface_box
 
-            return make_surface_box(
-                size=(1e-6, 1e-6, 1e-6),
-                metadata={
-                    "consumer": {
-                        "hidden_placeholder": True,
-                        "text_empty_placeholder_policy": "hidden-non-rendering-placeholder",
-                    }
-                },
-            )
-        bodies = [_surface_text_extrude(section, height=depth) for section in profiles]
-        from .surface import make_surface_body
-
-        combined = make_surface_body(
-            tuple(shell for body in bodies for shell in body.iter_shells(world=True)),
-            metadata={"consumer": {"color": color}} if color is not None else None,
+        return make_surface_box(
+            size=(1e-6, 1e-6, 1e-6),
+            metadata={
+                "consumer": {
+                    "hidden_placeholder": True,
+                    "text_empty_placeholder_policy": "hidden-non-rendering-placeholder",
+                }
+            },
         )
-        transform = _orientation_transform(center, direction)
-        return combined.with_transform(transform)
+    bodies = [_surface_text_extrude(section, height=depth) for section in profiles]
+    from .surface import make_surface_body
 
-    warn_mesh_primary_api(
-        "make_text",
-        replacement="text_profiles()/text_sections() with surface-native downstream modeling",
+    combined = make_surface_body(
+        tuple(shell for body in bodies for shell in body.iter_shells(world=True)),
+        metadata={"consumer": {"color": color}} if color is not None else None,
     )
+    transform = _orientation_transform(center, direction)
+    return combined.with_transform(transform)
+
+
+def _make_text_mesh_impl(
+    profiles: Sequence[Section],
+    *,
+    content: str,
+    depth: float,
+    center: Sequence[float],
+    direction: Sequence[float],
+    color: Sequence[float] | str | None,
+) -> Mesh:
     meshes = [_mesh_text_extrude(section, height=depth) for section in profiles]
     if not meshes:
         return Mesh(
@@ -156,11 +154,11 @@ def make_text_mesh(
 ) -> Mesh:
     """Explicit mesh compatibility helper for text extrusion."""
 
-    return make_text(
+    depth = float(depth)
+    if depth <= 0:
+        raise ValueError("depth must be positive.")
+    profiles = text_profiles(
         content=content,
-        depth=depth,
-        center=center,
-        direction=direction,
         font_size=font_size,
         justify=justify,
         valign=valign,
@@ -168,8 +166,14 @@ def make_text_mesh(
         line_height=line_height,
         font=font,
         font_path=font_path,
+    )
+    return _make_text_mesh_impl(
+        profiles,
+        content=content,
+        depth=depth,
+        center=center,
+        direction=direction,
         color=color,
-        backend="mesh",
     )
 
 
@@ -221,15 +225,9 @@ def text(
     font: str = "Arial",
     font_path: str | None = None,
     color: Sequence[float] | str | None = None,
-    backend: Backend = "surface",
-) -> Mesh | SurfaceBody:
+) -> SurfaceBody:
     """Alias for make_text."""
 
-    if backend == "mesh":
-        warn_mesh_primary_api(
-            "text",
-            replacement="text_profiles()/text_sections() with surface-native downstream modeling",
-        )
     return make_text(
         content=content,
         depth=depth,
@@ -243,7 +241,6 @@ def text(
         font=font,
         font_path=font_path,
         color=color,
-        backend=backend,
     )
 
 

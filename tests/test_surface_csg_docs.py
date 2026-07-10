@@ -7,7 +7,7 @@ from impression.modeling import inventory_legacy_primitive_mesh_assumptions
 
 def test_csg_docs_explain_surface_migration_posture(project_root: Path) -> None:
     doc = (project_root / "docs" / "modeling" / "csg.md").read_text()
-    assert 'backend="surface"' in doc
+    assert "surfacebody-result APIs" in doc
     assert "SurfaceBooleanResult" in doc
     assert 'status="unsupported"' not in doc or "remains explicitly unsupported" in doc
     assert "succeeds for a very small bounded initial scope" in doc
