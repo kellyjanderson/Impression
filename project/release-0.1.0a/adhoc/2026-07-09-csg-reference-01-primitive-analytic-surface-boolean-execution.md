@@ -109,13 +109,11 @@ Reference artifact verification must cover:
 Project readiness fields:
 - Implementation owner/module: src/impression/modeling/csg.py
 - Chosen defaults / parameters: No mesh fallback; tessellation only after a surfaced result succeeds at artifact, preview, or export boundaries.
-- Chosen defaults / parameters: Tangent or degenerate cases return deterministic diagnostics instead of unstable sliver geometry.
-- Chosen defaults / parameters: Unsupported routes return deterministic refusal records with family, operation, phase, and reason where applicable.
 - Test strategy: `surface_boolean_result` success for every supported primitive pair above; `boolean_union`, `boolean_difference`, and `boolean_intersection` public helpers preserving the surfaced route; `tests/test_no_hidden_mesh_fallback.py` or equivalent guards for every new primitive route; section-loop or bounds checks that make wrong orientation and missing cuts fail clearly
 - Data ownership: `SurfaceBody` and `SurfaceBooleanResult` records remain the authored source of truth for CSG execution.
 - Data ownership: Reference fixture metadata owns review evidence, dirty artifact context, and diagnostic evidence records.
-- Routes: public boolean helper to `surface_boolean_result` to surfaced CSG route; CSG intersection output to patch-local trim/fragment reconstruction route; loft or ruled-patch eligibility route into surfaced CSG planner; advanced family route through CSG support matrix, payload persistence, or refusal diagnostics
-- Reuse/extraction decision: Reuse existing CSG/surface helpers named in the implementation boundary; add private helpers only when extraction keeps owner modules cohesive.
+- Routes: public boolean helpers to primitive analytic surfaced CSG execution route
+- Reuse/extraction decision: Reuse existing helpers named in the implementation boundary; add private helpers only when extraction keeps owner modules cohesive.
 - UI field/control inventory: not applicable; these CSG manifest entries have no UI controls or visible fields
 
 Open questions / nuance discovered:

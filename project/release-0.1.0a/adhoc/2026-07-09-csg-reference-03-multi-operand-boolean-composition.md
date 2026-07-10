@@ -86,12 +86,11 @@ Reference artifact verification must cover:
 Project readiness fields:
 - Implementation owner/module: src/impression/modeling/csg.py
 - Chosen defaults / parameters: No mesh fallback; tessellation only after a surfaced result succeeds at artifact, preview, or export boundaries.
-- Chosen defaults / parameters: Unsupported routes return deterministic refusal records with family, operation, phase, and reason where applicable.
 - Test strategy: input-order determinism for multi-operand union; declared cutter-order behavior for multi-operand difference; diagnostics for unsupported pairwise step in a chain; provenance metadata across all operands; no hidden mesh fallback across intermediate results
 - Data ownership: `SurfaceBody` and `SurfaceBooleanResult` records remain the authored source of truth for CSG execution.
 - Data ownership: Reference fixture metadata owns review evidence, dirty artifact context, and diagnostic evidence records.
-- Routes: public boolean helper to `surface_boolean_result` to surfaced CSG route; CSG intersection output to patch-local trim/fragment reconstruction route
-- Reuse/extraction decision: Reuse existing CSG/surface helpers named in the implementation boundary; add private helpers only when extraction keeps owner modules cohesive.
+- Routes: multi-operand request to deterministic pairwise surfaced CSG composition route
+- Reuse/extraction decision: Reuse existing helpers named in the implementation boundary; add private helpers only when extraction keeps owner modules cohesive.
 - UI field/control inventory: not applicable; these CSG manifest entries have no UI controls or visible fields
 
 Open questions / nuance discovered:

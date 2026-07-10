@@ -97,7 +97,7 @@ Project readiness fields:
 - Chosen defaults / parameters: This parent has no execution defaults; child leaves own thresholds, route limits, and fixture defaults.
 - Test strategy: child-leaf support matrix rows and execute-or-refuse behavior; no hidden mesh fallback for successful, promoted, and refused routes; `.impress` round-trip for successful or promoted family payloads where child leaves require persistence; negative diagnostic fixture coverage for unsupported routes
 - Data ownership: Parent document owns sequencing and coverage mapping only; child leaves own implementation data.
-- Routes: advanced family route through CSG support matrix, payload persistence, or refusal diagnostics
+- Routes: child advanced-family leaves sequence support policy, sampled/implicit routes, and evidence routes
 - Reuse/extraction decision: Parent reuses child leaves and does not add code directly.
 - UI field/control inventory: not applicable; these CSG manifest entries have no UI controls or visible fields
 
