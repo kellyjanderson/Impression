@@ -16,6 +16,10 @@ Reference Review Workbench planning lives under:
 
 - [`reference-review-workbench-progression.md`](reference-review-workbench-progression.md)
 
+Reference test expansion planning lives under:
+
+- [`reference-test-expansion-plan.md`](reference-test-expansion-plan.md)
+
 Surface-body completion planning lives under:
 
 - [`surface-body-families/`](surface-body-families/README.md)

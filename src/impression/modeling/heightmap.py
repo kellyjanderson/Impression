@@ -1116,44 +1116,27 @@ def heightmap(
     center: Sequence[float] = (0.0, 0.0, 0.0),
     alpha_mode: str = "mask",
     quality: MeshQuality | None = None,
-    backend: Backend = "mesh",
-) -> Mesh | SurfaceBody:
-    """Create a heightfield mesh from an image.
+) -> SurfaceBody:
+    """Create a heightfield surface body from an image.
 
     alpha_mode:
         - "mask": skip faces that touch fully transparent pixels (holes).
         - "ignore": treat transparent pixels as zero height (no holes).
     """
-    if backend not in {"mesh", "surface"}:
-        raise ValueError("backend must be 'mesh' or 'surface'.")
-    if backend == "surface":
-        patch = make_heightmap_surface_patch(
-            image,
-            height=height,
-            xy_scale=xy_scale,
-            center=center,
-            alpha_mode=alpha_mode,
-            quality=quality,
-        )
-        from .surface import make_surface_body, make_surface_shell
-
-        return make_surface_body(
-            (make_surface_shell((patch,), connected=False, metadata={"kernel": {"producer": "heightmap"}}),),
-            metadata={"kernel": {"producer": "heightmap"}, "consumer": {"source": "heightmap"}},
-        )
-
-    warn_mesh_primary_api(
-        "heightmap",
-        replacement="a future surface-native heightfield path",
-    )
-    return heightmap_mesh_compatibility_result(
+    patch = make_heightmap_surface_patch(
         image,
         height=height,
         xy_scale=xy_scale,
         center=center,
         alpha_mode=alpha_mode,
         quality=quality,
-    ).mesh
+    )
+    from .surface import make_surface_body, make_surface_shell
+
+    return make_surface_body(
+        (make_surface_shell((patch,), connected=False, metadata={"kernel": {"producer": "heightmap"}}),),
+        metadata={"kernel": {"producer": "heightmap"}, "consumer": {"source": "heightmap"}},
+    )
 
 
 def _vertex_normals(mesh: Mesh) -> np.ndarray:
@@ -1262,36 +1245,16 @@ def displace_heightmap(
     alpha_mode: str = "ignore",
     bounds: Sequence[float] | None = None,
     quality: MeshQuality | None = None,
-    backend: Backend = "mesh",
-) -> Mesh | SurfaceBody:
-    """Displace a mesh using a heightmap with planar projection.
+    ) -> SurfaceBody:
+    """Displace a surface body using a heightmap with planar projection.
 
     alpha_mode:
         - "ignore": transparent pixels cause no displacement.
         - "mask": faces touching transparent samples are removed.
     """
-    if backend not in {"mesh", "surface"}:
-        raise ValueError("backend must be 'mesh' or 'surface'.")
-    if backend == "surface":
-        if isinstance(mesh, Mesh):
-            raise ValueError("Surface displacement requires a SurfaceBody input; use backend='mesh' for Mesh inputs.")
-        return _displace_heightmap_surface_body(
-            mesh,
-            image=image,
-            height=height,
-            projection=projection,
-            plane=plane,
-            direction=direction,
-            alpha_mode=alpha_mode,
-            bounds=bounds,
-            quality=quality,
-        )
-
-    warn_mesh_primary_api(
-        "displace_heightmap",
-        replacement="surface-native displacement once SurfaceBody deformation lands",
-    )
-    return _displace_heightmap_mesh_impl(
+    if isinstance(mesh, Mesh):
+        raise ValueError("Surface displacement requires a SurfaceBody input.")
+    return _displace_heightmap_surface_body(
         mesh,
         image=image,
         height=height,
