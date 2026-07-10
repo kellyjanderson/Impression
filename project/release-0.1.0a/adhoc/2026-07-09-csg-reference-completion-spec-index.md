@@ -47,18 +47,25 @@ Basis: this index owns no implementation itself; it sequences eighteen final imp
 
 Program and parent documents:
 
-- [CSG Reference Spec 01: Primitive Analytic Surface Boolean Execution](2026-07-09-csg-reference-01-primitive-analytic-surface-boolean-execution.md)
 - [CSG Reference Spec 02: General Trim Fragment Reconstruction Program](2026-07-09-csg-reference-02-general-trim-fragment-reconstruction.md)
-- [CSG Reference Spec 03: Multi-Operand Boolean Composition](2026-07-09-csg-reference-03-multi-operand-boolean-composition.md)
+- [CSG Reference Spec 02c: Shell Assembly And Validity Program](2026-07-09-csg-reference-02c-shell-seam-assembly-and-validity-gate.md)
 - [CSG Reference Spec 04: Lofted And Ruled Body Boolean Program](2026-07-09-csg-reference-04-lofted-and-ruled-body-boolean-execution.md)
+- [CSG Reference Spec 04b: Ruled Patch Boolean Program](2026-07-09-csg-reference-04b-ruled-patch-boolean-execution-route.md)
 - [CSG Reference Spec 05: Advanced Patch Family Boolean Program](2026-07-09-csg-reference-05-advanced-patch-family-boolean-policy-and-evidence.md)
+- [CSG Reference Spec 05b: Sampled And Implicit Patch Family Boolean Program](2026-07-09-csg-reference-05b-sampled-and-implicit-patch-family-boolean-routes.md)
+- [CSG Reference Spec 05b2: Sampled Surface Boolean Program](2026-07-09-csg-reference-05b2-sampled-heightmap-and-displacement-boolean-routes.md)
+- [CSG Reference Spec 05b2b: Displacement Boolean Program](2026-07-09-csg-reference-05b2b-displacement-boolean-routes.md)
+- [CSG Reference Spec 05b2b2: Displacement Successful Result Program](2026-07-09-csg-reference-05b2b2-displacement-successful-payload-persistence-route.md)
+- [CSG Reference Spec 05c: Advanced Patch Family Reference Evidence Program](2026-07-09-csg-reference-05c-advanced-patch-family-reference-evidence-matrix.md)
 
 Final implementation leaves:
 
+- [CSG Reference Spec 01: Primitive Analytic Surface Boolean Execution](2026-07-09-csg-reference-01-primitive-analytic-surface-boolean-execution.md)
 - [CSG Reference Spec 02a: Trim Arrangement Graph Construction](2026-07-09-csg-reference-02a-trim-arrangement-graph-construction.md)
 - [CSG Reference Spec 02b: Fragment Classification And Operation Selection](2026-07-09-csg-reference-02b-fragment-classification-and-operation-selection.md)
 - [CSG Reference Spec 02c1: Shell And Seam Assembly](2026-07-09-csg-reference-02c1-shell-and-seam-assembly.md)
 - [CSG Reference Spec 02c2: Cap Patch And Validity Gate](2026-07-09-csg-reference-02c2-cap-patch-and-validity-gate.md)
+- [CSG Reference Spec 03: Multi-Operand Boolean Composition](2026-07-09-csg-reference-03-multi-operand-boolean-composition.md)
 - [CSG Reference Spec 04a: Lofted Body Eligibility And Refusal Diagnostics](2026-07-09-csg-reference-04a-lofted-body-eligibility-and-refusal-diagnostics.md)
 - [CSG Reference Spec 04b1: Ruled Patch Box-Cutter Execution](2026-07-09-csg-reference-04b1-ruled-patch-box-cutter-execution.md)
 - [CSG Reference Spec 04b2: Ruled Patch Unsupported Cutter Diagnostics](2026-07-09-csg-reference-04b2-ruled-patch-unsupported-cutter-diagnostics.md)

@@ -45,11 +45,11 @@ Owner module:
 Project readiness fields:
 - Implementation owner/module: src/impression/modeling/csg.py
 - Chosen defaults / parameters: No mesh fallback; tessellation only after a surfaced result succeeds at artifact, preview, or export boundaries.
-- Test strategy: cap patch insertion tests; invalid reconstruction tests; no-hidden-mesh-fallback checks
+- Test strategy: cap patch insertion tests; invalid reconstruction tests; no-hidden-mesh-fallback checks; Implementation owner/module: src/impression/modeling/csg.py; Chosen defaults / parameters: No mesh fallback; tessellation only after a surfaced result succeeds at artifact, preview, or export boundaries.; Test strategy: cap patch insertion tests; invalid reconstruction tests; no-hidden-mesh-fallback checks; Data ownership: `SurfaceBody` and `SurfaceBooleanResult` records remain the authored source of truth for CSG execution.; Data ownership: Reference fixture metadata owns review evidence, dirty artifact context, and diagnostic evidence records.; Routes: CSG intersection output to patch-local trim/fragment reconstruction route; Reuse/extraction decision: Add to existing CSG, surface, persistence, or reference helper modules named by this spec; do not create public API unless the spec says so.; UI field/control inventory: not applicable; these CSG manifest entries have no UI controls or visible fields; Exact geometric tolerances and fixture thresholds should follow the existing CSG and reference-test helpers unless a child implementation finds a case requiring an explicit local value.; If implementation discovers a route needs mesh-derived source truth, keep the route refused and record the missing surfaced capability instead of adding fallback execution.
 - Data ownership: `SurfaceBody` and `SurfaceBooleanResult` records remain the authored source of truth for CSG execution.
 - Data ownership: Reference fixture metadata owns review evidence, dirty artifact context, and diagnostic evidence records.
-- Routes: CSG intersection output to patch-local trim/fragment reconstruction route
-- Reuse/extraction decision: Add to existing CSG, surface, persistence, or reference helper modules named by this spec; do not create public API unless the spec says so.
+- Routes: selected fragments and cap requirements to validity/refusal gate route
+- Reuse/extraction decision: Reuse existing helpers named in the implementation boundary; add private helpers only when extraction keeps owner modules cohesive.
 - UI field/control inventory: not applicable; these CSG manifest entries have no UI controls or visible fields
 
 Open questions / nuance discovered:

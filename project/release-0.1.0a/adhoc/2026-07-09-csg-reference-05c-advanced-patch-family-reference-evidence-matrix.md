@@ -74,9 +74,9 @@ Shared reuse:
 Project readiness fields:
 - Implementation owner/module: src/impression/modeling/csg.py
 - Chosen defaults / parameters: This parent has no execution defaults; child leaves own thresholds, route limits, and fixture defaults.
-- Test strategy: child-leaf fixture inventory coverage; child-leaf support/refusal matrix coverage; child-leaf no-hidden-mesh-fallback evidence checks
+- Test strategy: child-leaf fixture inventory coverage; child-leaf support/refusal matrix coverage; child-leaf no-hidden-mesh-fallback evidence checks; Implementation owner/module: src/impression/modeling/csg.py; Chosen defaults / parameters: This parent has no execution defaults; child leaves own thresholds, route limits, and fixture defaults.; Test strategy: child-leaf fixture inventory coverage; child-leaf support/refusal matrix coverage; child-leaf no-hidden-mesh-fallback evidence checks; Data ownership: Parent document owns sequencing and coverage mapping only; child leaves own implementation data.; Routes: advanced family route through CSG support matrix, payload persistence, or refusal diagnostics; Reuse/extraction decision: Parent reuses child leaves and does not add code directly.; UI field/control inventory: not applicable; these CSG manifest entries have no UI controls or visible fields; Keep this parent out of progression-style implementation queues; only child leaves should be scheduled as executable work.; Rollup IWU counts must stay synchronized with nested child leaves if children are split again.
 - Data ownership: Parent document owns sequencing and coverage mapping only; child leaves own implementation data.
-- Routes: advanced family route through CSG support matrix, payload persistence, or refusal diagnostics
+- Routes: child advanced-family leaves sequence support policy, sampled/implicit routes, and evidence routes
 - Reuse/extraction decision: Parent reuses child leaves and does not add code directly.
 - UI field/control inventory: not applicable; these CSG manifest entries have no UI controls or visible fields
 

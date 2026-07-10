@@ -57,13 +57,13 @@ Owner modules:
 Project readiness fields:
 - Implementation owner/module: src/impression/modeling/csg.py
 - Chosen defaults / parameters: No mesh fallback; tessellation only after a surfaced result succeeds at artifact, preview, or export boundaries.
-- Chosen defaults / parameters: Unsupported routes return deterministic refusal records with family, operation, phase, and reason where applicable.
-- Test strategy: implicit field composition tests; adapter refusal tests; `.impress` round-trip tests for successful implicit payloads; no-hidden-mesh-fallback tests
+- Chosen defaults / parameters: Sampled or implicit source truth must be preserved, promoted with provenance, or refused explicitly.
+- Test strategy: implicit field composition tests; adapter refusal tests; `.impress` round-trip tests for successful implicit payloads; no-hidden-mesh-fallback tests; Implementation owner/module: src/impression/modeling/csg.py; Chosen defaults / parameters: No mesh fallback; tessellation only after a surfaced result succeeds at artifact, preview, or export boundaries.; Chosen defaults / parameters: Unsupported routes return deterministic refusal records with family, operation, phase, and reason where applicable.; Test strategy: implicit field composition tests; adapter refusal tests; `.impress` round-trip tests for successful implicit payloads; no-hidden-mesh-fallback tests; Data ownership: `SurfaceBody` and `SurfaceBooleanResult` records remain the authored source of truth for CSG execution.; Data ownership: `.impress` payloads own persistence evidence only after surfaced/native or promoted payloads are produced.; Data ownership: Reference fixture metadata owns review evidence, dirty artifact context, and diagnostic evidence records.; Routes: advanced family route through CSG support matrix, payload persistence, or refusal diagnostics; Reuse/extraction decision: Add to existing CSG, surface, persistence, or reference helper modules named by this spec; do not create public API unless the spec says so.; UI field/control inventory: not applicable; these CSG manifest entries have no UI controls or visible fields; Exact geometric tolerances and fixture thresholds should follow the existing CSG and reference-test helpers unless a child implementation finds a case requiring an explicit local value.; If implementation discovers a route needs mesh-derived source truth, keep the route refused and record the missing surfaced capability instead of adding fallback execution.
 - Data ownership: `SurfaceBody` and `SurfaceBooleanResult` records remain the authored source of truth for CSG execution.
 - Data ownership: `.impress` payloads own persistence evidence only after surfaced/native or promoted payloads are produced.
 - Data ownership: Reference fixture metadata owns review evidence, dirty artifact context, and diagnostic evidence records.
-- Routes: advanced family route through CSG support matrix, payload persistence, or refusal diagnostics
-- Reuse/extraction decision: Add to existing CSG, surface, persistence, or reference helper modules named by this spec; do not create public API unless the spec says so.
+- Routes: implicit field operands to expression-preserving or refusal CSG route
+- Reuse/extraction decision: Reuse existing helpers named in the implementation boundary; add private helpers only when extraction keeps owner modules cohesive.
 - UI field/control inventory: not applicable; these CSG manifest entries have no UI controls or visible fields
 
 Open questions / nuance discovered:

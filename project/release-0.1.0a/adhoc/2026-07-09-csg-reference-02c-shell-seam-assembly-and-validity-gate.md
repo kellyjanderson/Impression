@@ -49,9 +49,9 @@ Shared owner modules:
 Project readiness fields:
 - Implementation owner/module: src/impression/modeling/csg.py
 - Chosen defaults / parameters: This parent has no execution defaults; child leaves own thresholds, route limits, and fixture defaults.
-- Test strategy: child-leaf shell assembly, cap patch, invalid reconstruction, and no-hidden-mesh-fallback checks
+- Test strategy: child-leaf shell assembly, cap patch, invalid reconstruction, and no-hidden-mesh-fallback checks; Implementation owner/module: src/impression/modeling/csg.py; Chosen defaults / parameters: This parent has no execution defaults; child leaves own thresholds, route limits, and fixture defaults.; Test strategy: child-leaf shell assembly, cap patch, invalid reconstruction, and no-hidden-mesh-fallback checks; Data ownership: Parent document owns sequencing and coverage mapping only; child leaves own implementation data.; Routes: CSG intersection output to patch-local trim/fragment reconstruction route; Reuse/extraction decision: Parent reuses child leaves and does not add code directly.; UI field/control inventory: not applicable; these CSG manifest entries have no UI controls or visible fields; Keep this parent out of progression-style implementation queues; only child leaves should be scheduled as executable work.; Rollup IWU counts must stay synchronized with nested child leaves if children are split again.
 - Data ownership: Parent document owns sequencing and coverage mapping only; child leaves own implementation data.
-- Routes: CSG intersection output to patch-local trim/fragment reconstruction route
+- Routes: child reconstruction leaves sequence trim graph, classification, shell/seam, cap, and validity routes
 - Reuse/extraction decision: Parent reuses child leaves and does not add code directly.
 - UI field/control inventory: not applicable; these CSG manifest entries have no UI controls or visible fields
 

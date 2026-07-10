@@ -51,12 +51,11 @@ Owner files:
 Project readiness fields:
 - Implementation owner/module: src/impression/modeling/csg.py
 - Chosen defaults / parameters: No mesh fallback; tessellation only after a surfaced result succeeds at artifact, preview, or export boundaries.
-- Chosen defaults / parameters: Unsupported routes return deterministic refusal records with family, operation, phase, and reason where applicable.
-- Test strategy: fixture inventory coverage; missing artifact failure tests; no-hidden-mesh-fallback evidence for supported artifact generators
+- Test strategy: fixture inventory coverage; missing artifact failure tests; no-hidden-mesh-fallback evidence for supported artifact generators; Implementation owner/module: src/impression/modeling/csg.py; Chosen defaults / parameters: No mesh fallback; tessellation only after a surfaced result succeeds at artifact, preview, or export boundaries.; Chosen defaults / parameters: Unsupported routes return deterministic refusal records with family, operation, phase, and reason where applicable.; Test strategy: fixture inventory coverage; missing artifact failure tests; no-hidden-mesh-fallback evidence for supported artifact generators; Data ownership: `SurfaceBody` and `SurfaceBooleanResult` records remain the authored source of truth for CSG execution.; Data ownership: Reference fixture metadata owns review evidence, dirty artifact context, and diagnostic evidence records.; Routes: CSG support matrix to surfaced operation planner route; Reuse/extraction decision: Add to existing CSG, surface, persistence, or reference helper modules named by this spec; do not create public API unless the spec says so.; UI field/control inventory: not applicable; these CSG manifest entries have no UI controls or visible fields; Exact geometric tolerances and fixture thresholds should follow the existing CSG and reference-test helpers unless a child implementation finds a case requiring an explicit local value.; If implementation discovers a route needs mesh-derived source truth, keep the route refused and record the missing surfaced capability instead of adding fallback execution.
 - Data ownership: `SurfaceBody` and `SurfaceBooleanResult` records remain the authored source of truth for CSG execution.
 - Data ownership: Reference fixture metadata owns review evidence, dirty artifact context, and diagnostic evidence records.
-- Routes: CSG support matrix to surfaced operation planner route
-- Reuse/extraction decision: Add to existing CSG, surface, persistence, or reference helper modules named by this spec; do not create public API unless the spec says so.
+- Routes: supported advanced patch CSG route to dirty STL evidence route
+- Reuse/extraction decision: Reuse existing helpers named in the implementation boundary; add private helpers only when extraction keeps owner modules cohesive.
 - UI field/control inventory: not applicable; these CSG manifest entries have no UI controls or visible fields
 
 Open questions / nuance discovered:

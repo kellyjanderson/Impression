@@ -81,7 +81,7 @@ Project readiness fields:
 - Chosen defaults / parameters: This parent has no execution defaults; child leaves own thresholds, route limits, and fixture defaults.
 - Test strategy: child-leaf trim graph, classification, shell assembly, invalid-result, and no-hidden-mesh fallback tests
 - Data ownership: Parent document owns sequencing and coverage mapping only; child leaves own implementation data.
-- Routes: CSG intersection output to patch-local trim/fragment reconstruction route; loft or ruled-patch eligibility route into surfaced CSG planner; advanced family route through CSG support matrix, payload persistence, or refusal diagnostics
+- Routes: child reconstruction leaves sequence trim graph, classification, shell/seam, cap, and validity routes
 - Reuse/extraction decision: Parent reuses child leaves and does not add code directly.
 - UI field/control inventory: not applicable; these CSG manifest entries have no UI controls or visible fields
 
