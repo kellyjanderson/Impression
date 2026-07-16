@@ -14,8 +14,8 @@ path into reusable trim fragment reconstruction for non-box cut curves.
 Unit: Implementation Work Unit (IWU).
 Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
 Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
-Count: 3 IWU.
-Basis: parent program document with three 1-IWU child leaves: trim arrangement, fragment classification, and shell/seam assembly.
+Count: 4 IWU.
+Basis: parent program document with four final 1-IWU descendant leaves: trim arrangement, fragment classification, shell/seam assembly, and cap/validity behavior.
 
 ## Scope
 
@@ -133,7 +133,8 @@ Readiness blockers:
 Split decision:
 
 - Split completed. This parent is not an implementation leaf; implementation
-  lives in Specs 02a, 02b, and 02c.
+  lives in final descendant leaves Specs 02a, 02b, 02c1, and 02c2, with
+  Spec 02c retained only as a nested program document.
 
 ## Acceptance
 

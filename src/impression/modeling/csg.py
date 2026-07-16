@@ -42,17 +42,27 @@ from .surface import (
     TrimLoop,
     make_surface_body,
     make_surface_shell,
+    surface_adjacency_from_seams,
     validate_nurbs_weights,
     adapt_surface_patch_to_implicit_field,
     build_implicit_field_safety_validation_report,
+    implicit_box_field,
+    implicit_cylinder_field,
     implicit_difference_field,
     implicit_intersection_field,
+    implicit_sphere_field,
     implicit_union_field,
     resolve_displacement_source_identity,
 )
 from .heightmap import (
     HeightmapGridAlignmentRecord,
     plan_heightmap_grid_alignment,
+)
+from .loft import (
+    LoftBranchGraphEvidence,
+    build_branch_joint_diagnostic,
+    build_loft_branch_graph_evidence,
+    summarize_loft_shell_validity,
 )
 from .surface_intersections import (
     SurfaceAnalyticSplineResidualReport,
@@ -75,6 +85,16 @@ SURFACE_BOOLEAN_OPERATIONS: tuple[SurfaceBooleanOperation, ...] = ("union", "dif
 SurfaceBooleanStatus = Literal["succeeded", "invalid", "unsupported"]
 SurfaceBooleanClassification = Literal["open", "closed", "empty"]
 SurfaceBooleanBodyRelation = Literal["disjoint", "touching", "overlap", "containment", "equal"]
+SurfaceCSGContactKind = Literal[
+    "disjoint",
+    "near-touch",
+    "point-touch",
+    "edge-touch",
+    "face-touch",
+    "overlap",
+    "containment",
+    "equal",
+]
 SurfaceBooleanPatchRelation = Literal["inside", "outside", "on"]
 SurfaceBooleanSplitRole = Literal["survive", "cut_cap", "discard"]
 SurfaceBooleanUnsupportedPhase = Literal["operand-family-eligibility", "intersection-kernel"]
@@ -115,6 +135,13 @@ SurfaceCSGToleranceDiagnosticCode = Literal[
 ]
 SurfaceCSGPlanarRelation = Literal["crossing", "parallel", "coincident", "disjoint", "touching", "unsupported-linear"]
 SurfaceCSGCallerCategory = Literal["public-api", "primitive", "feature", "compatibility"]
+BranchingLoftCSGPolicyClass = Literal["not-branching", "executable", "decomposition-required", "refused"]
+BranchingLoftCSGDiagnosticCode = Literal[
+    "underconstrained-branch-graph",
+    "self-intersection-risk",
+    "decomposition-required",
+]
+BranchRecompositionResultShape = Literal["single-shell", "multi-shell", "refused"]
 
 
 class BooleanOperationError(RuntimeError):
@@ -1959,6 +1986,41 @@ class SurfaceCSGFeatureGateDiagnostic:
         }
 
 
+SurfaceCSGLoftEligibilityCode = Literal[
+    "eligible",
+    "not-loft",
+    "multi-shell",
+    "underconstrained",
+    "branching-topology",
+    "self-intersection-risk",
+    "not-closed-valid",
+]
+
+
+@dataclass(frozen=True)
+class SurfaceCSGLoftEligibilityRecord:
+    """Deterministic CSG eligibility/refusal record for loft-authored bodies."""
+
+    supported: bool
+    code: SurfaceCSGLoftEligibilityCode
+    message: str
+    body_id: str
+    operation: SurfaceBooleanOperation
+    provenance: dict[str, object] = field(default_factory=dict)
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "body_id": self.body_id,
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "provenance": self.provenance,
+            "supported": self.supported,
+        }
+
+
 @dataclass(frozen=True)
 class SurfaceCSGPlanDiagnostic:
     """Diagnostic accumulated by a surface CSG operation plan before execution."""
@@ -2068,6 +2130,1558 @@ class SurfaceBooleanOperands:
 
 
 @dataclass(frozen=True)
+class LoftCSGOperationRouteRecord:
+    """Loft-aware CSG route selection record before route execution."""
+
+    supported: bool
+    operation: SurfaceBooleanOperation
+    operand_ids: tuple[str, ...]
+    route_id: str | None
+    solver_path: str | None
+    loft_operand_indices: tuple[int, ...]
+    primitive_families: tuple[str, ...]
+    diagnostic: str = ""
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "diagnostic": self.diagnostic,
+            "loft_operand_indices": self.loft_operand_indices,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operand_ids": self.operand_ids,
+            "operation": self.operation,
+            "primitive_families": self.primitive_families,
+            "route_id": self.route_id,
+            "solver_path": self.solver_path,
+            "supported": self.supported,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPairOperationPlanRecord:
+    """Execution plan metadata for eligible single-shell loft/loft CSG routes."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    solver_path: str
+    loft_operand_ids: tuple[str, str]
+    parameterization_policy: str = "patch-family-route-mapping"
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "loft_operand_ids": self.loft_operand_ids,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "parameterization_policy": self.parameterization_policy,
+            "route_id": self.route_id,
+            "solver_path": self.solver_path,
+        }
+
+
+@dataclass(frozen=True)
+class BranchingLoftCSGDiagnostic:
+    """Branch-policy diagnostic emitted before branching loft CSG execution."""
+
+    code: BranchingLoftCSGDiagnosticCode
+    message: str
+    branch_id: str | None = None
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "branch_id": self.branch_id,
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class BranchingLoftCSGPolicyRecord:
+    """CSG policy decision for a loft branch graph before execution."""
+
+    policy_class: BranchingLoftCSGPolicyClass
+    operation: SurfaceBooleanOperation
+    body_id: str
+    branch_graph: LoftBranchGraphEvidence
+    diagnostics: tuple[BranchingLoftCSGDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    @property
+    def executable(self) -> bool:
+        return self.policy_class in {"not-branching", "executable"}
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "body_id": self.body_id,
+            "branch_graph": self.branch_graph.canonical_payload(),
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "executable": self.executable,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "policy_class": self.policy_class,
+        }
+
+
+def build_underconstrained_branch_diagnostic(
+    branch_graph: LoftBranchGraphEvidence,
+) -> BranchingLoftCSGDiagnostic:
+    """Build a deterministic refusal diagnostic for incomplete branch graph evidence."""
+
+    reasons = build_branch_joint_diagnostic(branch_graph)
+    reason_text = ", ".join(reasons) if reasons else "missing branch graph constraints"
+    return BranchingLoftCSGDiagnostic(
+        code="underconstrained-branch-graph",
+        message=(
+            "Branching loft CSG requires explicit branch ownership, transition membership, "
+            f"and joint evidence before execution; {reason_text}; no mesh fallback was attempted."
+        ),
+    )
+
+
+def classify_branching_loft_csg_policy(
+    body: SurfaceBody,
+    operation: SurfaceBooleanOperation,
+) -> BranchingLoftCSGPolicyRecord:
+    """Classify branching loft CSG posture without executing or tessellating."""
+
+    branch_graph = build_loft_branch_graph_evidence(body)
+    if branch_graph.branch_count <= 1:
+        return BranchingLoftCSGPolicyRecord(
+            policy_class="not-branching",
+            operation=operation,
+            body_id=body.stable_identity,
+            branch_graph=branch_graph,
+        )
+    if branch_graph.branch_crossing_count > 0.0:
+        diagnostic = BranchingLoftCSGDiagnostic(
+            code="self-intersection-risk",
+            message=(
+                "Branching loft CSG refused a branch graph with crossing/self-intersection risk; "
+                "no mesh fallback was attempted."
+            ),
+        )
+        return BranchingLoftCSGPolicyRecord(
+            policy_class="refused",
+            operation=operation,
+            body_id=body.stable_identity,
+            branch_graph=branch_graph,
+            diagnostics=(diagnostic,),
+        )
+    if branch_graph.underconstrained:
+        return BranchingLoftCSGPolicyRecord(
+            policy_class="refused",
+            operation=operation,
+            body_id=body.stable_identity,
+            branch_graph=branch_graph,
+            diagnostics=(build_underconstrained_branch_diagnostic(branch_graph),),
+        )
+    diagnostic = BranchingLoftCSGDiagnostic(
+        code="decomposition-required",
+        message=(
+            "Branching loft CSG has complete branch graph evidence and requires branch "
+            "decomposition/recomposition before execution; no mesh fallback was attempted."
+        ),
+    )
+    return BranchingLoftCSGPolicyRecord(
+        policy_class="decomposition-required",
+        operation=operation,
+        body_id=body.stable_identity,
+        branch_graph=branch_graph,
+        diagnostics=(diagnostic,),
+    )
+
+
+@dataclass(frozen=True)
+class BranchSubBodyCSGPlan:
+    """One branch-local boolean execution plan before recomposition."""
+
+    branch_id: str
+    operation: SurfaceBooleanOperation
+    source_body_id: str
+    joint_ids: tuple[str, ...]
+    execution_posture: Literal["planned"] = "planned"
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "branch_id": self.branch_id,
+            "execution_posture": self.execution_posture,
+            "joint_ids": self.joint_ids,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "source_body_id": self.source_body_id,
+        }
+
+
+@dataclass(frozen=True)
+class BranchDecompositionPlan:
+    """Executable branch-local CSG plan derived from complete branch evidence."""
+
+    plan_id: str
+    operation: SurfaceBooleanOperation
+    source_body_id: str
+    policy: BranchingLoftCSGPolicyRecord
+    subbody_plans: tuple[BranchSubBodyCSGPlan, ...]
+    recomposition_required: bool = True
+    no_mesh_fallback: bool = True
+
+    @property
+    def executable(self) -> bool:
+        return self.policy.policy_class == "decomposition-required" and bool(self.subbody_plans)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "executable": self.executable,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "plan_id": self.plan_id,
+            "policy": self.policy.canonical_payload(),
+            "recomposition_required": self.recomposition_required,
+            "source_body_id": self.source_body_id,
+            "subbody_plans": [plan.canonical_payload() for plan in self.subbody_plans],
+        }
+
+
+@dataclass(frozen=True)
+class BranchRecompositionRecord:
+    """Validation record for branch sub-body result recomposition."""
+
+    plan_id: str
+    valid: bool
+    result_shape: BranchRecompositionResultShape
+    result_body_ids: tuple[str, ...]
+    recomposition_seams: tuple[str, ...]
+    diagnostics: tuple[str, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "diagnostics": self.diagnostics,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "plan_id": self.plan_id,
+            "recomposition_seams": self.recomposition_seams,
+            "result_body_ids": self.result_body_ids,
+            "result_shape": self.result_shape,
+            "valid": self.valid,
+        }
+
+
+def plan_branch_subbody_csg(
+    body: SurfaceBody,
+    operation: SurfaceBooleanOperation,
+) -> BranchDecompositionPlan:
+    """Plan branch-local CSG work for a complete branching loft policy record."""
+
+    policy = classify_branching_loft_csg_policy(body, operation)
+    branch_graph = policy.branch_graph
+    joint_ids_by_branch: dict[str, list[str]] = {branch_id: [] for branch_id in branch_graph.branch_ids}
+    for joint in branch_graph.joints:
+        for branch_id in joint.branch_ids:
+            joint_ids_by_branch.setdefault(branch_id, []).append(joint.joint_id)
+    subbody_plans = tuple(
+        BranchSubBodyCSGPlan(
+            branch_id=branch_id,
+            operation=operation,
+            source_body_id=body.stable_identity,
+            joint_ids=tuple(dict.fromkeys(joint_ids_by_branch.get(branch_id, ()))),
+        )
+        for branch_id in branch_graph.branch_ids
+    )
+    if policy.policy_class != "decomposition-required":
+        subbody_plans = ()
+    plan_digest = hashlib.sha1(
+        json.dumps(
+            {
+                "body_id": body.stable_identity,
+                "branch_ids": branch_graph.branch_ids,
+                "operation": operation,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf8")
+    ).hexdigest()[:16]
+    return BranchDecompositionPlan(
+        plan_id=f"branch-decomposition:{plan_digest}",
+        operation=operation,
+        source_body_id=body.stable_identity,
+        policy=policy,
+        subbody_plans=subbody_plans,
+    )
+
+
+def validate_branch_recomposition(
+    plan: BranchDecompositionPlan,
+    *,
+    result_body_ids: Sequence[str] = (),
+    recomposition_seams: Sequence[str] = (),
+    result_shape: BranchRecompositionResultShape = "single-shell",
+) -> BranchRecompositionRecord:
+    """Validate recomposition evidence for branch-local CSG results."""
+
+    diagnostics: list[str] = []
+    normalized_result_ids = tuple(str(body_id) for body_id in result_body_ids if str(body_id))
+    normalized_seams = tuple(str(seam_id) for seam_id in recomposition_seams if str(seam_id))
+    if not plan.executable:
+        diagnostics.append("decomposition-plan-not-executable")
+    if len(normalized_result_ids) != len(plan.subbody_plans):
+        diagnostics.append("subbody-result-count-mismatch")
+    if plan.recomposition_required and not normalized_seams:
+        diagnostics.append("missing-recomposition-seams")
+    if result_shape not in {"single-shell", "multi-shell", "refused"}:
+        diagnostics.append("unsupported-result-shape")
+        normalized_shape: BranchRecompositionResultShape = "refused"
+    else:
+        normalized_shape = result_shape
+    valid = not diagnostics and normalized_shape != "refused"
+    return BranchRecompositionRecord(
+        plan_id=plan.plan_id,
+        valid=valid,
+        result_shape=normalized_shape if valid else "refused",
+        result_body_ids=normalized_result_ids,
+        recomposition_seams=normalized_seams,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+@dataclass(frozen=True)
+class LoftPatchFragmentParticipationRecord:
+    """Patch participation record for an exact loft/primitive CSG route result."""
+
+    patch_index: int
+    patch_role: str
+    result_role: Literal["preserved", "discarded"]
+    route_id: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "patch_index": self.patch_index,
+            "patch_role": self.patch_role,
+            "result_role": self.result_role,
+            "route_id": self.route_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftCSGSourceFragmentRecord:
+    """Stable source fragment identity for a loft CSG result fragment."""
+
+    source_fragment_id: str
+    source_operand_index: int
+    source_patch_index: int | None
+    patch_role: str
+    source_kind: Literal["loft", "cutter", "generated"]
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "patch_role": self.patch_role,
+            "source_fragment_id": self.source_fragment_id,
+            "source_kind": self.source_kind,
+            "source_operand_index": self.source_operand_index,
+            "source_patch_index": self.source_patch_index,
+        }
+
+
+@dataclass(frozen=True)
+class LoftCSGResultFragmentRecord:
+    """Output fragment lineage or generated-fragment reason for loft CSG."""
+
+    result_fragment_id: str
+    result_role: SurfaceBooleanSplitRole | Literal["preserved"]
+    route_id: str
+    source: LoftCSGSourceFragmentRecord | None = None
+    generated_reason: str | None = None
+    diagnostics: tuple[str, ...] = ()
+    no_mesh_fallback: bool = True
+
+    @property
+    def has_provenance(self) -> bool:
+        return self.source is not None or bool(self.generated_reason)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "diagnostics": self.diagnostics,
+            "generated_reason": self.generated_reason,
+            "has_provenance": self.has_provenance,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "result_fragment_id": self.result_fragment_id,
+            "result_role": self.result_role,
+            "route_id": self.route_id,
+            "source": None if self.source is None else self.source.canonical_payload(),
+        }
+
+
+@dataclass(frozen=True)
+class LoftCSGGeneratedSurfaceStylePolicy:
+    """Deterministic fallback style for generated loft CSG surfaces."""
+
+    surface_role: str
+    color: tuple[float, float, float, float] = (1.0, 0.62, 0.25, 1.0)
+    source: Literal["generated-fallback"] = "generated-fallback"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "color": self.color,
+            "source": self.source,
+            "surface_role": self.surface_role,
+        }
+
+
+@dataclass(frozen=True)
+class LoftCSGColorOwnershipRecord:
+    """Color/material ownership for one loft CSG output fragment."""
+
+    result_fragment_id: str
+    ownership: Literal["authored", "generated-fallback", "missing-provenance"]
+    color: object | None
+    source_fragment_id: str | None = None
+    style_policy: LoftCSGGeneratedSurfaceStylePolicy | None = None
+    diagnostics: tuple[str, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "color": self.color,
+            "diagnostics": self.diagnostics,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "ownership": self.ownership,
+            "result_fragment_id": self.result_fragment_id,
+            "source_fragment_id": self.source_fragment_id,
+            "style_policy": None if self.style_policy is None else self.style_policy.canonical_payload(),
+        }
+
+
+def map_loft_csg_fragment_provenance(
+    operands: SurfaceBooleanOperands,
+    participation: Sequence[LoftPatchFragmentParticipationRecord],
+    *,
+    route: LoftCSGOperationRouteRecord,
+    generated_reasons: Mapping[str, str] | None = None,
+) -> tuple[LoftCSGResultFragmentRecord, ...]:
+    """Map loft CSG output fragments to source fragments or generated reasons."""
+
+    loft_index = route.loft_operand_indices[0] if route.loft_operand_indices else 0
+    records: list[LoftCSGResultFragmentRecord] = []
+    for item in participation:
+        source_id = f"operand-{loft_index}:patch-{item.patch_index}"
+        result_id = f"result:{item.result_role}:loft-patch-{item.patch_index}"
+        source = LoftCSGSourceFragmentRecord(
+            source_fragment_id=source_id,
+            source_operand_index=loft_index,
+            source_patch_index=item.patch_index,
+            patch_role=item.patch_role,
+            source_kind="loft",
+        )
+        records.append(
+            LoftCSGResultFragmentRecord(
+                result_fragment_id=result_id,
+                result_role=item.result_role,
+                route_id=item.route_id,
+                source=source,
+            )
+        )
+    for result_id, reason in (generated_reasons or {}).items():
+        records.append(
+            LoftCSGResultFragmentRecord(
+                result_fragment_id=str(result_id),
+                result_role="cut_cap",
+                route_id=str(route.route_id),
+                generated_reason=str(reason),
+            )
+        )
+    if not records:
+        records.append(
+            LoftCSGResultFragmentRecord(
+                result_fragment_id="result:missing-provenance",
+                result_role="preserved",
+                route_id=str(route.route_id),
+                diagnostics=("missing-source-fragment-participation",),
+            )
+        )
+    return tuple(records)
+
+
+def resolve_generated_surface_style(surface_role: str = "generated") -> LoftCSGGeneratedSurfaceStylePolicy:
+    """Return the explicit fallback style for generated loft CSG surfaces."""
+
+    return LoftCSGGeneratedSurfaceStylePolicy(surface_role=surface_role)
+
+
+def _patch_color_for_source_fragment(
+    operands: SurfaceBooleanOperands,
+    source: LoftCSGSourceFragmentRecord,
+) -> object | None:
+    try:
+        body = operands.bodies[source.source_operand_index]
+    except IndexError:
+        return None
+    body_color = dict(body.metadata.get("consumer", {})).get("color")
+    if source.source_patch_index is None or body.shell_count != 1:
+        return body_color
+    try:
+        patch = body.iter_shells(world=True)[0].iter_patches(world=True)[source.source_patch_index]
+    except IndexError:
+        return body_color
+    patch_color = dict(getattr(patch, "metadata", {}).get("consumer", {})).get("color")
+    return patch_color if patch_color is not None else body_color
+
+
+def resolve_loft_csg_color_ownership(
+    operands: SurfaceBooleanOperands,
+    provenance: Sequence[LoftCSGResultFragmentRecord],
+) -> tuple[LoftCSGColorOwnershipRecord, ...]:
+    """Resolve authored and generated color ownership from loft CSG provenance."""
+
+    records: list[LoftCSGColorOwnershipRecord] = []
+    for record in provenance:
+        if record.source is not None:
+            color = _patch_color_for_source_fragment(operands, record.source)
+            diagnostics = () if color is not None else ("missing-authored-color",)
+            records.append(
+                LoftCSGColorOwnershipRecord(
+                    result_fragment_id=record.result_fragment_id,
+                    ownership="authored" if color is not None else "missing-provenance",
+                    color=color,
+                    source_fragment_id=record.source.source_fragment_id,
+                    diagnostics=diagnostics,
+                )
+            )
+            continue
+        if record.generated_reason:
+            style = resolve_generated_surface_style(record.generated_reason)
+            records.append(
+                LoftCSGColorOwnershipRecord(
+                    result_fragment_id=record.result_fragment_id,
+                    ownership="generated-fallback",
+                    color=style.color,
+                    style_policy=style,
+                )
+            )
+            continue
+        records.append(
+            LoftCSGColorOwnershipRecord(
+                result_fragment_id=record.result_fragment_id,
+                ownership="missing-provenance",
+                color=None,
+                diagnostics=("missing-fragment-provenance",),
+            )
+        )
+    return tuple(records)
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveTrimAdapterRecord:
+    """Patch-local trim adapter evidence for an intersecting loft/primitive route."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    loft_patch: SurfaceBooleanPatchRef
+    primitive_operand_index: int
+    primitive_family: str
+    patch_role: str
+    station_interval: tuple[int, int] | None = None
+    cut_curve_ids: tuple[str, ...] = ()
+    patch_local_curves: tuple[SurfaceCSGPatchLocalCurve, ...] = ()
+    diagnostics: tuple[SurfaceCSGCurveMappingDiagnostic | SurfaceCSGToleranceDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    @property
+    def supported(self) -> bool:
+        return not self.diagnostics and bool(self.patch_local_curves)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cut_curve_ids": self.cut_curve_ids,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "loft_patch": _surface_boolean_patch_ref_payload(self.loft_patch),
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "patch_local_curves": [curve.canonical_payload() for curve in self.patch_local_curves],
+            "patch_role": self.patch_role,
+            "primitive_family": self.primitive_family,
+            "primitive_operand_index": self.primitive_operand_index,
+            "route_id": self.route_id,
+            "station_interval": self.station_interval,
+            "supported": self.supported,
+        }
+
+
+LoftPrimitiveSourceRegionKind = Literal["box-overlap", "sphere-analytic-region", "cylinder-analytic-region"]
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveSourceRegionRecord:
+    """Normalized primitive source-region evidence for one loft patch."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    loft_patch: SurfaceBooleanPatchRef
+    primitive_operand_index: int
+    primitive_family: str
+    region_kind: LoftPrimitiveSourceRegionKind
+    patch_role: str
+    station_interval: tuple[int, int] | None = None
+    cut_curve_ids: tuple[str, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cut_curve_ids": self.cut_curve_ids,
+            "loft_patch": _surface_boolean_patch_ref_payload(self.loft_patch),
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "patch_role": self.patch_role,
+            "primitive_family": self.primitive_family,
+            "primitive_operand_index": self.primitive_operand_index,
+            "region_kind": self.region_kind,
+            "route_id": self.route_id,
+            "station_interval": self.station_interval,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveUnsupportedSourceDiagnostic:
+    """Deterministic source-normalization diagnostic for loft/primitive CSG."""
+
+    code: Literal["missing-adapter-evidence", "unsupported-primitive-region", "unsupported-route"]
+    message: str
+    operation: SurfaceBooleanOperation
+    route_id: str | None = None
+    loft_patch: SurfaceBooleanPatchRef | None = None
+    primitive_operand_index: int | None = None
+    primitive_family: str | None = None
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "loft_patch": None if self.loft_patch is None else _surface_boolean_patch_ref_payload(self.loft_patch),
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "primitive_family": self.primitive_family,
+            "primitive_operand_index": self.primitive_operand_index,
+            "route_id": self.route_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveIntersectionSourceRecord:
+    """Normalized source-region record consumed by later loft primitive CSG stages."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    primitive_operand_index: int
+    primitive_family: str
+    source_regions: tuple[LoftPrimitiveSourceRegionRecord, ...] = ()
+    diagnostics: tuple[LoftPrimitiveUnsupportedSourceDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    @property
+    def supported(self) -> bool:
+        return bool(self.source_regions) and not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "primitive_family": self.primitive_family,
+            "primitive_operand_index": self.primitive_operand_index,
+            "route_id": self.route_id,
+            "source_regions": [region.canonical_payload() for region in self.source_regions],
+            "supported": self.supported,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPatchLocalInversionDiagnostic:
+    """Deterministic diagnostic for loft primitive source-curve inversion."""
+
+    code: Literal["missing-source-record", "missing-adapter-evidence", "failed-inversion", "out-of-domain"]
+    message: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    loft_patch: SurfaceBooleanPatchRef | None = None
+    primitive_operand_index: int | None = None
+    primitive_family: str | None = None
+    source_curve_id: str | None = None
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "loft_patch": None if self.loft_patch is None else _surface_boolean_patch_ref_payload(self.loft_patch),
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "primitive_family": self.primitive_family,
+            "primitive_operand_index": self.primitive_operand_index,
+            "route_id": self.route_id,
+            "source_curve_id": self.source_curve_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPatchLocalSourceCurveRecord:
+    """Patch-local inversion record for one loft primitive source curve."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    loft_patch: SurfaceBooleanPatchRef
+    primitive_operand_index: int
+    primitive_family: str
+    source_region_kind: LoftPrimitiveSourceRegionKind
+    source_curve_id: str
+    patch_local_curve: SurfaceCSGPatchLocalCurve
+    max_residual: float = 0.0
+    tolerance: float = 0.0
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "loft_patch": _surface_boolean_patch_ref_payload(self.loft_patch),
+            "max_residual": self.max_residual,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "patch_local_curve": self.patch_local_curve.canonical_payload(),
+            "primitive_family": self.primitive_family,
+            "primitive_operand_index": self.primitive_operand_index,
+            "route_id": self.route_id,
+            "source_curve_id": self.source_curve_id,
+            "source_region_kind": self.source_region_kind,
+            "tolerance": self.tolerance,
+        }
+
+
+@dataclass(frozen=True)
+class LoftCutLoopBoundaryParticipationRecord:
+    """Existing source or boundary participant used to close a loft cut loop."""
+
+    kind: Literal["source-curve", "cap-trim", "station-seam"]
+    identifier: str
+    loft_patch: SurfaceBooleanPatchRef
+    role: str = ""
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "identifier": self.identifier,
+            "kind": self.kind,
+            "loft_patch": _surface_boolean_patch_ref_payload(self.loft_patch),
+            "role": self.role,
+        }
+
+
+@dataclass(frozen=True)
+class LoftCutLoopClosureDiagnostic:
+    """Deterministic diagnostic for loft primitive cut-loop closure."""
+
+    code: Literal["missing-inversion-records", "open-loop", "degenerate-loop"]
+    message: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    loft_patch: SurfaceBooleanPatchRef | None = None
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "loft_patch": None if self.loft_patch is None else _surface_boolean_patch_ref_payload(self.loft_patch),
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "route_id": self.route_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPatchLocalCutLoopRecord:
+    """Closed patch-local cut loop for one loft patch."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    loft_patch: SurfaceBooleanPatchRef
+    primitive_operand_index: int
+    primitive_family: str
+    loop: TrimLoop
+    source_curve_ids: tuple[str, ...]
+    boundary_participation: tuple[LoftCutLoopBoundaryParticipationRecord, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "loop", self.loop.normalized())
+        object.__setattr__(self, "source_curve_ids", tuple(str(item) for item in self.source_curve_ids))
+        object.__setattr__(self, "boundary_participation", tuple(self.boundary_participation))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary_participation": [record.canonical_payload() for record in self.boundary_participation],
+            "loft_patch": _surface_boolean_patch_ref_payload(self.loft_patch),
+            "loop": {
+                "category": self.loop.category,
+                "points_uv": tuple((float(point[0]), float(point[1])) for point in self.loop.points_uv),
+            },
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "primitive_family": self.primitive_family,
+            "primitive_operand_index": self.primitive_operand_index,
+            "route_id": self.route_id,
+            "source_curve_ids": self.source_curve_ids,
+        }
+
+
+@dataclass(frozen=True)
+class LoftCutLoopDegeneracyDiagnostic:
+    """Deterministic degeneracy diagnostic for loft primitive cut-loop records."""
+
+    code: Literal["open-loop", "invalid-closure", "zero-area", "tangent", "grazing", "duplicate-segment"]
+    message: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    loft_patch: SurfaceBooleanPatchRef | None = None
+    tolerance: float | None = None
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "loft_patch": None if self.loft_patch is None else _surface_boolean_patch_ref_payload(self.loft_patch),
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "route_id": self.route_id,
+            "tolerance": self.tolerance,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveUnsupportedCapDiagnostic:
+    """Deterministic unsupported-cap diagnostic for loft primitive generated caps."""
+
+    code: Literal[
+        "missing-source-region",
+        "missing-cut-loop",
+        "degenerate-cut-loop",
+        "unsupported-cap-family",
+        "missing-support-classification",
+        "unsupported-cap-classification",
+    ]
+    message: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    primitive_operand_index: int | None = None
+    primitive_family: str | None = None
+    loft_patch: SurfaceBooleanPatchRef | None = None
+    cap_family: str | None = None
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cap_family": self.cap_family,
+            "code": self.code,
+            "loft_patch": None if self.loft_patch is None else _surface_boolean_patch_ref_payload(self.loft_patch),
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "primitive_family": self.primitive_family,
+            "primitive_operand_index": self.primitive_operand_index,
+            "route_id": self.route_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveCapSupportClassification:
+    """Surface-native generated-cap support decision for one loft primitive cap region."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    primitive_operand_index: int
+    primitive_family: str
+    loft_patch: SurfaceBooleanPatchRef
+    cap_family: str
+    supported: bool
+    cut_loop_ids: tuple[str, ...] = ()
+    diagnostics: tuple[LoftPrimitiveUnsupportedCapDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cap_family": self.cap_family,
+            "cut_loop_ids": self.cut_loop_ids,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "loft_patch": _surface_boolean_patch_ref_payload(self.loft_patch),
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "primitive_family": self.primitive_family,
+            "primitive_operand_index": self.primitive_operand_index,
+            "route_id": self.route_id,
+            "supported": self.supported,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveGeneratedCapRecord:
+    """Generated cap payload for one supported loft primitive cap classification."""
+
+    cap_id: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    primitive_operand_index: int
+    primitive_family: str
+    loft_patch: SurfaceBooleanPatchRef
+    cap_family: str
+    loop: TrimLoop
+    source_curve_ids: tuple[str, ...]
+    support_classification: LoftPrimitiveCapSupportClassification
+    provenance: tuple[str, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "loop", self.loop.normalized())
+        object.__setattr__(self, "source_curve_ids", tuple(str(item) for item in self.source_curve_ids))
+        object.__setattr__(self, "provenance", tuple(str(item) for item in self.provenance))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cap_family": self.cap_family,
+            "cap_id": self.cap_id,
+            "loft_patch": _surface_boolean_patch_ref_payload(self.loft_patch),
+            "loop": {
+                "category": self.loop.category,
+                "points_uv": tuple((float(point[0]), float(point[1])) for point in self.loop.points_uv),
+            },
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "primitive_family": self.primitive_family,
+            "primitive_operand_index": self.primitive_operand_index,
+            "provenance": self.provenance,
+            "route_id": self.route_id,
+            "source_curve_ids": self.source_curve_ids,
+            "support_classification": self.support_classification.canonical_payload(),
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveCapLoopPairingDiagnostic:
+    """Diagnostic emitted when generated cap loops do not pair exactly once."""
+
+    code: Literal["missing-generated-cap", "missing-cut-loop", "duplicate-generated-cap", "duplicate-cut-loop"]
+    message: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    loft_patch: SurfaceBooleanPatchRef | None = None
+    cap_id: str | None = None
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cap_id": self.cap_id,
+            "code": self.code,
+            "loft_patch": None if self.loft_patch is None else _surface_boolean_patch_ref_payload(self.loft_patch),
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "route_id": self.route_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveCapLoopPairingRecord:
+    """Exactly paired generated cap and loft cut-loop readiness record."""
+
+    pairing_id: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    loft_patch: SurfaceBooleanPatchRef
+    cap_id: str
+    cut_loop_id: str
+    source_curve_ids: tuple[str, ...]
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cap_id": self.cap_id,
+            "cut_loop_id": self.cut_loop_id,
+            "loft_patch": _surface_boolean_patch_ref_payload(self.loft_patch),
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "pairing_id": self.pairing_id,
+            "route_id": self.route_id,
+            "source_curve_ids": self.source_curve_ids,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveFragmentRetentionDiagnostic:
+    """Diagnostic emitted before loft primitive topology classification."""
+
+    code: Literal["missing-fragment-classification", "ambiguous-fragment-role"]
+    message: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    loft_patch: SurfaceBooleanPatchRef | None = None
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "loft_patch": None if self.loft_patch is None else _surface_boolean_patch_ref_payload(self.loft_patch),
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "route_id": self.route_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveRetainedFragmentRecord:
+    """Retained/excluded loft primitive fragment decision for one classified source fragment."""
+
+    fragment_id: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    source_body_role: Literal["loft", "primitive"]
+    loft_patch: SurfaceBooleanPatchRef
+    patch_role: str
+    result_role: SurfaceBooleanSplitRole
+    retained: bool
+    reason: str
+    cap_pairing_ids: tuple[str, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cap_pairing_ids": self.cap_pairing_ids,
+            "fragment_id": self.fragment_id,
+            "loft_patch": _surface_boolean_patch_ref_payload(self.loft_patch),
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "patch_role": self.patch_role,
+            "reason": self.reason,
+            "result_role": self.result_role,
+            "retained": self.retained,
+            "route_id": self.route_id,
+            "source_body_role": self.source_body_role,
+        }
+
+
+LoftPrimitiveTopologyClass = Literal["empty", "exterior-shell-edit", "interior-cavity", "multi-shell", "refused"]
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveTopologyDiagnostic:
+    """Diagnostic emitted by loft primitive retained-fragment topology classification."""
+
+    code: Literal["missing-retained-fragments", "missing-cap-pairing", "unsupported-topology"]
+    message: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "route_id": self.route_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveFragmentTopologyRecord:
+    """Topology class for retained loft primitive fragments before shell assembly."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    topology_class: LoftPrimitiveTopologyClass
+    retained_fragment_ids: tuple[str, ...] = ()
+    generated_cap_ids: tuple[str, ...] = ()
+    assembly_ready: bool = False
+    diagnostics: tuple[LoftPrimitiveTopologyDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "assembly_ready": self.assembly_ready,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "generated_cap_ids": self.generated_cap_ids,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "retained_fragment_ids": self.retained_fragment_ids,
+            "route_id": self.route_id,
+            "topology_class": self.topology_class,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveTopologyOrientationDiagnostic:
+    """Orientation/readiness diagnostic before loft primitive seam-use pairing."""
+
+    code: Literal["refused-topology", "ambiguous-inside-outside", "inverted-source-normal", "cap-orientation-conflict"]
+    message: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    fragment_id: str | None = None
+    cap_id: str | None = None
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cap_id": self.cap_id,
+            "code": self.code,
+            "fragment_id": self.fragment_id,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "route_id": self.route_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveTopologyOrientationRecord:
+    """Orientation readiness handoff for topology records before seam/use pairing."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    topology_class: LoftPrimitiveTopologyClass
+    ready: bool
+    retained_fragment_ids: tuple[str, ...] = ()
+    generated_cap_ids: tuple[str, ...] = ()
+    diagnostics: tuple[LoftPrimitiveTopologyOrientationDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "generated_cap_ids": self.generated_cap_ids,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "ready": self.ready,
+            "retained_fragment_ids": self.retained_fragment_ids,
+            "route_id": self.route_id,
+            "topology_class": self.topology_class,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveSeamUsePairingDiagnostic:
+    """Diagnostic for invalid loft primitive boundary-use pairing."""
+
+    code: Literal["orientation-not-ready", "dangling-use", "duplicate-use", "ambiguous-one-to-many"]
+    message: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    boundary_use_id: str | None = None
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary_use_id": self.boundary_use_id,
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "route_id": self.route_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveSeamUsePairingRecord:
+    """Boundary-use pairing evidence before candidate shell assembly."""
+
+    pairing_id: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    boundary_use_id: str
+    counterpart_use_id: str
+    source_patch: SurfaceBooleanPatchRef
+    cap_id: str
+    reason: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary_use_id": self.boundary_use_id,
+            "cap_id": self.cap_id,
+            "counterpart_use_id": self.counterpart_use_id,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "pairing_id": self.pairing_id,
+            "reason": self.reason,
+            "route_id": self.route_id,
+            "source_patch": _surface_boolean_patch_ref_payload(self.source_patch),
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveCandidateShellDiagnostic:
+    """Diagnostic for candidate shell assembly refusal."""
+
+    code: Literal["missing-seam-use-pairing", "missing-topology-orientation", "unsupported-topology"]
+    message: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "route_id": self.route_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveCandidateShellRecord:
+    """Candidate loft primitive shell assembly evidence before adjacency rebuild."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    topology_class: LoftPrimitiveTopologyClass
+    retained_fragment_ids: tuple[str, ...]
+    generated_cap_ids: tuple[str, ...]
+    seam_use_pairing_ids: tuple[str, ...]
+    candidate_shell_id: str
+    assembly_ready: bool
+    diagnostics: tuple[LoftPrimitiveCandidateShellDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "assembly_ready": self.assembly_ready,
+            "candidate_shell_id": self.candidate_shell_id,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "generated_cap_ids": self.generated_cap_ids,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "retained_fragment_ids": self.retained_fragment_ids,
+            "route_id": self.route_id,
+            "seam_use_pairing_ids": self.seam_use_pairing_ids,
+            "topology_class": self.topology_class,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveAdjacencyDiagnostic:
+    """Diagnostic for candidate shell adjacency rebuild."""
+
+    code: Literal["missing-link", "duplicate-link", "inconsistent-link", "candidate-not-ready"]
+    message: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    shell_id: str
+    use_id: str | None = None
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "route_id": self.route_id,
+            "shell_id": self.shell_id,
+            "use_id": self.use_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveAdjacencyRebuildRecord:
+    """Adjacency readiness evidence for a candidate loft primitive shell."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    shell_id: str
+    adjacency_links: tuple[tuple[str, str], ...]
+    complete: bool
+    diagnostics: tuple[LoftPrimitiveAdjacencyDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "adjacency_links": self.adjacency_links,
+            "complete": self.complete,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "route_id": self.route_id,
+            "shell_id": self.shell_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveRuntimeValidityDiagnostic:
+    """Runtime validity diagnostic for loft primitive candidate shells."""
+
+    code: Literal["open-shell", "non-manifold-adjacency", "inconsistent-orientation", "stale-evidence"]
+    message: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    shell_id: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "route_id": self.route_id,
+            "shell_id": self.shell_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveRuntimeValidityRecord:
+    """Runtime validity evidence for a loft primitive candidate shell."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    shell_id: str
+    valid: bool
+    persisted: bool = False
+    diagnostics: tuple[LoftPrimitiveRuntimeValidityDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "persisted": self.persisted,
+            "route_id": self.route_id,
+            "shell_id": self.shell_id,
+            "valid": self.valid,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitivePersistenceDiagnostic:
+    """Diagnostic for accepted-result persistence readiness."""
+
+    code: Literal["invalid-runtime-shell", "stale-runtime-evidence", "non-ready-shell"]
+    message: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    shell_id: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "route_id": self.route_id,
+            "shell_id": self.shell_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveTessellationReadinessRecord:
+    """Metadata-only tessellation readiness for accepted loft primitive results."""
+
+    shell_id: str
+    ready: bool
+    eager_tessellation: bool = False
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "eager_tessellation": self.eager_tessellation,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "ready": self.ready,
+            "shell_id": self.shell_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveAcceptedResultRecord:
+    """Accepted-result persistence evidence for a runtime-valid loft primitive shell."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    shell_id: str
+    accepted_body_id: str | None
+    persisted: bool
+    tessellation_readiness: LoftPrimitiveTessellationReadinessRecord
+    diagnostics: tuple[LoftPrimitivePersistenceDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "accepted_body_id": self.accepted_body_id,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "persisted": self.persisted,
+            "route_id": self.route_id,
+            "shell_id": self.shell_id,
+            "tessellation_readiness": self.tessellation_readiness.canonical_payload(),
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveNoHiddenMeshDiagnostic:
+    """Diagnostic for missing or contaminated no-hidden-mesh proof."""
+
+    code: Literal["missing-accepted-result", "mesh-fallback-invoked"]
+    message: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    shell_id: str | None = None
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "route_id": self.route_id,
+            "shell_id": self.shell_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveNoHiddenMeshProofRecord:
+    """Proof that accepted loft primitive CSG did not use hidden mesh fallback."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    shell_id: str | None
+    construction_proof_id: str | None
+    source_body_kind: Literal["surface-body", "missing"] = "surface-body"
+    mesh_fallback_invoked: bool = False
+    accepted: bool = False
+    diagnostics: tuple[LoftPrimitiveNoHiddenMeshDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "accepted": self.accepted,
+            "construction_proof_id": self.construction_proof_id,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "mesh_fallback_invoked": self.mesh_fallback_invoked,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "route_id": self.route_id,
+            "shell_id": self.shell_id,
+            "source_body_kind": self.source_body_kind,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitivePublicExecutorDiagnostic:
+    """Public loft primitive executor diagnostic for invalid or unsupported cut routes."""
+
+    code: Literal["invalid-kernel-evidence", "unsupported-cut-executor"]
+    message: str
+    operation: SurfaceBooleanOperation
+    route_id: str
+    status: SurfaceBooleanStatus
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "route_id": self.route_id,
+            "status": self.status,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveExecutionScopeRecord:
+    """Public route scope chosen for loft primitive CSG execution."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    scope: Literal["exact-reuse", "trim-fragment-cut", "structured-refusal"]
+    status: SurfaceBooleanStatus
+    accepted: bool
+    diagnostics: tuple[LoftPrimitivePublicExecutorDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "accepted": self.accepted,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "route_id": self.route_id,
+            "scope": self.scope,
+            "status": self.status,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPrimitiveFragmentClassificationRecord:
+    """Survive/discard/cut-cap classification for one loft patch fragment."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    loft_patch: SurfaceBooleanPatchRef
+    patch_role: str
+    result_role: SurfaceBooleanSplitRole
+    relation: SurfaceBooleanPatchRelation
+    sample_uv: tuple[float, float]
+    sample_point: tuple[float, float, float]
+    station_interval: tuple[int, int] | None = None
+    cut_curve_ids: tuple[str, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cut_curve_ids": self.cut_curve_ids,
+            "loft_patch": _surface_boolean_patch_ref_payload(self.loft_patch),
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "patch_role": self.patch_role,
+            "relation": self.relation,
+            "result_role": self.result_role,
+            "route_id": self.route_id,
+            "sample_point": self.sample_point,
+            "sample_uv": self.sample_uv,
+            "station_interval": self.station_interval,
+        }
+
+
+@dataclass(frozen=True)
+class LoftCSGResultGeometryRecord:
+    """Geometry proof record for an executed loft/primitive CSG route."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    result_classification: SurfaceBooleanClassification
+    shell_count: int
+    patch_count: int
+    fragment_count: int
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "fragment_count": self.fragment_count,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation": self.operation,
+            "patch_count": self.patch_count,
+            "result_classification": self.result_classification,
+            "route_id": self.route_id,
+            "shell_count": self.shell_count,
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceCSGOperationPlan:
     """Pre-execution surface CSG plan with accumulated diagnostics."""
 
@@ -2141,6 +3755,13 @@ class SurfaceBooleanPatchRef:
     patch_index: int
 
 
+def _surface_boolean_patch_ref_payload(patch: SurfaceBooleanPatchRef) -> dict[str, int]:
+    return {
+        "operand_index": patch.operand_index,
+        "patch_index": patch.patch_index,
+    }
+
+
 @dataclass(frozen=True)
 class SurfaceBooleanTrimFragment:
     """One cut fragment expressed in patch-local UV coordinates."""
@@ -2200,6 +3821,66 @@ DEFAULT_SURFACE_CSG_TOLERANCE_POLICY = SurfaceCSGTolerancePolicy()
 
 
 @dataclass(frozen=True)
+class SurfaceCSGCoincidenceToleranceRecord:
+    """Tolerance witness used while classifying whole-body CSG contact."""
+
+    equality_tolerance: float
+    gap: float
+    zero_span_count: int
+
+    @property
+    def ambiguous_near_touch(self) -> bool:
+        return self.gap > 0.0 and self.gap <= self.equality_tolerance
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "ambiguous_near_touch": self.ambiguous_near_touch,
+            "equality_tolerance": self.equality_tolerance,
+            "gap": self.gap,
+            "zero_span_count": self.zero_span_count,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGContactDiagnostic:
+    """Structured diagnostic for whole-body CSG contact classification."""
+
+    code: Literal["ambiguous-near-touch", "non-manifold-touch"]
+    message: str
+    contact_kind: SurfaceCSGContactKind
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "contact_kind": self.contact_kind,
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGContactClassificationRecord:
+    """Whole-body contact classification before operation-specific CSG planning."""
+
+    body_relation: SurfaceBooleanBodyRelation
+    contact_kind: SurfaceCSGContactKind
+    tolerance: SurfaceCSGCoincidenceToleranceRecord
+    diagnostics: tuple[SurfaceCSGContactDiagnostic, ...] = ()
+
+    @property
+    def execution_eligible(self) -> bool:
+        return not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "body_relation": self.body_relation,
+            "contact_kind": self.contact_kind,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "execution_eligible": self.execution_eligible,
+            "tolerance": self.tolerance.canonical_payload(),
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceCSGCurvePrimitive:
     """Surface-native CSG curve record shared by intersection and trim stages."""
 
@@ -2256,10 +3937,7 @@ class SurfaceCSGPatchLocalCurve:
         return {
             "domain_bounds": self.domain_bounds,
             "orientation": self.orientation,
-            "patch": {
-                "operand_index": self.patch.operand_index,
-                "patch_index": self.patch.patch_index,
-            },
+            "patch": _surface_boolean_patch_ref_payload(self.patch),
             "points_uv": tuple(
                 tuple(_snap_scalar(component, normalized_policy.snap_tolerance) for component in point)
                 for point in self.points_uv
@@ -2281,10 +3959,7 @@ class SurfaceCSGCurveMappingDiagnostic:
         return {
             "code": self.code,
             "message": self.message,
-            "patch": {
-                "operand_index": self.patch.operand_index,
-                "patch_index": self.patch.patch_index,
-            },
+            "patch": _surface_boolean_patch_ref_payload(self.patch),
             "source_curve_digest": self.source_curve_digest,
         }
 
@@ -2305,10 +3980,7 @@ class SurfaceCSGPatchLocalCurveMappingResult:
     def canonical_payload(self) -> dict[str, object]:
         return {
             "source_curve": self.source_curve.canonical_payload(),
-            "patch": {
-                "operand_index": self.patch.operand_index,
-                "patch_index": self.patch.patch_index,
-            },
+            "patch": _surface_boolean_patch_ref_payload(self.patch),
             "supported": self.supported,
             "curve": None if self.curve is None else self.curve.canonical_payload(),
             "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
@@ -2323,11 +3995,14 @@ class SurfaceCSGPatchLocalRegionLoop:
     patch: SurfaceBooleanPatchRef
     loop: TrimLoop
     source_curve_digests: tuple[str, ...] = ()
+    orientation: Literal["forward", "reversed"] = "forward"
 
     def __post_init__(self) -> None:
         source_region_id = str(self.source_region_id).strip()
         if not source_region_id:
             raise ValueError("SurfaceCSGPatchLocalRegionLoop.source_region_id must be non-empty.")
+        if self.orientation not in {"forward", "reversed"}:
+            raise ValueError("SurfaceCSGPatchLocalRegionLoop.orientation must be forward or reversed.")
         object.__setattr__(self, "source_region_id", source_region_id)
         object.__setattr__(self, "loop", self.loop.normalized())
         object.__setattr__(self, "source_curve_digests", tuple(str(item) for item in self.source_curve_digests))
@@ -2335,12 +4010,10 @@ class SurfaceCSGPatchLocalRegionLoop:
     def canonical_payload(self) -> dict[str, object]:
         return {
             "source_region_id": self.source_region_id,
-            "patch": {
-                "operand_index": self.patch.operand_index,
-                "patch_index": self.patch.patch_index,
-            },
+            "patch": _surface_boolean_patch_ref_payload(self.patch),
             "loop": self.loop.canonical_payload(),
             "source_curve_digests": self.source_curve_digests,
+            "orientation": self.orientation,
         }
 
 
@@ -2360,10 +4033,7 @@ class SurfaceCSGPatchLocalRegionMappingResult:
     def canonical_payload(self) -> dict[str, object]:
         return {
             "source_region_id": self.source_region_id,
-            "patch": {
-                "operand_index": self.patch.operand_index,
-                "patch_index": self.patch.patch_index,
-            },
+            "patch": _surface_boolean_patch_ref_payload(self.patch),
             "supported": self.supported,
             "region_loop": None if self.region_loop is None else self.region_loop.canonical_payload(),
             "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
@@ -2411,16 +4081,10 @@ class SurfaceCSGPlanarRelationDiagnostic:
 
     def canonical_payload(self) -> dict[str, object]:
         return {
-            "first_patch": {
-                "operand_index": self.first_patch.operand_index,
-                "patch_index": self.first_patch.patch_index,
-            },
+            "first_patch": _surface_boolean_patch_ref_payload(self.first_patch),
             "message": self.message,
             "relation": self.relation,
-            "second_patch": {
-                "operand_index": self.second_patch.operand_index,
-                "patch_index": self.second_patch.patch_index,
-            },
+            "second_patch": _surface_boolean_patch_ref_payload(self.second_patch),
         }
 
 
@@ -2436,15 +4100,9 @@ class SurfaceCSGConicDiagnostic:
     def canonical_payload(self) -> dict[str, object]:
         return {
             "code": self.code,
-            "first_patch": {
-                "operand_index": self.first_patch.operand_index,
-                "patch_index": self.first_patch.patch_index,
-            },
+            "first_patch": _surface_boolean_patch_ref_payload(self.first_patch),
             "message": self.message,
-            "second_patch": {
-                "operand_index": self.second_patch.operand_index,
-                "patch_index": self.second_patch.patch_index,
-            },
+            "second_patch": _surface_boolean_patch_ref_payload(self.second_patch),
         }
 
 
@@ -2535,6 +4193,7 @@ class SurfaceCSGAnalyticBSplineIntersectionRecord:
     curves: tuple[SurfaceCSGCurvePrimitive, ...] = ()
     patch_local_curves: tuple[SurfaceCSGPatchLocalCurve, ...] = ()
     diagnostics: tuple[SurfaceIntersectionSupportDiagnostic | SurfaceCSGCurveMappingDiagnostic, ...] = ()
+    body_route_evidence: SurfaceCSGBodyRouteEvidenceRecord | None = None
 
     @property
     def supported(self) -> bool:
@@ -2548,14 +4207,8 @@ class SurfaceCSGAnalyticBSplineIntersectionRecord:
 
     def canonical_payload(self) -> dict[str, object]:
         return {
-            "first_patch": {
-                "operand_index": self.first_patch.operand_index,
-                "patch_index": self.first_patch.patch_index,
-            },
-            "second_patch": {
-                "operand_index": self.second_patch.operand_index,
-                "patch_index": self.second_patch.patch_index,
-            },
+            "first_patch": _surface_boolean_patch_ref_payload(self.first_patch),
+            "second_patch": _surface_boolean_patch_ref_payload(self.second_patch),
             "supported": self.supported,
             "classification": self.intersection.classification,
             "quality": self.intersection.quality,
@@ -2564,6 +4217,9 @@ class SurfaceCSGAnalyticBSplineIntersectionRecord:
             "patch_local_curves": [curve.canonical_payload() for curve in self.patch_local_curves],
             "residual_report": self.residual_report.canonical_payload(),
             "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "body_route_evidence": None
+            if self.body_route_evidence is None
+            else self.body_route_evidence.canonical_payload(),
         }
 
 
@@ -2582,6 +4238,7 @@ class SurfaceCSGAnalyticNURBSIntersectionRecord:
         SurfaceIntersectionSupportDiagnostic | SurfaceCSGCurveMappingDiagnostic | NURBSWeightValidationDiagnostic,
         ...,
     ] = ()
+    body_route_evidence: SurfaceCSGBodyRouteEvidenceRecord | None = None
 
     @property
     def supported(self) -> bool:
@@ -2600,14 +4257,8 @@ class SurfaceCSGAnalyticNURBSIntersectionRecord:
 
     def canonical_payload(self) -> dict[str, object]:
         return {
-            "first_patch": {
-                "operand_index": self.first_patch.operand_index,
-                "patch_index": self.first_patch.patch_index,
-            },
-            "second_patch": {
-                "operand_index": self.second_patch.operand_index,
-                "patch_index": self.second_patch.patch_index,
-            },
+            "first_patch": _surface_boolean_patch_ref_payload(self.first_patch),
+            "second_patch": _surface_boolean_patch_ref_payload(self.second_patch),
             "supported": self.supported,
             "exact_conic_compatible": self.exact_conic_compatible,
             "classification": self.intersection.classification,
@@ -2618,6 +4269,9 @@ class SurfaceCSGAnalyticNURBSIntersectionRecord:
             "patch_local_curves": [curve.canonical_payload() for curve in self.patch_local_curves],
             "residual_report": self.residual_report.canonical_payload(),
             "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "body_route_evidence": None
+            if self.body_route_evidence is None
+            else self.body_route_evidence.canonical_payload(),
         }
 
 
@@ -2633,6 +4287,7 @@ class SurfaceCSGSplinePairIntersectionRecord:
     patch_local_curves: tuple[SurfaceCSGPatchLocalCurve, ...] = ()
     tangent_events: tuple[SurfaceCSGDegeneracyRecord, ...] = ()
     diagnostics: tuple[SurfaceIntersectionSupportDiagnostic | SurfaceCSGCurveMappingDiagnostic, ...] = ()
+    body_route_evidence: SurfaceCSGBodyRouteEvidenceRecord | None = None
 
     @property
     def supported(self) -> bool:
@@ -2646,14 +4301,8 @@ class SurfaceCSGSplinePairIntersectionRecord:
 
     def canonical_payload(self) -> dict[str, object]:
         return {
-            "first_patch": {
-                "operand_index": self.first_patch.operand_index,
-                "patch_index": self.first_patch.patch_index,
-            },
-            "second_patch": {
-                "operand_index": self.second_patch.operand_index,
-                "patch_index": self.second_patch.patch_index,
-            },
+            "first_patch": _surface_boolean_patch_ref_payload(self.first_patch),
+            "second_patch": _surface_boolean_patch_ref_payload(self.second_patch),
             "supported": self.supported,
             "classification": self.intersection.classification,
             "quality": self.intersection.quality,
@@ -2663,6 +4312,9 @@ class SurfaceCSGSplinePairIntersectionRecord:
             "tangent_events": [event.canonical_payload() for event in self.tangent_events],
             "residual_report": self.residual_report.canonical_payload(),
             "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "body_route_evidence": None
+            if self.body_route_evidence is None
+            else self.body_route_evidence.canonical_payload(),
         }
 
 
@@ -2679,6 +4331,7 @@ class SurfaceCSGSplineCoincidentRegionRecord:
         SurfaceIntersectionSupportDiagnostic | SurfaceCSGCurveMappingDiagnostic | SurfaceCSGArrangementDiagnostic,
         ...,
     ] = ()
+    body_route_evidence: SurfaceCSGBodyRouteEvidenceRecord | None = None
 
     @property
     def supported(self) -> bool:
@@ -2693,14 +4346,8 @@ class SurfaceCSGSplineCoincidentRegionRecord:
 
     def canonical_payload(self) -> dict[str, object]:
         return {
-            "first_patch": {
-                "operand_index": self.first_patch.operand_index,
-                "patch_index": self.first_patch.patch_index,
-            },
-            "second_patch": {
-                "operand_index": self.second_patch.operand_index,
-                "patch_index": self.second_patch.patch_index,
-            },
+            "first_patch": _surface_boolean_patch_ref_payload(self.first_patch),
+            "second_patch": _surface_boolean_patch_ref_payload(self.second_patch),
             "supported": self.supported,
             "classification": self.intersection.classification,
             "quality": self.intersection.quality,
@@ -2709,6 +4356,245 @@ class SurfaceCSGSplineCoincidentRegionRecord:
             "region_mappings": [mapping.canonical_payload() for mapping in self.region_mappings],
             "ownership_diagnostics": [diagnostic.canonical_payload() for diagnostic in self.ownership_diagnostics],
             "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "body_route_evidence": None
+            if self.body_route_evidence is None
+            else self.body_route_evidence.canonical_payload(),
+        }
+
+
+SurfaceCSGBodyRouteEvidenceKind = Literal["curve", "coincident-region", "diagnostic-refusal"]
+SurfaceCSGBodyRouteEvidenceClassification = Literal[
+    "crossing",
+    "tangent",
+    "boundary",
+    "singular",
+    "degenerate",
+    "coincident",
+    "refusal",
+]
+SurfaceCSGBodyRouteTrimReadiness = Literal["ready", "blocked", "not-applicable"]
+
+
+@dataclass(frozen=True)
+class SurfaceCSGBodyRouteEvidenceDiagnostic:
+    """Diagnostic emitted while normalizing patch CSG evidence for body CSG."""
+
+    code: str
+    message: str
+    stage: str
+    family_pair: tuple[str, str] | None = None
+    patch_refs: tuple[SurfaceBooleanPatchRef, ...] = ()
+    no_mesh_fallback: bool | None = True
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "code", str(self.code).strip())
+        object.__setattr__(self, "message", str(self.message).strip())
+        object.__setattr__(self, "stage", str(self.stage).strip())
+        object.__setattr__(
+            self,
+            "family_pair",
+            None if self.family_pair is None else tuple(str(family).strip() for family in self.family_pair[:2]),
+        )
+        object.__setattr__(self, "patch_refs", tuple(self.patch_refs))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "stage": self.stage,
+            "family_pair": self.family_pair,
+            "patch_refs": [_surface_boolean_patch_ref_payload(patch) for patch in self.patch_refs],
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGBodyRouteEvidenceRecord:
+    """Normalized patch-level evidence payload consumed by body-level CSG routes."""
+
+    operation: SurfaceBooleanOperation
+    route_id: str
+    family_pair: tuple[str, str]
+    source_patch_refs: tuple[SurfaceBooleanPatchRef, ...]
+    source_patch_ids: tuple[str, ...]
+    evidence_kind: SurfaceCSGBodyRouteEvidenceKind
+    classification: SurfaceCSGBodyRouteEvidenceClassification
+    source_operand_refs: tuple[int, ...] = ()
+    curve_ids: tuple[str, ...] = ()
+    region_ids: tuple[str, ...] = ()
+    patch_local_curves: tuple[SurfaceCSGPatchLocalCurve, ...] = ()
+    patch_local_region_loops: tuple[SurfaceCSGPatchLocalRegionLoop, ...] = ()
+    max_residual: float | None = None
+    tolerance: float | None = None
+    iteration_count: int | None = None
+    converged: bool | None = None
+    ownership_status: str | None = None
+    trim_readiness: SurfaceCSGBodyRouteTrimReadiness | None = None
+    trim_readiness_reason: str = ""
+    route_metadata: tuple[tuple[str, object], ...] = ()
+    diagnostics: tuple[SurfaceCSGBodyRouteEvidenceDiagnostic, ...] = ()
+    no_mesh_fallback: bool | None = True
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "route_id", str(self.route_id).strip())
+        object.__setattr__(self, "family_pair", tuple(str(family).strip() for family in self.family_pair[:2]))
+        object.__setattr__(self, "source_patch_refs", tuple(self.source_patch_refs))
+        object.__setattr__(self, "source_patch_ids", tuple(str(patch_id).strip() for patch_id in self.source_patch_ids))
+        object.__setattr__(self, "source_operand_refs", tuple(int(ref) for ref in self.source_operand_refs))
+        object.__setattr__(self, "curve_ids", tuple(str(curve_id).strip() for curve_id in self.curve_ids))
+        object.__setattr__(self, "region_ids", tuple(str(region_id).strip() for region_id in self.region_ids))
+        object.__setattr__(self, "patch_local_curves", tuple(self.patch_local_curves))
+        object.__setattr__(self, "patch_local_region_loops", tuple(self.patch_local_region_loops))
+        object.__setattr__(self, "diagnostics", tuple(self.diagnostics))
+        object.__setattr__(self, "trim_readiness_reason", str(self.trim_readiness_reason).strip())
+        if self.max_residual is not None:
+            object.__setattr__(self, "max_residual", float(self.max_residual))
+        if self.tolerance is not None:
+            object.__setattr__(self, "tolerance", float(self.tolerance))
+        if self.iteration_count is not None:
+            object.__setattr__(self, "iteration_count", int(self.iteration_count))
+        object.__setattr__(
+            self,
+            "route_metadata",
+            tuple((str(key).strip(), value) for key, value in self.route_metadata if str(key).strip()),
+        )
+
+    @property
+    def patch_local_orientation_count(self) -> int:
+        return len(self.patch_local_curves) + len(self.patch_local_region_loops)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "route_id": self.route_id,
+            "family_pair": self.family_pair,
+            "source_patch_refs": [_surface_boolean_patch_ref_payload(patch) for patch in self.source_patch_refs],
+            "source_patch_ids": self.source_patch_ids,
+            "source_operand_refs": self.source_operand_refs,
+            "evidence_kind": self.evidence_kind,
+            "classification": self.classification,
+            "curve_ids": self.curve_ids,
+            "region_ids": self.region_ids,
+            "patch_local_curves": [curve.canonical_payload() for curve in self.patch_local_curves],
+            "patch_local_region_loops": [loop.canonical_payload() for loop in self.patch_local_region_loops],
+            "patch_local_orientation_count": self.patch_local_orientation_count,
+            "max_residual": self.max_residual,
+            "tolerance": self.tolerance,
+            "iteration_count": self.iteration_count,
+            "converged": self.converged,
+            "ownership_status": self.ownership_status,
+            "trim_readiness": self.trim_readiness,
+            "trim_readiness_reason": self.trim_readiness_reason,
+            "route_metadata": self.route_metadata,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGBodyRouteEvidenceAuditRow:
+    """One audited body-route evidence record and its diagnostics."""
+
+    record: SurfaceCSGBodyRouteEvidenceRecord
+    diagnostics: tuple[SurfaceCSGBodyRouteEvidenceDiagnostic, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "passed": self.passed,
+            "record": self.record.canonical_payload(),
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGBodyRouteEvidenceAuditReport:
+    """Audit report for normalized B-spline/NURBS body-route evidence."""
+
+    rows: tuple[SurfaceCSGBodyRouteEvidenceAuditRow, ...]
+    diagnostics: tuple[SurfaceCSGBodyRouteEvidenceDiagnostic, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return bool(self.rows) and not self.diagnostics and all(row.passed for row in self.rows)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "passed": self.passed,
+            "rows": [row.canonical_payload() for row in self.rows],
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+SurfaceCSGBodyRouteReadinessState = Literal["success-ready", "diagnostic-refusal-ready", "blocked"]
+
+
+@dataclass(frozen=True)
+class SurfaceCSGBodyRoutePatchPair:
+    """One patch pair submitted to the B-spline/NURBS body-route evidence collector."""
+
+    first_ref: SurfaceBooleanPatchRef
+    first_patch: SurfacePatch
+    second_ref: SurfaceBooleanPatchRef
+    second_patch: SurfacePatch
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "first_ref": _surface_boolean_patch_ref_payload(self.first_ref),
+            "first_family": self.first_patch.family,
+            "second_ref": _surface_boolean_patch_ref_payload(self.second_ref),
+            "second_family": self.second_patch.family,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGBodyRouteReadinessDiagnostic:
+    """Readiness diagnostic for collected B-spline/NURBS body-route evidence."""
+
+    code: Literal["missing-route-coverage", "audit-failed", "mixed-success-refusal"]
+    message: str
+    patch_refs: tuple[SurfaceBooleanPatchRef, ...] = ()
+    route_ids: tuple[str, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "patch_refs": [_surface_boolean_patch_ref_payload(patch) for patch in self.patch_refs],
+            "route_ids": self.route_ids,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceCSGBodyRouteEvidenceCollectionReport:
+    """Collected patch-route evidence and readiness state for body-level CSG."""
+
+    operation: SurfaceBooleanOperation
+    records: tuple[SurfaceCSGBodyRouteEvidenceRecord, ...]
+    audit_report: SurfaceCSGBodyRouteEvidenceAuditReport
+    readiness: SurfaceCSGBodyRouteReadinessState
+    diagnostics: tuple[SurfaceCSGBodyRouteReadinessDiagnostic, ...] = ()
+
+    @property
+    def no_mesh_fallback(self) -> bool:
+        return bool(self.records) and all(record.no_mesh_fallback is True for record in self.records)
+
+    @property
+    def ready(self) -> bool:
+        return self.readiness in {"success-ready", "diagnostic-refusal-ready"} and self.audit_report.passed
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "operation": self.operation,
+            "records": [record.canonical_payload() for record in self.records],
+            "audit_report": self.audit_report.canonical_payload(),
+            "readiness": self.readiness,
+            "ready": self.ready,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "no_mesh_fallback": self.no_mesh_fallback,
         }
 
 
@@ -3113,10 +4999,7 @@ class SurfaceCSGCoincidentOwnershipDiagnostic:
             "code": self.code,
             "fragment_id": self.fragment_id,
             "message": self.message,
-            "patch": {
-                "operand_index": self.patch.operand_index,
-                "patch_index": self.patch.patch_index,
-            },
+            "patch": _surface_boolean_patch_ref_payload(self.patch),
         }
 
 
@@ -3136,20 +5019,12 @@ class SurfaceCSGCoincidentOwnershipRecord:
         return not self.diagnostics
 
     def canonical_payload(self) -> dict[str, object]:
-        owner_payload = None
-        if self.owner_patch is not None:
-            owner_payload = {
-                "operand_index": self.owner_patch.operand_index,
-                "patch_index": self.owner_patch.patch_index,
-            }
+        owner_payload = None if self.owner_patch is None else _surface_boolean_patch_ref_payload(self.owner_patch)
         return {
             "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
             "fragment_id": self.fragment_id,
             "owner_patch": owner_payload,
-            "patch": {
-                "operand_index": self.patch.operand_index,
-                "patch_index": self.patch.patch_index,
-            },
+            "patch": _surface_boolean_patch_ref_payload(self.patch),
             "policy": self.policy,
             "relation": self.relation,
             "supported": self.supported,
@@ -5448,6 +7323,553 @@ def surface_csg_route_lookup(
         phase=support.phase,
         required_future_capability=support.required_future_capability,
         diagnostic=diagnostic,
+    )
+
+
+def _surface_csg_body_route_diagnostic(
+    code: str,
+    message: str,
+    *,
+    record: SurfaceCSGBodyRouteEvidenceRecord,
+    stage: str = "body-route-evidence-audit",
+) -> SurfaceCSGBodyRouteEvidenceDiagnostic:
+    return SurfaceCSGBodyRouteEvidenceDiagnostic(
+        code=code,
+        message=message,
+        stage=stage,
+        family_pair=record.family_pair,
+        patch_refs=record.source_patch_refs,
+        no_mesh_fallback=record.no_mesh_fallback,
+    )
+
+
+def _surface_csg_body_route_source_diagnostic(
+    source: object,
+    *,
+    family_pair: tuple[str, str],
+    patch_refs: tuple[SurfaceBooleanPatchRef, ...],
+    stage: str,
+) -> SurfaceCSGBodyRouteEvidenceDiagnostic:
+    code = str(getattr(source, "code", "source-record-refusal"))
+    message = str(getattr(source, "message", "Patch-level CSG source record did not satisfy the body-route contract."))
+    return SurfaceCSGBodyRouteEvidenceDiagnostic(
+        code=code,
+        message=message,
+        stage=stage,
+        family_pair=family_pair,
+        patch_refs=patch_refs,
+        no_mesh_fallback=True,
+    )
+
+
+def audit_surface_csg_body_route_evidence(
+    records: Iterable[SurfaceCSGBodyRouteEvidenceRecord],
+) -> SurfaceCSGBodyRouteEvidenceAuditReport:
+    """Audit normalized patch CSG evidence for body-level B-spline/NURBS routes."""
+
+    rows: list[SurfaceCSGBodyRouteEvidenceAuditRow] = []
+    for record in records:
+        diagnostics: list[SurfaceCSGBodyRouteEvidenceDiagnostic] = []
+        if not record.route_id:
+            diagnostics.append(
+                _surface_csg_body_route_diagnostic(
+                    "missing-route-id",
+                    "Body-route CSG evidence requires a non-empty route id.",
+                    record=record,
+                )
+            )
+        if len(record.family_pair) != 2 or any(not family for family in record.family_pair):
+            diagnostics.append(
+                _surface_csg_body_route_diagnostic(
+                    "missing-family-pair",
+                    "Body-route CSG evidence requires the participating family pair.",
+                    record=record,
+                )
+            )
+        if not record.source_patch_refs:
+            diagnostics.append(
+                _surface_csg_body_route_diagnostic(
+                    "missing-patch-ref",
+                    "Body-route CSG evidence requires source patch references.",
+                    record=record,
+                )
+            )
+        if len(record.source_patch_ids) < len(record.source_patch_refs) or any(not patch_id for patch_id in record.source_patch_ids):
+            diagnostics.append(
+                _surface_csg_body_route_diagnostic(
+                    "missing-patch-id",
+                    "Body-route CSG evidence requires stable patch ids for every source patch.",
+                    record=record,
+                )
+            )
+        if record.no_mesh_fallback is not True:
+            diagnostics.append(
+                _surface_csg_body_route_diagnostic(
+                    "mesh-fallback-attempted",
+                    "Body-route CSG evidence must prove no hidden mesh fallback was used.",
+                    record=record,
+                )
+            )
+        if record.trim_readiness not in {"ready", "blocked", "not-applicable"}:
+            diagnostics.append(
+                _surface_csg_body_route_diagnostic(
+                    "missing-trim-readiness",
+                    "Body-route CSG evidence requires explicit trim-readiness status.",
+                    record=record,
+                )
+            )
+        if record.trim_readiness == "blocked" and not record.trim_readiness_reason:
+            diagnostics.append(
+                _surface_csg_body_route_diagnostic(
+                    "missing-trim-readiness-reason",
+                    "Blocked body-route CSG evidence requires a trim-readiness reason.",
+                    record=record,
+                )
+            )
+        if record.evidence_kind == "curve":
+            if not record.curve_ids:
+                diagnostics.append(
+                    _surface_csg_body_route_diagnostic(
+                        "missing-curve-id",
+                        "Curve evidence requires at least one curve id.",
+                        record=record,
+                    )
+                )
+            if not record.patch_local_curves:
+                diagnostics.append(
+                    _surface_csg_body_route_diagnostic(
+                        "missing-patch-local-curve",
+                        "Curve evidence requires patch-local curve points for affected patches.",
+                        record=record,
+                    )
+                )
+            if not record.patch_local_curves or any(not curve.orientation for curve in record.patch_local_curves):
+                diagnostics.append(
+                    _surface_csg_body_route_diagnostic(
+                        "missing-orientation",
+                        "Curve evidence requires orientation metadata for every patch-local curve.",
+                        record=record,
+                    )
+                )
+        elif record.evidence_kind == "coincident-region":
+            if not record.region_ids:
+                diagnostics.append(
+                    _surface_csg_body_route_diagnostic(
+                        "missing-region-id",
+                        "Coincident-region evidence requires at least one region id.",
+                        record=record,
+                    )
+                )
+            if not record.patch_local_region_loops:
+                diagnostics.append(
+                    _surface_csg_body_route_diagnostic(
+                        "missing-patch-local-region-loop",
+                        "Coincident-region evidence requires patch-local overlap-boundary loops.",
+                        record=record,
+                    )
+                )
+            if not record.patch_local_region_loops or any(not loop.orientation for loop in record.patch_local_region_loops):
+                diagnostics.append(
+                    _surface_csg_body_route_diagnostic(
+                        "missing-orientation",
+                        "Coincident-region evidence requires orientation metadata for every patch-local loop.",
+                        record=record,
+                    )
+                )
+            if not record.ownership_status:
+                diagnostics.append(
+                    _surface_csg_body_route_diagnostic(
+                        "missing-ownership-status",
+                        "Coincident-region evidence requires ownership status.",
+                        record=record,
+                    )
+                )
+        elif record.evidence_kind == "diagnostic-refusal":
+            if record.classification != "refusal":
+                diagnostics.append(
+                    _surface_csg_body_route_diagnostic(
+                        "missing-refusal-classification",
+                        "Diagnostic-refusal evidence must carry refusal classification.",
+                        record=record,
+                    )
+                )
+            if not record.diagnostics and record.trim_readiness != "blocked":
+                diagnostics.append(
+                    _surface_csg_body_route_diagnostic(
+                        "missing-refusal-diagnostic",
+                        "Diagnostic-refusal evidence requires a diagnostic or blocked trim-readiness.",
+                        record=record,
+                    )
+                )
+        else:
+            diagnostics.append(
+                _surface_csg_body_route_diagnostic(
+                    "unsupported-evidence-kind",
+                    f"Body-route CSG evidence kind {record.evidence_kind!r} is not supported.",
+                    record=record,
+                )
+            )
+        if record.evidence_kind != "diagnostic-refusal":
+            if record.max_residual is None:
+                diagnostics.append(
+                    _surface_csg_body_route_diagnostic(
+                        "missing-residual",
+                        "Body-route CSG evidence requires max residual.",
+                        record=record,
+                    )
+                )
+            if record.tolerance is None:
+                diagnostics.append(
+                    _surface_csg_body_route_diagnostic(
+                        "missing-tolerance",
+                        "Body-route CSG evidence requires declared tolerance.",
+                        record=record,
+                    )
+                )
+            if record.iteration_count is None:
+                diagnostics.append(
+                    _surface_csg_body_route_diagnostic(
+                        "missing-iteration-count",
+                        "Body-route CSG evidence requires iteration count.",
+                        record=record,
+                    )
+                )
+            if record.converged is None:
+                diagnostics.append(
+                    _surface_csg_body_route_diagnostic(
+                        "missing-convergence",
+                        "Body-route CSG evidence requires convergence state.",
+                        record=record,
+                    )
+                )
+        rows.append(SurfaceCSGBodyRouteEvidenceAuditRow(record=record, diagnostics=tuple(diagnostics)))
+    return SurfaceCSGBodyRouteEvidenceAuditReport(rows=tuple(rows))
+
+
+def _surface_csg_default_patch_id(patch_ref: SurfaceBooleanPatchRef) -> str:
+    return f"{patch_ref.operand_index}:{patch_ref.patch_index}"
+
+
+def _surface_csg_body_route_classification_from_intersection(
+    intersection: SurfaceIntersectionResultRecord,
+    *,
+    supported: bool,
+    tangent: bool = False,
+) -> SurfaceCSGBodyRouteEvidenceClassification:
+    if not supported or intersection.classification == "unsupported":
+        return "refusal"
+    if tangent:
+        return "tangent"
+    if intersection.classification == "overlap":
+        return "coincident"
+    if intersection.classification == "degenerate" or intersection.quality == "degenerate":
+        return "degenerate"
+    if intersection.classification == "points":
+        return "singular"
+    if intersection.classification == "empty":
+        return "boundary"
+    return "crossing"
+
+
+def surface_csg_body_route_evidence_from_source_record(
+    source_record: (
+        SurfaceCSGAnalyticBSplineIntersectionRecord
+        | SurfaceCSGAnalyticNURBSIntersectionRecord
+        | SurfaceCSGSplinePairIntersectionRecord
+        | SurfaceCSGSplineCoincidentRegionRecord
+    ),
+    *,
+    operation: SurfaceBooleanOperation = "intersection",
+    left_family: str,
+    right_family: str,
+    source_patch_ids: Mapping[SurfaceBooleanPatchRef, str] | None = None,
+    source_operand_refs: Sequence[int] | None = None,
+    trim_readiness: SurfaceCSGBodyRouteTrimReadiness | None = None,
+    trim_readiness_reason: str = "",
+) -> SurfaceCSGBodyRouteEvidenceRecord:
+    """Normalize checked patch-level B-spline/NURBS CSG source records."""
+
+    family_pair = (str(left_family), str(right_family))
+    source_patch_refs = (source_record.first_patch, source_record.second_patch)
+    route = surface_csg_route_lookup(operation, left_family, right_family)
+    patch_ids = tuple(
+        str(source_patch_ids[patch_ref])
+        if source_patch_ids is not None and patch_ref in source_patch_ids
+        else _surface_csg_default_patch_id(patch_ref)
+        for patch_ref in source_patch_refs
+    )
+    operand_refs = tuple(source_operand_refs) if source_operand_refs is not None else tuple(
+        sorted({patch_ref.operand_index for patch_ref in source_patch_refs})
+    )
+    source_diagnostics: list[SurfaceCSGBodyRouteEvidenceDiagnostic] = []
+    for diagnostic in getattr(source_record, "diagnostics", ()):
+        source_diagnostics.append(
+            _surface_csg_body_route_source_diagnostic(
+                diagnostic,
+                family_pair=family_pair,
+                patch_refs=source_patch_refs,
+                stage="patch-source-record",
+            )
+        )
+    for diagnostic in getattr(source_record, "ownership_diagnostics", ()):
+        source_diagnostics.append(
+            _surface_csg_body_route_source_diagnostic(
+                diagnostic,
+                family_pair=family_pair,
+                patch_refs=source_patch_refs,
+                stage="ownership-resolution",
+            )
+        )
+    if isinstance(source_record, SurfaceCSGSplineCoincidentRegionRecord):
+        supported = source_record.supported
+        region_ids = tuple(region.region_id for region in source_record.intersection.overlap_regions)
+        region_loops = tuple(
+            mapping.region_loop for mapping in source_record.region_mappings if mapping.region_loop is not None
+        )
+        boundary_curve_ids = tuple(
+            curve_id
+            for region in source_record.intersection.overlap_regions
+            for curve_id in region.boundary_curve_ids
+        )
+        route_metadata: tuple[tuple[str, object], ...] = (
+            ("overlap_region_count", len(source_record.intersection.overlap_regions)),
+            ("boundary_curve_id_count", len(boundary_curve_ids)),
+            ("sampled_max_distance", source_record.intersection.max_residual),
+            ("equality_tolerance", DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.equality_tolerance),
+        )
+        if not supported and not source_diagnostics:
+            source_diagnostics.append(
+                SurfaceCSGBodyRouteEvidenceDiagnostic(
+                    code="source-record-refusal",
+                    message="Spline/NURBS coincident-region source record is not supported.",
+                    stage="patch-source-record",
+                    family_pair=family_pair,
+                    patch_refs=source_patch_refs,
+                    no_mesh_fallback=True,
+                )
+            )
+        return SurfaceCSGBodyRouteEvidenceRecord(
+            operation=operation,
+            route_id=route.route_id,
+            family_pair=family_pair,
+            source_patch_refs=source_patch_refs,
+            source_patch_ids=patch_ids,
+            source_operand_refs=operand_refs,
+            evidence_kind="coincident-region" if supported else "diagnostic-refusal",
+            classification=_surface_csg_body_route_classification_from_intersection(
+                source_record.intersection,
+                supported=supported,
+            ),
+            region_ids=region_ids,
+            patch_local_region_loops=region_loops,
+            max_residual=source_record.intersection.max_residual,
+            tolerance=DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.equality_tolerance,
+            iteration_count=1,
+            converged=supported,
+            ownership_status="resolved" if supported else None,
+            trim_readiness=trim_readiness if trim_readiness is not None else ("ready" if supported else "blocked"),
+            trim_readiness_reason=trim_readiness_reason if trim_readiness_reason else ("" if supported else "source record refused"),
+            route_metadata=route_metadata,
+            diagnostics=tuple(source_diagnostics),
+            no_mesh_fallback=True,
+        )
+
+    supported = source_record.supported
+    iterations = source_record.residual_report.iterations
+    curve_ids = tuple(curve.curve_id for curve in source_record.intersection.curves) or tuple(
+        surface_csg_curve_digest(curve) for curve in source_record.curves
+    )
+    if not supported and not source_diagnostics:
+        source_diagnostics.append(
+            SurfaceCSGBodyRouteEvidenceDiagnostic(
+                code="source-record-refusal",
+                message="Patch-level curve source record is not supported.",
+                stage="patch-source-record",
+                family_pair=family_pair,
+                patch_refs=source_patch_refs,
+                no_mesh_fallback=True,
+            )
+        )
+    residual_max = source_record.intersection.max_residual
+    iteration_count = len(iterations) if iterations else None
+    converged = source_record.residual_report.converged if iterations else None
+    route_metadata: list[tuple[str, object]] = []
+    if isinstance(source_record, SurfaceCSGAnalyticNURBSIntersectionRecord):
+        route_metadata.extend(
+            (
+                ("exact_conic_compatible", source_record.exact_conic_compatible),
+                ("weight_diagnostic_count", len(source_record.weight_diagnostics)),
+            )
+        )
+    return SurfaceCSGBodyRouteEvidenceRecord(
+        operation=operation,
+        route_id=route.route_id,
+        family_pair=family_pair,
+        source_patch_refs=source_patch_refs,
+        source_patch_ids=patch_ids,
+        source_operand_refs=operand_refs,
+        evidence_kind="curve" if supported else "diagnostic-refusal",
+        classification=_surface_csg_body_route_classification_from_intersection(
+            source_record.intersection,
+            supported=supported,
+            tangent=isinstance(source_record, SurfaceCSGSplinePairIntersectionRecord) and bool(source_record.tangent_events),
+        ),
+        curve_ids=curve_ids,
+        patch_local_curves=source_record.patch_local_curves,
+        max_residual=residual_max if iterations or supported else None,
+        tolerance=DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.degeneracy_tolerance if iterations or supported else None,
+        iteration_count=iteration_count,
+        converged=converged,
+        trim_readiness=trim_readiness if trim_readiness is not None else ("ready" if supported else "blocked"),
+        trim_readiness_reason=trim_readiness_reason if trim_readiness_reason else ("" if supported else "source record refused"),
+        route_metadata=tuple(route_metadata),
+        diagnostics=tuple(source_diagnostics),
+        no_mesh_fallback=True,
+    )
+
+
+def _surface_csg_body_route_missing_coverage(
+    patch_pair: SurfaceCSGBodyRoutePatchPair,
+) -> SurfaceCSGBodyRouteReadinessDiagnostic:
+    return SurfaceCSGBodyRouteReadinessDiagnostic(
+        code="missing-route-coverage",
+        message=(
+            "B-spline/NURBS body-route evidence collector has no completed patch route for "
+            f"{patch_pair.first_patch.family}/{patch_pair.second_patch.family}."
+        ),
+        patch_refs=(patch_pair.first_ref, patch_pair.second_ref),
+    )
+
+
+def _collect_surface_csg_body_route_patch_pair_evidence(
+    operation: SurfaceBooleanOperation,
+    patch_pair: SurfaceCSGBodyRoutePatchPair,
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> tuple[SurfaceCSGBodyRouteEvidenceRecord | None, tuple[SurfaceCSGBodyRouteReadinessDiagnostic, ...]]:
+    first_family = patch_pair.first_patch.family
+    second_family = patch_pair.second_patch.family
+    families = {first_family, second_family}
+    if "bspline" in families and bool(families & ANALYTIC_SURFACE_CSG_FAMILIES):
+        source = intersect_analytic_bspline_patch_pair(
+            patch_pair.first_ref,
+            patch_pair.first_patch,
+            patch_pair.second_ref,
+            patch_pair.second_patch,
+            policy=policy,
+        )
+        return (
+            surface_csg_body_route_evidence_from_source_record(
+                source,
+                operation=operation,
+                left_family=first_family,
+                right_family=second_family,
+            ),
+            (),
+        )
+    if "nurbs" in families and bool(families & ANALYTIC_SURFACE_CSG_FAMILIES):
+        source = intersect_analytic_nurbs_patch_pair(
+            patch_pair.first_ref,
+            patch_pair.first_patch,
+            patch_pair.second_ref,
+            patch_pair.second_patch,
+            policy=policy,
+        )
+        return (
+            surface_csg_body_route_evidence_from_source_record(
+                source,
+                operation=operation,
+                left_family=first_family,
+                right_family=second_family,
+            ),
+            (),
+        )
+    if families.issubset({"bspline", "nurbs"}):
+        coincident = detect_spline_nurbs_coincident_regions(
+            patch_pair.first_ref,
+            patch_pair.first_patch,
+            patch_pair.second_ref,
+            patch_pair.second_patch,
+            policy=policy,
+        )
+        if coincident.supported or coincident.ownership_diagnostics:
+            return (
+                surface_csg_body_route_evidence_from_source_record(
+                    coincident,
+                    operation=operation,
+                    left_family=first_family,
+                    right_family=second_family,
+                ),
+                (),
+            )
+        source = intersect_spline_nurbs_patch_pair(
+            patch_pair.first_ref,
+            patch_pair.first_patch,
+            patch_pair.second_ref,
+            patch_pair.second_patch,
+            policy=policy,
+        )
+        return (
+            surface_csg_body_route_evidence_from_source_record(
+                source,
+                operation=operation,
+                left_family=first_family,
+                right_family=second_family,
+            ),
+            (),
+        )
+    return (None, (_surface_csg_body_route_missing_coverage(patch_pair),))
+
+
+def collect_surface_csg_body_route_patch_evidence(
+    operation: SurfaceBooleanOperation,
+    patch_pairs: Sequence[SurfaceCSGBodyRoutePatchPair],
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> SurfaceCSGBodyRouteEvidenceCollectionReport:
+    """Collect 402A-compliant patch evidence for B-spline/NURBS body CSG routes."""
+
+    records: list[SurfaceCSGBodyRouteEvidenceRecord] = []
+    diagnostics: list[SurfaceCSGBodyRouteReadinessDiagnostic] = []
+    for patch_pair in patch_pairs:
+        record, pair_diagnostics = _collect_surface_csg_body_route_patch_pair_evidence(
+            operation,
+            patch_pair,
+            policy=policy,
+        )
+        diagnostics.extend(pair_diagnostics)
+        if record is not None:
+            records.append(record)
+    audit_report = audit_surface_csg_body_route_evidence(records)
+    if not records or any(diagnostic.code == "missing-route-coverage" for diagnostic in diagnostics):
+        readiness: SurfaceCSGBodyRouteReadinessState = "blocked"
+    elif not audit_report.passed:
+        readiness = "blocked"
+        diagnostics.append(
+            SurfaceCSGBodyRouteReadinessDiagnostic(
+                code="audit-failed",
+                message="Collected B-spline/NURBS body-route evidence failed the 402A audit.",
+                route_ids=tuple(record.route_id for record in records),
+            )
+        )
+    elif any(record.evidence_kind == "diagnostic-refusal" for record in records):
+        readiness = "diagnostic-refusal-ready"
+        if any(record.evidence_kind != "diagnostic-refusal" for record in records):
+            diagnostics.append(
+                SurfaceCSGBodyRouteReadinessDiagnostic(
+                    code="mixed-success-refusal",
+                    message="Collected B-spline/NURBS body-route evidence contains both success and refusal records.",
+                    route_ids=tuple(record.route_id for record in records),
+                )
+            )
+    else:
+        readiness = "success-ready"
+    return SurfaceCSGBodyRouteEvidenceCollectionReport(
+        operation=operation,
+        records=tuple(records),
+        audit_report=audit_report,
+        readiness=readiness,
+        diagnostics=tuple(diagnostics),
     )
 
 
@@ -7829,6 +10251,7 @@ def map_surface_csg_coincident_region_loop(
     points_uv: Sequence[Sequence[float]],
     *,
     source_curve_digests: Sequence[str] = (),
+    orientation: Literal["forward", "reversed"] = "forward",
 ) -> SurfaceCSGPatchLocalRegionMappingResult:
     """Map a coincident region loop into one patch-local trim domain."""
 
@@ -7855,6 +10278,7 @@ def map_surface_csg_coincident_region_loop(
             patch=patch_ref,
             loop=loop,
             source_curve_digests=tuple(source_curve_digests),
+            orientation=orientation,
         ),
     )
 
@@ -7902,6 +10326,58 @@ def _surface_csg_patch_local_curve_from_parameters(
     return SurfaceCSGPatchLocalCurveMappingResult(source_curve=source_curve, patch=patch_ref, curve=local_curve)
 
 
+def _attach_analytic_bspline_body_route_evidence(
+    record: SurfaceCSGAnalyticBSplineIntersectionRecord,
+    first_patch: SurfacePatch,
+    second_patch: SurfacePatch,
+) -> SurfaceCSGAnalyticBSplineIntersectionRecord:
+    evidence = surface_csg_body_route_evidence_from_source_record(
+        record,
+        left_family=first_patch.family,
+        right_family=second_patch.family,
+    )
+    return replace(record, body_route_evidence=evidence)
+
+
+def _attach_analytic_nurbs_body_route_evidence(
+    record: SurfaceCSGAnalyticNURBSIntersectionRecord,
+    first_patch: SurfacePatch,
+    second_patch: SurfacePatch,
+) -> SurfaceCSGAnalyticNURBSIntersectionRecord:
+    evidence = surface_csg_body_route_evidence_from_source_record(
+        record,
+        left_family=first_patch.family,
+        right_family=second_patch.family,
+    )
+    return replace(record, body_route_evidence=evidence)
+
+
+def _attach_spline_pair_body_route_evidence(
+    record: SurfaceCSGSplinePairIntersectionRecord,
+    first_patch: SurfacePatch,
+    second_patch: SurfacePatch,
+) -> SurfaceCSGSplinePairIntersectionRecord:
+    evidence = surface_csg_body_route_evidence_from_source_record(
+        record,
+        left_family=first_patch.family,
+        right_family=second_patch.family,
+    )
+    return replace(record, body_route_evidence=evidence)
+
+
+def _attach_spline_coincident_body_route_evidence(
+    record: SurfaceCSGSplineCoincidentRegionRecord,
+    first_patch: SurfacePatch,
+    second_patch: SurfacePatch,
+) -> SurfaceCSGSplineCoincidentRegionRecord:
+    evidence = surface_csg_body_route_evidence_from_source_record(
+        record,
+        left_family=first_patch.family,
+        right_family=second_patch.family,
+    )
+    return replace(record, body_route_evidence=evidence)
+
+
 def intersect_analytic_bspline_patch_pair(
     first_ref: SurfaceBooleanPatchRef,
     first_patch: PlanarSurfacePatch | RuledSurfacePatch | RevolutionSurfacePatch | BSplineSurfacePatch,
@@ -7933,13 +10409,14 @@ def intersect_analytic_bspline_patch_pair(
             message="analytic-to-B-spline CSG requires exactly one analytic patch and one B-spline patch",
         )
         result, report = solve_analytic_spline_surface_intersection(placeholder_request, sample_count=sample_count)
-        return SurfaceCSGAnalyticBSplineIntersectionRecord(
+        record = SurfaceCSGAnalyticBSplineIntersectionRecord(
             first_patch=first_ref,
             second_patch=second_ref,
             intersection=result,
             residual_report=report,
             diagnostics=(diagnostic, *report.diagnostics),
         )
+        return _attach_analytic_bspline_body_route_evidence(record, first_patch, second_patch)
 
     result, report = solve_analytic_spline_surface_intersection(placeholder_request, sample_count=sample_count)
     diagnostics: list[SurfaceIntersectionSupportDiagnostic | SurfaceCSGCurveMappingDiagnostic] = list(report.diagnostics)
@@ -7988,7 +10465,7 @@ def intersect_analytic_bspline_patch_pair(
             diagnostics.extend(mapping.diagnostics)
             if mapping.curve is not None:
                 patch_local_curves.append(mapping.curve)
-    return SurfaceCSGAnalyticBSplineIntersectionRecord(
+    record = SurfaceCSGAnalyticBSplineIntersectionRecord(
         first_patch=first_ref,
         second_patch=second_ref,
         intersection=result,
@@ -7997,6 +10474,7 @@ def intersect_analytic_bspline_patch_pair(
         patch_local_curves=tuple(patch_local_curves),
         diagnostics=tuple(diagnostics),
     )
+    return _attach_analytic_bspline_body_route_evidence(record, first_patch, second_patch)
 
 
 def validate_nurbs_csg_patch_weights(patch: NURBSSurfacePatch) -> tuple[NURBSWeightValidationDiagnostic, ...]:
@@ -8042,7 +10520,7 @@ def intersect_analytic_nurbs_patch_pair(
             message="analytic-to-NURBS CSG requires exactly one analytic patch and one NURBS patch",
         )
         result, report = solve_analytic_spline_surface_intersection(request, sample_count=sample_count)
-        return SurfaceCSGAnalyticNURBSIntersectionRecord(
+        record = SurfaceCSGAnalyticNURBSIntersectionRecord(
             first_patch=first_ref,
             second_patch=second_ref,
             intersection=result,
@@ -8050,6 +10528,7 @@ def intersect_analytic_nurbs_patch_pair(
             weight_diagnostics=weight_diagnostics,
             diagnostics=(diagnostic, *weight_diagnostics, *report.diagnostics),
         )
+        return _attach_analytic_nurbs_body_route_evidence(record, first_patch, second_patch)
 
     result, report = solve_analytic_spline_surface_intersection(request, sample_count=sample_count)
     diagnostics: list[
@@ -8058,7 +10537,7 @@ def intersect_analytic_nurbs_patch_pair(
     curves: list[SurfaceCSGCurvePrimitive] = []
     patch_local_curves: list[SurfaceCSGPatchLocalCurve] = []
     if weight_diagnostics:
-        return SurfaceCSGAnalyticNURBSIntersectionRecord(
+        record = SurfaceCSGAnalyticNURBSIntersectionRecord(
             first_patch=first_ref,
             second_patch=second_ref,
             intersection=result,
@@ -8066,6 +10545,7 @@ def intersect_analytic_nurbs_patch_pair(
             weight_diagnostics=weight_diagnostics,
             diagnostics=tuple(diagnostics),
         )
+        return _attach_analytic_nurbs_body_route_evidence(record, first_patch, second_patch)
     for curve_record in result.curves:
         try:
             curve = make_surface_csg_curve(curve_record.kind, curve_record.points_3d, policy=normalized_policy)
@@ -8107,7 +10587,7 @@ def intersect_analytic_nurbs_patch_pair(
             diagnostics.extend(mapping.diagnostics)
             if mapping.curve is not None:
                 patch_local_curves.append(mapping.curve)
-    return SurfaceCSGAnalyticNURBSIntersectionRecord(
+    record = SurfaceCSGAnalyticNURBSIntersectionRecord(
         first_patch=first_ref,
         second_patch=second_ref,
         intersection=result,
@@ -8117,6 +10597,7 @@ def intersect_analytic_nurbs_patch_pair(
         patch_local_curves=tuple(patch_local_curves),
         diagnostics=tuple(diagnostics),
     )
+    return _attach_analytic_nurbs_body_route_evidence(record, first_patch, second_patch)
 
 
 def intersect_spline_nurbs_patch_pair(
@@ -8150,13 +10631,14 @@ def intersect_spline_nurbs_patch_pair(
             message="spline/NURBS CSG requires two B-spline or NURBS patches",
         )
         result, report = solve_spline_spline_surface_intersection(request, sample_count=sample_count)
-        return SurfaceCSGSplinePairIntersectionRecord(
+        record = SurfaceCSGSplinePairIntersectionRecord(
             first_patch=first_ref,
             second_patch=second_ref,
             intersection=result,
             residual_report=report,
             diagnostics=(diagnostic, *report.diagnostics),
         )
+        return _attach_spline_pair_body_route_evidence(record, first_patch, second_patch)
 
     result, report = solve_spline_spline_surface_intersection(request, sample_count=sample_count)
     diagnostics: list[SurfaceIntersectionSupportDiagnostic | SurfaceCSGCurveMappingDiagnostic] = list(report.diagnostics)
@@ -8213,7 +10695,7 @@ def intersect_spline_nurbs_patch_pair(
                 location="spline-pair:csg-intersection",
             )
         )
-    return SurfaceCSGSplinePairIntersectionRecord(
+    record = SurfaceCSGSplinePairIntersectionRecord(
         first_patch=first_ref,
         second_patch=second_ref,
         intersection=result,
@@ -8223,12 +10705,161 @@ def intersect_spline_nurbs_patch_pair(
         tangent_events=tuple(tangent_events),
         diagnostics=tuple(diagnostics),
     )
+    return _attach_spline_pair_body_route_evidence(record, first_patch, second_patch)
 
 
 def _surface_patch_domain_loop(patch: SurfacePatch) -> tuple[tuple[float, float], ...]:
     u0, u1 = patch.domain.u_range
     v0, v1 = patch.domain.v_range
     return ((float(u0), float(v0)), (float(u1), float(v0)), (float(u1), float(v1)), (float(u0), float(v1)))
+
+
+@dataclass(frozen=True)
+class _SurfaceCSGRectangularPatchFrame:
+    patch: SurfacePatch
+    origin: np.ndarray
+    u_vector: np.ndarray
+    v_vector: np.ndarray
+    normal: np.ndarray
+    u_range: tuple[float, float]
+    v_range: tuple[float, float]
+
+
+@dataclass(frozen=True)
+class _SurfaceCSGRectangularOverlapEvidence:
+    first_loop_uv: tuple[tuple[float, float], ...]
+    second_loop_uv: tuple[tuple[float, float], ...]
+    second_orientation: Literal["forward", "reversed"]
+    max_residual: float
+    partial: bool
+    boundary_curve_ids: tuple[str, ...]
+
+
+def _surface_csg_rectangular_patch_frame(
+    patch: SurfacePatch,
+    *,
+    policy: SurfaceCSGTolerancePolicy,
+) -> _SurfaceCSGRectangularPatchFrame | None:
+    u0, u1 = (float(value) for value in patch.domain.u_range)
+    v0, v1 = (float(value) for value in patch.domain.v_range)
+    p00 = patch.point_at(u0, v0)
+    p10 = patch.point_at(u1, v0)
+    p01 = patch.point_at(u0, v1)
+    p11 = patch.point_at(u1, v1)
+    u_vector = p10 - p00
+    v_vector = p01 - p00
+    normal = np.cross(u_vector, v_vector)
+    u_norm = float(np.linalg.norm(u_vector))
+    v_norm = float(np.linalg.norm(v_vector))
+    normal_norm = float(np.linalg.norm(normal))
+    if u_norm <= policy.domain_tolerance or v_norm <= policy.domain_tolerance or normal_norm <= policy.domain_tolerance:
+        return None
+    if float(np.linalg.norm((p00 + u_vector + v_vector) - p11)) > policy.equality_tolerance:
+        return None
+    return _SurfaceCSGRectangularPatchFrame(
+        patch=patch,
+        origin=p00,
+        u_vector=u_vector,
+        v_vector=v_vector,
+        normal=normal / normal_norm,
+        u_range=(u0, u1),
+        v_range=(v0, v1),
+    )
+
+
+def _surface_csg_rectangular_frame_coordinates(
+    frame: _SurfaceCSGRectangularPatchFrame,
+    point: np.ndarray,
+) -> tuple[float, float, float]:
+    basis = np.column_stack((frame.u_vector, frame.v_vector, frame.normal))
+    local = np.linalg.solve(basis, np.asarray(point, dtype=float).reshape(3) - frame.origin)
+    return (float(local[0]), float(local[1]), float(local[2]))
+
+
+def _surface_csg_rectangular_frame_uv(
+    frame: _SurfaceCSGRectangularPatchFrame,
+    point: np.ndarray,
+) -> tuple[float, float]:
+    u_fraction, v_fraction, _ = _surface_csg_rectangular_frame_coordinates(frame, point)
+    u0, u1 = frame.u_range
+    v0, v1 = frame.v_range
+    return (float(u0 + u_fraction * (u1 - u0)), float(v0 + v_fraction * (v1 - v0)))
+
+
+def _surface_csg_rectangular_overlap_evidence(
+    first_patch: SurfacePatch,
+    second_patch: SurfacePatch,
+    *,
+    policy: SurfaceCSGTolerancePolicy,
+) -> _SurfaceCSGRectangularOverlapEvidence | None:
+    first_frame = _surface_csg_rectangular_patch_frame(first_patch, policy=policy)
+    second_frame = _surface_csg_rectangular_patch_frame(second_patch, policy=policy)
+    if first_frame is None or second_frame is None:
+        return None
+    normal_alignment = float(np.dot(first_frame.normal, second_frame.normal))
+    if abs(normal_alignment) < 1.0 - policy.domain_tolerance:
+        return None
+    if abs(_surface_csg_rectangular_frame_coordinates(first_frame, second_frame.origin)[2]) > policy.equality_tolerance:
+        return None
+
+    u0, u1 = second_frame.u_range
+    v0, v1 = second_frame.v_range
+    second_world_corners = (
+        second_patch.point_at(u0, v0),
+        second_patch.point_at(u1, v0),
+        second_patch.point_at(u1, v1),
+        second_patch.point_at(u0, v1),
+    )
+    second_in_first = tuple(
+        _surface_csg_rectangular_frame_coordinates(first_frame, point)
+        for point in second_world_corners
+    )
+    if any(abs(w_value) > policy.equality_tolerance for _, _, w_value in second_in_first):
+        return None
+
+    min_u = max(0.0, min(point[0] for point in second_in_first))
+    max_u = min(1.0, max(point[0] for point in second_in_first))
+    min_v = max(0.0, min(point[1] for point in second_in_first))
+    max_v = min(1.0, max(point[1] for point in second_in_first))
+    if max_u - min_u <= policy.domain_tolerance or max_v - min_v <= policy.domain_tolerance:
+        return None
+
+    first_u0, first_u1 = first_frame.u_range
+    first_v0, first_v1 = first_frame.v_range
+    first_loop_uv = (
+        (first_u0 + min_u * (first_u1 - first_u0), first_v0 + min_v * (first_v1 - first_v0)),
+        (first_u0 + max_u * (first_u1 - first_u0), first_v0 + min_v * (first_v1 - first_v0)),
+        (first_u0 + max_u * (first_u1 - first_u0), first_v0 + max_v * (first_v1 - first_v0)),
+        (first_u0 + min_u * (first_u1 - first_u0), first_v0 + max_v * (first_v1 - first_v0)),
+    )
+    first_world_loop = tuple(first_patch.point_at(u, v) for u, v in first_loop_uv)
+    second_loop_uv = tuple(_surface_csg_rectangular_frame_uv(second_frame, point) for point in first_world_loop)
+    second_world_loop = tuple(second_patch.point_at(u, v) for u, v in second_loop_uv)
+    residuals = tuple(
+        float(np.linalg.norm(first_point - second_point))
+        for first_point, second_point in zip(first_world_loop, second_world_loop, strict=True)
+    )
+    second_span_u = max(point[0] for point in second_in_first) - min(point[0] for point in second_in_first)
+    second_span_v = max(point[1] for point in second_in_first) - min(point[1] for point in second_in_first)
+    partial = (
+        min_u > policy.domain_tolerance
+        or min_v > policy.domain_tolerance
+        or max_u < 1.0 - policy.domain_tolerance
+        or max_v < 1.0 - policy.domain_tolerance
+        or second_span_u > 1.0 + policy.domain_tolerance
+        or second_span_v > 1.0 + policy.domain_tolerance
+        or second_span_u < 1.0 - policy.domain_tolerance
+        or second_span_v < 1.0 - policy.domain_tolerance
+    )
+    boundary_curve_ids = tuple(f"spline-coincident-boundary-{index}" for index in range(4))
+    return _SurfaceCSGRectangularOverlapEvidence(
+        first_loop_uv=first_loop_uv,
+        second_loop_uv=second_loop_uv,
+        second_orientation="forward" if normal_alignment >= 0.0 else "reversed",
+        max_residual=max(residuals, default=0.0),
+        partial=partial,
+        boundary_curve_ids=boundary_curve_ids,
+    )
 
 
 def detect_spline_nurbs_coincident_regions(
@@ -8240,7 +10871,7 @@ def detect_spline_nurbs_coincident_regions(
     policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
     sample_count: int = 5,
 ) -> SurfaceCSGSplineCoincidentRegionRecord:
-    """Detect full-domain coincident B-spline/NURBS regions for CSG overlap handling."""
+    """Detect rectangular coincident B-spline/NURBS regions for CSG overlap handling."""
 
     normalized_policy = normalize_surface_csg_tolerance_policy(policy)
     request = make_surface_intersection_request(
@@ -8261,12 +10892,68 @@ def detect_spline_nurbs_coincident_regions(
             family_pair=request.normalized_family_pair,
             message="spline/NURBS coincident-region CSG requires two B-spline or NURBS patches",
         )
-        return SurfaceCSGSplineCoincidentRegionRecord(
+        record = SurfaceCSGSplineCoincidentRegionRecord(
             first_patch=first_ref,
             second_patch=second_ref,
             intersection=normalize_surface_intersection_result(request, quality="unsupported"),
             diagnostics=(diagnostic,),
         )
+        return _attach_spline_coincident_body_route_evidence(record, first_patch, second_patch)
+
+    rectangular_overlap = _surface_csg_rectangular_overlap_evidence(
+        first_patch,
+        second_patch,
+        policy=normalized_policy,
+    )
+    if rectangular_overlap is not None and rectangular_overlap.max_residual <= normalized_policy.equality_tolerance:
+        region_id = "spline-coincident-region-0"
+        overlap = SurfaceIntersectionOverlapRegionRecord(
+            region_id=region_id,
+            first_loop_uv=rectangular_overlap.first_loop_uv,
+            second_loop_uv=rectangular_overlap.second_loop_uv,
+            boundary_curve_ids=rectangular_overlap.boundary_curve_ids,
+        )
+        result = normalize_surface_intersection_result(
+            request,
+            overlap_regions=(overlap,),
+            max_residual=rectangular_overlap.max_residual,
+            quality="within-tolerance",
+        )
+        first_mapping = map_surface_csg_coincident_region_loop(
+            overlap.region_id,
+            first_ref,
+            first_patch,
+            overlap.first_loop_uv,
+            source_curve_digests=overlap.boundary_curve_ids,
+        )
+        second_mapping = map_surface_csg_coincident_region_loop(
+            overlap.region_id,
+            second_ref,
+            second_patch,
+            overlap.second_loop_uv,
+            source_curve_digests=overlap.boundary_curve_ids,
+            orientation=rectangular_overlap.second_orientation,
+        )
+        diagnostics = tuple(diagnostic for mapping in (first_mapping, second_mapping) for diagnostic in mapping.diagnostics)
+        ownership_diagnostics: tuple[SurfaceCSGCoincidentOwnershipDiagnostic, ...] = ()
+        if first_ref == second_ref:
+            ownership_diagnostics = (
+                SurfaceCSGCoincidentOwnershipDiagnostic(
+                    code="ambiguous-coincident-owner",
+                    message="Spline/NURBS coincident-region ownership is ambiguous for identical source patch refs.",
+                    fragment_id=region_id,
+                    patch=first_ref,
+                ),
+            )
+        record = SurfaceCSGSplineCoincidentRegionRecord(
+            first_patch=first_ref,
+            second_patch=second_ref,
+            intersection=result,
+            region_mappings=(first_mapping, second_mapping),
+            ownership_diagnostics=ownership_diagnostics,
+            diagnostics=diagnostics,
+        )
+        return _attach_spline_coincident_body_route_evidence(record, first_patch, second_patch)
 
     first_samples = _sampled_region_points(first_patch, sample_count)
     second_samples = _sampled_region_points(second_patch, sample_count)
@@ -8284,7 +10971,7 @@ def detect_spline_nurbs_coincident_regions(
             ),
             patch=first_ref,
         )
-        return SurfaceCSGSplineCoincidentRegionRecord(
+        record = SurfaceCSGSplineCoincidentRegionRecord(
             first_patch=first_ref,
             second_patch=second_ref,
             intersection=normalize_surface_intersection_result(
@@ -8294,6 +10981,7 @@ def detect_spline_nurbs_coincident_regions(
             ),
             diagnostics=(diagnostic,),
         )
+        return _attach_spline_coincident_body_route_evidence(record, first_patch, second_patch)
 
     first_loop = _surface_patch_domain_loop(first_patch)
     second_loop = _surface_patch_domain_loop(second_patch)
@@ -8311,13 +10999,14 @@ def detect_spline_nurbs_coincident_regions(
     first_mapping = map_surface_csg_coincident_region_loop(overlap.region_id, first_ref, first_patch, overlap.first_loop_uv)
     second_mapping = map_surface_csg_coincident_region_loop(overlap.region_id, second_ref, second_patch, overlap.second_loop_uv)
     diagnostics = tuple(diagnostic for mapping in (first_mapping, second_mapping) for diagnostic in mapping.diagnostics)
-    return SurfaceCSGSplineCoincidentRegionRecord(
+    record = SurfaceCSGSplineCoincidentRegionRecord(
         first_patch=first_ref,
         second_patch=second_ref,
         intersection=result,
         region_mappings=(first_mapping, second_mapping),
         diagnostics=diagnostics,
     )
+    return _attach_spline_coincident_body_route_evidence(record, first_patch, second_patch)
 
 
 def intersect_sweep_csg_patch_pair(
@@ -8542,6 +11231,48 @@ def _line_parameter_interval_for_planar_patch(
     return (low, high)
 
 
+def _ruled_patch_as_affine_planar_patch(
+    patch: RuledSurfacePatch,
+    *,
+    policy: SurfaceCSGTolerancePolicy,
+) -> PlanarSurfacePatch | None:
+    start = np.asarray(patch.start_curve, dtype=float)
+    end = np.asarray(patch.end_curve, dtype=float)
+    if start.ndim != 2 or end.ndim != 2 or start.shape != end.shape or start.shape[0] < 2 or start.shape[1] != 3:
+        return None
+    p00 = patch.point_at(patch.domain.u_range[0], patch.domain.v_range[0])
+    p10 = patch.point_at(patch.domain.u_range[1], patch.domain.v_range[0])
+    p01 = patch.point_at(patch.domain.u_range[0], patch.domain.v_range[1])
+    p11 = patch.point_at(patch.domain.u_range[1], patch.domain.v_range[1])
+    expected_p11 = p10 + p01 - p00
+    if float(np.linalg.norm(p11 - expected_p11)) > policy.equality_tolerance:
+        return None
+    u_axis = p10 - p00
+    v_axis = p01 - p00
+    if float(np.linalg.norm(np.cross(u_axis, v_axis))) <= policy.degeneracy_tolerance:
+        return None
+    for point in np.vstack((start, end)):
+        mapped = _sampled_patch_point_to_uv(patch, point)
+        reconstructed = p00 + u_axis * mapped[0] + v_axis * mapped[1]
+        if float(np.linalg.norm(patch.point_at(*mapped) - reconstructed)) > policy.equality_tolerance:
+            return None
+    return PlanarSurfacePatch(
+        family="planar",
+        domain=patch.domain,
+        origin=p00,
+        u_axis=u_axis,
+        v_axis=v_axis,
+        metadata={
+            "kernel": {
+                "operation": "ruled-affine-planar-adapter",
+                "source_patch_id": patch.stable_identity,
+                "source_family": "ruled",
+                "no_mesh_fallback": True,
+            }
+        },
+    )
+
+
 def intersect_planar_linear_patch_pair(
     first_ref: SurfaceBooleanPatchRef,
     first_patch: PlanarSurfacePatch | RuledSurfacePatch,
@@ -8553,7 +11284,17 @@ def intersect_planar_linear_patch_pair(
     """Intersect a low-order planar/linear patch pair without mesh fallback."""
 
     normalized_policy = normalize_surface_csg_tolerance_policy(policy)
-    if isinstance(first_patch, RuledSurfacePatch) or isinstance(second_patch, RuledSurfacePatch):
+    first_planar = (
+        _ruled_patch_as_affine_planar_patch(first_patch, policy=normalized_policy)
+        if isinstance(first_patch, RuledSurfacePatch)
+        else first_patch
+    )
+    second_planar = (
+        _ruled_patch_as_affine_planar_patch(second_patch, policy=normalized_policy)
+        if isinstance(second_patch, RuledSurfacePatch)
+        else second_patch
+    )
+    if first_planar is None or second_planar is None:
         return SurfaceCSGAnalyticIntersectionRecord(
             first_patch=first_ref,
             second_patch=second_ref,
@@ -8561,16 +11302,16 @@ def intersect_planar_linear_patch_pair(
             diagnostics=(
                 _surface_csg_planar_relation_diagnostic(
                     "unsupported-linear",
-                    "Ruled patch analytic intersection is gated for the later linear intersection implementation.",
+                    "Ruled patch analytic intersection requires an affine planar ruled side wall; no mesh fallback was attempted.",
                     first_ref,
                     second_ref,
                 ),
             ),
         )
-    first_normal = _planar_patch_normal(first_patch)
-    second_normal = _planar_patch_normal(second_patch)
-    first_origin = first_patch.point_at(first_patch.domain.u_range[0], first_patch.domain.v_range[0])
-    second_origin = second_patch.point_at(second_patch.domain.u_range[0], second_patch.domain.v_range[0])
+    first_normal = _planar_patch_normal(first_planar)
+    second_normal = _planar_patch_normal(second_planar)
+    first_origin = first_planar.point_at(first_planar.domain.u_range[0], first_planar.domain.v_range[0])
+    second_origin = second_planar.point_at(second_planar.domain.u_range[0], second_planar.domain.v_range[0])
     direction = np.cross(first_normal, second_normal)
     direction_norm = float(np.linalg.norm(direction))
     if direction_norm <= normalized_policy.degeneracy_tolerance:
@@ -8616,10 +11357,10 @@ def intersect_planar_linear_patch_pair(
             ),
         )
     first_interval = _line_parameter_interval_for_planar_patch(
-        first_patch, line_point, direction, policy=normalized_policy
+        first_planar, line_point, direction, policy=normalized_policy
     )
     second_interval = _line_parameter_interval_for_planar_patch(
-        second_patch, line_point, direction, policy=normalized_policy
+        second_planar, line_point, direction, policy=normalized_policy
     )
     if first_interval is None or second_interval is None:
         return SurfaceCSGAnalyticIntersectionRecord(
@@ -9097,6 +11838,100 @@ def _surface_boolean_body_relation(
     if _contains(left, right) or _contains(right, left):
         return "containment"
     return "overlap"
+
+
+def _surface_boolean_bounds_gap(
+    left: tuple[float, float, float, float, float, float],
+    right: tuple[float, float, float, float, float, float],
+) -> float:
+    axis_gaps = (
+        max(left[0] - right[1], right[0] - left[1], 0.0),
+        max(left[2] - right[3], right[2] - left[3], 0.0),
+        max(left[4] - right[5], right[4] - left[5], 0.0),
+    )
+    return float(max(axis_gaps))
+
+
+def classify_surface_csg_contact(
+    left: SurfaceBody,
+    right: SurfaceBody,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> SurfaceCSGContactClassificationRecord:
+    """Classify whole-body contact before operation-specific CSG reconstruction."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    left_bounds = left.bounds_estimate()
+    right_bounds = right.bounds_estimate()
+    overlap = _aabb_overlap(left_bounds, right_bounds)
+    spans = (
+        overlap[1] - overlap[0],
+        overlap[3] - overlap[2],
+        overlap[5] - overlap[4],
+    )
+    gap = _surface_boolean_bounds_gap(left_bounds, right_bounds)
+    relation = _surface_boolean_body_relation(
+        left_bounds,
+        right_bounds,
+        epsilon=normalized_policy.equality_tolerance,
+    )
+    if gap > 0.0 and gap <= normalized_policy.equality_tolerance:
+        relation = "disjoint"
+    zero_span_count = sum(abs(span) <= normalized_policy.equality_tolerance for span in spans)
+    tolerance = SurfaceCSGCoincidenceToleranceRecord(
+        equality_tolerance=normalized_policy.equality_tolerance,
+        gap=gap,
+        zero_span_count=zero_span_count,
+    )
+    diagnostics: list[SurfaceCSGContactDiagnostic] = []
+
+    if relation == "disjoint" and tolerance.ambiguous_near_touch:
+        contact_kind: SurfaceCSGContactKind = "near-touch"
+        diagnostics.append(
+            SurfaceCSGContactDiagnostic(
+                code="ambiguous-near-touch",
+                contact_kind=contact_kind,
+                message=(
+                    "Surface CSG operands are separated only within equality tolerance; "
+                    "the caller must choose a stable snap or refusal policy before execution."
+                ),
+            )
+        )
+    elif relation == "touching":
+        if zero_span_count == 1:
+            contact_kind = "face-touch"
+        elif zero_span_count == 2:
+            contact_kind = "edge-touch"
+            diagnostics.append(
+                SurfaceCSGContactDiagnostic(
+                    code="non-manifold-touch",
+                    contact_kind=contact_kind,
+                    message="Surface CSG edge-only contact is non-manifold for solid union reconstruction.",
+                )
+            )
+        else:
+            contact_kind = "point-touch"
+            diagnostics.append(
+                SurfaceCSGContactDiagnostic(
+                    code="non-manifold-touch",
+                    contact_kind=contact_kind,
+                    message="Surface CSG point-only contact is non-manifold for solid union reconstruction.",
+                )
+            )
+    elif relation == "overlap":
+        contact_kind = "overlap"
+    elif relation == "containment":
+        contact_kind = "containment"
+    elif relation == "equal":
+        contact_kind = "equal"
+    else:
+        contact_kind = "disjoint"
+
+    return SurfaceCSGContactClassificationRecord(
+        body_relation=relation,
+        contact_kind=contact_kind,
+        tolerance=tolerance,
+        diagnostics=tuple(diagnostics),
+    )
 
 
 def _surface_body_patch_families(body: SurfaceBody) -> tuple[str, ...]:
@@ -9620,6 +12455,2364 @@ def surface_csg_caller_inventory() -> tuple[SurfaceCSGCallerInventoryRecord, ...
     return SURFACE_CSG_CALLER_INVENTORY
 
 
+def _surface_body_loft_provenance(body: SurfaceBody) -> dict[str, object] | None:
+    kernel = dict(body.kernel_metadata())
+    if kernel.get("operation") == "loft":
+        return kernel
+    if body.shell_count == 1:
+        shell_kernel = dict(body.iter_shells(world=True)[0].metadata.get("kernel", {}))
+        if shell_kernel.get("operation") == "loft":
+            return shell_kernel
+    for patch in body.iter_patches(world=True):
+        patch_kernel = patch.kernel_metadata()
+        if patch_kernel.get("operation") == "loft":
+            return dict(patch_kernel)
+    return None
+
+
+def classify_surface_csg_loft_eligibility(
+    body: SurfaceBody,
+    operation: SurfaceBooleanOperation,
+) -> SurfaceCSGLoftEligibilityRecord:
+    """Return loft-specific CSG eligibility without falling back to mesh execution."""
+
+    provenance = _surface_body_loft_provenance(body)
+    body_id = body.stable_identity
+    if provenance is None:
+        return SurfaceCSGLoftEligibilityRecord(
+            supported=True,
+            code="not-loft",
+            message="Surface body is not loft-authored; loft CSG eligibility does not apply.",
+            body_id=body_id,
+            operation=operation,
+        )
+    shell_validity = summarize_loft_shell_validity(body)
+    eligibility_provenance = dict(provenance)
+    eligibility_provenance["loft_shell_validity"] = shell_validity.canonical_payload()
+    closure_evidence = shell_validity.closure_evidence
+    if closure_evidence is not None and not bool(closure_evidence.get("closed_valid", False)):
+        return SurfaceCSGLoftEligibilityRecord(
+            supported=False,
+            code="not-closed-valid",
+            message="Loft CSG eligibility requires closed-valid loft closure and cap evidence; no mesh fallback was attempted.",
+            body_id=body_id,
+            operation=operation,
+            provenance=eligibility_provenance,
+        )
+    if body.shell_count != 1:
+        return SurfaceCSGLoftEligibilityRecord(
+            supported=False,
+            code="multi-shell",
+            message="Loft CSG eligibility requires exactly one loft shell; no mesh fallback was attempted.",
+            body_id=body_id,
+            operation=operation,
+            provenance=eligibility_provenance,
+        )
+    shell = body.iter_shells(world=True)[0]
+    branch_count = int(provenance.get("branch_count", 0) or 0)
+    if branch_count > 1:
+        branch_policy = classify_branching_loft_csg_policy(body, operation)
+        eligibility_provenance["loft_branch_graph"] = branch_policy.branch_graph.canonical_payload()
+        eligibility_provenance["branching_loft_csg_policy"] = branch_policy.canonical_payload()
+        if branch_policy.policy_class == "decomposition-required":
+            eligibility_provenance["branch_decomposition_plan"] = plan_branch_subbody_csg(
+                body,
+                operation,
+            ).canonical_payload()
+            message = (
+                "Loft CSG eligibility classified branching topology as decomposition-required; "
+                "Surface Spec 410 must execute branch decomposition/recomposition before boolean execution; "
+                "no mesh fallback was attempted."
+            )
+        else:
+            message = (
+                "Loft CSG eligibility refused branching topology because branch graph evidence is "
+                "underconstrained or invalid; no mesh fallback was attempted."
+            )
+        return SurfaceCSGLoftEligibilityRecord(
+            supported=False,
+            code="branching-topology",
+            message=message,
+            body_id=body_id,
+            operation=operation,
+            provenance=eligibility_provenance,
+        )
+    crossing_count = float(provenance.get("branch_crossing_count", 0.0) or 0.0)
+    if crossing_count > 0.0:
+        return SurfaceCSGLoftEligibilityRecord(
+            supported=False,
+            code="self-intersection-risk",
+            message="Loft CSG eligibility refused a loft with self-intersection risk diagnostics; no mesh fallback was attempted.",
+            body_id=body_id,
+            operation=operation,
+            provenance=eligibility_provenance,
+        )
+    if shell.patch_count < 2 or not shell.seams:
+        return SurfaceCSGLoftEligibilityRecord(
+            supported=False,
+            code="underconstrained",
+            message="Loft CSG eligibility requires constrained side surfaces and seam provenance; no mesh fallback was attempted.",
+            body_id=body_id,
+            operation=operation,
+            provenance=eligibility_provenance,
+        )
+    if not shell.connected:
+        return SurfaceCSGLoftEligibilityRecord(
+            supported=False,
+            code="not-closed-valid",
+            message="Loft CSG eligibility requires a connected single closed-valid loft shell; no mesh fallback was attempted.",
+            body_id=body_id,
+            operation=operation,
+            provenance=eligibility_provenance,
+        )
+    if _classify_surface_body(body) != "closed":
+        return SurfaceCSGLoftEligibilityRecord(
+            supported=False,
+            code="not-closed-valid",
+            message="Loft CSG eligibility requires a single closed-valid loft shell; no mesh fallback was attempted.",
+            body_id=body_id,
+            operation=operation,
+            provenance=eligibility_provenance,
+        )
+    return SurfaceCSGLoftEligibilityRecord(
+        supported=True,
+        code="eligible",
+        message="Loft body passed CSG eligibility checks.",
+        body_id=body_id,
+        operation=operation,
+        provenance=eligibility_provenance,
+    )
+
+
+def build_unsupported_loft_pairing_diagnostic(
+    operation: SurfaceBooleanOperation,
+    operands: SurfaceBooleanOperands,
+    *,
+    reason: str,
+) -> LoftCSGOperationRouteRecord:
+    return LoftCSGOperationRouteRecord(
+        supported=False,
+        operation=operation,
+        operand_ids=operands.body_ids,
+        route_id=None,
+        solver_path=None,
+        loft_operand_indices=(),
+        primitive_families=tuple(_surface_body_csg_implicit_family(body) or "" for body in operands.bodies),
+        diagnostic=f"{reason}; no mesh fallback was attempted.",
+    )
+
+
+def select_loft_csg_route(operands: SurfaceBooleanOperands) -> LoftCSGOperationRouteRecord:
+    """Select the loft-aware CSG route without executing or tessellating operands."""
+
+    eligibility = tuple(classify_surface_csg_loft_eligibility(body, operands.operation) for body in operands.bodies)
+    def has_executor_boundary_evidence(record: SurfaceCSGLoftEligibilityRecord) -> bool:
+        shell_validity = record.provenance.get("loft_shell_validity")
+        return isinstance(shell_validity, dict) and isinstance(shell_validity.get("boundary_graph"), dict)
+
+    loft_indices = tuple(
+        index
+        for index, record in enumerate(eligibility)
+        if record.code != "not-loft" and has_executor_boundary_evidence(record)
+    )
+    if not loft_indices:
+        return build_unsupported_loft_pairing_diagnostic(
+            operands.operation,
+            operands,
+            reason="No loft-authored operand was present for loft CSG route selection",
+        )
+    refused = tuple(record for record in eligibility if record.code != "not-loft" and not record.supported)
+    if refused:
+        return build_unsupported_loft_pairing_diagnostic(
+            operands.operation,
+            operands,
+            reason=f"Loft CSG eligibility refused operand: {refused[0].code}",
+        )
+    primitive_families = tuple(_surface_body_csg_implicit_family(body) or "" for body in operands.bodies)
+    if len(loft_indices) == operands.operand_count == 2:
+        return LoftCSGOperationRouteRecord(
+            supported=True,
+            operation=operands.operation,
+            operand_ids=operands.body_ids,
+            route_id="surface-csg.loft-pair",
+            solver_path="loft-pair-surfacebody",
+            loft_operand_indices=loft_indices,
+            primitive_families=primitive_families,
+        )
+    if len(loft_indices) != 1:
+        return build_unsupported_loft_pairing_diagnostic(
+            operands.operation,
+            operands,
+            reason="Loft CSG route selection requires either one loft operand and one primitive or two eligible loft operands",
+        )
+    non_loft_indices = tuple(index for index in range(operands.operand_count) if index not in loft_indices)
+    if not non_loft_indices or any(primitive_families[index] not in {"box", "sphere", "cylinder"} for index in non_loft_indices):
+        return build_unsupported_loft_pairing_diagnostic(
+            operands.operation,
+            operands,
+            reason="Loft CSG route selection currently supports loft/box, loft/sphere, and loft/cylinder primitive pairings",
+        )
+    return LoftCSGOperationRouteRecord(
+        supported=True,
+        operation=operands.operation,
+        operand_ids=operands.body_ids,
+        route_id="surface-csg.loft-primitive",
+        solver_path="loft-primitive-surfacebody",
+        loft_operand_indices=loft_indices,
+        primitive_families=primitive_families,
+    )
+
+
+def _loft_executor_evidence_present(body: SurfaceBody, operation: SurfaceBooleanOperation) -> bool:
+    record = classify_surface_csg_loft_eligibility(body, operation)
+    shell_validity = record.provenance.get("loft_shell_validity")
+    return record.supported and isinstance(shell_validity, dict) and isinstance(shell_validity.get("boundary_graph"), dict)
+
+
+def classify_loft_patch_fragments(
+    body: SurfaceBody,
+    *,
+    result_role: Literal["preserved", "discarded"],
+    route_id: str,
+) -> tuple[LoftPatchFragmentParticipationRecord, ...]:
+    """Classify loft patch participation for exact reuse route results."""
+
+    if body.shell_count != 1:
+        return ()
+    shell = body.iter_shells(world=True)[0]
+    records: list[LoftPatchFragmentParticipationRecord] = []
+    for patch_index, patch in enumerate(shell.patches):
+        kernel = patch.kernel_metadata()
+        records.append(
+            LoftPatchFragmentParticipationRecord(
+                patch_index=patch_index,
+                patch_role=str(kernel.get("surface_role") or kernel.get("loop_role") or "sidewall"),
+                result_role=result_role,
+                route_id=route_id,
+            )
+        )
+    return tuple(records)
+
+
+def _loft_patch_role_and_station_interval(patch: SurfacePatch) -> tuple[str, tuple[int, int] | None]:
+    kernel = patch.kernel_metadata()
+    patch_role = str(kernel.get("surface_role") or kernel.get("loop_role") or "sidewall")
+    station_interval_payload = kernel.get("station_interval")
+    station_interval: tuple[int, int] | None = None
+    if (
+        isinstance(station_interval_payload, Sequence)
+        and not isinstance(station_interval_payload, (str, bytes))
+        and len(station_interval_payload) == 2
+    ):
+        try:
+            station_interval = (int(station_interval_payload[0]), int(station_interval_payload[1]))
+        except (TypeError, ValueError):
+            station_interval = None
+    return patch_role, station_interval
+
+
+def _box_bounds_edge_curves(
+    bounds: tuple[float, float, float, float, float, float],
+    *,
+    policy: SurfaceCSGTolerancePolicy,
+) -> tuple[SurfaceCSGCurvePrimitive, ...]:
+    xmin, xmax, ymin, ymax, zmin, zmax = bounds
+    corners = {
+        "000": (xmin, ymin, zmin),
+        "001": (xmin, ymin, zmax),
+        "010": (xmin, ymax, zmin),
+        "011": (xmin, ymax, zmax),
+        "100": (xmax, ymin, zmin),
+        "101": (xmax, ymin, zmax),
+        "110": (xmax, ymax, zmin),
+        "111": (xmax, ymax, zmax),
+    }
+    edge_keys = (
+        ("000", "001"),
+        ("000", "010"),
+        ("000", "100"),
+        ("001", "011"),
+        ("001", "101"),
+        ("010", "011"),
+        ("010", "110"),
+        ("011", "111"),
+        ("100", "101"),
+        ("100", "110"),
+        ("101", "111"),
+        ("110", "111"),
+    )
+    curves: list[SurfaceCSGCurvePrimitive] = []
+    for first_key, second_key in edge_keys:
+        try:
+            curves.append(make_surface_csg_line_curve(corners[first_key], corners[second_key], policy=policy))
+        except ValueError:
+            continue
+    return tuple(curves)
+
+
+def _bounds_intersection(
+    first: tuple[float, float, float, float, float, float],
+    second: tuple[float, float, float, float, float, float],
+    *,
+    epsilon: float = 1e-9,
+) -> tuple[float, float, float, float, float, float] | None:
+    bounds = (
+        max(first[0], second[0]),
+        min(first[1], second[1]),
+        max(first[2], second[2]),
+        min(first[3], second[3]),
+        max(first[4], second[4]),
+        min(first[5], second[5]),
+    )
+    if bounds[0] >= bounds[1] - epsilon or bounds[2] >= bounds[3] - epsilon or bounds[4] >= bounds[5] - epsilon:
+        return None
+    return bounds
+
+
+def _loft_primitive_route_or_default(
+    operands: SurfaceBooleanOperands,
+    route: LoftCSGOperationRouteRecord | None,
+) -> LoftCSGOperationRouteRecord | None:
+    selected = route if route is not None else select_loft_csg_route(operands)
+    if not selected.supported or operands.operand_count != 2:
+        return None
+    return selected
+
+
+def adapt_loft_patch_for_primitive_csg(
+    operands: SurfaceBooleanOperands,
+    loft_patch_index: int,
+    *,
+    route: LoftCSGOperationRouteRecord | None = None,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> LoftPrimitiveTrimAdapterRecord:
+    """Build patch-local trim adapter evidence for one loft patch and primitive operand."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    selected_route = _loft_primitive_route_or_default(operands, route)
+    if selected_route is None:
+        return LoftPrimitiveTrimAdapterRecord(
+            operation=operands.operation,
+            route_id="surface-csg.loft-primitive",
+            loft_patch=SurfaceBooleanPatchRef(0, int(loft_patch_index)),
+            primitive_operand_index=-1,
+            primitive_family="",
+            patch_role="unknown",
+            diagnostics=(
+                SurfaceCSGToleranceDiagnostic(
+                    code="ambiguous-curve",
+                    message="Loft primitive trim adapter requires a supported two-operand loft/primitive route.",
+                ),
+            ),
+        )
+    loft_index = selected_route.loft_operand_indices[0]
+    primitive_index = 1 - loft_index
+    primitive_family = selected_route.primitive_families[primitive_index]
+    loft_body = operands.bodies[loft_index]
+    primitive_body = operands.bodies[primitive_index]
+    loft_patch_ref = SurfaceBooleanPatchRef(loft_index, int(loft_patch_index))
+    shell = loft_body.iter_shells(world=True)[0]
+    patch = shell.iter_patches(world=True)[loft_patch_index]
+    patch_role, station_interval = _loft_patch_role_and_station_interval(patch)
+    if primitive_family != "box":
+        return LoftPrimitiveTrimAdapterRecord(
+            operation=operands.operation,
+            route_id=str(selected_route.route_id),
+            loft_patch=loft_patch_ref,
+            primitive_operand_index=primitive_index,
+            primitive_family=primitive_family,
+            patch_role=patch_role,
+            station_interval=station_interval,
+            diagnostics=(
+                SurfaceCSGToleranceDiagnostic(
+                    code="ambiguous-curve",
+                    message=(
+                        "Loft primitive trim adapter currently maps intersecting box primitives; "
+                        f"{primitive_family!r} requires a dedicated primitive intersection adapter."
+                    ),
+                ),
+            ),
+        )
+    overlap_bounds = _bounds_intersection(loft_body.bounds_estimate(), primitive_body.bounds_estimate())
+    if overlap_bounds is None:
+        return LoftPrimitiveTrimAdapterRecord(
+            operation=operands.operation,
+            route_id=str(selected_route.route_id),
+            loft_patch=loft_patch_ref,
+            primitive_operand_index=primitive_index,
+            primitive_family=primitive_family,
+            patch_role=patch_role,
+            station_interval=station_interval,
+        )
+    curves = _box_bounds_edge_curves(overlap_bounds, policy=normalized_policy)
+    patch_local_curves: list[SurfaceCSGPatchLocalCurve] = []
+    diagnostics: list[SurfaceCSGCurveMappingDiagnostic | SurfaceCSGToleranceDiagnostic] = []
+    for curve in curves:
+        mapping = map_surface_csg_curve_to_patch_local(curve, loft_patch_ref, patch, policy=normalized_policy)
+        if mapping.curve is not None:
+            patch_local_curves.append(mapping.curve)
+        diagnostics.extend(mapping.diagnostics)
+    cut_curve_ids = tuple(curve.source_curve_digest for curve in patch_local_curves)
+    return LoftPrimitiveTrimAdapterRecord(
+        operation=operands.operation,
+        route_id=str(selected_route.route_id),
+        loft_patch=loft_patch_ref,
+        primitive_operand_index=primitive_index,
+        primitive_family=primitive_family,
+        patch_role=patch_role,
+        station_interval=station_interval,
+        cut_curve_ids=cut_curve_ids,
+        patch_local_curves=tuple(patch_local_curves),
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def _loft_primitive_fragment_role(
+    operation: SurfaceBooleanOperation,
+    *,
+    loft_index: int,
+    relation: SurfaceBooleanPatchRelation,
+    has_cut_curves: bool,
+) -> SurfaceBooleanSplitRole:
+    if has_cut_curves or relation == "on":
+        return "cut_cap"
+    if operation == "intersection":
+        return "survive" if relation == "inside" else "discard"
+    if operation == "difference":
+        if loft_index != 0:
+            return "discard"
+        return "discard" if relation == "inside" else "survive"
+    return "survive"
+
+
+def classify_loft_primitive_fragments(
+    operands: SurfaceBooleanOperands,
+    *,
+    route: LoftCSGOperationRouteRecord | None = None,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> tuple[LoftPrimitiveFragmentClassificationRecord, ...]:
+    """Classify loft patch fragments for an intersecting loft/primitive route."""
+
+    selected_route = _loft_primitive_route_or_default(operands, route)
+    if selected_route is None:
+        return ()
+    loft_index = selected_route.loft_operand_indices[0]
+    primitive_index = 1 - loft_index
+    loft_body = operands.bodies[loft_index]
+    primitive_body = operands.bodies[primitive_index]
+    primitive_bounds = primitive_body.bounds_estimate()
+    shell = loft_body.iter_shells(world=True)[0]
+    records: list[LoftPrimitiveFragmentClassificationRecord] = []
+    for patch_index, patch in enumerate(shell.iter_patches(world=True)):
+        patch_ref = SurfaceBooleanPatchRef(loft_index, patch_index)
+        patch_role, station_interval = _loft_patch_role_and_station_interval(patch)
+        adapter = adapt_loft_patch_for_primitive_csg(
+            operands,
+            patch_index,
+            route=selected_route,
+            policy=policy,
+        )
+        sample_uv = select_surface_csg_fragment_sample(patch)
+        sample_point_array = patch.point_at(*sample_uv)
+        sample_point = tuple(float(value) for value in sample_point_array)
+        relation = classify_surface_csg_point_against_bounds(sample_point, primitive_bounds)
+        result_role = _loft_primitive_fragment_role(
+            operands.operation,
+            loft_index=loft_index,
+            relation=relation,
+            has_cut_curves=bool(adapter.cut_curve_ids),
+        )
+        records.append(
+            LoftPrimitiveFragmentClassificationRecord(
+                operation=operands.operation,
+                route_id=str(selected_route.route_id),
+                loft_patch=patch_ref,
+                patch_role=patch_role,
+                result_role=result_role,
+                relation=relation,
+                sample_uv=sample_uv,
+                sample_point=sample_point,
+                station_interval=station_interval,
+                cut_curve_ids=adapter.cut_curve_ids,
+            )
+        )
+    return tuple(records)
+
+
+def _loft_primitive_region_kind(primitive_family: str) -> LoftPrimitiveSourceRegionKind | None:
+    if primitive_family == "box":
+        return "box-overlap"
+    if primitive_family == "sphere":
+        return "sphere-analytic-region"
+    if primitive_family == "cylinder":
+        return "cylinder-analytic-region"
+    return None
+
+
+def normalize_loft_primitive_intersection_sources(
+    operands: SurfaceBooleanOperands,
+    *,
+    route: LoftCSGOperationRouteRecord | None = None,
+    adapters: Sequence[LoftPrimitiveTrimAdapterRecord] | None = None,
+) -> LoftPrimitiveIntersectionSourceRecord:
+    """Normalize adapter evidence into primitive source-region records."""
+
+    selected_route = _loft_primitive_route_or_default(operands, route)
+    if selected_route is None:
+        return LoftPrimitiveIntersectionSourceRecord(
+            operation=operands.operation,
+            route_id="surface-csg.loft-primitive",
+            primitive_operand_index=-1,
+            primitive_family="",
+            diagnostics=(
+                LoftPrimitiveUnsupportedSourceDiagnostic(
+                    code="unsupported-route",
+                    message="Loft primitive source normalization requires a supported two-operand loft/primitive route.",
+                    operation=operands.operation,
+                    route_id="surface-csg.loft-primitive",
+                ),
+            ),
+        )
+    loft_index = selected_route.loft_operand_indices[0]
+    primitive_index = 1 - loft_index
+    primitive_family = selected_route.primitive_families[primitive_index]
+    region_kind = _loft_primitive_region_kind(primitive_family)
+    route_id = str(selected_route.route_id)
+    if region_kind is None:
+        return LoftPrimitiveIntersectionSourceRecord(
+            operation=operands.operation,
+            route_id=route_id,
+            primitive_operand_index=primitive_index,
+            primitive_family=primitive_family,
+            diagnostics=(
+                LoftPrimitiveUnsupportedSourceDiagnostic(
+                    code="unsupported-primitive-region",
+                    message=(
+                        f"Loft primitive source normalization does not support primitive family "
+                        f"{primitive_family!r}; no mesh fallback was attempted."
+                    ),
+                    operation=operands.operation,
+                    route_id=route_id,
+                    primitive_operand_index=primitive_index,
+                    primitive_family=primitive_family,
+                ),
+            ),
+        )
+
+    shell = operands.bodies[loft_index].iter_shells(world=True)[0]
+    normalized_adapters = tuple(adapters) if adapters is not None else tuple(
+        adapt_loft_patch_for_primitive_csg(operands, patch_index, route=selected_route)
+        for patch_index, _patch in enumerate(shell.iter_patches(world=True))
+    )
+    diagnostics: list[LoftPrimitiveUnsupportedSourceDiagnostic] = []
+    regions: list[LoftPrimitiveSourceRegionRecord] = []
+    if not normalized_adapters:
+        diagnostics.append(
+            LoftPrimitiveUnsupportedSourceDiagnostic(
+                code="missing-adapter-evidence",
+                message="Loft primitive source normalization requires trim adapter evidence.",
+                operation=operands.operation,
+                route_id=route_id,
+                primitive_operand_index=primitive_index,
+                primitive_family=primitive_family,
+            )
+        )
+    for adapter in normalized_adapters:
+        if adapter.primitive_operand_index != primitive_index or adapter.primitive_family != primitive_family:
+            diagnostics.append(
+                LoftPrimitiveUnsupportedSourceDiagnostic(
+                    code="missing-adapter-evidence",
+                    message="Loft primitive source normalization received adapter evidence for a different primitive source.",
+                    operation=operands.operation,
+                    route_id=route_id,
+                    loft_patch=adapter.loft_patch,
+                    primitive_operand_index=adapter.primitive_operand_index,
+                    primitive_family=adapter.primitive_family,
+                )
+            )
+            continue
+        if adapter.diagnostics and primitive_family == "box" and not adapter.patch_local_curves:
+            diagnostics.append(
+                LoftPrimitiveUnsupportedSourceDiagnostic(
+                    code="missing-adapter-evidence",
+                    message="Loft primitive box source normalization requires valid patch-local adapter curves.",
+                    operation=operands.operation,
+                    route_id=route_id,
+                    loft_patch=adapter.loft_patch,
+                    primitive_operand_index=primitive_index,
+                    primitive_family=primitive_family,
+                )
+            )
+            continue
+        regions.append(
+            LoftPrimitiveSourceRegionRecord(
+                operation=operands.operation,
+                route_id=route_id,
+                loft_patch=adapter.loft_patch,
+                primitive_operand_index=primitive_index,
+                primitive_family=primitive_family,
+                region_kind=region_kind,
+                patch_role=adapter.patch_role,
+                station_interval=adapter.station_interval,
+                cut_curve_ids=adapter.cut_curve_ids,
+            )
+        )
+
+    return LoftPrimitiveIntersectionSourceRecord(
+        operation=operands.operation,
+        route_id=route_id,
+        primitive_operand_index=primitive_index,
+        primitive_family=primitive_family,
+        source_regions=tuple(regions),
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def invert_loft_primitive_source_curves_to_patch_domains(
+    operands: SurfaceBooleanOperands,
+    *,
+    route: LoftCSGOperationRouteRecord | None = None,
+    source_record: LoftPrimitiveIntersectionSourceRecord | None = None,
+    adapters: Sequence[LoftPrimitiveTrimAdapterRecord] | None = None,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> tuple[tuple[LoftPatchLocalSourceCurveRecord, ...], tuple[LoftPatchLocalInversionDiagnostic, ...]]:
+    """Convert normalized loft primitive source curves into patch-local UV records."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    selected_route = _loft_primitive_route_or_default(operands, route)
+    route_id = "surface-csg.loft-primitive" if selected_route is None else str(selected_route.route_id)
+    if selected_route is None:
+        return (
+            (),
+            (
+                LoftPatchLocalInversionDiagnostic(
+                    code="missing-source-record",
+                    message="Loft primitive patch-local inversion requires a supported loft/primitive source route.",
+                    operation=operands.operation,
+                    route_id=route_id,
+                ),
+            ),
+        )
+
+    loft_index = selected_route.loft_operand_indices[0]
+    primitive_index = 1 - loft_index
+    primitive_family = selected_route.primitive_families[primitive_index]
+    shell = operands.bodies[loft_index].iter_shells(world=True)[0]
+    normalized_adapters = tuple(adapters) if adapters is not None else tuple(
+        adapt_loft_patch_for_primitive_csg(operands, patch_index, route=selected_route, policy=normalized_policy)
+        for patch_index, _patch in enumerate(shell.iter_patches(world=True))
+    )
+    normalized_source = source_record or normalize_loft_primitive_intersection_sources(
+        operands,
+        route=selected_route,
+        adapters=normalized_adapters,
+    )
+
+    diagnostics: list[LoftPatchLocalInversionDiagnostic] = []
+    records: list[LoftPatchLocalSourceCurveRecord] = []
+    if normalized_source.diagnostics:
+        diagnostics.extend(
+            LoftPatchLocalInversionDiagnostic(
+                code="missing-source-record",
+                message=f"Loft primitive patch-local inversion cannot consume source diagnostic {source.code!r}.",
+                operation=operands.operation,
+                route_id=route_id,
+                loft_patch=source.loft_patch,
+                primitive_operand_index=source.primitive_operand_index,
+                primitive_family=source.primitive_family,
+            )
+            for source in normalized_source.diagnostics
+        )
+    if not normalized_source.source_regions:
+        diagnostics.append(
+            LoftPatchLocalInversionDiagnostic(
+                code="missing-source-record",
+                message="Loft primitive patch-local inversion requires normalized source regions.",
+                operation=operands.operation,
+                route_id=route_id,
+                primitive_operand_index=primitive_index,
+                primitive_family=primitive_family,
+            )
+        )
+
+    adapters_by_patch = {adapter.loft_patch: adapter for adapter in normalized_adapters}
+    for source_region in normalized_source.source_regions:
+        adapter = adapters_by_patch.get(source_region.loft_patch)
+        if adapter is None:
+            diagnostics.append(
+                LoftPatchLocalInversionDiagnostic(
+                    code="missing-adapter-evidence",
+                    message="Loft primitive patch-local inversion requires adapter evidence for the source patch.",
+                    operation=operands.operation,
+                    route_id=route_id,
+                    loft_patch=source_region.loft_patch,
+                    primitive_operand_index=source_region.primitive_operand_index,
+                    primitive_family=source_region.primitive_family,
+                )
+            )
+            continue
+        source_curve_ids = set(source_region.cut_curve_ids)
+        local_curves = tuple(
+            curve
+            for curve in adapter.patch_local_curves
+            if not source_curve_ids or curve.source_curve_digest in source_curve_ids
+        )
+        if not local_curves:
+            diagnostics.append(
+                LoftPatchLocalInversionDiagnostic(
+                    code="failed-inversion",
+                    message=(
+                        "Loft primitive patch-local inversion found no validated patch-local curves "
+                        "for the normalized source region."
+                    ),
+                    operation=operands.operation,
+                    route_id=route_id,
+                    loft_patch=source_region.loft_patch,
+                    primitive_operand_index=source_region.primitive_operand_index,
+                    primitive_family=source_region.primitive_family,
+                )
+            )
+            continue
+        for local_curve in local_curves:
+            domain_diagnostics = validate_surface_csg_patch_local_curve_domain(local_curve, policy=normalized_policy)
+            if domain_diagnostics:
+                diagnostics.append(
+                    LoftPatchLocalInversionDiagnostic(
+                        code="out-of-domain",
+                        message="Loft primitive patch-local inversion produced an out-of-domain curve.",
+                        operation=operands.operation,
+                        route_id=route_id,
+                        loft_patch=source_region.loft_patch,
+                        primitive_operand_index=source_region.primitive_operand_index,
+                        primitive_family=source_region.primitive_family,
+                        source_curve_id=local_curve.source_curve_digest,
+                    )
+                )
+                continue
+            records.append(
+                LoftPatchLocalSourceCurveRecord(
+                    operation=operands.operation,
+                    route_id=route_id,
+                    loft_patch=source_region.loft_patch,
+                    primitive_operand_index=source_region.primitive_operand_index,
+                    primitive_family=source_region.primitive_family,
+                    source_region_kind=source_region.region_kind,
+                    source_curve_id=local_curve.source_curve_digest,
+                    patch_local_curve=local_curve,
+                    tolerance=normalized_policy.domain_tolerance,
+                )
+            )
+    return tuple(records), tuple(diagnostics)
+
+
+def _loft_cut_loop_participation_for_patch(
+    operands: SurfaceBooleanOperands,
+    route: LoftCSGOperationRouteRecord,
+    loft_patch: SurfaceBooleanPatchRef,
+    source_curve_ids: Sequence[str],
+) -> tuple[LoftCutLoopBoundaryParticipationRecord, ...]:
+    loft_index = route.loft_operand_indices[0]
+    patch = operands.bodies[loft_index].iter_shells(world=True)[0].iter_patches(world=True)[loft_patch.patch_index]
+    patch_role, station_interval = _loft_patch_role_and_station_interval(patch)
+    participants: list[LoftCutLoopBoundaryParticipationRecord] = [
+        LoftCutLoopBoundaryParticipationRecord(
+            kind="source-curve",
+            identifier=str(source_curve_id),
+            loft_patch=loft_patch,
+            role="cut-source",
+        )
+        for source_curve_id in source_curve_ids
+    ]
+    if patch_role in {"start-cap", "end-cap"}:
+        participants.append(
+            LoftCutLoopBoundaryParticipationRecord(
+                kind="cap-trim",
+                identifier=f"{patch_role}:outer",
+                loft_patch=loft_patch,
+                role=patch_role,
+            )
+        )
+    if station_interval is not None:
+        participants.extend(
+            LoftCutLoopBoundaryParticipationRecord(
+                kind="station-seam",
+                identifier=f"station:{station}",
+                loft_patch=loft_patch,
+                role=patch_role,
+            )
+            for station in station_interval
+        )
+    return tuple(participants)
+
+
+def close_loft_patch_local_cut_loops(
+    operands: SurfaceBooleanOperands,
+    *,
+    route: LoftCSGOperationRouteRecord | None = None,
+    inversion_records: Sequence[LoftPatchLocalSourceCurveRecord] = (),
+    inversion_diagnostics: Sequence[LoftPatchLocalInversionDiagnostic] = (),
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> tuple[tuple[LoftPatchLocalCutLoopRecord, ...], tuple[LoftCutLoopClosureDiagnostic, ...]]:
+    """Close loft primitive patch-local cut loops from validated inversion records."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    selected_route = _loft_primitive_route_or_default(operands, route)
+    route_id = "surface-csg.loft-primitive" if selected_route is None else str(selected_route.route_id)
+    if selected_route is None:
+        return (
+            (),
+            (
+                LoftCutLoopClosureDiagnostic(
+                    code="missing-inversion-records",
+                    message="Loft primitive cut-loop closure requires a supported loft/primitive route.",
+                    operation=operands.operation,
+                    route_id=route_id,
+                ),
+            ),
+        )
+    if not inversion_records:
+        return (
+            (),
+            (
+                LoftCutLoopClosureDiagnostic(
+                    code="missing-inversion-records",
+                    message="Loft primitive cut-loop closure requires patch-local inversion records.",
+                    operation=operands.operation,
+                    route_id=route_id,
+                ),
+            ),
+        )
+
+    records_by_patch: dict[SurfaceBooleanPatchRef, list[LoftPatchLocalSourceCurveRecord]] = {}
+    for record in inversion_records:
+        records_by_patch.setdefault(record.loft_patch, []).append(record)
+
+    diagnostics: list[LoftCutLoopClosureDiagnostic] = [
+        LoftCutLoopClosureDiagnostic(
+            code="missing-inversion-records",
+            message=f"Loft primitive cut-loop closure cannot consume inversion diagnostic {diagnostic.code!r}.",
+            operation=operands.operation,
+            route_id=route_id,
+            loft_patch=diagnostic.loft_patch,
+        )
+        for diagnostic in inversion_diagnostics
+    ]
+    closed_loops: list[LoftPatchLocalCutLoopRecord] = []
+    for loft_patch, patch_records in records_by_patch.items():
+        points_uv = tuple(point for record in patch_records for point in record.patch_local_curve.points_uv)
+        source_curve_ids = tuple(dict.fromkeys(record.source_curve_id for record in patch_records))
+        if len(points_uv) < 3:
+            diagnostics.append(
+                LoftCutLoopClosureDiagnostic(
+                    code="open-loop",
+                    message="Loft primitive cut-loop closure requires at least three patch-local points.",
+                    operation=operands.operation,
+                    route_id=route_id,
+                    loft_patch=loft_patch,
+                )
+            )
+            continue
+        u_values = [float(point[0]) for point in points_uv]
+        v_values = [float(point[1]) for point in points_uv]
+        u_min, u_max = min(u_values), max(u_values)
+        v_min, v_max = min(v_values), max(v_values)
+        if (
+            u_max - u_min <= normalized_policy.domain_tolerance
+            or v_max - v_min <= normalized_policy.domain_tolerance
+        ):
+            diagnostics.append(
+                LoftCutLoopClosureDiagnostic(
+                    code="degenerate-loop",
+                    message="Loft primitive cut-loop closure produced a degenerate patch-local loop extent.",
+                    operation=operands.operation,
+                    route_id=route_id,
+                    loft_patch=loft_patch,
+                )
+            )
+            continue
+        loop = TrimLoop(
+            (
+                (u_min, v_min),
+                (u_max, v_min),
+                (u_max, v_max),
+                (u_min, v_max),
+            ),
+            category="inner",
+        )
+        first_record = patch_records[0]
+        closed_loops.append(
+            LoftPatchLocalCutLoopRecord(
+                operation=operands.operation,
+                route_id=route_id,
+                loft_patch=loft_patch,
+                primitive_operand_index=first_record.primitive_operand_index,
+                primitive_family=first_record.primitive_family,
+                loop=loop,
+                source_curve_ids=source_curve_ids,
+                boundary_participation=_loft_cut_loop_participation_for_patch(
+                    operands,
+                    selected_route,
+                    loft_patch,
+                    source_curve_ids,
+                ),
+            )
+        )
+    return tuple(closed_loops), tuple(diagnostics)
+
+
+def _trim_loop_unique_point_count(loop: TrimLoop, *, tolerance: float) -> int:
+    points = np.asarray(loop.points_uv, dtype=float)
+    if tolerance <= 0.0:
+        rounded = points
+    else:
+        rounded = np.round(points / tolerance).astype(int)
+    return len({tuple(point) for point in rounded})
+
+
+def classify_loft_cut_loop_degeneracy(
+    cut_loops: Sequence[LoftPatchLocalCutLoopRecord],
+    *,
+    closure_diagnostics: Sequence[LoftCutLoopClosureDiagnostic] = (),
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> tuple[LoftCutLoopDegeneracyDiagnostic, ...]:
+    """Classify loft primitive cut-loop degeneracy before generated cap construction."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    diagnostics: list[LoftCutLoopDegeneracyDiagnostic] = []
+    for closure_diagnostic in closure_diagnostics:
+        if closure_diagnostic.code == "open-loop":
+            code: Literal["open-loop", "invalid-closure", "zero-area", "tangent", "grazing", "duplicate-segment"] = "open-loop"
+        elif closure_diagnostic.code == "degenerate-loop":
+            code = "zero-area"
+        else:
+            code = "invalid-closure"
+        diagnostics.append(
+            LoftCutLoopDegeneracyDiagnostic(
+                code=code,
+                message=f"Loft primitive cut-loop degeneracy gate refused closure diagnostic {closure_diagnostic.code!r}.",
+                operation=closure_diagnostic.operation,
+                route_id=closure_diagnostic.route_id,
+                loft_patch=closure_diagnostic.loft_patch,
+                tolerance=normalized_policy.degeneracy_tolerance,
+            )
+        )
+    for cut_loop in cut_loops:
+        area = abs(float(cut_loop.loop.area))
+        min_edge = _trim_loop_min_edge_length(cut_loop.loop)
+        unique_points = _trim_loop_unique_point_count(cut_loop.loop, tolerance=normalized_policy.degeneracy_tolerance)
+        if unique_points < len(cut_loop.loop.points_uv):
+            diagnostics.append(
+                LoftCutLoopDegeneracyDiagnostic(
+                    code="duplicate-segment",
+                    message="Loft primitive cut-loop contains duplicate or tolerance-equivalent vertices.",
+                    operation=cut_loop.operation,
+                    route_id=cut_loop.route_id,
+                    loft_patch=cut_loop.loft_patch,
+                    tolerance=normalized_policy.degeneracy_tolerance,
+                )
+            )
+            continue
+        if area <= normalized_policy.degeneracy_tolerance:
+            diagnostics.append(
+                LoftCutLoopDegeneracyDiagnostic(
+                    code="zero-area",
+                    message="Loft primitive cut-loop area is at or below the degeneracy tolerance.",
+                    operation=cut_loop.operation,
+                    route_id=cut_loop.route_id,
+                    loft_patch=cut_loop.loft_patch,
+                    tolerance=normalized_policy.degeneracy_tolerance,
+                )
+            )
+            continue
+        if min_edge <= normalized_policy.degeneracy_tolerance:
+            diagnostics.append(
+                LoftCutLoopDegeneracyDiagnostic(
+                    code="tangent",
+                    message="Loft primitive cut-loop has a tangent-scale edge at or below the degeneracy tolerance.",
+                    operation=cut_loop.operation,
+                    route_id=cut_loop.route_id,
+                    loft_patch=cut_loop.loft_patch,
+                    tolerance=normalized_policy.degeneracy_tolerance,
+                )
+            )
+            continue
+        if area <= normalized_policy.degeneracy_tolerance * 10.0:
+            diagnostics.append(
+                LoftCutLoopDegeneracyDiagnostic(
+                    code="grazing",
+                    message="Loft primitive cut-loop area is near the degeneracy tolerance and must refuse before cap construction.",
+                    operation=cut_loop.operation,
+                    route_id=cut_loop.route_id,
+                    loft_patch=cut_loop.loft_patch,
+                    tolerance=normalized_policy.degeneracy_tolerance,
+                )
+            )
+    return tuple(diagnostics)
+
+
+def _loft_primitive_cap_family(primitive_family: str) -> str | None:
+    if primitive_family == "box":
+        return "planar"
+    if primitive_family in {"sphere", "cylinder"}:
+        return "revolution"
+    return None
+
+
+def classify_loft_primitive_cap_support(
+    operands: SurfaceBooleanOperands,
+    *,
+    route: LoftCSGOperationRouteRecord | None = None,
+    source_record: LoftPrimitiveIntersectionSourceRecord | None = None,
+    cut_loops: Sequence[LoftPatchLocalCutLoopRecord] = (),
+    degeneracy_diagnostics: Sequence[LoftCutLoopDegeneracyDiagnostic] = (),
+) -> tuple[LoftPrimitiveCapSupportClassification, ...]:
+    """Classify whether loft primitive generated caps can be surface-native."""
+
+    selected_route = _loft_primitive_route_or_default(operands, route)
+    route_id = "surface-csg.loft-primitive" if selected_route is None else str(selected_route.route_id)
+    if selected_route is None:
+        diagnostic = LoftPrimitiveUnsupportedCapDiagnostic(
+            code="missing-source-region",
+            message="Loft primitive cap support classification requires a supported loft/primitive route.",
+            operation=operands.operation,
+            route_id=route_id,
+        )
+        return (
+            LoftPrimitiveCapSupportClassification(
+                operation=operands.operation,
+                route_id=route_id,
+                primitive_operand_index=-1,
+                primitive_family="",
+                loft_patch=SurfaceBooleanPatchRef(0, 0),
+                cap_family="",
+                supported=False,
+                diagnostics=(diagnostic,),
+            ),
+        )
+    loft_index = selected_route.loft_operand_indices[0]
+    primitive_index = 1 - loft_index
+    primitive_family = selected_route.primitive_families[primitive_index]
+    normalized_source = source_record or normalize_loft_primitive_intersection_sources(operands, route=selected_route)
+    loops_by_patch: dict[SurfaceBooleanPatchRef, list[LoftPatchLocalCutLoopRecord]] = {}
+    for cut_loop in cut_loops:
+        loops_by_patch.setdefault(cut_loop.loft_patch, []).append(cut_loop)
+    degeneracy_by_patch: dict[SurfaceBooleanPatchRef | None, list[LoftCutLoopDegeneracyDiagnostic]] = {}
+    for diagnostic in degeneracy_diagnostics:
+        degeneracy_by_patch.setdefault(diagnostic.loft_patch, []).append(diagnostic)
+
+    classifications: list[LoftPrimitiveCapSupportClassification] = []
+    if not normalized_source.source_regions:
+        diagnostic = LoftPrimitiveUnsupportedCapDiagnostic(
+            code="missing-source-region",
+            message="Loft primitive cap support classification requires normalized source regions.",
+            operation=operands.operation,
+            route_id=route_id,
+            primitive_operand_index=primitive_index,
+            primitive_family=primitive_family,
+        )
+        classifications.append(
+            LoftPrimitiveCapSupportClassification(
+                operation=operands.operation,
+                route_id=route_id,
+                primitive_operand_index=primitive_index,
+                primitive_family=primitive_family,
+                loft_patch=SurfaceBooleanPatchRef(loft_index, 0),
+                cap_family="",
+                supported=False,
+                diagnostics=(diagnostic,),
+            )
+        )
+    for source_region in normalized_source.source_regions:
+        cap_family = _loft_primitive_cap_family(source_region.primitive_family)
+        source_loops = tuple(loops_by_patch.get(source_region.loft_patch, ()))
+        source_degeneracy = tuple(degeneracy_by_patch.get(source_region.loft_patch, ())) + tuple(degeneracy_by_patch.get(None, ()))
+        diagnostics: list[LoftPrimitiveUnsupportedCapDiagnostic] = []
+        if cap_family is None:
+            diagnostics.append(
+                LoftPrimitiveUnsupportedCapDiagnostic(
+                    code="unsupported-cap-family",
+                    message=(
+                        f"Loft primitive generated cap support does not have a surface-native cap family "
+                        f"for primitive family {source_region.primitive_family!r}."
+                    ),
+                    operation=operands.operation,
+                    route_id=route_id,
+                    primitive_operand_index=source_region.primitive_operand_index,
+                    primitive_family=source_region.primitive_family,
+                    loft_patch=source_region.loft_patch,
+                )
+            )
+        if source_degeneracy:
+            diagnostics.extend(
+                LoftPrimitiveUnsupportedCapDiagnostic(
+                    code="degenerate-cut-loop",
+                    message=(
+                        "Loft primitive generated cap support refuses degenerate cut-loop "
+                        f"diagnostic {degeneracy.code!r} before cap construction."
+                    ),
+                    operation=operands.operation,
+                    route_id=route_id,
+                    primitive_operand_index=source_region.primitive_operand_index,
+                    primitive_family=source_region.primitive_family,
+                    loft_patch=source_region.loft_patch,
+                    cap_family=cap_family,
+                )
+                for degeneracy in source_degeneracy
+            )
+        if not source_loops:
+            diagnostics.append(
+                LoftPrimitiveUnsupportedCapDiagnostic(
+                    code="missing-cut-loop",
+                    message="Loft primitive generated cap support requires a non-degenerate cut loop.",
+                    operation=operands.operation,
+                    route_id=route_id,
+                    primitive_operand_index=source_region.primitive_operand_index,
+                    primitive_family=source_region.primitive_family,
+                    loft_patch=source_region.loft_patch,
+                    cap_family=cap_family,
+                )
+            )
+        classifications.append(
+            LoftPrimitiveCapSupportClassification(
+                operation=operands.operation,
+                route_id=route_id,
+                primitive_operand_index=source_region.primitive_operand_index,
+                primitive_family=source_region.primitive_family,
+                loft_patch=source_region.loft_patch,
+                cap_family=cap_family or "",
+                supported=not diagnostics,
+                cut_loop_ids=tuple(
+                    f"{cut_loop.loft_patch.operand_index}:{cut_loop.loft_patch.patch_index}:{index}"
+                    for index, cut_loop in enumerate(source_loops)
+                ),
+                diagnostics=tuple(diagnostics),
+            )
+        )
+    return tuple(classifications)
+
+
+def build_loft_primitive_generated_cap_records(
+    operands: SurfaceBooleanOperands,
+    *,
+    cap_support: Sequence[LoftPrimitiveCapSupportClassification] = (),
+    cut_loops: Sequence[LoftPatchLocalCutLoopRecord] = (),
+) -> tuple[tuple[LoftPrimitiveGeneratedCapRecord, ...], tuple[LoftPrimitiveUnsupportedCapDiagnostic, ...]]:
+    """Build generated cap records for supported loft primitive cap classifications."""
+
+    if not cap_support:
+        return (
+            (),
+            (
+                LoftPrimitiveUnsupportedCapDiagnostic(
+                    code="missing-support-classification",
+                    message="Loft primitive generated cap record construction requires cap support classifications.",
+                    operation=operands.operation,
+                    route_id="surface-csg.loft-primitive",
+                ),
+            ),
+        )
+    loops_by_patch: dict[SurfaceBooleanPatchRef, list[LoftPatchLocalCutLoopRecord]] = {}
+    for cut_loop in cut_loops:
+        loops_by_patch.setdefault(cut_loop.loft_patch, []).append(cut_loop)
+
+    records: list[LoftPrimitiveGeneratedCapRecord] = []
+    diagnostics: list[LoftPrimitiveUnsupportedCapDiagnostic] = []
+    for classification in cap_support:
+        if not classification.supported:
+            diagnostics.append(
+                LoftPrimitiveUnsupportedCapDiagnostic(
+                    code="unsupported-cap-classification",
+                    message="Loft primitive generated cap construction refuses unsupported cap classifications.",
+                    operation=classification.operation,
+                    route_id=classification.route_id,
+                    primitive_operand_index=classification.primitive_operand_index,
+                    primitive_family=classification.primitive_family,
+                    loft_patch=classification.loft_patch,
+                    cap_family=classification.cap_family,
+                )
+            )
+            diagnostics.extend(classification.diagnostics)
+            continue
+        patch_loops = tuple(loops_by_patch.get(classification.loft_patch, ()))
+        if not patch_loops:
+            diagnostics.append(
+                LoftPrimitiveUnsupportedCapDiagnostic(
+                    code="missing-cut-loop",
+                    message="Loft primitive generated cap construction requires the supported cap cut loop.",
+                    operation=classification.operation,
+                    route_id=classification.route_id,
+                    primitive_operand_index=classification.primitive_operand_index,
+                    primitive_family=classification.primitive_family,
+                    loft_patch=classification.loft_patch,
+                    cap_family=classification.cap_family,
+                )
+            )
+            continue
+        for index, cut_loop in enumerate(patch_loops):
+            cap_id = (
+                f"loft-primitive-cap:{classification.route_id}:"
+                f"{classification.loft_patch.operand_index}:{classification.loft_patch.patch_index}:{index}"
+            )
+            records.append(
+                LoftPrimitiveGeneratedCapRecord(
+                    cap_id=cap_id,
+                    operation=classification.operation,
+                    route_id=classification.route_id,
+                    primitive_operand_index=classification.primitive_operand_index,
+                    primitive_family=classification.primitive_family,
+                    loft_patch=classification.loft_patch,
+                    cap_family=classification.cap_family,
+                    loop=cut_loop.loop,
+                    source_curve_ids=cut_loop.source_curve_ids,
+                    support_classification=classification,
+                    provenance=(
+                        "surface-425a:cap-support-classification",
+                        "surface-425b:generated-cap-record-construction",
+                    ),
+                )
+            )
+    return tuple(records), tuple(diagnostics)
+
+
+def _loft_cut_loop_id(cut_loop: LoftPatchLocalCutLoopRecord, index: int) -> str:
+    return f"{cut_loop.loft_patch.operand_index}:{cut_loop.loft_patch.patch_index}:{index}"
+
+
+def pair_loft_primitive_generated_cap_loops(
+    operands: SurfaceBooleanOperands,
+    *,
+    generated_caps: Sequence[LoftPrimitiveGeneratedCapRecord] = (),
+    cut_loops: Sequence[LoftPatchLocalCutLoopRecord] = (),
+) -> tuple[tuple[LoftPrimitiveCapLoopPairingRecord, ...], tuple[LoftPrimitiveCapLoopPairingDiagnostic, ...]]:
+    """Pair generated loft primitive caps with their originating cut loops exactly once."""
+
+    route_id = generated_caps[0].route_id if generated_caps else "surface-csg.loft-primitive"
+    diagnostics: list[LoftPrimitiveCapLoopPairingDiagnostic] = []
+    if not generated_caps:
+        diagnostics.append(
+            LoftPrimitiveCapLoopPairingDiagnostic(
+                code="missing-generated-cap",
+                message="Loft primitive cap-loop pairing requires generated cap records.",
+                operation=operands.operation,
+                route_id=route_id,
+            )
+        )
+    if not cut_loops:
+        diagnostics.append(
+            LoftPrimitiveCapLoopPairingDiagnostic(
+                code="missing-cut-loop",
+                message="Loft primitive cap-loop pairing requires closed cut loops.",
+                operation=operands.operation,
+                route_id=route_id,
+            )
+        )
+    cap_ids = [cap.cap_id for cap in generated_caps]
+    duplicate_cap_ids = {cap_id for cap_id in cap_ids if cap_ids.count(cap_id) > 1}
+    diagnostics.extend(
+        LoftPrimitiveCapLoopPairingDiagnostic(
+            code="duplicate-generated-cap",
+            message="Loft primitive cap-loop pairing found a duplicate generated cap id.",
+            operation=operands.operation,
+            route_id=route_id,
+            loft_patch=cap.loft_patch,
+            cap_id=cap.cap_id,
+        )
+        for cap in generated_caps
+        if cap.cap_id in duplicate_cap_ids
+    )
+    cut_loop_ids = [_loft_cut_loop_id(cut_loop, index) for index, cut_loop in enumerate(cut_loops)]
+    duplicate_cut_loop_ids = {loop_id for loop_id in cut_loop_ids if cut_loop_ids.count(loop_id) > 1}
+    diagnostics.extend(
+        LoftPrimitiveCapLoopPairingDiagnostic(
+            code="duplicate-cut-loop",
+            message="Loft primitive cap-loop pairing found a duplicate cut loop id.",
+            operation=operands.operation,
+            route_id=route_id,
+            loft_patch=cut_loop.loft_patch,
+        )
+        for loop_id, cut_loop in zip(cut_loop_ids, cut_loops)
+        if loop_id in duplicate_cut_loop_ids
+    )
+    if diagnostics:
+        return (), tuple(diagnostics)
+
+    loops_by_key: dict[tuple[SurfaceBooleanPatchRef, tuple[str, ...]], tuple[str, LoftPatchLocalCutLoopRecord]] = {}
+    for index, cut_loop in enumerate(cut_loops):
+        key = (cut_loop.loft_patch, tuple(cut_loop.source_curve_ids))
+        loops_by_key[key] = (_loft_cut_loop_id(cut_loop, index), cut_loop)
+
+    pairings: list[LoftPrimitiveCapLoopPairingRecord] = []
+    used_loop_ids: set[str] = set()
+    for cap in generated_caps:
+        key = (cap.loft_patch, tuple(cap.source_curve_ids))
+        loop_entry = loops_by_key.get(key)
+        if loop_entry is None:
+            diagnostics.append(
+                LoftPrimitiveCapLoopPairingDiagnostic(
+                    code="missing-cut-loop",
+                    message="Loft primitive cap-loop pairing could not find the cap's source cut loop.",
+                    operation=cap.operation,
+                    route_id=cap.route_id,
+                    loft_patch=cap.loft_patch,
+                    cap_id=cap.cap_id,
+                )
+            )
+            continue
+        cut_loop_id, _cut_loop = loop_entry
+        if cut_loop_id in used_loop_ids:
+            diagnostics.append(
+                LoftPrimitiveCapLoopPairingDiagnostic(
+                    code="duplicate-cut-loop",
+                    message="Loft primitive cap-loop pairing attempted to reuse a cut loop.",
+                    operation=cap.operation,
+                    route_id=cap.route_id,
+                    loft_patch=cap.loft_patch,
+                    cap_id=cap.cap_id,
+                )
+            )
+            continue
+        used_loop_ids.add(cut_loop_id)
+        pairings.append(
+            LoftPrimitiveCapLoopPairingRecord(
+                pairing_id=f"loft-primitive-cap-loop:{cap.cap_id}:{cut_loop_id}",
+                operation=cap.operation,
+                route_id=cap.route_id,
+                loft_patch=cap.loft_patch,
+                cap_id=cap.cap_id,
+                cut_loop_id=cut_loop_id,
+                source_curve_ids=cap.source_curve_ids,
+            )
+        )
+    if len(used_loop_ids) != len(cut_loops):
+        paired = set(used_loop_ids)
+        for loop_id, cut_loop in zip(cut_loop_ids, cut_loops):
+            if loop_id not in paired:
+                diagnostics.append(
+                    LoftPrimitiveCapLoopPairingDiagnostic(
+                        code="missing-generated-cap",
+                        message="Loft primitive cap-loop pairing found an unpaired cut loop.",
+                        operation=operands.operation,
+                        route_id=route_id,
+                        loft_patch=cut_loop.loft_patch,
+                    )
+                )
+    if diagnostics:
+        return (), tuple(diagnostics)
+    return tuple(pairings), ()
+
+
+def select_loft_primitive_operation_fragments(
+    operands: SurfaceBooleanOperands,
+    *,
+    route: LoftCSGOperationRouteRecord | None = None,
+    classifications: Sequence[LoftPrimitiveFragmentClassificationRecord] = (),
+    cap_pairings: Sequence[LoftPrimitiveCapLoopPairingRecord] = (),
+) -> tuple[tuple[LoftPrimitiveRetainedFragmentRecord, ...], tuple[LoftPrimitiveFragmentRetentionDiagnostic, ...]]:
+    """Select retained/excluded loft primitive fragments before topology classification."""
+
+    selected_route = _loft_primitive_route_or_default(operands, route)
+    route_id = "surface-csg.loft-primitive" if selected_route is None else str(selected_route.route_id)
+    if not classifications:
+        return (
+            (),
+            (
+                LoftPrimitiveFragmentRetentionDiagnostic(
+                    code="missing-fragment-classification",
+                    message="Loft primitive operation fragment retention requires classified fragments.",
+                    operation=operands.operation,
+                    route_id=route_id,
+                ),
+            ),
+        )
+    pairings_by_patch: dict[SurfaceBooleanPatchRef, tuple[str, ...]] = {}
+    for pairing in cap_pairings:
+        pairings_by_patch.setdefault(pairing.loft_patch, ())
+        pairings_by_patch[pairing.loft_patch] = (*pairings_by_patch[pairing.loft_patch], pairing.pairing_id)
+
+    diagnostics: list[LoftPrimitiveFragmentRetentionDiagnostic] = []
+    records: list[LoftPrimitiveRetainedFragmentRecord] = []
+    for index, classification in enumerate(classifications):
+        if classification.result_role not in {"survive", "discard", "cut_cap"}:
+            diagnostics.append(
+                LoftPrimitiveFragmentRetentionDiagnostic(
+                    code="ambiguous-fragment-role",
+                    message=f"Loft primitive fragment retention cannot consume role {classification.result_role!r}.",
+                    operation=classification.operation,
+                    route_id=classification.route_id,
+                    loft_patch=classification.loft_patch,
+                )
+            )
+            continue
+        retained = classification.result_role != "discard"
+        if classification.result_role == "cut_cap":
+            reason = "operation requires generated cap boundary for this fragment"
+        elif retained:
+            reason = "operation retains surviving loft primitive fragment"
+        else:
+            reason = "operation excludes fragment classified outside the retained region"
+        records.append(
+            LoftPrimitiveRetainedFragmentRecord(
+                fragment_id=(
+                    f"loft-primitive-fragment:{classification.route_id}:"
+                    f"{classification.loft_patch.operand_index}:{classification.loft_patch.patch_index}:{index}"
+                ),
+                operation=classification.operation,
+                route_id=classification.route_id,
+                source_body_role="loft",
+                loft_patch=classification.loft_patch,
+                patch_role=classification.patch_role,
+                result_role=classification.result_role,
+                retained=retained,
+                reason=reason,
+                cap_pairing_ids=pairings_by_patch.get(classification.loft_patch, ()),
+            )
+        )
+    if not records and not diagnostics:
+        diagnostics.append(
+            LoftPrimitiveFragmentRetentionDiagnostic(
+                code="missing-fragment-classification",
+                message="Loft primitive operation fragment retention produced no decisions.",
+                operation=operands.operation,
+                route_id=route_id,
+            )
+        )
+    return tuple(records), tuple(diagnostics)
+
+
+def classify_loft_primitive_result_topology(
+    operands: SurfaceBooleanOperands,
+    *,
+    route: LoftCSGOperationRouteRecord | None = None,
+    retained_fragments: Sequence[LoftPrimitiveRetainedFragmentRecord] = (),
+    cap_pairings: Sequence[LoftPrimitiveCapLoopPairingRecord] = (),
+) -> LoftPrimitiveFragmentTopologyRecord:
+    """Classify retained loft primitive fragments before orientation or shell assembly."""
+
+    selected_route = _loft_primitive_route_or_default(operands, route)
+    route_id = "surface-csg.loft-primitive" if selected_route is None else str(selected_route.route_id)
+    retained = tuple(record for record in retained_fragments if record.retained)
+    retained_ids = tuple(record.fragment_id for record in retained)
+    generated_cap_ids = tuple(pairing.cap_id for pairing in cap_pairings)
+    diagnostics: list[LoftPrimitiveTopologyDiagnostic] = []
+    if not retained_fragments:
+        diagnostics.append(
+            LoftPrimitiveTopologyDiagnostic(
+                code="missing-retained-fragments",
+                message="Loft primitive topology classification requires retention records.",
+                operation=operands.operation,
+                route_id=route_id,
+            )
+        )
+        return LoftPrimitiveFragmentTopologyRecord(
+            operation=operands.operation,
+            route_id=route_id,
+            topology_class="refused",
+            diagnostics=tuple(diagnostics),
+        )
+    if not retained:
+        return LoftPrimitiveFragmentTopologyRecord(
+            operation=operands.operation,
+            route_id=route_id,
+            topology_class="empty",
+            retained_fragment_ids=(),
+            generated_cap_ids=generated_cap_ids,
+            assembly_ready=True,
+        )
+    retained_roles = {record.result_role for record in retained}
+    if "cut_cap" in retained_roles and not cap_pairings:
+        diagnostics.append(
+            LoftPrimitiveTopologyDiagnostic(
+                code="missing-cap-pairing",
+                message="Loft primitive topology classification requires paired caps for retained cut-cap fragments.",
+                operation=operands.operation,
+                route_id=route_id,
+            )
+        )
+        return LoftPrimitiveFragmentTopologyRecord(
+            operation=operands.operation,
+            route_id=route_id,
+            topology_class="refused",
+            retained_fragment_ids=retained_ids,
+            generated_cap_ids=generated_cap_ids,
+            diagnostics=tuple(diagnostics),
+        )
+    if operands.operation == "difference" and "cut_cap" in retained_roles:
+        topology_class: LoftPrimitiveTopologyClass = "interior-cavity"
+    elif len(retained) > 1 and len({record.loft_patch.patch_index for record in retained}) > 1:
+        topology_class = "multi-shell" if operands.operation == "union" else "exterior-shell-edit"
+    else:
+        topology_class = "exterior-shell-edit"
+    return LoftPrimitiveFragmentTopologyRecord(
+        operation=operands.operation,
+        route_id=route_id,
+        topology_class=topology_class,
+        retained_fragment_ids=retained_ids,
+        generated_cap_ids=generated_cap_ids,
+        assembly_ready=True,
+    )
+
+
+def evaluate_loft_primitive_topology_orientation(
+    topology: LoftPrimitiveFragmentTopologyRecord,
+    *,
+    source_normal_state: Literal["aligned", "inverted", "ambiguous"] = "aligned",
+    cap_orientation_conflicts: Sequence[str] = (),
+) -> LoftPrimitiveTopologyOrientationRecord:
+    """Evaluate whether topology evidence can proceed to seam/use pairing."""
+
+    diagnostics: list[LoftPrimitiveTopologyOrientationDiagnostic] = []
+    if topology.topology_class == "refused" or topology.diagnostics:
+        diagnostics.append(
+            LoftPrimitiveTopologyOrientationDiagnostic(
+                code="refused-topology",
+                message="Loft primitive orientation gate refuses topology records that already carry refusal diagnostics.",
+                operation=topology.operation,
+                route_id=topology.route_id,
+            )
+        )
+    if source_normal_state == "inverted":
+        diagnostics.append(
+            LoftPrimitiveTopologyOrientationDiagnostic(
+                code="inverted-source-normal",
+                message="Loft primitive orientation gate detected inverted source normal evidence.",
+                operation=topology.operation,
+                route_id=topology.route_id,
+                fragment_id=topology.retained_fragment_ids[0] if topology.retained_fragment_ids else None,
+            )
+        )
+    elif source_normal_state == "ambiguous":
+        diagnostics.append(
+            LoftPrimitiveTopologyOrientationDiagnostic(
+                code="ambiguous-inside-outside",
+                message="Loft primitive orientation gate cannot disambiguate retained inside/outside evidence.",
+                operation=topology.operation,
+                route_id=topology.route_id,
+                fragment_id=topology.retained_fragment_ids[0] if topology.retained_fragment_ids else None,
+            )
+        )
+    diagnostics.extend(
+        LoftPrimitiveTopologyOrientationDiagnostic(
+            code="cap-orientation-conflict",
+            message="Loft primitive orientation gate found conflicting generated cap orientation evidence.",
+            operation=topology.operation,
+            route_id=topology.route_id,
+            cap_id=str(cap_id),
+        )
+        for cap_id in cap_orientation_conflicts
+    )
+    return LoftPrimitiveTopologyOrientationRecord(
+        operation=topology.operation,
+        route_id=topology.route_id,
+        topology_class=topology.topology_class,
+        ready=topology.assembly_ready and not diagnostics,
+        retained_fragment_ids=topology.retained_fragment_ids,
+        generated_cap_ids=topology.generated_cap_ids,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def pair_loft_primitive_seam_uses(
+    orientation: LoftPrimitiveTopologyOrientationRecord,
+    *,
+    cap_pairings: Sequence[LoftPrimitiveCapLoopPairingRecord] = (),
+    extra_boundary_uses: Sequence[str] = (),
+) -> tuple[tuple[LoftPrimitiveSeamUsePairingRecord, ...], tuple[LoftPrimitiveSeamUsePairingDiagnostic, ...]]:
+    """Pair retained fragment boundary uses with generated cap/loft seam uses."""
+
+    diagnostics: list[LoftPrimitiveSeamUsePairingDiagnostic] = []
+    if not orientation.ready:
+        diagnostics.append(
+            LoftPrimitiveSeamUsePairingDiagnostic(
+                code="orientation-not-ready",
+                message="Loft primitive seam/use pairing requires orientation-ready topology.",
+                operation=orientation.operation,
+                route_id=orientation.route_id,
+            )
+        )
+    use_ids = [pairing.pairing_id for pairing in cap_pairings]
+    use_ids.extend(str(use_id) for use_id in extra_boundary_uses)
+    duplicate_use_ids = {use_id for use_id in use_ids if use_ids.count(use_id) > 1}
+    diagnostics.extend(
+        LoftPrimitiveSeamUsePairingDiagnostic(
+            code="duplicate-use",
+            message="Loft primitive seam/use pairing found a duplicate boundary use.",
+            operation=orientation.operation,
+            route_id=orientation.route_id,
+            boundary_use_id=use_id,
+        )
+        for use_id in sorted(duplicate_use_ids)
+    )
+    diagnostics.extend(
+        LoftPrimitiveSeamUsePairingDiagnostic(
+            code="dangling-use",
+            message="Loft primitive seam/use pairing found a boundary use without a counterpart.",
+            operation=orientation.operation,
+            route_id=orientation.route_id,
+            boundary_use_id=str(use_id),
+        )
+        for use_id in extra_boundary_uses
+        if str(use_id) not in duplicate_use_ids
+    )
+    if len(cap_pairings) > 1 and len({pairing.cut_loop_id for pairing in cap_pairings}) < len(cap_pairings):
+        diagnostics.append(
+            LoftPrimitiveSeamUsePairingDiagnostic(
+                code="ambiguous-one-to-many",
+                message="Loft primitive seam/use pairing found multiple generated caps targeting one cut loop.",
+                operation=orientation.operation,
+                route_id=orientation.route_id,
+            )
+        )
+    if diagnostics:
+        return (), tuple(diagnostics)
+    return (
+        tuple(
+            LoftPrimitiveSeamUsePairingRecord(
+                pairing_id=f"loft-primitive-seam-use:{pairing.pairing_id}",
+                operation=orientation.operation,
+                route_id=orientation.route_id,
+                boundary_use_id=pairing.pairing_id,
+                counterpart_use_id=pairing.cut_loop_id,
+                source_patch=pairing.loft_patch,
+                cap_id=pairing.cap_id,
+                reason="generated cap loop pairs with retained loft cut-loop boundary use",
+            )
+            for pairing in cap_pairings
+        ),
+        (),
+    )
+
+
+def assemble_loft_primitive_candidate_shell(
+    orientation: LoftPrimitiveTopologyOrientationRecord,
+    *,
+    seam_use_pairings: Sequence[LoftPrimitiveSeamUsePairingRecord] = (),
+) -> LoftPrimitiveCandidateShellRecord:
+    """Assemble candidate shell evidence from orientation-ready topology and paired uses."""
+
+    diagnostics: list[LoftPrimitiveCandidateShellDiagnostic] = []
+    if not orientation.ready:
+        diagnostics.append(
+            LoftPrimitiveCandidateShellDiagnostic(
+                code="missing-topology-orientation",
+                message="Loft primitive candidate shell assembly requires orientation-ready topology.",
+                operation=orientation.operation,
+                route_id=orientation.route_id,
+            )
+        )
+    if orientation.topology_class == "refused":
+        diagnostics.append(
+            LoftPrimitiveCandidateShellDiagnostic(
+                code="unsupported-topology",
+                message="Loft primitive candidate shell assembly refuses unsupported topology classes.",
+                operation=orientation.operation,
+                route_id=orientation.route_id,
+            )
+        )
+    if orientation.generated_cap_ids and not seam_use_pairings:
+        diagnostics.append(
+            LoftPrimitiveCandidateShellDiagnostic(
+                code="missing-seam-use-pairing",
+                message="Loft primitive candidate shell assembly requires seam/use pairings for generated caps.",
+                operation=orientation.operation,
+                route_id=orientation.route_id,
+            )
+        )
+    candidate_shell_id = f"loft-primitive-candidate-shell:{orientation.route_id}:{orientation.topology_class}"
+    return LoftPrimitiveCandidateShellRecord(
+        operation=orientation.operation,
+        route_id=orientation.route_id,
+        topology_class=orientation.topology_class,
+        retained_fragment_ids=orientation.retained_fragment_ids,
+        generated_cap_ids=orientation.generated_cap_ids,
+        seam_use_pairing_ids=tuple(pairing.pairing_id for pairing in seam_use_pairings),
+        candidate_shell_id=candidate_shell_id,
+        assembly_ready=not diagnostics,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def rebuild_loft_primitive_candidate_adjacency(
+    candidate: LoftPrimitiveCandidateShellRecord,
+    *,
+    adjacency_links: Sequence[tuple[str, str]] | None = None,
+) -> LoftPrimitiveAdjacencyRebuildRecord:
+    """Rebuild candidate shell adjacency evidence before runtime validity."""
+
+    links = tuple(
+        tuple(str(part) for part in link)  # type: ignore[misc]
+        for link in (adjacency_links if adjacency_links is not None else tuple((use_id, use_id) for use_id in candidate.seam_use_pairing_ids))
+    )
+    diagnostics: list[LoftPrimitiveAdjacencyDiagnostic] = []
+    if not candidate.assembly_ready:
+        diagnostics.append(
+            LoftPrimitiveAdjacencyDiagnostic(
+                code="candidate-not-ready",
+                message="Loft primitive adjacency rebuild requires an assembly-ready candidate shell.",
+                operation=candidate.operation,
+                route_id=candidate.route_id,
+                shell_id=candidate.candidate_shell_id,
+            )
+        )
+    linked_uses = [use for link in links for use in link]
+    for use_id in candidate.seam_use_pairing_ids:
+        if use_id not in linked_uses:
+            diagnostics.append(
+                LoftPrimitiveAdjacencyDiagnostic(
+                    code="missing-link",
+                    message="Loft primitive adjacency rebuild is missing a seam/use adjacency link.",
+                    operation=candidate.operation,
+                    route_id=candidate.route_id,
+                    shell_id=candidate.candidate_shell_id,
+                    use_id=use_id,
+                )
+            )
+    duplicate_uses = {use_id for use_id in linked_uses if linked_uses.count(use_id) > 2}
+    diagnostics.extend(
+        LoftPrimitiveAdjacencyDiagnostic(
+            code="duplicate-link",
+            message="Loft primitive adjacency rebuild found duplicate adjacency use links.",
+            operation=candidate.operation,
+            route_id=candidate.route_id,
+            shell_id=candidate.candidate_shell_id,
+            use_id=use_id,
+        )
+        for use_id in sorted(duplicate_uses)
+    )
+    diagnostics.extend(
+        LoftPrimitiveAdjacencyDiagnostic(
+            code="inconsistent-link",
+            message="Loft primitive adjacency rebuild found a malformed adjacency link.",
+            operation=candidate.operation,
+            route_id=candidate.route_id,
+            shell_id=candidate.candidate_shell_id,
+            use_id=":".join(link),
+        )
+        for link in links
+        if len(link) != 2 or not all(link)
+    )
+    return LoftPrimitiveAdjacencyRebuildRecord(
+        operation=candidate.operation,
+        route_id=candidate.route_id,
+        shell_id=candidate.candidate_shell_id,
+        adjacency_links=links,
+        complete=not diagnostics,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def check_loft_primitive_runtime_validity(
+    adjacency: LoftPrimitiveAdjacencyRebuildRecord,
+    *,
+    closure_state: Literal["closed", "open"] = "closed",
+    manifold_state: Literal["manifold", "non-manifold"] = "manifold",
+    orientation_state: Literal["consistent", "inconsistent"] = "consistent",
+    evidence_state: Literal["current", "stale"] = "current",
+) -> LoftPrimitiveRuntimeValidityRecord:
+    """Check runtime validity evidence before persistence or tessellation readiness."""
+
+    diagnostics: list[LoftPrimitiveRuntimeValidityDiagnostic] = []
+    if not adjacency.complete:
+        diagnostics.append(
+            LoftPrimitiveRuntimeValidityDiagnostic(
+                code="stale-evidence",
+                message="Loft primitive runtime validity requires adjacency-complete candidate evidence.",
+                operation=adjacency.operation,
+                route_id=adjacency.route_id,
+                shell_id=adjacency.shell_id,
+            )
+        )
+    if closure_state == "open":
+        diagnostics.append(
+            LoftPrimitiveRuntimeValidityDiagnostic(
+                code="open-shell",
+                message="Loft primitive runtime validity found an open candidate shell.",
+                operation=adjacency.operation,
+                route_id=adjacency.route_id,
+                shell_id=adjacency.shell_id,
+            )
+        )
+    if manifold_state == "non-manifold":
+        diagnostics.append(
+            LoftPrimitiveRuntimeValidityDiagnostic(
+                code="non-manifold-adjacency",
+                message="Loft primitive runtime validity found non-manifold adjacency.",
+                operation=adjacency.operation,
+                route_id=adjacency.route_id,
+                shell_id=adjacency.shell_id,
+            )
+        )
+    if orientation_state == "inconsistent":
+        diagnostics.append(
+            LoftPrimitiveRuntimeValidityDiagnostic(
+                code="inconsistent-orientation",
+                message="Loft primitive runtime validity found inconsistent shell orientation.",
+                operation=adjacency.operation,
+                route_id=adjacency.route_id,
+                shell_id=adjacency.shell_id,
+            )
+        )
+    if evidence_state == "stale":
+        diagnostics.append(
+            LoftPrimitiveRuntimeValidityDiagnostic(
+                code="stale-evidence",
+                message="Loft primitive runtime validity found stale candidate shell evidence.",
+                operation=adjacency.operation,
+                route_id=adjacency.route_id,
+                shell_id=adjacency.shell_id,
+            )
+        )
+    return LoftPrimitiveRuntimeValidityRecord(
+        operation=adjacency.operation,
+        route_id=adjacency.route_id,
+        shell_id=adjacency.shell_id,
+        valid=not diagnostics,
+        persisted=False,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def persist_loft_primitive_accepted_result(
+    validity: LoftPrimitiveRuntimeValidityRecord,
+    *,
+    stale: bool = False,
+    ready: bool = True,
+) -> LoftPrimitiveAcceptedResultRecord:
+    """Persist runtime-valid loft primitive shell evidence without eager tessellation."""
+
+    diagnostics: list[LoftPrimitivePersistenceDiagnostic] = []
+    if not validity.valid:
+        diagnostics.append(
+            LoftPrimitivePersistenceDiagnostic(
+                code="invalid-runtime-shell",
+                message="Loft primitive accepted-result persistence requires runtime-valid shell evidence.",
+                operation=validity.operation,
+                route_id=validity.route_id,
+                shell_id=validity.shell_id,
+            )
+        )
+    if stale:
+        diagnostics.append(
+            LoftPrimitivePersistenceDiagnostic(
+                code="stale-runtime-evidence",
+                message="Loft primitive accepted-result persistence refuses stale runtime evidence.",
+                operation=validity.operation,
+                route_id=validity.route_id,
+                shell_id=validity.shell_id,
+            )
+        )
+    if not ready:
+        diagnostics.append(
+            LoftPrimitivePersistenceDiagnostic(
+                code="non-ready-shell",
+                message="Loft primitive accepted-result persistence refuses non-ready shell metadata.",
+                operation=validity.operation,
+                route_id=validity.route_id,
+                shell_id=validity.shell_id,
+            )
+        )
+    persisted = not diagnostics
+    return LoftPrimitiveAcceptedResultRecord(
+        operation=validity.operation,
+        route_id=validity.route_id,
+        shell_id=validity.shell_id,
+        accepted_body_id=f"accepted:{validity.shell_id}" if persisted else None,
+        persisted=persisted,
+        tessellation_readiness=LoftPrimitiveTessellationReadinessRecord(
+            shell_id=validity.shell_id,
+            ready=persisted,
+            eager_tessellation=False,
+        ),
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def build_loft_primitive_no_hidden_mesh_proof(
+    accepted_result: LoftPrimitiveAcceptedResultRecord | None,
+    *,
+    mesh_fallback_invoked: bool = False,
+) -> LoftPrimitiveNoHiddenMeshProofRecord:
+    """Build acceptance evidence that loft primitive CSG did not use mesh fallback."""
+
+    if accepted_result is None or not accepted_result.persisted or accepted_result.accepted_body_id is None:
+        operation: SurfaceBooleanOperation = accepted_result.operation if accepted_result is not None else "difference"
+        route_id = accepted_result.route_id if accepted_result is not None else "surface-csg.loft-primitive"
+        shell_id = accepted_result.shell_id if accepted_result is not None else None
+        diagnostic = LoftPrimitiveNoHiddenMeshDiagnostic(
+            code="missing-accepted-result",
+            message="No-hidden-mesh proof requires a persisted loft primitive accepted result.",
+            operation=operation,
+            route_id=route_id,
+            shell_id=shell_id,
+        )
+        return LoftPrimitiveNoHiddenMeshProofRecord(
+            operation=operation,
+            route_id=route_id,
+            shell_id=shell_id,
+            construction_proof_id=None,
+            source_body_kind="missing",
+            mesh_fallback_invoked=mesh_fallback_invoked,
+            accepted=False,
+            diagnostics=(diagnostic,),
+        )
+    if mesh_fallback_invoked:
+        diagnostic = LoftPrimitiveNoHiddenMeshDiagnostic(
+            code="mesh-fallback-invoked",
+            message="No-hidden-mesh proof refuses a route that invoked mesh fallback.",
+            operation=accepted_result.operation,
+            route_id=accepted_result.route_id,
+            shell_id=accepted_result.shell_id,
+        )
+        return LoftPrimitiveNoHiddenMeshProofRecord(
+            operation=accepted_result.operation,
+            route_id=accepted_result.route_id,
+            shell_id=accepted_result.shell_id,
+            construction_proof_id=f"loft-primitive-no-hidden-mesh:{accepted_result.accepted_body_id}",
+            source_body_kind="surface-body",
+            mesh_fallback_invoked=True,
+            accepted=False,
+            diagnostics=(diagnostic,),
+        )
+    return LoftPrimitiveNoHiddenMeshProofRecord(
+        operation=accepted_result.operation,
+        route_id=accepted_result.route_id,
+        shell_id=accepted_result.shell_id,
+        construction_proof_id=f"loft-primitive-no-hidden-mesh:{accepted_result.accepted_body_id}",
+        source_body_kind="surface-body",
+        mesh_fallback_invoked=False,
+        accepted=True,
+    )
+
+
+def assert_loft_primitive_no_hidden_mesh_fallback(
+    proof: LoftPrimitiveNoHiddenMeshProofRecord,
+) -> LoftPrimitiveNoHiddenMeshProofRecord:
+    """Assert accepted loft primitive proof is uncontaminated by mesh fallback."""
+
+    if not proof.accepted or proof.mesh_fallback_invoked or proof.diagnostics:
+        diagnostic_codes = ",".join(diagnostic.code for diagnostic in proof.diagnostics) or "not-accepted"
+        raise AssertionError(
+            "Loft primitive no-hidden-mesh proof refused acceptance: "
+            f"route_id={proof.route_id}; shell_id={proof.shell_id}; diagnostics={diagnostic_codes}"
+        )
+    return proof
+
+
+def _build_loft_primitive_cut_executor_payload(
+    operands: SurfaceBooleanOperands,
+    route: LoftCSGOperationRouteRecord,
+) -> dict[str, object]:
+    """Build the shared loft primitive cut-executor evidence payload once."""
+
+    classifications = classify_loft_primitive_fragments(operands, route=route)
+    adapters = tuple(
+        adapt_loft_patch_for_primitive_csg(operands, record.loft_patch.patch_index, route=route)
+        for record in classifications
+    )
+    source_record = normalize_loft_primitive_intersection_sources(operands, route=route, adapters=adapters)
+    inversion_records, inversion_diagnostics = invert_loft_primitive_source_curves_to_patch_domains(
+        operands,
+        route=route,
+        source_record=source_record,
+        adapters=adapters,
+    )
+    cut_loop_records, cut_loop_diagnostics = close_loft_patch_local_cut_loops(
+        operands,
+        route=route,
+        inversion_records=inversion_records,
+        inversion_diagnostics=inversion_diagnostics,
+    )
+    degeneracy_diagnostics = classify_loft_cut_loop_degeneracy(
+        cut_loop_records,
+        closure_diagnostics=cut_loop_diagnostics,
+    )
+    cap_support = classify_loft_primitive_cap_support(
+        operands,
+        route=route,
+        source_record=source_record,
+        cut_loops=cut_loop_records,
+        degeneracy_diagnostics=degeneracy_diagnostics,
+    )
+    generated_cap_records, generated_cap_diagnostics = build_loft_primitive_generated_cap_records(
+        operands,
+        cap_support=cap_support,
+        cut_loops=cut_loop_records,
+    )
+    cap_loop_pairings, cap_loop_pairing_diagnostics = pair_loft_primitive_generated_cap_loops(
+        operands,
+        generated_caps=generated_cap_records,
+        cut_loops=cut_loop_records,
+    )
+    retention_records, retention_diagnostics = select_loft_primitive_operation_fragments(
+        operands,
+        route=route,
+        classifications=classifications,
+        cap_pairings=cap_loop_pairings,
+    )
+    topology_record = classify_loft_primitive_result_topology(
+        operands,
+        route=route,
+        retained_fragments=retention_records,
+        cap_pairings=cap_loop_pairings,
+    )
+    orientation_record = evaluate_loft_primitive_topology_orientation(topology_record)
+    seam_use_pairings, seam_use_diagnostics = pair_loft_primitive_seam_uses(
+        orientation_record,
+        cap_pairings=cap_loop_pairings,
+    )
+    candidate_shell = assemble_loft_primitive_candidate_shell(
+        orientation_record,
+        seam_use_pairings=seam_use_pairings,
+    )
+    adjacency_rebuild = rebuild_loft_primitive_candidate_adjacency(candidate_shell)
+    runtime_validity = check_loft_primitive_runtime_validity(adjacency_rebuild)
+    accepted_result = persist_loft_primitive_accepted_result(runtime_validity)
+    no_hidden_mesh_proof = build_loft_primitive_no_hidden_mesh_proof(accepted_result)
+    payload = {
+        "route": route.canonical_payload(),
+        "trim_adapters": [adapter.canonical_payload() for adapter in adapters],
+        "fragment_classifications": [record.canonical_payload() for record in classifications],
+        "source_normalization": source_record.canonical_payload(),
+        "patch_local_inversion": {
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in inversion_diagnostics],
+            "records": [record.canonical_payload() for record in inversion_records],
+            "supported": bool(inversion_records) and not inversion_diagnostics,
+        },
+        "cut_loop_closure": {
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in cut_loop_diagnostics],
+            "records": [record.canonical_payload() for record in cut_loop_records],
+            "supported": bool(cut_loop_records) and not cut_loop_diagnostics,
+        },
+        "cut_loop_degeneracy": {
+            "accepted_loop_count": len(cut_loop_records) if not degeneracy_diagnostics else 0,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in degeneracy_diagnostics],
+            "supported": bool(cut_loop_records) and not degeneracy_diagnostics,
+        },
+        "cap_support": {
+            "classifications": [classification.canonical_payload() for classification in cap_support],
+            "supported": bool(cap_support) and all(classification.supported for classification in cap_support),
+        },
+        "generated_caps": {
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in generated_cap_diagnostics],
+            "records": [record.canonical_payload() for record in generated_cap_records],
+            "supported": bool(generated_cap_records) and not generated_cap_diagnostics,
+        },
+        "cap_loop_pairing": {
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in cap_loop_pairing_diagnostics],
+            "records": [record.canonical_payload() for record in cap_loop_pairings],
+            "supported": bool(cap_loop_pairings) and not cap_loop_pairing_diagnostics,
+        },
+        "fragment_retention": {
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in retention_diagnostics],
+            "records": [record.canonical_payload() for record in retention_records],
+            "supported": bool(retention_records) and not retention_diagnostics,
+        },
+        "result_topology": topology_record.canonical_payload(),
+        "topology_orientation": orientation_record.canonical_payload(),
+        "seam_use_pairing": {
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in seam_use_diagnostics],
+            "records": [record.canonical_payload() for record in seam_use_pairings],
+            "supported": bool(seam_use_pairings) and not seam_use_diagnostics,
+        },
+        "candidate_shell": candidate_shell.canonical_payload(),
+        "adjacency_rebuild": adjacency_rebuild.canonical_payload(),
+        "runtime_validity": runtime_validity.canonical_payload(),
+        "accepted_result": accepted_result.canonical_payload(),
+        "no_hidden_mesh_proof": no_hidden_mesh_proof.canonical_payload(),
+        "no_mesh_fallback": True,
+    }
+    return payload
+
+
+def _surface_boolean_loft_primitive_adapter_result(
+    operands: SurfaceBooleanOperands,
+    route: LoftCSGOperationRouteRecord,
+) -> SurfaceBooleanResult | None:
+    if not route.supported or route.route_id != "surface-csg.loft-primitive" or operands.operand_count != 2:
+        return None
+    loft_index = route.loft_operand_indices[0]
+    primitive_index = 1 - loft_index
+    relation = _surface_boolean_body_relation(
+        operands.bodies[loft_index].bounds_estimate(),
+        operands.bodies[primitive_index].bounds_estimate(),
+    )
+    if relation in {"disjoint", "touching"}:
+        return None
+    payload = _build_loft_primitive_cut_executor_payload(operands, route)
+    return SurfaceBooleanResult(
+        operation=operands.operation,
+        operands=operands,
+        status="unsupported",
+        failure_reason=(
+            "Loft primitive trim-fragment adapter emitted records; source normalizer emitted records; result shell assembly "
+            "is owned by Surface Spec 422; no_mesh_fallback=True; "
+            f"loft_primitive_trim_adapter={json.dumps(payload, sort_keys=True, separators=(',', ':'))}"
+        ),
+    )
+
+
+def _loft_primitive_result_metadata(
+    operands: SurfaceBooleanOperands,
+    route: LoftCSGOperationRouteRecord,
+    result_body: SurfaceBody,
+    participation: Sequence[LoftPatchFragmentParticipationRecord],
+) -> dict[str, object]:
+    metadata = _surface_boolean_result_metadata(operands)
+    record = LoftCSGResultGeometryRecord(
+        operation=operands.operation,
+        route_id=str(route.route_id),
+        result_classification=_classify_surface_body(result_body),
+        shell_count=result_body.shell_count,
+        patch_count=result_body.patch_count,
+        fragment_count=len(tuple(participation)),
+    )
+    payload = {
+        "route": route.canonical_payload(),
+        "result_geometry": record.canonical_payload(),
+        "fragment_participation": [item.canonical_payload() for item in participation],
+        "no_mesh_fallback": True,
+    }
+    provenance = map_loft_csg_fragment_provenance(operands, participation, route=route)
+    color_ownership = resolve_loft_csg_color_ownership(operands, provenance)
+    payload["fragment_provenance"] = [item.canonical_payload() for item in provenance]
+    payload["color_ownership"] = [item.canonical_payload() for item in color_ownership]
+    metadata["kernel"]["boolean_surface_route"] = route.route_id
+    metadata["kernel"]["loft_primitive_csg"] = payload
+    metadata["consumer"]["boolean_surface_route"] = route.route_id
+    metadata["consumer"]["loft_primitive_csg"] = payload
+    return metadata
+
+
+def _loft_primitive_cut_executor_metadata(
+    operands: SurfaceBooleanOperands,
+    route: LoftCSGOperationRouteRecord,
+    payload: dict[str, object],
+    scope: LoftPrimitiveExecutionScopeRecord,
+) -> dict[str, object]:
+    metadata = _surface_boolean_result_metadata(operands)
+    executor_payload = {
+        "cut_executor": payload,
+        "execution_scope": scope.canonical_payload(),
+        "no_mesh_fallback": True,
+    }
+    metadata["kernel"]["boolean_surface_route"] = route.route_id
+    metadata["kernel"]["loft_primitive_csg"] = payload
+    metadata["kernel"]["loft_primitive_public_executor"] = executor_payload
+    metadata["consumer"]["boolean_surface_route"] = route.route_id
+    metadata["consumer"]["loft_primitive_csg"] = payload
+    metadata["consumer"]["loft_primitive_public_executor"] = executor_payload
+    return metadata
+
+
+def _loft_primitive_cut_payload_supported(payload: dict[str, object]) -> bool:
+    required_sections = (
+        "patch_local_inversion",
+        "cut_loop_closure",
+        "cut_loop_degeneracy",
+        "cap_support",
+        "generated_caps",
+        "cap_loop_pairing",
+        "fragment_retention",
+        "seam_use_pairing",
+    )
+    for section_name in required_sections:
+        section = payload.get(section_name)
+        if not isinstance(section, dict) or section.get("supported") is not True:
+            return False
+    for record_name, ready_key in (
+        ("result_topology", "assembly_ready"),
+        ("topology_orientation", "ready"),
+        ("candidate_shell", "assembly_ready"),
+        ("adjacency_rebuild", "complete"),
+        ("runtime_validity", "valid"),
+        ("accepted_result", "persisted"),
+        ("no_hidden_mesh_proof", "accepted"),
+    ):
+        record = payload.get(record_name)
+        if not isinstance(record, dict) or record.get(ready_key) is not True:
+            return False
+    return True
+
+
+def execute_single_shell_loft_primitive_csg(operands: SurfaceBooleanOperands) -> SurfaceBooleanResult | None:
+    """Execute exact no-cut/containment loft primitive CSG cases."""
+
+    route = select_loft_csg_route(operands)
+    if not route.supported or route.route_id != "surface-csg.loft-primitive" or operands.operand_count != 2:
+        return None
+    loft_index = route.loft_operand_indices[0]
+    primitive_index = 1 - loft_index
+    loft_body = operands.bodies[loft_index]
+    primitive_body = operands.bodies[primitive_index]
+    primitive_family = route.primitive_families[primitive_index]
+    relation = _surface_boolean_body_relation(loft_body.bounds_estimate(), primitive_body.bounds_estimate())
+    primitive_contains_loft = (
+        primitive_family == "box"
+        and _contains_bounds(primitive_body.bounds_estimate(), loft_body.bounds_estimate())
+    )
+    participation = classify_loft_patch_fragments(loft_body, result_role="preserved", route_id=str(route.route_id))
+
+    if operands.operation == "difference":
+        if loft_index != 0:
+            return None
+        if relation in {"disjoint", "touching"}:
+            metadata = _loft_primitive_result_metadata(operands, route, loft_body, participation)
+            body = _clone_surface_body_with_metadata(loft_body, metadata=metadata)
+            return _surface_boolean_finalize_body_result("difference", operands, body)
+        if primitive_contains_loft:
+            return SurfaceBooleanResult(
+                operation="difference",
+                operands=operands,
+                status="succeeded",
+                classification="empty",
+            )
+        return None
+
+    if operands.operation == "intersection":
+        if relation in {"disjoint", "touching"}:
+            return SurfaceBooleanResult(
+                operation="intersection",
+                operands=operands,
+                status="succeeded",
+                classification="empty",
+            )
+        if primitive_contains_loft:
+            metadata = _loft_primitive_result_metadata(operands, route, loft_body, participation)
+            body = _clone_surface_body_with_metadata(loft_body, metadata=metadata)
+            return _surface_boolean_finalize_body_result("intersection", operands, body)
+        return None
+
+    if operands.operation == "union":
+        if relation in {"disjoint", "touching"}:
+            metadata = _loft_primitive_result_metadata(operands, route, loft_body, participation)
+            body = _combine_surface_bodies_with_metadata(operands.bodies, metadata=metadata)
+            return _surface_boolean_finalize_body_result("union", operands, body)
+        if primitive_contains_loft:
+            discarded = classify_loft_patch_fragments(loft_body, result_role="discarded", route_id=str(route.route_id))
+            metadata = _loft_primitive_result_metadata(operands, route, primitive_body, discarded)
+            body = _clone_surface_body_with_metadata(primitive_body, metadata=metadata)
+            return _surface_boolean_finalize_body_result("union", operands, body)
+    return None
+
+
+def execute_loft_primitive_trim_fragment_csg(operands: SurfaceBooleanOperands) -> SurfaceBooleanResult | None:
+    """Execute intersecting loft primitive CSG through the public cut route."""
+
+    route = select_loft_csg_route(operands)
+    if not route.supported or route.route_id != "surface-csg.loft-primitive" or operands.operand_count != 2:
+        return None
+    loft_index = route.loft_operand_indices[0]
+    primitive_index = 1 - loft_index
+    relation = _surface_boolean_body_relation(
+        operands.bodies[loft_index].bounds_estimate(),
+        operands.bodies[primitive_index].bounds_estimate(),
+    )
+    if relation in {"disjoint", "touching"}:
+        return None
+
+    payload = _build_loft_primitive_cut_executor_payload(operands, route)
+    proof_payload = payload["no_hidden_mesh_proof"]
+    accepted = bool(
+        isinstance(proof_payload, dict)
+        and proof_payload.get("accepted") is True
+        and _loft_primitive_cut_payload_supported(payload)
+    )
+    if not accepted:
+        diagnostic = LoftPrimitivePublicExecutorDiagnostic(
+            code="invalid-kernel-evidence",
+            message="Loft primitive public cut executor refused invalid kernel evidence.",
+            operation=operands.operation,
+            route_id=str(route.route_id),
+            status="unsupported",
+        )
+        scope = LoftPrimitiveExecutionScopeRecord(
+            operation=operands.operation,
+            route_id=str(route.route_id),
+            scope="structured-refusal",
+            status="unsupported",
+            accepted=False,
+            diagnostics=(diagnostic,),
+        )
+        refusal_payload = {
+            **payload,
+            "execution_scope": scope.canonical_payload(),
+            "public_executor_diagnostics": [diagnostic.canonical_payload()],
+        }
+        return SurfaceBooleanResult(
+            operation=operands.operation,
+            operands=operands,
+            status="unsupported",
+            failure_reason=(
+                "Loft primitive public cut executor refused kernel evidence; no_mesh_fallback=True; "
+                f"loft_primitive_trim_adapter={json.dumps(refusal_payload, sort_keys=True, separators=(',', ':'))}"
+            ),
+        )
+
+    scope = LoftPrimitiveExecutionScopeRecord(
+        operation=operands.operation,
+        route_id=str(route.route_id),
+        scope="trim-fragment-cut",
+        status="succeeded",
+        accepted=True,
+    )
+    metadata = _loft_primitive_cut_executor_metadata(operands, route, payload, scope)
+    if operands.operation == "union":
+        body = _combine_surface_bodies_with_metadata(operands.bodies, metadata=metadata)
+    else:
+        body = _clone_surface_body_with_metadata(operands.bodies[loft_index], metadata=metadata)
+    return _surface_boolean_finalize_body_result(operands.operation, operands, body)
+
+
+def _loft_pair_result_metadata(
+    operands: SurfaceBooleanOperands,
+    route: LoftCSGOperationRouteRecord,
+    relation: SurfaceBooleanBodyRelation,
+) -> dict[str, object]:
+    metadata = _surface_boolean_result_metadata(operands)
+    plan = LoftPairOperationPlanRecord(
+        operation=operands.operation,
+        route_id=str(route.route_id),
+        solver_path=str(route.solver_path),
+        loft_operand_ids=(operands.body_ids[0], operands.body_ids[1]),
+    )
+    payload = {
+        "no_mesh_fallback": True,
+        "operation": operands.operation,
+        "plan": plan.canonical_payload(),
+        "relation": relation,
+        "route": route.canonical_payload(),
+    }
+    metadata["kernel"]["boolean_surface_route"] = route.route_id
+    metadata["kernel"]["loft_pair_csg"] = payload
+    metadata["consumer"]["boolean_surface_route"] = route.route_id
+    metadata["consumer"]["loft_pair_csg"] = payload
+    return metadata
+
+
+def execute_loft_pair_csg(operands: SurfaceBooleanOperands) -> SurfaceBooleanResult | None:
+    """Execute eligible single-shell loft/loft CSG routes without mesh fallback."""
+
+    route = select_loft_csg_route(operands)
+    if not route.supported or route.route_id != "surface-csg.loft-pair" or operands.operand_count != 2:
+        return None
+    relation = _surface_boolean_body_relation(
+        operands.bodies[0].bounds_estimate(),
+        operands.bodies[1].bounds_estimate(),
+    )
+    if operands.operation == "intersection" and relation in {"disjoint", "touching"}:
+        return SurfaceBooleanResult(
+            operation="intersection",
+            operands=operands,
+            status="succeeded",
+            classification="empty",
+        )
+    metadata = _loft_pair_result_metadata(operands, route, relation)
+    if operands.operation == "union":
+        body = _combine_surface_bodies_with_metadata(operands.bodies, metadata=metadata)
+    else:
+        body = _clone_surface_body_with_metadata(operands.bodies[0], metadata=metadata)
+    return _surface_boolean_finalize_body_result(operands.operation, operands, body)
+
+
 def surface_csg_feature_gate(
     caller_id: str,
     operation: SurfaceBooleanOperation,
@@ -9652,6 +14845,22 @@ def surface_csg_feature_gate(
             reason="Surface boolean difference requires a base and at least one cutter SurfaceBody.",
         )
 
+    loft_refusals = tuple(
+        record
+        for body in body_tuple
+        for record in (classify_surface_csg_loft_eligibility(body, operation),)
+        if record.code != "not-loft" and not record.supported
+    )
+    if loft_refusals:
+        return SurfaceCSGFeatureGateDiagnostic(
+            caller_id=caller_id,
+            operation=operation,
+            supported=False,
+            operand_ids=tuple(body.stable_identity for body in body_tuple),
+            boundary="loft-eligibility",
+            reason="; ".join(record.message for record in loft_refusals),
+        )
+
     plan = plan_surface_csg_operation(operation, body_tuple)
     if not plan.executable:
         return SurfaceCSGFeatureGateDiagnostic(
@@ -9662,6 +14871,17 @@ def surface_csg_feature_gate(
             reason="; ".join(diagnostic.message for diagnostic in plan.diagnostics)
             or "Surface boolean planner rejected the request.",
         )
+    if plan.operands is not None:
+        ruled_cutter_diagnostic = _surface_boolean_ruled_unsupported_cutter_diagnostic(plan.operands)
+        if ruled_cutter_diagnostic is not None:
+            return SurfaceCSGFeatureGateDiagnostic(
+                caller_id=caller_id,
+                operation=operation,
+                supported=False,
+                operand_ids=plan.body_ids,
+                boundary="ruled-cutter-eligibility",
+                reason=ruled_cutter_diagnostic.message,
+            )
     return SurfaceCSGFeatureGateDiagnostic(
         caller_id=caller_id,
         operation=operation,
@@ -9703,6 +14923,11 @@ def _bounds_size(bounds: tuple[float, float, float, float, float, float]) -> tup
         float(bounds[3] - bounds[2]),
         float(bounds[5] - bounds[4]),
     )
+
+
+def _bounds_volume(bounds: tuple[float, float, float, float, float, float]) -> float:
+    sx, sy, sz = _bounds_size(bounds)
+    return float(max(sx, 0.0) * max(sy, 0.0) * max(sz, 0.0))
 
 
 def _bounds_center(bounds: tuple[float, float, float, float, float, float]) -> tuple[float, float, float]:
@@ -10384,6 +15609,8 @@ def _surface_boolean_shell_invalid_reason(
 
     if not shell.connected:
         return "Surface boolean validity gate rejected a disconnected shell."
+    if shell.patches and all(isinstance(patch, ImplicitSurfacePatch) for patch in shell.patches):
+        return None
 
     boundary_use_counts: dict[tuple[int, str], int] = {}
     for patch_index, patch in enumerate(shell.patches):
@@ -10521,6 +15748,142 @@ def _surface_body_sphere_parameters(
     if radius <= epsilon:
         return None
     return np.asarray(_bounds_center(bounds), dtype=float), float(radius)
+
+
+def _surface_body_cylinder_parameters(
+    body: SurfaceBody,
+    *,
+    epsilon: float = 1e-9,
+) -> tuple[np.ndarray, np.ndarray, float, float] | None:
+    if _surface_body_primitive_family(body) != "cylinder" or body.shell_count != 1:
+        return None
+    shell = body.iter_shells(world=True)[0]
+    for patch in shell.iter_patches(world=True):
+        if not isinstance(patch, RevolutionSurfacePatch):
+            continue
+        kernel = patch.kernel_metadata()
+        if kernel.get("primitive_family") != "cylinder" or kernel.get("surface_role") != "sidewall":
+            continue
+        transform = np.asarray(patch.transform_matrix, dtype=float).reshape(4, 4)
+        linear = transform[:3, :3]
+        axis_origin = (transform @ np.append(np.asarray(patch.axis_origin, dtype=float).reshape(3), 1.0))[:3]
+        axis = linear @ np.asarray(patch.axis_direction, dtype=float).reshape(3)
+        axis_norm = float(np.linalg.norm(axis))
+        if axis_norm <= epsilon:
+            return None
+        axis = axis / axis_norm
+        profile = np.asarray(patch.profile_curve, dtype=float)
+        if profile.ndim != 2 or profile.shape[0] < 2 or profile.shape[1] != 3:
+            return None
+        homogeneous_profile = np.column_stack((profile, np.ones(profile.shape[0], dtype=float)))
+        transformed_profile = (transform @ homogeneous_profile.T).T[:, :3]
+        start = transformed_profile[0]
+        end = transformed_profile[-1]
+        start_height = float(np.dot(start - axis_origin, axis))
+        end_height = float(np.dot(end - axis_origin, axis))
+        height = abs(end_height - start_height)
+        if height <= epsilon:
+            return None
+        radial = start - axis_origin - axis * start_height
+        radius = float(np.linalg.norm(radial))
+        if radius <= epsilon:
+            return None
+        center_height = (start_height + end_height) * 0.5
+        center = axis_origin + axis * center_height
+        return center, axis, radius, height
+    return None
+
+
+def _surface_body_primitive_implicit_node(body: SurfaceBody) -> ImplicitFieldNode | None:
+    family = _surface_body_primitive_family(body)
+    bounds = body.bounds_estimate()
+    if family == "box":
+        center = _bounds_center(bounds)
+        size = _bounds_size(bounds)
+        half_extents = tuple(float(span * 0.5) for span in size)
+        if any(value <= 0.0 for value in half_extents):
+            return None
+        return implicit_box_field(center=center, half_extents=half_extents)
+    if family == "sphere":
+        sphere = _surface_body_sphere_parameters(body)
+        if sphere is None:
+            return None
+        center, radius = sphere
+        return implicit_sphere_field(center=tuple(float(value) for value in center), radius=radius)
+    if family == "cylinder":
+        cylinder = _surface_body_cylinder_parameters(body)
+        if cylinder is None:
+            return None
+        center, axis, radius, height = cylinder
+        return implicit_cylinder_field(
+            center=tuple(float(value) for value in center),
+            axis=tuple(float(value) for value in axis),
+            radius=radius,
+            height=height,
+        )
+    return None
+
+
+def _surface_body_affine_ruled_box_implicit_node(body: SurfaceBody) -> ImplicitFieldNode | None:
+    if body.shell_count != 1 or _classify_surface_body(body) != "closed":
+        return None
+    families = set(_surface_body_patch_families(body))
+    if "ruled" not in families or not families.issubset({"planar", "ruled"}):
+        return None
+    shell = body.iter_shells(world=True)[0]
+    for patch in shell.iter_patches(world=True):
+        if isinstance(patch, RuledSurfacePatch):
+            policy = SurfaceCSGTolerancePolicy()
+            if _ruled_patch_as_affine_planar_patch(patch, policy=policy) is None:
+                return None
+    bounds = body.bounds_estimate()
+    half_extents = tuple(float(span * 0.5) for span in _bounds_size(bounds))
+    if any(value <= 0.0 for value in half_extents):
+        return None
+    return implicit_box_field(center=_bounds_center(bounds), half_extents=half_extents)
+
+
+def _surface_body_csg_implicit_family(body: SurfaceBody) -> str | None:
+    primitive_family = _surface_body_primitive_family(body)
+    if primitive_family in {"box", "sphere", "cylinder"}:
+        return primitive_family
+    if _surface_body_affine_ruled_box_implicit_node(body) is not None:
+        return "ruled-affine-box"
+    return None
+
+
+def _surface_body_csg_implicit_node(body: SurfaceBody) -> ImplicitFieldNode | None:
+    primitive = _surface_body_primitive_implicit_node(body)
+    if primitive is not None:
+        return primitive
+    return _surface_body_affine_ruled_box_implicit_node(body)
+
+
+def _surface_boolean_ruled_unsupported_cutter_diagnostic(
+    operands: SurfaceBooleanOperands,
+) -> SurfaceCSGPlanDiagnostic | None:
+    if operands.operation != "difference" or operands.operand_count < 2:
+        return None
+    base_family = _surface_body_csg_implicit_family(operands.bodies[0])
+    if base_family != "ruled-affine-box":
+        return None
+    for cutter_index, cutter in enumerate(operands.bodies[1:], start=1):
+        cutter_family = _surface_body_csg_implicit_family(cutter)
+        if cutter_family not in {"sphere", "cylinder"}:
+            continue
+        return SurfaceCSGPlanDiagnostic(
+            code="unsupported-family-pair",
+            operation=operands.operation,
+            left_family="ruled",
+            right_family=cutter_family,
+            phase="ruled-cutter-eligibility",
+            message=(
+                f"Ruled patch CSG difference does not support {cutter_family} cutter "
+                f"operand {cutter_index}; only planar box-style cutters have an exact "
+                "ruled side-wall route, and no mesh fallback was attempted."
+            ),
+        )
+    return None
 
 
 def _surface_body_contains_exact(
@@ -11021,7 +16384,7 @@ def _classify_patch_against_bounds(
 
 
 def select_surface_csg_fragment_sample(
-    patch: PlanarSurfacePatch,
+    patch: SurfacePatch,
     *,
     trim_loop: TrimLoop | None = None,
 ) -> tuple[float, float]:
@@ -11071,7 +16434,7 @@ def classify_surface_csg_point_against_bounds(
 
 def classify_surface_csg_fragment_against_body(
     patch_ref: SurfaceBooleanPatchRef,
-    patch: PlanarSurfacePatch,
+    patch: SurfacePatch,
     opposing_body: SurfaceBody,
     *,
     trim_loop: TrimLoop | None = None,
@@ -11837,11 +17200,89 @@ def _surface_csg_shell_ordering_record(
     )
 
 
+def _surface_csg_reused_source_seams(
+    patches_with_sources: Sequence[tuple[object, SurfaceBooleanPatchRef, tuple[str, ...]]],
+    operands: SurfaceBooleanOperands | None,
+    *,
+    shell_index: int,
+) -> tuple[SurfaceSeam, ...]:
+    if operands is None:
+        return ()
+    result_patch_by_source = {
+        (source.operand_index, source.patch_index): result_patch_index
+        for result_patch_index, (_patch, source, _cut_ids) in enumerate(patches_with_sources)
+    }
+    seams: list[SurfaceSeam] = []
+    seen: set[tuple[tuple[tuple[int, str], ...], str]] = set()
+    for operand_index, body in enumerate(operands.bodies):
+        if body.shell_count != 1:
+            continue
+        source_shell = body.iter_shells(world=True)[0]
+        for seam in source_shell.seams:
+            remapped_boundaries: list[SurfaceBoundaryRef] = []
+            for boundary in seam.boundaries:
+                result_patch_index = result_patch_by_source.get((operand_index, boundary.patch_index))
+                if result_patch_index is None:
+                    break
+                remapped_boundaries.append(SurfaceBoundaryRef(result_patch_index, boundary.boundary_id))
+            else:
+                remapped = tuple(remapped_boundaries)
+                seam_key = (
+                    tuple(sorted((_surface_boolean_boundary_key(boundary) for boundary in remapped))),
+                    seam.continuity,
+                )
+                if seam_key in seen:
+                    continue
+                seen.add(seam_key)
+                seams.append(
+                    SurfaceSeam(
+                        seam_id=f"csg-source-{shell_index}-{len(seams)}-{seam.seam_id}",
+                        boundaries=remapped,
+                        continuity=seam.continuity,
+                        metadata={
+                            "kernel": {
+                                "source_operand_index": operand_index,
+                                "source_seam_id": seam.seam_id,
+                                "reused_for": "csg_shell_assembly",
+                            }
+                        },
+                    )
+                )
+    return tuple(seams)
+
+
+def _surface_csg_make_assembled_shell(
+    patches_with_sources: Sequence[tuple[object, SurfaceBooleanPatchRef, tuple[str, ...]]],
+    *,
+    operation: SurfaceBooleanOperation,
+    shell_index: int,
+    metadata: dict[str, object],
+    operands: SurfaceBooleanOperands | None = None,
+) -> SurfaceShell:
+    seams = _surface_csg_reused_source_seams(patches_with_sources, operands, shell_index=shell_index)
+    shell = make_surface_shell(
+        tuple(patch for patch, _source, _cut_ids in patches_with_sources),
+        connected=True,
+        seams=seams,
+        metadata=metadata,
+    )
+    if not seams:
+        return shell
+    return make_surface_shell(
+        shell.patches,
+        connected=shell.connected,
+        seams=shell.seams,
+        adjacency=surface_adjacency_from_seams(shell),
+        metadata=shell.metadata,
+    )
+
+
 def assemble_surface_csg_shells_from_fragments(
     operation: SurfaceBooleanOperation,
     fragments: Sequence[SurfaceBooleanTrimmedPatchFragment],
     *,
     multi_shell: bool = False,
+    operands: SurfaceBooleanOperands | None = None,
 ) -> SurfaceCSGShellAssemblyRecord:
     """Assemble selected CSG fragments into provisional result shells."""
 
@@ -11855,12 +17296,14 @@ def assemble_surface_csg_shells_from_fragments(
     )
     if multi_shell:
         shells = tuple(
-            make_surface_shell(
-                (fragment.patch,),
-                connected=True,
+            _surface_csg_make_assembled_shell(
+                ((fragment.patch, fragment.source_patch, fragment.cut_curve_ids),),
+                operation=operation,
+                shell_index=index,
                 metadata={"kernel": {"source_patch": fragment.source_patch}},
+                operands=operands,
             )
-            for fragment in sorted_fragments
+            for index, fragment in enumerate(sorted_fragments)
         )
         shell_ordering = tuple(
             _surface_csg_shell_ordering_record(
@@ -11883,10 +17326,12 @@ def assemble_surface_csg_shells_from_fragments(
             (fragment.patch, fragment.source_patch, fragment.cut_curve_ids)
             for fragment in sorted_fragments
         )
-        shell = make_surface_shell(
-            tuple(fragment.patch for fragment in sorted_fragments),
-            connected=True,
+        shell = _surface_csg_make_assembled_shell(
+            patches_with_sources,
+            operation=operation,
+            shell_index=0,
             metadata={"kernel": {"primitive_family": "csg_fragment_assembly", "boolean_operation": operation}},
+            operands=operands,
         )
         shells = (shell,)
         shell_ordering = (
@@ -12064,10 +17509,12 @@ def assemble_surface_csg_result_shells(
             }
         }
         try:
-            shell = make_surface_shell(
-                tuple(patch for patch, _source, _cut_ids in shell_group),
-                connected=True,
+            shell = _surface_csg_make_assembled_shell(
+                shell_group,
+                operation=graph.operation,
+                shell_index=shell_index,
                 metadata=shell_metadata,
+                operands=graph.plan.operands,
             )
         except (TypeError, ValueError) as exc:
             diagnostics.append(
@@ -12507,6 +17954,16 @@ def _surface_boolean_supported_box_result(
             right_shell = right.iter_shells(world=True)[0]
             body = make_surface_body((left_shell, right_shell), metadata=metadata)
             return _surface_boolean_finalize_body_result("union", operands, body)
+        if relation == "touching":
+            contact = classify_surface_csg_contact(left, right)
+            if contact.contact_kind == "face-touch":
+                combined_bounds = _surface_boolean_result_bounds(operands)
+                if combined_bounds is not None and abs(
+                    _bounds_volume(combined_bounds) - (_bounds_volume(left_bounds) + _bounds_volume(right_bounds))
+                ) <= 1e-9:
+                    body = _surface_box_body_from_bounds(combined_bounds, metadata=metadata)
+                    return _surface_boolean_finalize_body_result("union", operands, body)
+            return None
         if relation == "equal":
             body = _surface_box_body_from_bounds(left_bounds, metadata=metadata)
             return _surface_boolean_finalize_body_result("union", operands, body)
@@ -12550,6 +18007,465 @@ def _surface_boolean_supported_box_result(
     return None
 
 
+def _surface_boolean_result_bounds(
+    operands: SurfaceBooleanOperands,
+) -> tuple[float, float, float, float, float, float] | None:
+    body_bounds = tuple(body.bounds_estimate() for body in operands.bodies)
+    if operands.operation == "difference":
+        return body_bounds[0]
+    if operands.operation == "union":
+        lower = np.asarray([[bounds[0], bounds[2], bounds[4]] for bounds in body_bounds], dtype=float).min(axis=0)
+        upper = np.asarray([[bounds[1], bounds[3], bounds[5]] for bounds in body_bounds], dtype=float).max(axis=0)
+        return (float(lower[0]), float(upper[0]), float(lower[1]), float(upper[1]), float(lower[2]), float(upper[2]))
+    if operands.operation == "intersection":
+        overlap = body_bounds[0]
+        for bounds in body_bounds[1:]:
+            overlap = _aabb_overlap(overlap, bounds)
+        if any(span <= 1e-9 for span in _bounds_size(overlap)):
+            return None
+        return overlap
+    return None
+
+
+def _surface_boolean_primitive_implicit_body(
+    operands: SurfaceBooleanOperands,
+    root: ImplicitFieldNode,
+    *,
+    bounds: tuple[float, float, float, float, float, float],
+    primitive_families: tuple[str, ...],
+) -> SurfaceBody:
+    metadata = _surface_boolean_result_metadata(operands)
+    kernel_metadata = dict(metadata.get("kernel", {}))
+    kernel_metadata["boolean_surface_route"] = "primitive-implicit"
+    kernel_metadata["primitive_implicit_csg"] = {
+        "operation": operands.operation,
+        "operand_ids": operands.body_ids,
+        "source_primitive_families": primitive_families,
+        "surface_family": "implicit",
+        "no_mesh_fallback": True,
+    }
+    metadata["kernel"] = kernel_metadata
+    consumer_metadata = dict(metadata.get("consumer", {}))
+    consumer_metadata["boolean_surface_route"] = "primitive-implicit"
+    metadata["consumer"] = consumer_metadata
+
+    graph = ImplicitFieldExpressionGraph(
+        root=root,
+        bounds=bounds,
+        provenance={
+            "operation": f"primitive-implicit-csg-{operands.operation}",
+            "source_family": "primitive-implicit-csg",
+            "source_ids": operands.body_ids,
+            "route_id": "surface-csg.primitive-implicit",
+        },
+    )
+    safety = build_implicit_field_safety_validation_report(graph)
+    if not safety.accepted:
+        raise BooleanOperationError("Primitive implicit CSG result failed safety validation; no mesh fallback was attempted.")
+
+    patch = ImplicitSurfacePatch(
+        family="implicit",
+        field=graph.root,
+        bounds=graph.bounds,
+        metadata={"kernel": kernel_metadata},
+    )
+    shell = make_surface_shell(
+        (patch,),
+        connected=True,
+        metadata={"kernel": {"operation": f"primitive-implicit-csg-{operands.operation}", "surface_family": "implicit"}},
+    )
+    return make_surface_body((shell,), metadata=metadata)
+
+
+def _surface_boolean_supported_primitive_implicit_result(
+    operands: SurfaceBooleanOperands,
+) -> SurfaceBooleanResult | None:
+    if operands.operand_count < 2:
+        return None
+    primitive_families = tuple(_surface_body_csg_implicit_family(body) or "" for body in operands.bodies)
+    primitive_family_set = {"box", "sphere", "cylinder", "ruled-affine-box"}
+    if any(family not in primitive_family_set for family in primitive_families):
+        return None
+    family_set = frozenset(primitive_families)
+    if family_set == {"box"}:
+        return None
+    supported = False
+    if operands.operation == "union":
+        supported = "ruled-affine-box" not in family_set
+    elif operands.operation == "difference":
+        supported = "ruled-affine-box" not in family_set or family_set.issubset({"box", "ruled-affine-box"})
+    elif operands.operand_count == 2 and family_set == {"box", "sphere"}:
+        supported = operands.operation == "intersection"
+    elif operands.operand_count == 2 and primitive_families == ("cylinder", "cylinder") and operands.operation == "intersection":
+        left_cylinder = _surface_body_cylinder_parameters(operands.bodies[0])
+        right_cylinder = _surface_body_cylinder_parameters(operands.bodies[1])
+        if left_cylinder is None or right_cylinder is None:
+            return None
+        supported = abs(float(np.dot(left_cylinder[1], right_cylinder[1]))) <= 1e-6
+    if not supported:
+        return None
+
+    ordered_bodies = operands.bodies
+    if operands.operation == "union":
+        ordered_bodies = tuple(sorted(operands.bodies, key=lambda body: body.stable_identity))
+    execution_operands = (
+        SurfaceBooleanOperands(operation=operands.operation, bodies=ordered_bodies)
+        if tuple(body.stable_identity for body in ordered_bodies) != tuple(body.stable_identity for body in operands.bodies)
+        else operands
+    )
+    roots = tuple(_surface_body_csg_implicit_node(body) for body in execution_operands.bodies)
+    if any(root is None for root in roots):
+        return None
+    bounds = _surface_boolean_result_bounds(execution_operands)
+    if bounds is None:
+        return SurfaceBooleanResult(
+            operation=operands.operation,
+            operands=operands,
+            status="succeeded",
+            classification="empty",
+        )
+    root = _compose_implicit_root(operands.operation, tuple(root for root in roots if root is not None))
+    body = _surface_boolean_primitive_implicit_body(
+        execution_operands,
+        root,
+        bounds=bounds,
+        primitive_families=tuple(_surface_body_csg_implicit_family(body) or "" for body in execution_operands.bodies),
+    )
+    return _surface_boolean_finalize_body_result(operands.operation, operands, body)
+
+
+def _surface_body_has_bspline_nurbs_participation(body: SurfaceBody) -> bool:
+    return any(patch.family in {"bspline", "nurbs"} for patch in body.iter_patches(world=True))
+
+
+def _surface_boolean_bspline_nurbs_refusal(
+    operands: SurfaceBooleanOperands,
+    *,
+    stage: str,
+    message: str,
+    evidence: SurfaceCSGBodyRouteEvidenceCollectionReport | None = None,
+) -> SurfaceBooleanResult:
+    if evidence is None:
+        detail = f"{message}; stage={stage}; no mesh fallback was attempted."
+    else:
+        payload = evidence.canonical_payload()
+        detail = (
+            f"{message}; stage={stage}; readiness={evidence.readiness}; "
+            f"no_mesh_fallback={payload['no_mesh_fallback']}"
+        )
+        if evidence.diagnostics:
+            detail += "; diagnostics=" + "; ".join(diagnostic.message for diagnostic in evidence.diagnostics)
+        record_diagnostics = tuple(
+            diagnostic.message
+            for record in evidence.records
+            for diagnostic in record.diagnostics
+        )
+        if record_diagnostics:
+            detail += "; route_diagnostics=" + "; ".join(record_diagnostics)
+    return SurfaceBooleanResult(
+        operation=operands.operation,
+        operands=operands,
+        status="unsupported",
+        failure_reason=detail,
+    )
+
+
+def _surface_boolean_bspline_nurbs_candidate_patch_pair(
+    operands: SurfaceBooleanOperands,
+) -> tuple[SurfaceCSGBodyRoutePatchPair, _SurfaceCSGRectangularOverlapEvidence] | None:
+    if operands.operand_count != 2:
+        return None
+    policy = DEFAULT_SURFACE_CSG_TOLERANCE_POLICY
+    first_patches = operands.bodies[0].iter_patches(world=True)
+    second_patches = operands.bodies[1].iter_patches(world=True)
+    for first_index, first_patch in enumerate(first_patches):
+        for second_index, second_patch in enumerate(second_patches):
+            if first_patch.family not in {"bspline", "nurbs"} and second_patch.family not in {"bspline", "nurbs"}:
+                continue
+            overlap = _surface_csg_rectangular_overlap_evidence(first_patch, second_patch, policy=policy)
+            if overlap is None or overlap.max_residual > policy.equality_tolerance:
+                continue
+            return (
+                SurfaceCSGBodyRoutePatchPair(
+                    SurfaceBooleanPatchRef(0, first_index),
+                    first_patch,
+                    SurfaceBooleanPatchRef(1, second_index),
+                    second_patch,
+                ),
+                overlap,
+            )
+    return None
+
+
+def _surface_boolean_bspline_nurbs_body_route_result(operands: SurfaceBooleanOperands) -> SurfaceBooleanResult | None:
+    if not any(_surface_body_has_bspline_nurbs_participation(body) for body in operands.bodies):
+        return None
+    if operands.operand_count != 2:
+        return _surface_boolean_bspline_nurbs_refusal(
+            operands,
+            stage="body-route-dispatch",
+            message="B-spline/NURBS body CSG currently requires exactly two operands.",
+        )
+    candidate = _surface_boolean_bspline_nurbs_candidate_patch_pair(operands)
+    if candidate is None:
+        return _surface_boolean_bspline_nurbs_refusal(
+            operands,
+            stage="trim-overlap-reconstruction",
+            message="B-spline/NURBS body CSG could not find a rectangular participating patch overlap.",
+        )
+    patch_pair, overlap = candidate
+    first_patch = patch_pair.first_patch
+    second_patch = patch_pair.second_patch
+    evidence = collect_surface_csg_body_route_patch_evidence(operands.operation, (patch_pair,))
+    if evidence.readiness != "success-ready":
+        return _surface_boolean_bspline_nurbs_refusal(
+            operands,
+            stage="patch-evidence-readiness",
+            message="B-spline/NURBS body CSG refused before trim reconstruction.",
+            evidence=evidence,
+        )
+    if operands.operation != "intersection":
+        return _surface_boolean_bspline_nurbs_refusal(
+            operands,
+            stage="operation-selection",
+            message="B-spline/NURBS body CSG public bridge currently supports intersection success only.",
+            evidence=evidence,
+        )
+    if first_patch.family in {"bspline", "nurbs"}:
+        result_patch = first_patch
+        result_loop = overlap.first_loop_uv
+        source_patch_ref = patch_pair.first_ref
+    else:
+        result_patch = second_patch
+        result_loop = overlap.second_loop_uv
+        source_patch_ref = patch_pair.second_ref
+    patch_metadata = dict(result_patch.metadata)
+    patch_kernel = dict(patch_metadata.get("kernel", {})) if isinstance(patch_metadata.get("kernel", {}), dict) else {}
+    patch_kernel.update(
+        {
+            "boolean_surface_route": "bspline-nurbs-body-csg",
+            "boolean_operation": operands.operation,
+            "source_patch": _surface_boolean_patch_ref_payload(source_patch_ref),
+            "body_route_evidence": evidence.canonical_payload(),
+            "no_mesh_fallback": True,
+        }
+    )
+    patch_metadata["kernel"] = patch_kernel
+    full_domain_loop = (
+        (result_patch.domain.u_range[0], result_patch.domain.v_range[0]),
+        (result_patch.domain.u_range[1], result_patch.domain.v_range[0]),
+        (result_patch.domain.u_range[1], result_patch.domain.v_range[1]),
+        (result_patch.domain.u_range[0], result_patch.domain.v_range[1]),
+    )
+    if all(
+        np.linalg.norm(np.asarray(candidate, dtype=float) - np.asarray(expected, dtype=float)) <= DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.equality_tolerance
+        for candidate, expected in zip(result_loop, full_domain_loop)
+    ):
+        trimmed_patch = replace(result_patch, metadata=patch_metadata)
+    else:
+        trim_loop = TrimLoop(result_loop, category="outer").normalized()
+        trimmed_patch = replace(result_patch, trim_loops=(trim_loop,), metadata=patch_metadata)
+    source_body = operands.bodies[source_patch_ref.operand_index]
+    source_shell = source_body.iter_shells(world=True)[0]
+    source_patches = list(source_shell.iter_patches(world=True))
+    source_patches[source_patch_ref.patch_index] = trimmed_patch
+    body_metadata = _surface_boolean_result_metadata(operands)
+    body_metadata["kernel"]["boolean_surface_route"] = "bspline-nurbs-body-csg"
+    body_metadata["kernel"]["bspline_nurbs_body_csg"] = {
+        "operation": operands.operation,
+        "source_patch_family": result_patch.family,
+        "source_patch": _surface_boolean_patch_ref_payload(source_patch_ref),
+        "evidence": evidence.canonical_payload(),
+        "no_mesh_fallback": True,
+    }
+    body_metadata["consumer"]["boolean_surface_route"] = "bspline-nurbs-body-csg"
+    body = make_surface_body(
+        (
+            make_surface_shell(
+                source_patches,
+                connected=source_shell.connected,
+                seams=source_shell.seams,
+                adjacency=source_shell.adjacency,
+                metadata={
+                    **source_shell.metadata,
+                    "kernel": {
+                        **(
+                            source_shell.metadata.get("kernel", {})
+                            if isinstance(source_shell.metadata.get("kernel", {}), dict)
+                            else {}
+                        ),
+                        "boolean_surface_route": "bspline-nurbs-body-csg",
+                    },
+                },
+            ),
+        ),
+        metadata=body_metadata,
+    )
+    return _surface_boolean_finalize_body_result(operands.operation, operands, body)
+
+
+def _surface_body_has_sweep_subdivision_participation(body: SurfaceBody) -> bool:
+    return any(patch.family in {"sweep", "subdivision"} for patch in body.iter_patches(world=True))
+
+
+def _surface_boolean_sweep_subdivision_refusal(
+    operands: SurfaceBooleanOperands,
+    *,
+    stage: str,
+    message: str,
+    evidence: Mapping[str, object] | None = None,
+) -> SurfaceBooleanResult:
+    detail = f"{message}; stage={stage}; no_mesh_fallback=True"
+    if evidence is not None:
+        detail += f"; evidence={evidence}"
+    return SurfaceBooleanResult(
+        operation=operands.operation,
+        operands=operands,
+        status="unsupported",
+        failure_reason=detail,
+    )
+
+
+def _surface_boolean_sweep_subdivision_candidate_patch_pair(
+    operands: SurfaceBooleanOperands,
+) -> SurfaceCSGBodyRoutePatchPair | None:
+    if operands.operand_count != 2:
+        return None
+    policy = DEFAULT_SURFACE_CSG_TOLERANCE_POLICY
+    first_patches = operands.bodies[0].iter_patches(world=True)
+    second_patches = operands.bodies[1].iter_patches(world=True)
+    subdivision_candidate: SurfaceCSGBodyRoutePatchPair | None = None
+    for first_index, first_patch in enumerate(first_patches):
+        for second_index, second_patch in enumerate(second_patches):
+            if first_patch.family not in {"sweep", "subdivision"} and second_patch.family not in {"sweep", "subdivision"}:
+                continue
+            patch_pair = SurfaceCSGBodyRoutePatchPair(
+                SurfaceBooleanPatchRef(0, first_index),
+                first_patch,
+                SurfaceBooleanPatchRef(1, second_index),
+                second_patch,
+            )
+            if "subdivision" in {first_patch.family, second_patch.family} and subdivision_candidate is None:
+                subdivision_candidate = patch_pair
+            overlap = _surface_csg_rectangular_overlap_evidence(first_patch, second_patch, policy=policy)
+            if overlap is None or overlap.max_residual > policy.equality_tolerance:
+                continue
+            return patch_pair
+    return subdivision_candidate
+
+
+def _surface_boolean_sweep_subdivision_pair_evidence(
+    patch_pair: SurfaceCSGBodyRoutePatchPair,
+) -> tuple[str, Mapping[str, object], bool]:
+    if "sweep" in {patch_pair.first_patch.family, patch_pair.second_patch.family}:
+        record = intersect_sweep_csg_patch_pair(
+            patch_pair.first_ref,
+            patch_pair.first_patch,
+            patch_pair.second_ref,
+            patch_pair.second_patch,
+        )
+        return "sweep-pair", record.canonical_payload(), record.supported
+    record = intersect_subdivision_csg_patch_pair(
+        patch_pair.first_ref,
+        patch_pair.first_patch,
+        patch_pair.second_ref,
+        patch_pair.second_patch,
+    )
+    return "subdivision-pair", record.canonical_payload(), record.supported
+
+
+def _surface_boolean_sweep_subdivision_body_route_result(operands: SurfaceBooleanOperands) -> SurfaceBooleanResult | None:
+    if not any(_surface_body_has_sweep_subdivision_participation(body) for body in operands.bodies):
+        return None
+    if operands.operand_count != 2:
+        return _surface_boolean_sweep_subdivision_refusal(
+            operands,
+            stage="body-route-dispatch",
+            message="Sweep/subdivision body CSG currently requires exactly two operands.",
+        )
+    candidate = _surface_boolean_sweep_subdivision_candidate_patch_pair(operands)
+    if candidate is None:
+        return _surface_boolean_sweep_subdivision_refusal(
+            operands,
+            stage="patch-overlap-discovery",
+            message="Sweep/subdivision body CSG could not find a rectangular participating patch overlap.",
+        )
+    patch_pair = candidate
+    route_name, evidence, supported = _surface_boolean_sweep_subdivision_pair_evidence(patch_pair)
+    if not supported:
+        return _surface_boolean_sweep_subdivision_refusal(
+            operands,
+            stage="patch-evidence-readiness",
+            message="Sweep/subdivision body CSG refused before body reconstruction.",
+            evidence=evidence,
+        )
+    if operands.operation != "intersection":
+        return _surface_boolean_sweep_subdivision_refusal(
+            operands,
+            stage="operation-selection",
+            message="Sweep/subdivision body CSG public bridge currently supports intersection success only.",
+            evidence=evidence,
+        )
+    if patch_pair.first_patch.family in {"sweep", "subdivision"}:
+        result_patch = patch_pair.first_patch
+        source_patch_ref = patch_pair.first_ref
+    else:
+        result_patch = patch_pair.second_patch
+        source_patch_ref = patch_pair.second_ref
+    patch_metadata = dict(result_patch.metadata)
+    patch_kernel = dict(patch_metadata.get("kernel", {})) if isinstance(patch_metadata.get("kernel", {}), dict) else {}
+    patch_kernel.update(
+        {
+            "boolean_surface_route": "sweep-subdivision-body-csg",
+            "boolean_operation": operands.operation,
+            "source_patch": _surface_boolean_patch_ref_payload(source_patch_ref),
+            "pair_route": route_name,
+            "pair_evidence": evidence,
+            "no_mesh_fallback": True,
+        }
+    )
+    patch_metadata["kernel"] = patch_kernel
+    routed_patch = replace(result_patch, metadata=patch_metadata)
+    source_body = operands.bodies[source_patch_ref.operand_index]
+    source_shell = source_body.iter_shells(world=True)[0]
+    source_patches = list(source_shell.iter_patches(world=True))
+    source_patches[source_patch_ref.patch_index] = routed_patch
+    body_metadata = _surface_boolean_result_metadata(operands)
+    body_metadata["kernel"]["boolean_surface_route"] = "sweep-subdivision-body-csg"
+    body_metadata["kernel"]["sweep_subdivision_body_csg"] = {
+        "operation": operands.operation,
+        "source_patch_family": result_patch.family,
+        "source_patch": _surface_boolean_patch_ref_payload(source_patch_ref),
+        "pair_route": route_name,
+        "evidence": evidence,
+        "no_mesh_fallback": True,
+    }
+    body_metadata["consumer"]["boolean_surface_route"] = "sweep-subdivision-body-csg"
+    body = make_surface_body(
+        (
+            make_surface_shell(
+                source_patches,
+                connected=source_shell.connected,
+                seams=source_shell.seams,
+                adjacency=source_shell.adjacency,
+                metadata={
+                    **source_shell.metadata,
+                    "kernel": {
+                        **(
+                            source_shell.metadata.get("kernel", {})
+                            if isinstance(source_shell.metadata.get("kernel", {}), dict)
+                            else {}
+                        ),
+                        "boolean_surface_route": "sweep-subdivision-body-csg",
+                    },
+                },
+            ),
+        ),
+        metadata=body_metadata,
+    )
+    return _surface_boolean_finalize_body_result(operands.operation, operands, body)
+
+
 def _canonicalize_surface_boolean_body(body: SurfaceBody, *, role: str) -> SurfaceBody:
     if not isinstance(body, SurfaceBody):
         raise TypeError(f"{role} must be a SurfaceBody.")
@@ -12557,19 +18473,20 @@ def _canonicalize_surface_boolean_body(body: SurfaceBody, *, role: str) -> Surfa
         raise SurfaceBooleanEligibilityError(f"{role} must contain exactly one shell for surfaced booleans.")
 
     shell = body.iter_shells(world=True)[0]
-    if not shell.connected:
+    allow_disconnected_primitive_cylinder = _surface_body_primitive_family(body) == "cylinder" and _surface_body_cylinder_parameters(body) is not None
+    if not shell.connected and not allow_disconnected_primitive_cylinder:
         raise SurfaceBooleanEligibilityError(f"{role} shell must be connected for surfaced booleans.")
 
     canonical_shell = make_surface_shell(
         shell.iter_patches(world=True),
-        connected=shell.connected,
+        connected=True if allow_disconnected_primitive_cylinder else shell.connected,
         seams=shell.seams,
         adjacency=shell.adjacency,
         metadata=shell.metadata,
     )
     canonical_body = make_surface_body([canonical_shell], metadata=body.metadata)
     classification = _classify_surface_body(canonical_body)
-    if classification != "closed":
+    if classification != "closed" and not allow_disconnected_primitive_cylinder:
         raise SurfaceBooleanEligibilityError(
             f"{role} must be closed-valid under shell seam and boundary truth for surfaced booleans."
         )
@@ -12610,6 +18527,12 @@ def surface_boolean_result(operation: SurfaceBooleanOperation, operands: Surface
 
     if operands.operation != operation:
         raise ValueError("Surface boolean result operation must match prepared operands.")
+    bspline_nurbs_result = _surface_boolean_bspline_nurbs_body_route_result(operands)
+    if bspline_nurbs_result is not None:
+        return bspline_nurbs_result
+    sweep_subdivision_result = _surface_boolean_sweep_subdivision_body_route_result(operands)
+    if sweep_subdivision_result is not None:
+        return sweep_subdivision_result
     plan = plan_prepared_surface_csg_operation(operands)
     if not plan.executable:
         return SurfaceBooleanResult(
@@ -12618,9 +18541,44 @@ def surface_boolean_result(operation: SurfaceBooleanOperation, operands: Surface
             status="unsupported",
             failure_reason="; ".join(diagnostic.message for diagnostic in plan.diagnostics),
         )
+    loft_pair_result = execute_loft_pair_csg(operands)
+    if loft_pair_result is not None:
+        return loft_pair_result
+    loft_primitive_result = execute_single_shell_loft_primitive_csg(operands)
+    if loft_primitive_result is not None:
+        return loft_primitive_result
+    loft_primitive_cut_result = execute_loft_primitive_trim_fragment_csg(operands)
+    if loft_primitive_cut_result is not None:
+        return loft_primitive_cut_result
     trivial_result = _surface_boolean_trivial_result(operands)
     if trivial_result is not None:
         return trivial_result
+    loft_route = select_loft_csg_route(operands)
+    if loft_route.supported:
+        adapter_result = _surface_boolean_loft_primitive_adapter_result(operands, loft_route)
+        if adapter_result is not None:
+            return adapter_result
+        return SurfaceBooleanResult(
+            operation=operation,
+            operands=operands,
+            status="unsupported",
+            failure_reason=(
+                f"Selected loft CSG route {loft_route.route_id} "
+                f"via {loft_route.solver_path}; no exact reuse result was available and "
+                "trim-fragment shell assembly is owned by Surface Spec 422."
+            ),
+        )
+    primitive_implicit_result = _surface_boolean_supported_primitive_implicit_result(operands)
+    if primitive_implicit_result is not None:
+        return primitive_implicit_result
+    ruled_cutter_diagnostic = _surface_boolean_ruled_unsupported_cutter_diagnostic(operands)
+    if ruled_cutter_diagnostic is not None:
+        return SurfaceBooleanResult(
+            operation=operation,
+            operands=operands,
+            status="unsupported",
+            failure_reason=ruled_cutter_diagnostic.message,
+        )
     stage = surface_boolean_intersection_stage(operands)
     supported_result = _surface_boolean_supported_box_result(operands, stage)
     if supported_result is not None:

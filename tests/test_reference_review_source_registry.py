@@ -3,22 +3,32 @@ from __future__ import annotations
 import importlib.util
 import json
 import sqlite3
+import sys
 from pathlib import Path
 
 from impression.devtools.reference_review import (
     EntrypointParameterRecord,
+    ReferenceEvidenceArtifactRecord,
+    ReferenceEvidenceBundleRecord,
     ReferenceReviewStatus,
     ReviewSourceLoadMode,
     ReviewSourceModelRecord,
+    SectionEvidenceContractRecord,
     approve_reference_artifacts,
+    build_section_bundle_fixture_record,
     build_review_context_payload,
     discover_source_records,
+    load_database_evidence_bundles,
     load_source_records_from_database,
     load_source_records_from_file,
     resolve_generated_review_module,
+    resolve_dirty_gold_evidence_paths,
+    serialize_database_evidence_bundles,
     update_fixture_notes_in_file,
     update_fixture_review_status_in_database,
     update_fixture_review_status_in_file,
+    validate_evidence_artifact_path,
+    validate_section_evidence_roles,
     validate_source_record,
 )
 
@@ -131,6 +141,252 @@ def test_fixture_file_loads_review_source_records(tmp_path: Path) -> None:
     assert len(summary.valid_items) == 1
     assert summary.valid_items[0].record.fixture_id == "demo/file"
     assert summary.valid_items[0].record.review_status is ReferenceReviewStatus.UNREVIEWED
+
+
+def test_fixture_file_loads_typed_evidence_bundles_and_preserves_artifact_paths(tmp_path: Path) -> None:
+    source = _write_source(tmp_path, "fixture_model.py")
+    stl = tmp_path / "dirty.stl"
+    section = tmp_path / "sections.json"
+    stl.write_text("solid demo\nendsolid demo\n")
+    section.write_text("{}\n")
+    fixture_file = tmp_path / "review-fixtures.json"
+    fixture_file.write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "fixture_id": "demo/bundle",
+                        "feature_name": "demo",
+                        "source_path": source.name,
+                        "artifact_paths": [stl.name],
+                        "evidence_bundles": [
+                            {
+                                "bundle_id": "demo-section",
+                                "evidence_kind": "review-artifact",
+                                "artifacts": [
+                                    {
+                                        "role": "stl",
+                                        "kind": "model/stl",
+                                        "path": stl.name,
+                                    },
+                                    {
+                                        "role": "section-evidence",
+                                        "kind": "application/json",
+                                        "path": section.name,
+                                        "required": False,
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+
+    summary = load_source_records_from_file(fixture_file)
+    record = summary.valid_items[0].record
+
+    assert not summary.diagnostics
+    assert record.artifact_paths == (stl,)
+    assert len(record.evidence_bundles) == 1
+    assert isinstance(record.evidence_bundles[0], ReferenceEvidenceBundleRecord)
+    assert record.evidence_bundles[0].evidence_kind == "review-artifact"
+    assert all(isinstance(artifact, ReferenceEvidenceArtifactRecord) for artifact in record.evidence_bundles[0].artifacts)
+
+
+def test_fixture_file_evidence_bundle_validation_reports_required_paths_only(tmp_path: Path) -> None:
+    source = _write_source(tmp_path, "fixture_model.py")
+    outside = tmp_path.parent / "outside.json"
+    fixture_file = tmp_path / "review-fixtures.json"
+    fixture_file.write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "fixture_id": "demo/bundle",
+                        "feature_name": "demo",
+                        "source_path": source.name,
+                        "evidence_bundles": [
+                            {
+                                "bundle_id": "bad-bundle",
+                                "evidence_kind": "review-artifact",
+                                "artifacts": [
+                                    {
+                                        "role": "required",
+                                        "kind": "application/json",
+                                        "path": "missing-required.json",
+                                    },
+                                    {
+                                        "role": "optional",
+                                        "kind": "application/json",
+                                        "path": "missing-optional.json",
+                                        "required": False,
+                                    },
+                                    {
+                                        "role": "outside",
+                                        "kind": "application/json",
+                                        "path": outside.as_posix(),
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+
+    summary = load_source_records_from_file(fixture_file)
+    diagnostics = tuple(diagnostic for item in summary.items for diagnostic in item.validation.diagnostics)
+
+    assert {diagnostic.code for diagnostic in diagnostics} == {
+        "missing-evidence-artifact",
+        "evidence-artifact-outside-root",
+    }
+    optional_artifact = summary.items[0].record.evidence_bundles[0].artifacts[1]
+    assert validate_evidence_artifact_path(optional_artifact, fixture_id="demo/bundle", allowed_root=tmp_path) is None
+
+
+def test_section_evidence_bundle_validates_required_roles_and_plane_metadata(tmp_path: Path) -> None:
+    source = _write_source(tmp_path, "fixture_model.py")
+    for name in ("expected.png", "actual.png", "diff.png"):
+        (tmp_path / name).write_text("png\n")
+    fixture_file = tmp_path / "review-fixtures.json"
+    fixture_file.write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "fixture_id": "demo/section",
+                        "feature_name": "demo",
+                        "source_path": source.name,
+                        "evidence_bundles": [
+                            {
+                                "bundle_id": "section-a",
+                                "evidence_kind": "loft-section",
+                                "section_plane_metadata": {
+                                    "origin": [0.0, 0.0, 0.0],
+                                    "normal": [0.0, 0.0, 1.0],
+                                },
+                                "artifacts": [
+                                    {"role": "expected", "kind": "image/png", "path": "expected.png"},
+                                    {"role": "actual", "kind": "image/png", "path": "actual.png"},
+                                    {"role": "diff", "kind": "image/png", "path": "diff.png"},
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+
+    summary = load_source_records_from_file(fixture_file)
+    bundle = summary.valid_items[0].record.evidence_bundles[0]
+    contract = validate_section_evidence_roles(bundle)
+
+    assert not summary.diagnostics
+    assert isinstance(contract, SectionEvidenceContractRecord)
+    assert contract.valid is True
+    assert contract.present_roles == ("expected", "actual", "diff")
+
+
+def test_section_evidence_bundle_reports_missing_role_and_plane_metadata(tmp_path: Path) -> None:
+    source = _write_source(tmp_path, "fixture_model.py")
+    actual = tmp_path / "actual.png"
+    actual.write_text("png\n")
+    fixture_file = tmp_path / "review-fixtures.json"
+    fixture_file.write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "fixture_id": "demo/section",
+                        "feature_name": "demo",
+                        "source_path": source.name,
+                        "evidence_bundles": [
+                            {
+                                "bundle_id": "section-a",
+                                "evidence_kind": "loft-section",
+                                "artifacts": [
+                                    {"role": "actual", "kind": "image/png", "path": "actual.png"},
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+
+    summary = load_source_records_from_file(fixture_file)
+    diagnostics = tuple(diagnostic for item in summary.items for diagnostic in item.validation.diagnostics)
+
+    assert {diagnostic.code for diagnostic in diagnostics} == {
+        "section-evidence-missing-role",
+        "section-evidence-invalid-plane",
+    }
+    assert any(diagnostic.message.endswith(":expected") for diagnostic in diagnostics)
+    assert any(diagnostic.message.endswith(":diff") for diagnostic in diagnostics)
+
+
+def test_section_bundle_fixture_record_builder_integrates_with_loader(tmp_path: Path) -> None:
+    source = _write_source(tmp_path, "fixture_model.py")
+    path_set = resolve_dirty_gold_evidence_paths(
+        tmp_path / "reference-sections" / "dirty",
+        tmp_path / "reference-sections" / "gold",
+        fixture_stem="demo-section",
+    )
+    for path in path_set.dirty_paths.values():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("png\n")
+    bundle = build_section_bundle_fixture_record(
+        bundle_id="section-a",
+        evidence_kind="loft-section",
+        artifact_paths=path_set.dirty_paths,
+        section_plane_metadata={"origin": [0, 0, 0], "normal": [0, 0, 1]},
+    )
+    fixture_file = tmp_path / "review-fixtures.json"
+    fixture_file.write_text(
+        json.dumps(
+            {
+                "allowed_root": ".",
+                "fixtures": [
+                    {
+                        "fixture_id": "demo/section",
+                        "feature_name": "demo",
+                        "source_path": source.name,
+                        "evidence_bundles": [
+                            {
+                                "bundle_id": bundle.bundle_id,
+                                "evidence_kind": bundle.evidence_kind,
+                                "section_plane_metadata": dict(bundle.section_plane_metadata),
+                                "artifacts": [
+                                    {
+                                        "role": artifact.role,
+                                        "kind": artifact.kind,
+                                        "path": artifact.path.relative_to(tmp_path).as_posix(),
+                                        "stage": artifact.stage,
+                                        "required": artifact.required,
+                                    }
+                                    for artifact in bundle.artifacts
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+
+    summary = load_source_records_from_file(fixture_file)
+    loaded_bundle = summary.valid_items[0].record.evidence_bundles[0]
+
+    assert not summary.diagnostics
+    assert set(path_set.gold_paths) == {"expected", "actual", "diff"}
+    assert loaded_bundle.bundle_id == "section-a"
+    assert validate_section_evidence_roles(loaded_bundle).valid is True
 
 
 def test_fixture_file_persists_review_status_and_gold_artifact_path(tmp_path: Path) -> None:
@@ -263,6 +519,50 @@ def test_fixture_database_loads_review_source_records(tmp_path: Path) -> None:
     assert summary.valid_items[0].record.fixture_id == "demo/db"
 
 
+def test_fixture_database_loads_evidence_bundle_parity(tmp_path: Path) -> None:
+    source = _write_source(tmp_path, "db_model.py")
+    stl = tmp_path / "dirty.stl"
+    stl.write_text("solid demo\nendsolid demo\n")
+    bundles = (
+        ReferenceEvidenceBundleRecord(
+            bundle_id="db-bundle",
+            evidence_kind="review-artifact",
+            artifacts=(
+                ReferenceEvidenceArtifactRecord(
+                    role="stl",
+                    kind="model/stl",
+                    path=stl,
+                ),
+            ),
+        ),
+    )
+    database = tmp_path / "review-fixtures.sqlite"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "create table review_sources (fixture_id text, feature_name text, source_path text, entrypoint text, evidence_bundles text)"
+        )
+        connection.execute(
+            "insert into review_sources values (?, ?, ?, ?, ?)",
+            (
+                "demo/db-bundle",
+                "demo",
+                source.name,
+                "build",
+                serialize_database_evidence_bundles(bundles, base_dir=tmp_path),
+            ),
+        )
+
+    summary = load_source_records_from_database(database)
+    reloaded = load_database_evidence_bundles(
+        serialize_database_evidence_bundles(bundles, base_dir=tmp_path),
+        base_dir=tmp_path,
+    )
+
+    assert len(summary.valid_items) == 1
+    assert summary.valid_items[0].record.evidence_bundles == reloaded
+    assert summary.valid_items[0].record.evidence_bundles[0].artifacts[0].path == stl
+
+
 def test_fixture_database_persists_declined_status(tmp_path: Path) -> None:
     source = _write_source(tmp_path, "db_model.py")
     database = tmp_path / "review-fixtures.sqlite"
@@ -318,6 +618,7 @@ def test_dirty_impress_fixture_entrypoints_build_reviewable_models(project_root:
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
 
     built_types = {
@@ -343,6 +644,76 @@ def test_dirty_stl_fixture_file_covers_reviewable_stl_inventory(project_root: Pa
     assert all(record.purpose for record in records)
     assert all(record.methodology for record in records)
     assert all(record.render_description for record in records)
+
+
+def test_loft_csg_reference_handoff_fixture_registry_smoke(tmp_path: Path, project_root: Path) -> None:
+    fixture_file = tmp_path / "loft-csg-handoff-fixtures.json"
+    fixture_file.write_text(
+        json.dumps(
+            {
+                "allowed_root": str(project_root),
+                "fixtures": [
+                        {
+                            "fixture_id": "loft/csg/rt_loft_csg_reference_handoff_smoke",
+                            "feature_name": "Loft CSG handoff smoke",
+                            "source_path": (project_root / "tests/reference_review_fixtures/stl_review_sources.py").as_posix(),
+                            "entrypoint": "build_loft_csg_reference_geometry_handoff_smoke_record",
+                            "expected_output": "dirty STL source readiness",
+                        }
+                ],
+            }
+        )
+    )
+
+    summary = load_source_records_from_file(fixture_file)
+    record = summary.valid_items[0].record
+    spec = importlib.util.spec_from_file_location("stl_review_sources_handoff", record.source_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    handoff = getattr(module, record.entrypoint)()
+
+    assert not summary.diagnostics
+    assert handoff.accepted is True
+    assert handoff.dirty_stl_source_ready is True
+    assert handoff.accepted_body_identity
+
+
+def test_loft_csg_section_evidence_readiness_fixture_registry_smoke(tmp_path: Path, project_root: Path) -> None:
+    fixture_file = tmp_path / "loft-csg-section-fixtures.json"
+    fixture_file.write_text(
+        json.dumps(
+            {
+                "allowed_root": str(project_root),
+                "fixtures": [
+                    {
+                        "fixture_id": "loft/csg/rt_loft_csg_section_evidence_smoke",
+                        "feature_name": "Loft CSG section evidence smoke",
+                        "source_path": (project_root / "tests/reference_review_fixtures/stl_review_sources.py").as_posix(),
+                        "entrypoint": "build_loft_csg_section_evidence_readiness_smoke_record",
+                        "expected_output": "section evidence readiness",
+                    }
+                ],
+            }
+        )
+    )
+
+    summary = load_source_records_from_file(fixture_file)
+    record = summary.valid_items[0].record
+    spec = importlib.util.spec_from_file_location("stl_review_sources_section", record.source_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    readiness = getattr(module, record.entrypoint)()
+
+    assert not summary.diagnostics
+    assert readiness.ready is True
+    assert readiness.bundle_payload["evidence_kind"] == "loft-section"
+    assert readiness.accepted_body_identity
 
 
 def test_dirty_stl_fixture_file_reports_missing_artifact(tmp_path: Path, project_root: Path) -> None:

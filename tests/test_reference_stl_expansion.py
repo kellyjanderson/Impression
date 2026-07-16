@@ -8,30 +8,47 @@ import pytest
 
 from impression.modeling import (
     Bezier3D,
+    DisplacementSurfacePatch,
+    HeightmapSurfacePatch,
     Loft,
     Path3D,
+    PlanarSurfacePatch,
     Section,
     Station,
     SurfaceBody,
+    SurfaceBooleanResult,
+    adapt_surface_patch_to_implicit_field,
     as_section,
     boolean_difference,
     boolean_intersection,
     boolean_union,
+    compose_displacement_csg_result,
+    compose_heightmap_csg_result,
+    compose_implicit_field_csg_result,
     make_box,
     make_cone,
     make_cylinder,
     make_ngon,
     make_prism,
     make_surface_body,
+    make_surface_shell,
     make_sphere,
     make_torus,
     loft,
     loft_sections,
+    prepare_surface_boolean_difference_operands,
     rotate,
+    RuledSurfacePatch,
     scale,
+    surface_boolean_result,
     translate,
 )
 from impression.modeling.drawing2d import make_circle, make_polygon, make_rect
+from impression.devtools.reference_review import (
+    ReferenceEvidenceArtifactRecord,
+    ReferenceEvidenceBundleRecord,
+    build_section_bundle_fixture_record,
+)
 from tests.loft_showcases import (
     build_branching_manifold_profiles,
     build_dual_cylinder_correspondence_profiles,
@@ -40,7 +57,42 @@ from tests.loft_showcases import (
     build_perforated_cylinder_correspondence_profiles,
     build_perforated_vessel_profiles,
 )
-from tests.reference_images import ensure_reference_stl, stl_signal_stats, write_surface_body_stl
+from tests.reference_images import (
+    build_loft_csg_section_evidence_handoff,
+    ensure_reference_stl,
+    stl_signal_stats,
+    validate_loft_csg_section_readiness,
+    write_surface_body_stl,
+)
+from tests.csg_reference_fixtures import (
+    make_sampled_implicit_promotion_target_body,
+    make_box_with_subdivision_front_wall,
+    make_box_with_higher_order_front_wall,
+    make_box_with_sweep_front_wall,
+)
+from tests.reference_review_fixtures.stl_review_sources import (
+    build_loft_rt_loft_csg_014_underconstrained_branch_refusal,
+    build_loft_csg_rt_loft_csg_001_cylinder_difference_box_slot_reference,
+    build_loft_csg_rt_loft_csg_002_cylinder_difference_cross_drilled_cylinder_reference,
+    build_loft_csg_rt_loft_csg_003_vessel_difference_sphere_scoop_reference,
+    build_loft_csg_rt_loft_csg_004_hourglass_intersection_box_reference,
+    build_loft_csg_rt_loft_csg_005_square_correspondence_union_post_reference,
+    build_loft_csg_rt_loft_csg_006_phase_shift_difference_vertical_slot_reference,
+    build_loft_csg_rt_loft_csg_007_branch_difference_sphere_joint_reference,
+    build_loft_csg_rt_loft_csg_008_branch_intersection_cutter_window_reference,
+    build_loft_csg_rt_loft_csg_009_loft_union_loft_overlapping_ruled,
+    build_loft_csg_rt_loft_csg_010_loft_intersection_loft_crossing_axes,
+    build_loft_csg_rt_loft_csg_011_loft_difference_loft_shared_station,
+    build_loft_csg_rt_loft_csg_012_authored_color_preserved,
+    build_loft_csg_rt_loft_csg_013_section_evidence_reference,
+    build_loft_csg_reference_geometry_handoff,
+    build_loft_csg_reference_geometry_handoff_smoke_record,
+    build_loft_csg_section_evidence_readiness_smoke_record,
+    build_loft_rt_loft_037_self_intersection_diagnostic,
+    build_mixed_planar_ruled_revolution_fixture_matrix,
+    build_no_hidden_mesh_fallback_audit_matrix,
+    validate_loft_csg_reference_result_body,
+)
 
 
 _RELEASE_STL_ROOT = Path(__file__).resolve().parents[1] / "project/release-0.1.0a/reference-stl"
@@ -79,6 +131,27 @@ def _surface_boolean_body(result: object) -> SurfaceBody:
     body = getattr(result, "body", None)
     assert isinstance(body, SurfaceBody)
     return body
+
+
+def _surface_csg_success_body(result: object) -> SurfaceBody:
+    assert getattr(result, "supported", False)
+    body = getattr(result, "body", None)
+    assert isinstance(body, SurfaceBody)
+    return body
+
+
+def _accepted_loft_csg_public_result() -> SurfaceBooleanResult:
+    body = loft(
+        [make_circle(radius=0.2), make_circle(radius=0.24)],
+        path=[(0.0, 0.0, 0.0), (0.03, 0.01, 0.5)],
+        cap_ends=True,
+        samples=24,
+    )
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+    result = surface_boolean_result("difference", operands)
+    assert result.status == "succeeded"
+    return result
 
 
 def _loft_from_profiles(builder: Callable[[], tuple[list[object], np.ndarray]]) -> SurfaceBody:
@@ -143,6 +216,170 @@ def _thin_stable_primitives() -> SurfaceBody:
     needle = rotate(make_cone(bottom_diameter=0.08, top_diameter=0.01, height=0.85, color="#6c91bf"), axis=(0.0, 1.0, 0.0), angle_deg=86.0)
     needle = translate(needle, (0.32, 0.0, 0.02))
     return _combine_surface_bodies([wafer, pin, needle])
+
+
+def test_loft_csg_reference_handoff_accepts_public_result_geometry() -> None:
+    result = _accepted_loft_csg_public_result()
+
+    handoff = build_loft_csg_reference_geometry_handoff(
+        fixture_id="loft/csg/handoff",
+        operation_id="RT-LOFT-CSG-HANDOFF",
+        source_path=Path("tests/reference_review_fixtures/stl_review_sources.py"),
+        result=result,
+    )
+
+    assert handoff.accepted is True
+    assert handoff.dirty_stl_source_ready is True
+    assert handoff.accepted_body_identity == result.body.stable_identity
+    assert handoff.diagnostics == ()
+    assert handoff.result_metadata["boolean_surface_route"] == "surface-csg.loft-primitive"
+    assert handoff.result_metadata["loft_primitive_public_executor"]["execution_scope"]["accepted"] is True
+    assert handoff.canonical_payload()["accepted_body_identity"] == result.body.stable_identity
+
+
+def test_loft_csg_reference_handoff_refuses_adapter_only_and_synthetic_payloads() -> None:
+    accepted = _accepted_loft_csg_public_result()
+    assert accepted.body is not None
+    synthetic_result = SurfaceBooleanResult(
+        operation="difference",
+        operands=accepted.operands,
+        status="succeeded",
+        body=make_box(size=(0.2, 0.2, 0.2)),
+        classification="closed",
+    )
+    adapter_result = SurfaceBooleanResult(
+        operation="difference",
+        operands=accepted.operands,
+        status="unsupported",
+        failure_reason="loft_primitive_trim_adapter={}",
+    )
+
+    adapter_only = build_loft_csg_reference_geometry_handoff(
+        fixture_id="loft/csg/adapter-only",
+        operation_id="RT-LOFT-CSG-HANDOFF",
+        source_path=Path("tests/reference_review_fixtures/stl_review_sources.py"),
+        result=adapter_result,
+    )
+    synthetic = build_loft_csg_reference_geometry_handoff(
+        fixture_id="loft/csg/synthetic",
+        operation_id="RT-LOFT-CSG-HANDOFF",
+        source_path=Path("tests/reference_review_fixtures/stl_review_sources.py"),
+        result=synthetic_result,
+    )
+
+    assert adapter_only.accepted is False
+    assert adapter_only.dirty_stl_source_ready is False
+    assert {diagnostic.code for diagnostic in adapter_only.diagnostics} == {"non-success-result"}
+    assert synthetic.accepted is False
+    assert synthetic.dirty_stl_source_ready is False
+    assert {diagnostic.code for diagnostic in synthetic.diagnostics} == {"missing-public-executor-metadata"}
+    assert validate_loft_csg_reference_result_body(
+        {"sampled_preview": True},
+        fixture_id="loft/csg/sample",
+        operation_id="RT-LOFT-CSG-HANDOFF",
+    ).code == "non-success-result"
+
+
+def test_loft_csg_reference_handoff_smoke_writes_dirty_stl_from_accepted_body(tmp_path: Path) -> None:
+    result = _accepted_loft_csg_public_result()
+    handoff = build_loft_csg_reference_geometry_handoff(
+        fixture_id="loft/csg/handoff-smoke",
+        operation_id="RT-LOFT-CSG-HANDOFF",
+        source_path=Path("tests/reference_review_fixtures/stl_review_sources.py"),
+        result=result,
+    )
+
+    assert handoff.dirty_stl_source_ready is True
+    assert build_loft_csg_reference_geometry_handoff_smoke_record().dirty_stl_source_ready is True
+    assert result.body is not None
+    stl_path = tmp_path / "loft-csg-handoff.stl"
+    write_surface_body_stl(result.body, stl_path)
+    _assert_stl_signal(stl_path, min_facets=8, min_vertices=8)
+
+
+def _loft_csg_section_bundle(*, include_plane: bool = True):
+    plane = {"origin": [0.0, 0.0, 0.25], "normal": [0.0, 0.0, 1.0]} if include_plane else {}
+    if include_plane:
+        return build_section_bundle_fixture_record(
+            bundle_id="loft-csg-section",
+            evidence_kind="loft-section",
+            artifact_paths={
+                "expected": Path("sections/expected.png"),
+                "actual": Path("sections/actual.png"),
+                "diff": Path("sections/diff.png"),
+            },
+            section_plane_metadata=plane,
+        )
+    return ReferenceEvidenceBundleRecord(
+        bundle_id="loft-csg-section",
+        evidence_kind="loft-section",
+        artifacts=(
+            ReferenceEvidenceArtifactRecord("expected", "image/png", Path("sections/expected.png")),
+            ReferenceEvidenceArtifactRecord("actual", "image/png", Path("sections/actual.png")),
+            ReferenceEvidenceArtifactRecord("diff", "image/png", Path("sections/diff.png")),
+        ),
+        section_plane_metadata=plane,
+    )
+
+
+def test_loft_csg_section_evidence_readiness_accepts_handoff_and_declared_plane() -> None:
+    handoff = build_loft_csg_reference_geometry_handoff_smoke_record()
+    bundle = _loft_csg_section_bundle()
+
+    readiness = build_loft_csg_section_evidence_handoff(
+        fixture_id="loft/csg/section",
+        operation_id="RT-LOFT-CSG-SECTION",
+        accepted_handoff=handoff,
+        bundle=bundle,
+    )
+
+    assert readiness.ready is True
+    assert readiness.accepted_body_identity == handoff.accepted_body_identity
+    assert readiness.diagnostics == ()
+    assert readiness.bundle_payload["bundle_id"] == "loft-csg-section"
+    assert readiness.section_plane_metadata == {"origin": [0.0, 0.0, 0.25], "normal": [0.0, 0.0, 1.0]}
+    assert readiness.canonical_payload()["ready"] is True
+
+
+def test_loft_csg_section_evidence_readiness_refuses_missing_plane_and_detached_evidence() -> None:
+    handoff = build_loft_csg_reference_geometry_handoff_smoke_record()
+    missing_plane_bundle = _loft_csg_section_bundle(include_plane=False)
+
+    missing_plane = build_loft_csg_section_evidence_handoff(
+        fixture_id="loft/csg/section-missing-plane",
+        operation_id="RT-LOFT-CSG-SECTION",
+        accepted_handoff=handoff,
+        bundle=missing_plane_bundle,
+    )
+    detached = build_loft_csg_section_evidence_handoff(
+        fixture_id="loft/csg/section-detached",
+        operation_id="RT-LOFT-CSG-SECTION",
+        accepted_handoff=object(),
+        bundle=_loft_csg_section_bundle(),
+    )
+
+    assert missing_plane.ready is False
+    assert {diagnostic.code for diagnostic in missing_plane.diagnostics} == {"missing-section-plane"}
+    assert detached.ready is False
+    assert {diagnostic.code for diagnostic in detached.diagnostics} == {"missing-handoff"}
+    assert {
+        diagnostic.code
+        for diagnostic in validate_loft_csg_section_readiness(
+            object(),
+            _loft_csg_section_bundle(include_plane=False),
+            fixture_id="loft/csg/section-invalid",
+            operation_id="RT-LOFT-CSG-SECTION",
+        )
+    } == {"missing-handoff", "missing-section-plane"}
+
+
+def test_loft_csg_section_evidence_readiness_fixture_source_smoke() -> None:
+    readiness = build_loft_csg_section_evidence_readiness_smoke_record()
+
+    assert readiness.ready is True
+    assert readiness.accepted_body_identity
+    assert readiness.bundle_payload["evidence_kind"] == "loft-section"
+    assert readiness.bundle_payload["section_plane_metadata"]["normal"] == [0.0, 0.0, 1.0]
 
 
 def _authored_color_primitive_smoke() -> SurfaceBody:
@@ -518,6 +755,18 @@ def _surface_box_intersection_overlap() -> SurfaceBody:
     return _surface_boolean_body(boolean_intersection([left, right]))
 
 
+def _surface_box_contains_sphere_union() -> SurfaceBody:
+    box = make_box(size=(2.0, 2.0, 2.0))
+    sphere = make_sphere(radius=0.45)
+    return _surface_boolean_body(boolean_union([box, sphere]))
+
+
+def _surface_box_contains_sphere_intersection() -> SurfaceBody:
+    box = make_box(size=(2.0, 2.0, 2.0))
+    sphere = make_sphere(radius=0.45)
+    return _surface_boolean_body(boolean_intersection([box, sphere]))
+
+
 def _surface_box_difference_corner_notch() -> SurfaceBody:
     base = make_box(size=(1.6, 1.2, 0.9))
     cutter = make_box(size=(0.85, 0.7, 1.1), center=(0.5, 0.3, 0.0))
@@ -558,6 +807,264 @@ def _surface_box_union_disjoint() -> SurfaceBody:
     left = make_box(size=(0.8, 0.8, 0.8), center=(-0.6, 0.0, 0.0))
     right = make_box(size=(0.6, 0.6, 0.6), center=(0.55, 0.0, 0.0))
     return _surface_boolean_body(boolean_union([left, right]))
+
+
+def _surface_mixed_family_disjoint_union() -> SurfaceBody:
+    box = make_box(size=(0.9, 0.9, 0.9), center=(-0.85, 0.0, 0.0))
+    sphere = make_sphere(radius=0.42, center=(0.85, 0.0, 0.0))
+    return _surface_boolean_body(boolean_union([box, sphere]))
+
+
+def _surface_rt_csg_001_cube_union_sphere() -> SurfaceBody:
+    cube = make_box(size=(1.4, 1.4, 1.4))
+    sphere = make_sphere(radius=0.55, center=(0.55, 0.0, 0.0))
+    return _surface_boolean_body(boolean_union([cube, sphere]))
+
+
+def _surface_rt_csg_002_cube_difference_sphere() -> SurfaceBody:
+    cube = make_box(size=(1.4, 1.4, 1.4))
+    sphere = make_sphere(radius=0.62, center=(0.55, 0.0, 0.0))
+    return _surface_boolean_body(boolean_difference(cube, [sphere]))
+
+
+def _surface_rt_csg_003_cube_intersection_sphere() -> SurfaceBody:
+    cube = make_box(size=(1.4, 1.4, 1.4))
+    sphere = make_sphere(radius=0.72, center=(0.42, 0.0, 0.0))
+    return _surface_boolean_body(boolean_intersection([cube, sphere]))
+
+
+def _surface_rt_csg_004_cylinder_difference_cube_slot() -> SurfaceBody:
+    cylinder = make_cylinder(radius=0.55, height=1.4)
+    cube = make_box(size=(0.72, 0.72, 0.72), center=(0.35, 0.0, 0.0))
+    return _surface_boolean_body(boolean_difference(cylinder, [cube]))
+
+
+def _surface_rt_csg_005_cube_difference_cylinder_through_hole() -> SurfaceBody:
+    cube = make_box(size=(1.4, 1.4, 1.4))
+    cylinder = make_cylinder(radius=0.3, height=1.8, direction=(0.0, 1.0, 0.0))
+    return _surface_boolean_body(boolean_difference(cube, [cylinder]))
+
+
+def _surface_rt_csg_006_orthogonal_cylinders_union() -> SurfaceBody:
+    cylinder_x = make_cylinder(radius=0.34, height=1.5, direction=(1.0, 0.0, 0.0))
+    cylinder_y = make_cylinder(radius=0.34, height=1.5, direction=(0.0, 1.0, 0.0))
+    return _surface_boolean_body(boolean_union([cylinder_x, cylinder_y]))
+
+
+def _surface_rt_csg_007_orthogonal_cylinders_intersection() -> SurfaceBody:
+    cylinder_x = make_cylinder(radius=0.45, height=1.5, direction=(1.0, 0.0, 0.0))
+    cylinder_y = make_cylinder(radius=0.45, height=1.5, direction=(0.0, 1.0, 0.0))
+    return _surface_boolean_body(boolean_intersection([cylinder_x, cylinder_y]))
+
+
+def _surface_rt_csg_008_tangent_sphere_cube_union() -> SurfaceBody:
+    cube = make_box(size=(1.0, 1.0, 1.0))
+    sphere = make_sphere(radius=0.35, center=(0.85, 0.0, 0.0))
+    return _surface_boolean_body(boolean_union([cube, sphere]))
+
+
+def _surface_rt_csg_009_coincident_face_box_union() -> SurfaceBody:
+    left = make_box(size=(1.0, 1.0, 1.0), center=(-0.5, 0.0, 0.0))
+    right = make_box(size=(1.0, 1.0, 1.0), center=(0.5, 0.0, 0.0))
+    return _surface_boolean_body(boolean_union([left, right]))
+
+
+def _surface_rt_csg_010_nested_cutters_box_sphere_cylinder() -> SurfaceBody:
+    cube = make_box(size=(1.5, 1.5, 1.5))
+    sphere = make_sphere(radius=0.48, center=(0.38, 0.0, 0.0))
+    cylinder = make_cylinder(radius=0.22, height=1.9, direction=(0.0, 1.0, 0.0))
+    return _surface_boolean_body(boolean_difference(cube, [sphere, cylinder]))
+
+
+def _surface_rt_csg_011_multi_operand_union_chain() -> SurfaceBody:
+    cube = make_box(size=(0.9, 0.9, 0.9), center=(-0.35, 0.0, 0.0))
+    sphere = make_sphere(radius=0.42, center=(0.28, 0.0, 0.0))
+    cylinder = make_cylinder(radius=0.2, height=1.35, direction=(0.0, 1.0, 0.0), center=(0.0, 0.0, 0.0))
+    return _surface_boolean_body(boolean_union([sphere, cylinder, cube]))
+
+
+def _surface_rt_csg_012_multi_operand_difference_chain() -> SurfaceBody:
+    cube = make_box(size=(1.5, 1.2, 1.2))
+    first_cutter = make_sphere(radius=0.42, center=(0.45, 0.0, 0.0))
+    second_cutter = make_cylinder(radius=0.18, height=1.7, direction=(0.0, 0.0, 1.0), center=(-0.35, 0.0, 0.0))
+    return _surface_boolean_body(boolean_difference(cube, [first_cutter, second_cutter]))
+
+
+def _surface_rt_patch_csg_001_planar_box_sphere_difference() -> SurfaceBody:
+    cube = make_box(size=(1.4, 1.4, 1.4))
+    sphere = make_sphere(radius=0.62, center=(0.55, 0.0, 0.0))
+    return _surface_boolean_body(boolean_difference(cube, [sphere]))
+
+
+def _surface_rt_patch_csg_003_revolution_cylinder_box_difference() -> SurfaceBody:
+    cylinder = make_cylinder(radius=0.55, height=1.4)
+    cube = make_box(size=(0.72, 0.72, 0.72), center=(0.35, 0.0, 0.0))
+    return _surface_boolean_body(boolean_difference(cylinder, [cube]))
+
+
+def _loft_provenance_ruled_box_body() -> SurfaceBody:
+    box = make_box(size=(1.0, 1.0, 1.0))
+    shell = box.iter_shells(world=True)[0]
+    front = shell.patches[0]
+    ruled_front = RuledSurfacePatch(
+        family="ruled",
+        start_curve=(front.point_at(0.0, 0.0), front.point_at(0.0, 1.0)),
+        end_curve=(front.point_at(1.0, 0.0), front.point_at(1.0, 1.0)),
+        metadata={"kernel": {"operation": "loft", "surface_role": "sidewall"}},
+    )
+    return make_surface_body(
+        (
+            make_surface_shell(
+                (ruled_front, *shell.patches[1:]),
+                connected=True,
+                seams=shell.seams,
+                adjacency=shell.adjacency,
+                metadata={"kernel": {"operation": "loft", "executor": "surface", "branch_count": 1}},
+            ),
+        ),
+        metadata={"kernel": {"operation": "loft", "executor": "surface", "branch_count": 1}},
+    )
+
+
+def _surface_rt_patch_csg_002_loft_ruled_box_difference() -> SurfaceBody:
+    body = _loft_provenance_ruled_box_body()
+    cutter = make_box(size=(0.45, 0.45, 0.45), center=(0.25, 0.0, 0.0))
+    return _surface_boolean_body(boolean_difference(body, [cutter]))
+
+
+def _assert_bspline_nurbs_fixture_metadata(body: SurfaceBody, expected_family: str) -> SurfaceBody:
+    metadata = body.kernel_metadata()["bspline_nurbs_body_csg"]
+    assert metadata["source_patch_family"] == expected_family
+    assert metadata["no_mesh_fallback"] is True
+    assert metadata["evidence"]["readiness"] == "success-ready"
+    assert metadata["evidence"]["no_mesh_fallback"] is True
+    return body
+
+
+def _surface_bspline_planar_intersection() -> SurfaceBody:
+    analytic = make_box(size=(1.0, 1.0, 1.0))
+    spline = make_box_with_higher_order_front_wall("bspline")
+    return _assert_bspline_nurbs_fixture_metadata(
+        _surface_boolean_body(boolean_intersection([analytic, spline])),
+        "bspline",
+    )
+
+
+def _surface_nurbs_planar_intersection() -> SurfaceBody:
+    analytic = make_box(size=(1.0, 1.0, 1.0))
+    nurbs = make_box_with_higher_order_front_wall("nurbs")
+    return _assert_bspline_nurbs_fixture_metadata(
+        _surface_boolean_body(boolean_intersection([analytic, nurbs])),
+        "nurbs",
+    )
+
+
+def _surface_bspline_nurbs_intersection() -> SurfaceBody:
+    spline = make_box_with_higher_order_front_wall("bspline")
+    nurbs = make_box_with_higher_order_front_wall("nurbs")
+    return _assert_bspline_nurbs_fixture_metadata(
+        _surface_boolean_body(boolean_intersection([spline, nurbs])),
+        "bspline",
+    )
+
+
+def _assert_sweep_subdivision_fixture_metadata(body: SurfaceBody, expected_family: str) -> SurfaceBody:
+    metadata = body.kernel_metadata()["sweep_subdivision_body_csg"]
+    assert metadata["source_patch_family"] == expected_family
+    assert metadata["no_mesh_fallback"] is True
+    assert metadata["evidence"]["supported"] is True
+    return body
+
+
+def _surface_sweep_planar_intersection() -> SurfaceBody:
+    analytic = make_box(size=(1.0, 1.0, 1.0))
+    sweep = make_box_with_sweep_front_wall()
+    return _assert_sweep_subdivision_fixture_metadata(
+        _surface_boolean_body(boolean_intersection([analytic, sweep])),
+        "sweep",
+    )
+
+
+def _surface_subdivision_planar_intersection() -> SurfaceBody:
+    analytic = make_box(size=(1.0, 1.0, 1.0))
+    subdivision = make_box_with_subdivision_front_wall()
+    return _assert_sweep_subdivision_fixture_metadata(
+        _surface_boolean_body(boolean_intersection([analytic, subdivision])),
+        "subdivision",
+    )
+
+
+def _surface_advanced_implicit_csg_union() -> SurfaceBody:
+    left = adapt_surface_patch_to_implicit_field(
+        PlanarSurfacePatch(family="planar"),
+        bounds=(-1.0, 1.0, -1.0, 1.0, -0.1, 0.1),
+    )
+    right = adapt_surface_patch_to_implicit_field(
+        PlanarSurfacePatch(family="planar", origin=np.array([0.0, 0.0, 0.5], dtype=float)),
+        bounds=(-1.0, 1.0, -1.0, 1.0, 0.4, 0.6),
+    )
+    return _surface_csg_success_body(
+        compose_implicit_field_csg_result("union", (left, right), samples=(3, 3, 3), max_sample_count=27)
+    )
+
+
+def _surface_advanced_heightmap_csg_union() -> SurfaceBody:
+    left = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.asarray([[0.0, 1.0], [2.0, 3.0]], dtype=float),
+        alpha_mask=np.ones((2, 2), dtype=bool),
+    )
+    right = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=np.asarray([[1.0, 0.5], [1.5, 4.0]], dtype=float),
+        alpha_mask=np.ones((2, 2), dtype=bool),
+    )
+    return _surface_csg_success_body(compose_heightmap_csg_result("union", left, right))
+
+
+def _surface_advanced_displacement_csg_union() -> SurfaceBody:
+    source = PlanarSurfacePatch(family="planar", metadata={"fixture_source": "shared"})
+    left = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.asarray([[0.0, 0.25], [0.5, 0.75]], dtype=float),
+        alpha_mask=np.ones((2, 2), dtype=bool),
+        projection_bounds=(-1.0, 1.0, -1.0, 1.0),
+    )
+    right = DisplacementSurfacePatch(
+        family="displacement",
+        source_patch=source,
+        displacement_samples=np.asarray([[0.5, 0.1], [0.25, 1.0]], dtype=float),
+        alpha_mask=np.ones((2, 2), dtype=bool),
+        projection_bounds=(-1.0, 1.0, -1.0, 1.0),
+    )
+    return _surface_csg_success_body(compose_displacement_csg_result("union", left, right))
+
+
+def _surface_sampled_implicit_promotion_target(target_family: str) -> SurfaceBody:
+    body = make_sampled_implicit_promotion_target_body(target_family)
+    metadata = body.kernel_metadata()["sampled_implicit_promotion"]
+    assert metadata["supported"] is True
+    assert metadata["target_family"] == target_family
+    assert metadata["no_mesh_fallback"] is True
+    assert metadata["lossiness"]["no_mesh_fallback"] is True
+    return body
+
+
+def _surface_sampled_implicit_promotion_implicit() -> SurfaceBody:
+    return _surface_sampled_implicit_promotion_target("implicit")
+
+
+def _surface_sampled_implicit_promotion_subdivision() -> SurfaceBody:
+    return _surface_sampled_implicit_promotion_target("subdivision")
+
+
+def _surface_sampled_implicit_promotion_nurbs() -> SurfaceBody:
+    return _surface_sampled_implicit_promotion_target("nurbs")
+
+
+def _surface_sampled_implicit_promotion_bspline() -> SurfaceBody:
+    return _surface_sampled_implicit_promotion_target("bspline")
 
 
 @pytest.mark.stl
@@ -618,6 +1125,8 @@ def test_surface_primitive_reference_stls(
     [
         ("surfacebody/csg/box_union_overlap", _surface_box_union_overlap, 20),
         ("surfacebody/csg/box_intersection_overlap", _surface_box_intersection_overlap, 12),
+        ("surfacebody/csg/box_contains_sphere_union", _surface_box_contains_sphere_union, 12),
+        ("surfacebody/csg/box_contains_sphere_intersection", _surface_box_contains_sphere_intersection, 100),
         ("surfacebody/csg/box_difference_corner_notch", _surface_box_difference_corner_notch, 20),
         ("surfacebody/csg/box_difference_end_recess", _surface_box_difference_end_recess, 20),
         ("surfacebody/csg/box_difference_side_recess", _surface_box_difference_side_recess, 20),
@@ -625,6 +1134,38 @@ def test_surface_primitive_reference_stls(
         ("surfacebody/csg/box_difference_shallow_step", _surface_box_difference_shallow_step, 12),
         ("surfacebody/csg/box_difference_coincident_face", _surface_box_difference_coincident_face, 12),
         ("surfacebody/csg/box_union_disjoint", _surface_box_union_disjoint, 24),
+        ("surfacebody/csg/mixed_family_disjoint_union", _surface_mixed_family_disjoint_union, 100),
+        ("surfacebody/csg/rt_csg_001_cube_union_sphere", _surface_rt_csg_001_cube_union_sphere, 60),
+        ("surfacebody/csg/rt_csg_002_cube_difference_sphere", _surface_rt_csg_002_cube_difference_sphere, 48),
+        ("surfacebody/csg/rt_csg_003_cube_intersection_sphere", _surface_rt_csg_003_cube_intersection_sphere, 32),
+        ("surfacebody/csg/rt_csg_004_cylinder_difference_cube_slot", _surface_rt_csg_004_cylinder_difference_cube_slot, 32),
+        ("surfacebody/csg/rt_csg_005_cube_difference_cylinder_through_hole", _surface_rt_csg_005_cube_difference_cylinder_through_hole, 48),
+        ("surfacebody/csg/rt_csg_006_orthogonal_cylinders_union", _surface_rt_csg_006_orthogonal_cylinders_union, 40),
+        ("surfacebody/csg/rt_csg_007_orthogonal_cylinders_intersection", _surface_rt_csg_007_orthogonal_cylinders_intersection, 16),
+        ("surfacebody/csg/rt_csg_008_tangent_sphere_cube_union", _surface_rt_csg_008_tangent_sphere_cube_union, 32),
+        ("surfacebody/csg/rt_csg_009_coincident_face_box_union", _surface_rt_csg_009_coincident_face_box_union, 12),
+        ("surfacebody/csg/rt_csg_010_nested_cutters_box_sphere_cylinder", _surface_rt_csg_010_nested_cutters_box_sphere_cylinder, 32),
+        ("surfacebody/csg/rt_csg_011_multi_operand_union_chain", _surface_rt_csg_011_multi_operand_union_chain, 32),
+        ("surfacebody/csg/rt_csg_012_multi_operand_difference_chain", _surface_rt_csg_012_multi_operand_difference_chain, 32),
+        ("surfacebody/csg/rt_patch_csg_001_planar_box_sphere_difference", _surface_rt_patch_csg_001_planar_box_sphere_difference, 48),
+        ("surfacebody/csg/rt_patch_csg_003_revolution_cylinder_box_difference", _surface_rt_patch_csg_003_revolution_cylinder_box_difference, 32),
+        ("surfacebody/csg/rt_patch_csg_002_loft_ruled_box_difference", _surface_rt_patch_csg_002_loft_ruled_box_difference, 12),
+        ("surfacebody/csg/bspline_planar_intersection", _surface_bspline_planar_intersection, 12),
+        ("surfacebody/csg/nurbs_planar_intersection", _surface_nurbs_planar_intersection, 12),
+        ("surfacebody/csg/bspline_nurbs_intersection", _surface_bspline_nurbs_intersection, 12),
+        ("surfacebody/csg/sweep_planar_intersection", _surface_sweep_planar_intersection, 12),
+        ("surfacebody/csg/subdivision_planar_intersection", _surface_subdivision_planar_intersection, 12),
+        ("surfacebody/csg/advanced_implicit_union", _surface_advanced_implicit_csg_union, 8),
+        ("surfacebody/csg/advanced_heightmap_union", _surface_advanced_heightmap_csg_union, 2),
+        ("surfacebody/csg/advanced_displacement_union", _surface_advanced_displacement_csg_union, 2),
+        ("surfacebody/csg/sampled_implicit_promotion_implicit", _surface_sampled_implicit_promotion_implicit, 8),
+        ("surfacebody/csg/sampled_implicit_promotion_subdivision", _surface_sampled_implicit_promotion_subdivision, 2),
+        ("surfacebody/csg/sampled_implicit_promotion_nurbs", _surface_sampled_implicit_promotion_nurbs, 2),
+        ("surfacebody/csg/sampled_implicit_promotion_bspline", _surface_sampled_implicit_promotion_bspline, 2),
+        ("loft/csg/rt_loft_csg_009_loft_union_loft_overlapping_ruled", build_loft_csg_rt_loft_csg_009_loft_union_loft_overlapping_ruled, 12),
+        ("loft/csg/rt_loft_csg_010_loft_intersection_loft_crossing_axes", build_loft_csg_rt_loft_csg_010_loft_intersection_loft_crossing_axes, 12),
+        ("loft/csg/rt_loft_csg_011_loft_difference_loft_shared_station", build_loft_csg_rt_loft_csg_011_loft_difference_loft_shared_station, 12),
+        ("loft/csg/rt_loft_csg_012_authored_color_preserved", build_loft_csg_rt_loft_csg_012_authored_color_preserved, 12),
     ],
 )
 def test_surface_csg_reference_stls(
@@ -641,6 +1182,109 @@ def test_surface_csg_reference_stls(
         update_dirty_reference_images=update_dirty_reference_images,
         min_facets=min_facets,
     )
+
+
+def test_mixed_planar_ruled_revolution_fixture_matrix_is_representative() -> None:
+    rows = build_mixed_planar_ruled_revolution_fixture_matrix()
+
+    assert {(row.left_family, row.right_family) for row in rows} == {
+        ("planar", "revolution"),
+        ("revolution", "planar"),
+        ("ruled", "planar"),
+    }
+    assert {row.operation for row in rows} == {"difference"}
+    fixture_root = Path(__file__).resolve().parent / "reference_review_fixtures"
+    for row in rows:
+        assert (fixture_root / row.artifact_path).resolve().exists()
+
+
+def test_no_hidden_mesh_fallback_audit_matrix_covers_advanced_families() -> None:
+    rows = build_no_hidden_mesh_fallback_audit_matrix()
+    by_family = {row.family: row for row in rows}
+
+    assert {
+        "bspline",
+        "nurbs",
+        "sweep",
+        "subdivision",
+        "implicit",
+        "heightmap",
+        "displacement",
+        "sampled-implicit-reference",
+    } <= set(by_family)
+    assert all(row.passed for row in rows)
+    assert all(row.no_mesh_fallback for row in rows)
+    assert all(row.total_records > 0 for row in rows)
+    assert all(
+        row.supported_surface_records + row.diagnostic_refusal_records > 0
+        for row in rows
+        if row.evidence_kind == "surface-family-pair"
+    )
+    assert by_family["sampled-implicit-reference"].proof_records >= 5
+
+
+def test_loft_self_intersection_reference_fixture_is_diagnostic_refusal() -> None:
+    row = build_loft_rt_loft_037_self_intersection_diagnostic()
+
+    assert row.fixture_id == "loft/rt_loft_037_self_intersection_diagnostic"
+    assert row.reference_id == "RT-LOFT-037"
+    assert row.artifact_policy == "diagnostic-refusal"
+    assert row.expected_output == "diagnostic evidence"
+    assert row.valid is False
+    assert row.diagnostic_code == "planner-self-intersection-risk"
+    assert row.branch_crossing_count > 0.0
+    assert row.no_mesh_fallback is True
+
+
+def test_underconstrained_branching_loft_csg_reference_fixture_is_diagnostic_refusal() -> None:
+    row = build_loft_rt_loft_csg_014_underconstrained_branch_refusal()
+
+    assert row.fixture_id == "loft/csg/rt_loft_csg_014_underconstrained_branch_refusal"
+    assert row.reference_id == "RT-LOFT-CSG-014"
+    assert row.artifact_policy == "diagnostic-refusal"
+    assert row.expected_output == "diagnostic evidence"
+    assert row.supported is False
+    assert row.diagnostic_code == "underconstrained"
+    assert row.operation == "difference"
+    assert row.no_mesh_fallback is True
+
+
+def test_loft_csg_diagnostic_reference_fixtures_cover_unsupported_routes() -> None:
+    rows = (
+        build_loft_csg_rt_loft_csg_001_cylinder_difference_box_slot_reference(),
+        build_loft_csg_rt_loft_csg_002_cylinder_difference_cross_drilled_cylinder_reference(),
+        build_loft_csg_rt_loft_csg_003_vessel_difference_sphere_scoop_reference(),
+        build_loft_csg_rt_loft_csg_004_hourglass_intersection_box_reference(),
+        build_loft_csg_rt_loft_csg_005_square_correspondence_union_post_reference(),
+        build_loft_csg_rt_loft_csg_006_phase_shift_difference_vertical_slot_reference(),
+        build_loft_csg_rt_loft_csg_007_branch_difference_sphere_joint_reference(),
+        build_loft_csg_rt_loft_csg_008_branch_intersection_cutter_window_reference(),
+    )
+
+    assert {row["reference_id"] for row in rows} == {
+        "RT-LOFT-CSG-001",
+        "RT-LOFT-CSG-002",
+        "RT-LOFT-CSG-003",
+        "RT-LOFT-CSG-004",
+        "RT-LOFT-CSG-005",
+        "RT-LOFT-CSG-006",
+        "RT-LOFT-CSG-007",
+        "RT-LOFT-CSG-008",
+    }
+    assert {row["artifact_policy"] for row in rows} == {"diagnostic-refusal"}
+    assert {row["expected_output"] for row in rows} == {"diagnostic evidence"}
+    assert all(row["supported"] is False for row in rows)
+    assert all(row["no_mesh_fallback"] is True for row in rows)
+    assert all(row["diagnostic"] for row in rows)
+
+
+def test_loft_csg_section_evidence_reference_fixture_is_readiness_payload() -> None:
+    row = build_loft_csg_rt_loft_csg_013_section_evidence_reference()
+
+    assert row["fixture_id"] == "loft/csg/rt_loft_csg_section_evidence_smoke"
+    assert row["ready"] is True
+    assert row["bundle_payload"]["evidence_kind"] == "loft-section"
+    assert row["accepted_body_identity"]
 
 
 @pytest.mark.stl

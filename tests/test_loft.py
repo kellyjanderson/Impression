@@ -19,11 +19,18 @@ from impression.modeling import (
     NURBSSurfacePatch,
     SweepSurfacePatch,
     SurfaceBody,
+    SurfaceBoundaryRef,
     SurfaceConsumerCollection,
+    SurfaceSeam,
     assert_loft_bspline_output_contract,
     assert_loft_nurbs_output_contract,
     assert_loft_sweep_output_contract,
+    build_loft_boundary_graph,
+    check_executed_loft_self_intersection_validity,
+    classify_loft_cap_validity,
+    classify_loft_seam_coverage,
     classify_loft_patch_family,
+    detect_loft_plan_self_intersections,
     export_tessellation_request,
     loft,
     loft_execute_plan,
@@ -37,6 +44,7 @@ from impression.modeling import (
     make_surface_mesh_adapter,
     mesh_from_surface_body,
     preview_tessellation_request,
+    summarize_loft_shell_validity,
     tessellate_surface_body,
     validate_loft_bspline_intent,
     validate_loft_nurbs_intent,
@@ -1905,6 +1913,176 @@ def test_loft_plan_sections_reports_nonzero_fairness_terms_for_split_birth_trans
     assert pre["branch_crossing"] >= 0.0
     assert pre["curvature_continuity"] >= 0.0
     assert pre["branch_acceleration"] >= 0.0
+
+
+def test_loft_self_intersection_detector_accepts_clean_plan_and_body():
+    base = as_section(make_rect(size=(1.0, 1.0)))
+    stations = [
+        Station(t=0.0, section=base, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=base, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    plan = loft_plan_sections(stations, samples=16, split_merge_mode="resolve")
+    body = loft_execute_plan(plan, cap_ends=True)
+
+    plan_report = detect_loft_plan_self_intersections(plan)
+    body_report = check_executed_loft_self_intersection_validity(body)
+
+    assert plan_report.valid is True
+    assert body_report.valid is True
+    assert plan_report.diagnostics == ()
+    assert body_report.diagnostics == ()
+    assert plan_report.canonical_payload()["no_mesh_fallback"] is True
+
+
+def test_loft_shell_validity_summary_exposes_csg_eligibility_facts():
+    body = loft(
+        [make_rect(size=(1.0, 1.0)), make_rect(size=(0.8, 0.8))],
+        path=[(0.0, 0.0, 0.0), (0.0, 0.0, 1.0)],
+        cap_ends=True,
+        samples=16,
+    )
+
+    record = summarize_loft_shell_validity(body)
+
+    assert record.provenance_present is True
+    assert record.shell_count == 1
+    assert record.patch_count >= 2
+    assert record.seam_count > 0
+    assert record.no_mesh_fallback is True
+    assert record.connected is True
+    assert record.seam_coverage is not None
+    assert record.seam_coverage["complete"] is True
+    assert record.cap_validity is not None
+    assert record.cap_validity["valid"] is True
+    assert record.closure_evidence is not None
+    assert record.closure_evidence["closed_valid"] is True
+    assert record.boundary_graph is not None
+    assert record.canonical_payload()["constrained_single_shell"] is True
+
+
+def test_loft_boundary_graph_classifies_complete_missing_duplicate_and_dangling_seams():
+    body = loft(
+        [make_rect(size=(1.0, 1.0)), make_rect(size=(0.8, 0.8))],
+        path=[(0.0, 0.0, 0.0), (0.0, 0.0, 1.0)],
+        cap_ends=True,
+        samples=16,
+    )
+    shell = body.iter_shells(world=True)[0]
+    graph = build_loft_boundary_graph(shell.patches, shell.seams)
+    complete = classify_loft_seam_coverage(graph)
+
+    missing = classify_loft_seam_coverage(build_loft_boundary_graph(shell.patches, shell.seams[:-1]))
+    duplicate = classify_loft_seam_coverage(
+        build_loft_boundary_graph(
+            shell.patches,
+            (
+                *shell.seams,
+                SurfaceSeam(
+                    "duplicate-test",
+                    (graph.boundary_refs[0], graph.boundary_refs[1]),
+                ),
+            ),
+        )
+    )
+    dangling = classify_loft_seam_coverage(
+        build_loft_boundary_graph(
+            shell.patches,
+            (
+                *shell.seams,
+                SurfaceSeam("dangling-test", (SurfaceBoundaryRef(0, "not-a-loft-boundary"),)),
+            ),
+        )
+    )
+
+    assert complete.complete is True
+    assert complete.missing == ()
+    assert missing.complete is False
+    assert missing.missing
+    assert duplicate.complete is False
+    assert duplicate.duplicate
+    assert dangling.complete is False
+    assert dangling.dangling == (SurfaceBoundaryRef(0, "not-a-loft-boundary"),)
+
+
+def test_loft_cap_validity_classifies_valid_uncapped_and_orientation_mismatch():
+    capped = loft(
+        [make_rect(size=(1.0, 1.0)), make_rect(size=(0.8, 0.8))],
+        path=[(0.0, 0.0, 0.0), (0.0, 0.0, 1.0)],
+        cap_ends=True,
+        samples=16,
+    )
+    uncapped = loft(
+        [make_rect(size=(1.0, 1.0)), make_rect(size=(0.8, 0.8))],
+        path=[(0.0, 0.0, 0.0), (0.0, 0.0, 1.0)],
+        cap_ends=False,
+        samples=16,
+    )
+    capped_shell = capped.iter_shells(world=True)[0]
+    cap_index = next(
+        index
+        for index, patch in enumerate(capped_shell.patches)
+        if patch.metadata.get("kernel", {}).get("surface_role") == "start-cap"
+    )
+    cap_patch = capped_shell.patches[cap_index]
+    reversed_outer = replace(
+        cap_patch.trim_loops[0],
+        points_uv=tuple(reversed(cap_patch.trim_loops[0].points_uv)),
+    )
+    invalid_patches = list(capped_shell.patches)
+    invalid_patches[cap_index] = replace(cap_patch, trim_loops=(reversed_outer,))
+
+    valid_record = classify_loft_cap_validity(capped_shell.patches)
+    uncapped_record = classify_loft_cap_validity(uncapped.iter_shells(world=True)[0].patches)
+    invalid_record = classify_loft_cap_validity(tuple(invalid_patches))
+
+    assert valid_record.valid is True
+    assert valid_record.cap_count == 2
+    assert uncapped_record.valid is False
+    assert "missing-terminal-cap:end-cap,start-cap" in uncapped_record.diagnostics
+    assert invalid_record.valid is False
+    assert any("outer-orientation" in diagnostic for diagnostic in invalid_record.diagnostics)
+
+
+def test_loft_self_intersection_detector_refuses_planner_branch_crossing():
+    base = as_section(make_rect(size=(1.0, 1.0)))
+    stations = [
+        Station(t=0.0, section=base, origin=[0, 0, 0], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+        Station(t=1.0, section=base, origin=[0, 0, 1], u=[1, 0, 0], v=[0, 1, 0], n=[0, 0, 1]),
+    ]
+    clean_plan = loft_plan_sections(stations, samples=16, split_merge_mode="resolve")
+    metadata = dict(clean_plan.metadata)
+    metadata["fairness_diagnostics"] = {
+        **dict(metadata["fairness_diagnostics"]),
+        "branch_crossing_count": 1.0,
+    }
+    plan = replace(clean_plan, metadata=metadata)
+
+    report = detect_loft_plan_self_intersections(plan)
+
+    assert report.valid is False
+    assert report.refused is True
+    assert report.diagnostics[0].code == "planner-self-intersection-risk"
+    assert report.diagnostics[0].no_mesh_fallback is True
+    assert "no mesh fallback" in report.diagnostics[0].message
+
+
+def test_executed_loft_self_intersection_detector_refuses_branch_crossing_metadata():
+    body = loft(
+        [make_rect(size=(1.0, 1.0)), make_rect(size=(0.8, 0.8))],
+        path=[(0.0, 0.0, 0.0), (0.0, 0.0, 1.0)],
+        cap_ends=True,
+        samples=16,
+    )
+    kernel = dict(body.kernel_metadata())
+    kernel["branch_crossing_count"] = 2.0
+    risky = replace(body, metadata={"kernel": kernel})
+
+    report = check_executed_loft_self_intersection_validity(risky)
+
+    assert report.valid is False
+    assert report.diagnostics[0].code == "executed-self-intersection-risk"
+    assert report.branch_crossing_count == pytest.approx(2.0)
+    assert report.canonical_payload()["refused"] is True
 
 
 def test_loft_plan_sections_global_fairness_converges_on_multistation_ambiguity():

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 import numpy as np
 
@@ -254,6 +254,92 @@ class LoftSweepFramePolicyRecord:
 
     def canonical_payload(self) -> dict[str, object]:
         return {"frame_policy": self.frame_policy, "source": self.source}
+
+
+@dataclass(frozen=True)
+class LoftBoundaryGraph:
+    """Deterministic boundary/seam graph authored by the loft executor."""
+
+    boundary_refs: tuple[SurfaceBoundaryRef, ...]
+    seam_refs: tuple[str, ...]
+    component_edges: tuple[tuple[str, tuple[SurfaceBoundaryRef, ...]], ...]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary_refs": [boundary.canonical_payload() for boundary in self.boundary_refs],
+            "seam_refs": self.seam_refs,
+            "component_edges": [
+                {
+                    "seam_id": seam_id,
+                    "boundaries": [boundary.canonical_payload() for boundary in boundaries],
+                }
+                for seam_id, boundaries in self.component_edges
+            ],
+        }
+
+
+@dataclass(frozen=True)
+class LoftSeamCoverageRecord:
+    """Structured seam coverage diagnostics for a loft boundary graph."""
+
+    complete: bool
+    missing: tuple[SurfaceBoundaryRef, ...] = ()
+    duplicate: tuple[SurfaceBoundaryRef, ...] = ()
+    dangling: tuple[SurfaceBoundaryRef, ...] = ()
+    seam_count: int = 0
+    boundary_count: int = 0
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary_count": self.boundary_count,
+            "complete": self.complete,
+            "dangling": [boundary.canonical_payload() for boundary in self.dangling],
+            "duplicate": [boundary.canonical_payload() for boundary in self.duplicate],
+            "missing": [boundary.canonical_payload() for boundary in self.missing],
+            "seam_count": self.seam_count,
+        }
+
+
+@dataclass(frozen=True)
+class LoftCapValidityRecord:
+    """Cap presence and trim-loop validity evidence for a loft shell."""
+
+    valid: bool
+    cap_count: int
+    expected_terminal_cap_count: int
+    cap_patch_indices: tuple[int, ...] = ()
+    diagnostics: tuple[str, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cap_count": self.cap_count,
+            "cap_patch_indices": self.cap_patch_indices,
+            "diagnostics": self.diagnostics,
+            "expected_terminal_cap_count": self.expected_terminal_cap_count,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "valid": self.valid,
+        }
+
+
+@dataclass(frozen=True)
+class LoftClosureEvidenceRecord:
+    """Closed-body eligibility evidence derived from loft-owned topology facts."""
+
+    closed_valid: bool
+    seam_coverage_complete: bool
+    cap_valid: bool
+    diagnostics: tuple[str, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cap_valid": self.cap_valid,
+            "closed_valid": self.closed_valid,
+            "diagnostics": self.diagnostics,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "seam_coverage_complete": self.seam_coverage_complete,
+        }
 
 
 @dataclass(frozen=True)
@@ -2094,6 +2180,550 @@ class LoftPlan:
             raise ValueError(status.diagnostic)
 
 
+@dataclass(frozen=True)
+class LoftSelfIntersectionDiagnostic:
+    """Deterministic loft self-intersection or invalid-metadata diagnostic."""
+
+    code: str
+    message: str
+    source: str
+    branch_crossing_count: float = 0.0
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "branch_crossing_count": self.branch_crossing_count,
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "source": self.source,
+        }
+
+
+@dataclass(frozen=True)
+class LoftSelfIntersectionValidityReport:
+    """Planner/executor visible validity signal for loft self-intersection risk."""
+
+    valid: bool
+    source: str
+    branch_crossing_count: float = 0.0
+    diagnostics: tuple[LoftSelfIntersectionDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    @property
+    def refused(self) -> bool:
+        return not self.valid
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "branch_crossing_count": self.branch_crossing_count,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "refused": self.refused,
+            "source": self.source,
+            "valid": self.valid,
+        }
+
+
+@dataclass(frozen=True)
+class LoftShellValidityRecord:
+    """Loft-owned shell/provenance facts used before CSG accepts a loft operand."""
+
+    provenance_present: bool
+    shell_count: int
+    patch_count: int
+    seam_count: int
+    connected: bool
+    branch_count: int
+    branch_crossing_count: float
+    boundary_graph: dict[str, object] | None = None
+    seam_coverage: dict[str, object] | None = None
+    cap_validity: dict[str, object] | None = None
+    closure_evidence: dict[str, object] | None = None
+    no_mesh_fallback: bool = True
+
+    @property
+    def constrained_single_shell(self) -> bool:
+        coverage_complete = True
+        if self.seam_coverage is not None:
+            coverage_complete = bool(self.seam_coverage.get("complete", False))
+        closed_valid = True
+        if self.closure_evidence is not None:
+            closed_valid = bool(self.closure_evidence.get("closed_valid", False))
+        return (
+            self.provenance_present
+            and self.shell_count == 1
+            and self.patch_count >= 2
+            and self.seam_count > 0
+            and self.connected
+            and coverage_complete
+            and closed_valid
+            and self.branch_count <= 1
+            and self.branch_crossing_count <= 0.0
+        )
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "branch_count": self.branch_count,
+            "branch_crossing_count": self.branch_crossing_count,
+            "boundary_graph": self.boundary_graph,
+            "cap_validity": self.cap_validity,
+            "closure_evidence": self.closure_evidence,
+            "connected": self.connected,
+            "constrained_single_shell": self.constrained_single_shell,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "patch_count": self.patch_count,
+            "provenance_present": self.provenance_present,
+            "seam_coverage": self.seam_coverage,
+            "seam_count": self.seam_count,
+            "shell_count": self.shell_count,
+        }
+
+
+@dataclass(frozen=True)
+class LoftBranchJointRecord:
+    """Branch joint membership and ownership evidence for branching loft routes."""
+
+    joint_id: str
+    transition_interval: tuple[int, int]
+    branch_ids: tuple[str, ...]
+    topology_case: str
+    owner: str | None = None
+    diagnostics: tuple[str, ...] = ()
+
+    @property
+    def constrained(self) -> bool:
+        return bool(self.joint_id and self.branch_ids and self.owner) and not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "branch_ids": self.branch_ids,
+            "constrained": self.constrained,
+            "diagnostics": self.diagnostics,
+            "joint_id": self.joint_id,
+            "owner": self.owner,
+            "topology_case": self.topology_case,
+            "transition_interval": self.transition_interval,
+        }
+
+
+@dataclass(frozen=True)
+class LoftBranchGraphEvidence:
+    """Loft-owned branch graph evidence consumed by CSG policy classification."""
+
+    branch_count: int
+    transition_count: int
+    branch_ids: tuple[str, ...]
+    joints: tuple[LoftBranchJointRecord, ...] = ()
+    branch_crossing_count: float = 0.0
+    source: str = "executor"
+    no_mesh_fallback: bool = True
+
+    @property
+    def underconstrained(self) -> bool:
+        if self.branch_count <= 1:
+            return False
+        if self.branch_crossing_count > 0.0:
+            return True
+        if len(self.branch_ids) < self.branch_count:
+            return True
+        if not self.joints:
+            return True
+        return any(not joint.constrained for joint in self.joints)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "branch_count": self.branch_count,
+            "branch_crossing_count": self.branch_crossing_count,
+            "branch_ids": self.branch_ids,
+            "joints": [joint.canonical_payload() for joint in self.joints],
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "source": self.source,
+            "transition_count": self.transition_count,
+            "underconstrained": self.underconstrained,
+        }
+
+
+def _coerce_branch_joint_record(payload: Mapping[str, object], index: int) -> LoftBranchJointRecord:
+    interval_payload = payload.get("transition_interval", (index, index + 1))
+    try:
+        interval_values = tuple(interval_payload)  # type: ignore[arg-type]
+        transition_interval = (int(interval_values[0]), int(interval_values[1]))
+    except (TypeError, ValueError, IndexError):
+        transition_interval = (index, index + 1)
+    branch_payload = payload.get("branch_ids", ())
+    if isinstance(branch_payload, Sequence) and not isinstance(branch_payload, (str, bytes)):
+        branch_ids = tuple(str(branch_id) for branch_id in branch_payload if str(branch_id))
+    else:
+        branch_ids = ()
+    diagnostics_payload = payload.get("diagnostics", ())
+    if isinstance(diagnostics_payload, Sequence) and not isinstance(diagnostics_payload, (str, bytes)):
+        diagnostics = tuple(str(item) for item in diagnostics_payload if str(item))
+    else:
+        diagnostics = ()
+    return LoftBranchJointRecord(
+        joint_id=str(payload.get("joint_id") or f"joint-{index}"),
+        transition_interval=transition_interval,
+        branch_ids=branch_ids,
+        topology_case=str(payload.get("topology_case") or "unknown"),
+        owner=None if payload.get("owner") is None else str(payload.get("owner")),
+        diagnostics=diagnostics,
+    )
+
+
+def build_branch_joint_diagnostic(evidence: LoftBranchGraphEvidence) -> tuple[str, ...]:
+    """Return deterministic underconstrained branch graph diagnostics."""
+
+    diagnostics: list[str] = []
+    if evidence.branch_count <= 1:
+        return ()
+    if evidence.branch_crossing_count > 0.0:
+        diagnostics.append("branch-crossing-risk")
+    if len(evidence.branch_ids) < evidence.branch_count:
+        diagnostics.append("missing-branch-membership")
+    if not evidence.joints:
+        diagnostics.append("missing-branch-joints")
+    for joint in evidence.joints:
+        if not joint.branch_ids:
+            diagnostics.append(f"{joint.joint_id}:missing-branch-membership")
+        if not joint.owner:
+            diagnostics.append(f"{joint.joint_id}:missing-owner")
+        diagnostics.extend(f"{joint.joint_id}:{diagnostic}" for diagnostic in joint.diagnostics)
+    return tuple(dict.fromkeys(diagnostics))
+
+
+def build_loft_branch_graph_evidence(body: SurfaceBody) -> LoftBranchGraphEvidence:
+    """Build branch graph evidence from loft-owned metadata without tessellation."""
+
+    kernel = _loft_kernel_metadata_from_body(body)
+    branch_count = int(kernel.get("branch_count", 0) or 0)
+    transition_count = int(kernel.get("transition_count", 0) or 0)
+    crossing_count = _loft_branch_crossing_count_from_metadata(kernel)
+    branch_graph_payload = kernel.get("loft_branch_graph")
+    branch_ids: tuple[str, ...] = ()
+    joints: tuple[LoftBranchJointRecord, ...] = ()
+    source = "executor"
+    if isinstance(branch_graph_payload, Mapping):
+        branch_payload = branch_graph_payload.get("branch_ids", ())
+        if isinstance(branch_payload, Sequence) and not isinstance(branch_payload, (str, bytes)):
+            branch_ids = tuple(str(branch_id) for branch_id in branch_payload if str(branch_id))
+        joint_payload = branch_graph_payload.get("joints", ())
+        if isinstance(joint_payload, Sequence) and not isinstance(joint_payload, (str, bytes)):
+            joints = tuple(
+                _coerce_branch_joint_record(item, index)
+                for index, item in enumerate(joint_payload)
+                if isinstance(item, Mapping)
+            )
+        source = str(branch_graph_payload.get("source") or source)
+    elif branch_count > 0:
+        branch_ids = tuple(f"branch-{index}" for index in range(branch_count if branch_count > 1 else 1))
+    return LoftBranchGraphEvidence(
+        branch_count=branch_count,
+        transition_count=transition_count,
+        branch_ids=branch_ids,
+        joints=joints,
+        branch_crossing_count=crossing_count,
+        source=source,
+    )
+
+
+def _loft_branch_crossing_count_from_metadata(metadata: dict[str, object]) -> float:
+    raw_count = metadata.get("branch_crossing_count")
+    if raw_count is None:
+        fairness = metadata.get("fairness_diagnostics", {})
+        if isinstance(fairness, dict):
+            raw_count = fairness.get("branch_crossing_count", 0.0)
+    try:
+        count = float(raw_count or 0.0)
+    except (TypeError, ValueError):
+        return -1.0
+    return count
+
+
+def _loft_kernel_metadata_from_body(body: SurfaceBody) -> dict[str, object]:
+    kernel = dict(body.kernel_metadata())
+    if kernel.get("operation") == "loft":
+        return kernel
+    if body.shell_count == 1:
+        shell_kernel = dict(body.iter_shells(world=True)[0].metadata.get("kernel", {}))
+        if shell_kernel.get("operation") == "loft":
+            return shell_kernel
+    for patch in body.iter_patches(world=True):
+        patch_kernel = patch.kernel_metadata()
+        if patch_kernel.get("operation") == "loft":
+            return dict(patch_kernel)
+    return {}
+
+
+def _loft_expected_patch_boundary_refs(patch: object, patch_index: int) -> tuple[SurfaceBoundaryRef, ...]:
+    kernel = dict(getattr(patch, "metadata", {}).get("kernel", {}))
+    surface_role = kernel.get("surface_role")
+    if surface_role in {"closure-cap", "start-cap", "end-cap"}:
+        trim_loops = tuple(getattr(patch, "trim_loops", ()) or ())
+        if not trim_loops:
+            return (SurfaceBoundaryRef(patch_index, "trim:outer"),)
+        return tuple(
+            SurfaceBoundaryRef(
+                patch_index,
+                "trim:outer" if loop_index == 0 else f"trim:inner:{loop_index - 1}",
+            )
+            for loop_index, _loop in enumerate(trim_loops)
+        )
+    return tuple(
+        SurfaceBoundaryRef(patch_index, boundary_id)
+        for boundary_id in ("left", "right", "bottom", "top")
+    )
+
+
+def build_loft_boundary_graph(
+    patches: Sequence[object],
+    seams: Sequence[SurfaceSeam],
+) -> LoftBoundaryGraph:
+    """Build loft boundary graph evidence without tessellation or global scans."""
+
+    boundary_refs = tuple(
+        boundary
+        for patch_index, patch in enumerate(patches)
+        for boundary in _loft_expected_patch_boundary_refs(patch, patch_index)
+    )
+    component_edges = tuple(
+        (seam.seam_id, tuple(seam.boundaries))
+        for seam in sorted(seams, key=lambda item: item.seam_id)
+    )
+    return LoftBoundaryGraph(
+        boundary_refs=tuple(sorted(boundary_refs, key=lambda ref: (ref.patch_index, ref.boundary_id))),
+        seam_refs=tuple(seam_id for seam_id, _boundaries in component_edges),
+        component_edges=component_edges,
+    )
+
+
+def classify_loft_seam_coverage(graph: LoftBoundaryGraph) -> LoftSeamCoverageRecord:
+    """Classify missing, duplicate, and dangling seam coverage in a loft graph."""
+
+    expected = set(graph.boundary_refs)
+    counts: dict[SurfaceBoundaryRef, int] = {boundary: 0 for boundary in graph.boundary_refs}
+    dangling: list[SurfaceBoundaryRef] = []
+    for _seam_id, boundaries in graph.component_edges:
+        for boundary in boundaries:
+            if boundary not in expected:
+                dangling.append(boundary)
+                continue
+            counts[boundary] += 1
+    missing = tuple(boundary for boundary in graph.boundary_refs if counts[boundary] == 0)
+    duplicate = tuple(boundary for boundary in graph.boundary_refs if counts[boundary] > 1)
+    unique_dangling = tuple(dict.fromkeys(dangling))
+    complete = not missing and not duplicate and not unique_dangling
+    return LoftSeamCoverageRecord(
+        complete=complete,
+        missing=missing,
+        duplicate=duplicate,
+        dangling=unique_dangling,
+        seam_count=len(graph.seam_refs),
+        boundary_count=len(graph.boundary_refs),
+    )
+
+
+def _loft_cap_patch_indices(patches: Sequence[object]) -> tuple[int, ...]:
+    return tuple(
+        patch_index
+        for patch_index, patch in enumerate(patches)
+        if dict(getattr(patch, "metadata", {}).get("kernel", {})).get("surface_role")
+        in {"closure-cap", "start-cap", "end-cap"}
+    )
+
+
+def classify_loft_cap_validity(patches: Sequence[object]) -> LoftCapValidityRecord:
+    """Classify loft cap presence and trim-loop validity without tessellation."""
+
+    cap_patch_indices = _loft_cap_patch_indices(patches)
+    terminal_roles = {
+        dict(getattr(patches[index], "metadata", {}).get("kernel", {})).get("surface_role")
+        for index in cap_patch_indices
+        if dict(getattr(patches[index], "metadata", {}).get("kernel", {})).get("surface_role")
+        in {"start-cap", "end-cap"}
+    }
+    diagnostics: list[str] = []
+    if terminal_roles != {"start-cap", "end-cap"}:
+        missing_roles = sorted({"start-cap", "end-cap"} - terminal_roles)
+        diagnostics.append(f"missing-terminal-cap:{','.join(missing_roles)}")
+    for patch_index in cap_patch_indices:
+        patch = patches[patch_index]
+        trim_loops = tuple(getattr(patch, "trim_loops", ()) or ())
+        if not trim_loops:
+            diagnostics.append(f"cap-{patch_index}:missing-trim-loop")
+            continue
+        outer_count = sum(1 for loop in trim_loops if loop.category == "outer")
+        if outer_count != 1:
+            diagnostics.append(f"cap-{patch_index}:outer-loop-count:{outer_count}")
+        for loop_index, trim_loop in enumerate(trim_loops):
+            area = float(_signed_area(trim_loop.points_uv))
+            if abs(area) <= 1e-12:
+                diagnostics.append(f"cap-{patch_index}:loop-{loop_index}:degenerate")
+            elif trim_loop.category == "outer" and area < 0.0:
+                diagnostics.append(f"cap-{patch_index}:loop-{loop_index}:outer-orientation")
+            elif trim_loop.category == "inner" and area > 0.0:
+                diagnostics.append(f"cap-{patch_index}:loop-{loop_index}:inner-orientation")
+    return LoftCapValidityRecord(
+        valid=not diagnostics,
+        cap_count=len(cap_patch_indices),
+        expected_terminal_cap_count=2,
+        cap_patch_indices=cap_patch_indices,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def build_loft_closure_evidence(
+    seam_coverage: LoftSeamCoverageRecord,
+    cap_validity: LoftCapValidityRecord,
+) -> LoftClosureEvidenceRecord:
+    """Build the closed-body eligibility decision from loft-owned evidence."""
+
+    diagnostics: list[str] = []
+    if not seam_coverage.complete:
+        diagnostics.append("incomplete-seam-coverage")
+    diagnostics.extend(cap_validity.diagnostics)
+    closed_valid = seam_coverage.complete and cap_validity.valid
+    return LoftClosureEvidenceRecord(
+        closed_valid=closed_valid,
+        seam_coverage_complete=seam_coverage.complete,
+        cap_valid=cap_validity.valid,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def summarize_loft_shell_validity(body: SurfaceBody) -> LoftShellValidityRecord:
+    """Summarize loft-owned shell/provenance facts without tessellating to mesh."""
+
+    kernel = _loft_kernel_metadata_from_body(body)
+    provenance_present = kernel.get("operation") == "loft"
+    shell = body.iter_shells(world=True)[0] if body.shell_count == 1 else None
+    graph_payload = None
+    coverage_payload = None
+    cap_payload = None
+    closure_payload = None
+    if shell is not None and provenance_present:
+        graph_payload = kernel.get("loft_boundary_graph")
+        coverage_payload = kernel.get("loft_seam_coverage")
+        cap_payload = kernel.get("loft_cap_validity")
+        closure_payload = kernel.get("loft_closure_evidence")
+        has_executor_evidence = any(
+            isinstance(payload, dict)
+            for payload in (graph_payload, coverage_payload, cap_payload, closure_payload)
+        ) or bool(_loft_cap_patch_indices(shell.patches))
+        if has_executor_evidence and (
+            not isinstance(graph_payload, dict)
+            or not isinstance(coverage_payload, dict)
+            or not isinstance(cap_payload, dict)
+            or not isinstance(closure_payload, dict)
+        ):
+            graph = build_loft_boundary_graph(shell.patches, shell.seams)
+            coverage = classify_loft_seam_coverage(graph)
+            cap_validity = classify_loft_cap_validity(shell.patches)
+            closure_evidence = build_loft_closure_evidence(coverage, cap_validity)
+            graph_payload = graph.canonical_payload()
+            coverage_payload = coverage.canonical_payload()
+            cap_payload = cap_validity.canonical_payload()
+            closure_payload = closure_evidence.canonical_payload()
+    return LoftShellValidityRecord(
+        provenance_present=provenance_present,
+        shell_count=body.shell_count,
+        patch_count=0 if shell is None else shell.patch_count,
+        seam_count=0 if shell is None else len(shell.seams),
+        connected=False if shell is None else shell.connected,
+        branch_count=int(kernel.get("branch_count", 0) or 0),
+        branch_crossing_count=_loft_branch_crossing_count_from_metadata(kernel),
+        boundary_graph=graph_payload if isinstance(graph_payload, dict) else None,
+        seam_coverage=coverage_payload if isinstance(coverage_payload, dict) else None,
+        cap_validity=cap_payload if isinstance(cap_payload, dict) else None,
+        closure_evidence=closure_payload if isinstance(closure_payload, dict) else None,
+    )
+
+
+def detect_loft_plan_self_intersections(
+    plan: LoftPlan,
+    *,
+    threshold: float = 0.0,
+) -> LoftSelfIntersectionValidityReport:
+    """Detect planner-visible loft self-intersection risk before execution/export."""
+
+    crossing_count = _loft_branch_crossing_count_from_metadata(plan.metadata)
+    if crossing_count < 0.0:
+        diagnostic = LoftSelfIntersectionDiagnostic(
+            code="invalid-metadata",
+            message="Loft plan self-intersection detector requires numeric branch_crossing_count; no mesh fallback was attempted.",
+            source="planner",
+            branch_crossing_count=crossing_count,
+        )
+        return LoftSelfIntersectionValidityReport(
+            valid=False,
+            source="planner",
+            branch_crossing_count=crossing_count,
+            diagnostics=(diagnostic,),
+        )
+    if crossing_count > threshold:
+        diagnostic = LoftSelfIntersectionDiagnostic(
+            code="planner-self-intersection-risk",
+            message="Loft planner detected branch crossing self-intersection risk; no mesh fallback was attempted.",
+            source="planner",
+            branch_crossing_count=crossing_count,
+        )
+        return LoftSelfIntersectionValidityReport(
+            valid=False,
+            source="planner",
+            branch_crossing_count=crossing_count,
+            diagnostics=(diagnostic,),
+        )
+    return LoftSelfIntersectionValidityReport(
+        valid=True,
+        source="planner",
+        branch_crossing_count=crossing_count,
+    )
+
+
+def check_executed_loft_self_intersection_validity(
+    body: SurfaceBody,
+    *,
+    threshold: float = 0.0,
+) -> LoftSelfIntersectionValidityReport:
+    """Check executed loft metadata for self-intersection risk before export."""
+
+    kernel = _loft_kernel_metadata_from_body(body)
+    if kernel.get("operation") != "loft":
+        return LoftSelfIntersectionValidityReport(valid=True, source="executor", branch_crossing_count=0.0)
+    crossing_count = _loft_branch_crossing_count_from_metadata(kernel)
+    if crossing_count < 0.0:
+        diagnostic = LoftSelfIntersectionDiagnostic(
+            code="invalid-metadata",
+            message="Executed loft validity checker requires numeric branch_crossing_count; no mesh fallback was attempted.",
+            source="executor",
+            branch_crossing_count=crossing_count,
+        )
+        return LoftSelfIntersectionValidityReport(
+            valid=False,
+            source="executor",
+            branch_crossing_count=crossing_count,
+            diagnostics=(diagnostic,),
+        )
+    if crossing_count > threshold:
+        diagnostic = LoftSelfIntersectionDiagnostic(
+            code="executed-self-intersection-risk",
+            message="Executed loft carries branch crossing self-intersection risk; no mesh fallback was attempted.",
+            source="executor",
+            branch_crossing_count=crossing_count,
+        )
+        return LoftSelfIntersectionValidityReport(
+            valid=False,
+            source="executor",
+            branch_crossing_count=crossing_count,
+            diagnostics=(diagnostic,),
+        )
+    return LoftSelfIntersectionValidityReport(
+        valid=True,
+        source="executor",
+        branch_crossing_count=crossing_count,
+    )
+
+
 def loft_profiles(
     profiles: Sequence[Section | Region | Path2D | object],
     path: Path3D | PolyPath | Sequence[Sequence[float]] | None = None,
@@ -3544,13 +4174,33 @@ def _loft_execute_plan_surface(
             )
         )
 
+    boundary_graph = build_loft_boundary_graph(tuple(patches), tuple(seams))
+    seam_coverage = classify_loft_seam_coverage(boundary_graph)
+    cap_validity = classify_loft_cap_validity(tuple(patches))
+    closure_evidence = build_loft_closure_evidence(seam_coverage, cap_validity)
+    loft_metadata = {
+        "kernel": {
+            "operation": "loft",
+            "executor": "surface",
+            "split_merge_mode": plan.metadata.get("split_merge_mode"),
+            "ambiguity_mode": plan.metadata.get("ambiguity_mode"),
+            "branch_count": max((len(transition.branch_order) for transition in plan.transitions), default=0),
+            "branch_crossing_count": plan.metadata.get("fairness_diagnostics", {}).get("branch_crossing_count", 0.0),
+            "transition_count": len(plan.transitions),
+            "station_count": len(plan.stations),
+            "loft_boundary_graph": boundary_graph.canonical_payload(),
+            "loft_cap_validity": cap_validity.canonical_payload(),
+            "loft_closure_evidence": closure_evidence.canonical_payload(),
+            "loft_seam_coverage": seam_coverage.canonical_payload(),
+        }
+    }
     shell = make_surface_shell(
         tuple(patches),
-        connected=False,
+        connected=closure_evidence.closed_valid,
         seams=tuple(seams),
-        metadata={"kernel": {"operation": "loft", "executor": "surface"}},
+        metadata=loft_metadata,
     )
-    return make_surface_body((shell,), metadata={"kernel": {"operation": "loft", "executor": "surface"}})
+    return make_surface_body((shell,), metadata=loft_metadata)
 
 
 def _station_loop_world(station: PlannedStation, loop: np.ndarray) -> np.ndarray:
@@ -7110,6 +7760,13 @@ __all__ = [
     "LoftAmbiguityLocator",
     "LoftAmbiguityRecord",
     "LoftPlanExecutabilityStatus",
+    "LoftBoundaryGraph",
+    "LoftCapValidityRecord",
+    "LoftClosureEvidenceRecord",
+    "LoftSeamCoverageRecord",
+    "LoftShellValidityRecord",
+    "LoftSelfIntersectionDiagnostic",
+    "LoftSelfIntersectionValidityReport",
     "LoftSuggestedAuthoredRail",
     "LoftPlan",
     "LoftDebugMeshResult",
@@ -7122,7 +7779,11 @@ __all__ = [
     "insert_synthetic_support_reference",
     "classify_loft_patch_family",
     "build_loft_ambiguity_record",
+    "build_loft_boundary_graph",
+    "build_loft_closure_evidence",
     "loft_patch_family_selection_records",
+    "classify_loft_cap_validity",
+    "classify_loft_seam_coverage",
     "locate_parent_span",
     "project_point_to_span",
     "resolve_authored_rails",
@@ -7140,6 +7801,9 @@ __all__ = [
     "validate_loft_ambiguity_locators",
     "validate_sample_correspondence",
     "validate_surface_executor_correspondence_input",
+    "check_executed_loft_self_intersection_validity",
+    "detect_loft_plan_self_intersections",
+    "summarize_loft_shell_validity",
     "loft_profiles",
     "loft",
     "loft_plan_sections",

@@ -16,8 +16,8 @@ state.
 Unit: Implementation Work Unit (IWU).
 Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
 Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
-Count: 2 IWU.
-Basis: parent program document with two 1-IWU child leaves: implicit field routes and sampled heightmap/displacement routes.
+Count: 5 IWU.
+Basis: parent program document with five final 1-IWU descendant leaves: implicit field routes, heightmap routes, displacement source/refusal, displacement result construction, and displacement persistence evidence.
 
 ## Scope
 
@@ -129,7 +129,9 @@ Readiness blockers:
 Split decision:
 
 - Split completed. This parent is not an implementation leaf; implementation
-  lives in Specs 05b1 and 05b2.
+  lives in final descendant leaves Specs 05b1, 05b2a, 05b2b1, 05b2b2a,
+  and 05b2b2b, with Spec 05b2 and its displacement parents retained only
+  as nested program documents.
 
 ## Acceptance
 

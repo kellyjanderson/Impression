@@ -17,10 +17,17 @@ from PySide6.QtGui import QIcon, QImage, QPainter
 from PySide6.QtWidgets import QApplication, QCheckBox, QLabel, QListWidget, QPushButton, QTabWidget, QTextEdit, QToolButton, QWidget
 
 from impression.mesh import Mesh, Polyline
-from impression.devtools.reference_review import ReferenceReviewStatus, ReviewSourceModelRecord
+from impression.devtools.reference_review import (
+    ReferenceEvidenceArtifactRecord,
+    ReferenceEvidenceBundleRecord,
+    ReferenceReviewStatus,
+    ReviewSourceModelRecord,
+)
 from impression.devtools.reference_review.ui import (
+    ArtifactEvidenceRow,
     BridgeRecord,
     BridgeRegistry,
+    ContextEvidenceSummary,
     DependencyPolicyRecord,
     PackageResourceManifest,
     PREVIEW_DISPLAY_CONTROL_ICON_FILES,
@@ -35,8 +42,11 @@ from impression.devtools.reference_review.ui import (
     PreviewRenderCommandQueue,
     WorkbenchIconToggleButton,
     build_dependency_policy_report,
+    format_missing_artifact_status,
     launch_workbench,
     load_style_tokens,
+    map_artifact_evidence_rows,
+    map_context_evidence_summary,
     PreviewRendererLifecycleWidget,
     SoftwarePreviewSurface,
     preview_display_control_icon_record,
@@ -87,6 +97,66 @@ def test_reference_review_ui_dependency_is_optional_extra() -> None:
     assert any(dep.startswith("PySide6") for dep in extras["reference-review-ui"])
     assert not any(dep.startswith("PySide6") for dep in core_dependencies)
     assert "qml/icons/preview-display/*.svg" in package_data
+
+
+def test_review_ui_maps_context_evidence_summary_without_absolute_paths(tmp_path: Path) -> None:
+    artifact = tmp_path / "section.json"
+    artifact.write_text("{}\n")
+    record = ReviewSourceModelRecord(
+        "fixture/evidence",
+        "Evidence Fixture",
+        tmp_path / "source.py",
+        evidence_bundles=(
+            ReferenceEvidenceBundleRecord(
+                bundle_id="bundle-a",
+                evidence_kind="loft-section",
+                artifacts=(
+                    ReferenceEvidenceArtifactRecord("section", "application/json", artifact),
+                    ReferenceEvidenceArtifactRecord("stl", "model/stl", tmp_path / "model.stl"),
+                ),
+            ),
+        ),
+    )
+
+    summary = map_context_evidence_summary(record)
+
+    assert all(isinstance(item, ContextEvidenceSummary) for item in summary)
+    assert summary[0].display_text() == "bundle-a (loft-section): section, stl"
+    assert tmp_path.as_posix() not in summary[0].display_text()
+
+
+def test_review_ui_maps_artifact_evidence_rows_with_missing_status(tmp_path: Path) -> None:
+    available = tmp_path / "available.stl"
+    missing_optional = tmp_path / "optional.json"
+    available.write_text("solid demo\nendsolid demo\n")
+    record = ReviewSourceModelRecord(
+        "fixture/artifacts",
+        "Artifact Fixture",
+        tmp_path / "source.py",
+        evidence_bundles=(
+            ReferenceEvidenceBundleRecord(
+                bundle_id="bundle-a",
+                evidence_kind="loft-section",
+                artifacts=(
+                    ReferenceEvidenceArtifactRecord("stl", "model/stl", available),
+                    ReferenceEvidenceArtifactRecord(
+                        "section",
+                        "application/json",
+                        missing_optional,
+                        required=False,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    rows = map_artifact_evidence_rows(record)
+
+    assert all(isinstance(row, ArtifactEvidenceRow) for row in rows)
+    assert rows[0].display_text() == "stl [model/stl] available.stl - available"
+    assert rows[1].status == "missing optional"
+    assert format_missing_artifact_status(missing_optional, required=True) == "missing required"
+    assert tmp_path.as_posix() not in rows[0].display_text()
 
 
 def test_live_shell_does_not_force_pyvista_offscreen_mode() -> None:

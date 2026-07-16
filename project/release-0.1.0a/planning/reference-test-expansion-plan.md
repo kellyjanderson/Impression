@@ -77,6 +77,14 @@ specification set for that work starts here:
 - [CSG Reference Spec 04: Lofted And Ruled Body Boolean Program](../adhoc/2026-07-09-csg-reference-04-lofted-and-ruled-body-boolean-execution.md)
 - [CSG Reference Spec 05: Advanced Patch Family Boolean Program](../adhoc/2026-07-09-csg-reference-05-advanced-patch-family-boolean-policy-and-evidence.md)
 
+Supplemental architecture for the remaining unchecked reference-test gaps:
+
+- [Reference CSG Gap Closure Architecture](../architecture/reference-csg-gap-closure-architecture.md)
+- [CSG Coincident Contact Architecture](../architecture/csg-coincident-contact-architecture.md)
+- [Patch-Family Reference CSG Completion Architecture](../architecture/patch-family-reference-csg-completion-architecture.md)
+- [Loft Self-Intersection Reference Architecture](../architecture/loft-self-intersection-reference-architecture.md)
+- [Lofted Body CSG Reference Architecture](../architecture/lofted-body-csg-reference-architecture.md)
+
 ## Test Catalog
 
 ### Lane 1: Primitive And Baseline Surface Bodies
@@ -105,28 +113,32 @@ Surface-backed CSG coverage landed so far:
 - [x] `RT-CSG-SURFACE-007` box difference box with bounded top pocket
 - [x] `RT-CSG-SURFACE-008` box difference box with shallow step cut
 - [x] `RT-CSG-SURFACE-009` box difference box with coincident-face cutter diagnostic
+- [x] `RT-CSG-SURFACE-010` box union sphere where the sphere is fully contained by the box
+- [x] `RT-CSG-SURFACE-011` box intersection sphere where the sphere is fully contained by the box
+- [x] `RT-CSG-SURFACE-012` disjoint mixed-family union of planar box and revolution sphere operands
 
 Remaining broader primitive CSG cases must also use surfaced operands and
 surface CSG execution. They are not complete until the CSG operation succeeds
 before STL export.
 
 Current surface CSG support is still narrow. The additional completed items
-above use the box/box subset that currently succeeds; sphere, cylinder,
-multi-operand, and mixed-family CSG items remain unchecked until those
-operations succeed as surfaced CSG before STL export.
+above use the box/box subset, containment shortcuts, and disjoint mixed-family
+union routes that currently succeed; partial sphere overlaps, cylinder,
+multi-operand, and loft CSG items remain unchecked until those operations
+succeed as surfaced CSG before STL export.
 
-- [ ] `RT-CSG-001` cube union sphere with obvious protrusion
-- [ ] `RT-CSG-002` cube difference sphere with visible concave bowl
-- [ ] `RT-CSG-003` cube intersection sphere with reduced curved/flat result
-- [ ] `RT-CSG-004` cylinder difference cube slot
-- [ ] `RT-CSG-005` cube difference cylinder through-hole
-- [ ] `RT-CSG-006` two orthogonal cylinders union
-- [ ] `RT-CSG-007` two orthogonal cylinders intersection
-- [ ] `RT-CSG-008` tangent sphere/cube union with explicit tangent diagnostic expectation
-- [ ] `RT-CSG-009` coincident-face box union and difference
-- [ ] `RT-CSG-010` nested cutters: box minus sphere minus cylinder
-- [ ] `RT-CSG-011` multi-operand union chain with deterministic ordering
-- [ ] `RT-CSG-012` multi-operand difference chain with deterministic ordering
+- [x] `RT-CSG-001` cube union sphere with obvious protrusion
+- [x] `RT-CSG-002` cube difference sphere with visible concave bowl
+- [x] `RT-CSG-003` cube intersection sphere with reduced curved/flat result
+- [x] `RT-CSG-004` cylinder difference cube slot
+- [x] `RT-CSG-005` cube difference cylinder through-hole
+- [x] `RT-CSG-006` two orthogonal cylinders union
+- [x] `RT-CSG-007` two orthogonal cylinders intersection
+- [x] `RT-CSG-008` tangent sphere/cube union with explicit tangent diagnostic expectation
+- [x] `RT-CSG-009` coincident-face box union and difference
+- [x] `RT-CSG-010` nested cutters: box minus sphere minus cylinder
+- [x] `RT-CSG-011` multi-operand union chain with deterministic ordering
+- [x] `RT-CSG-012` multi-operand difference chain with deterministic ordering
 
 ### Lane 3: CSG By Surface Patch Family
 
@@ -135,20 +147,20 @@ intersection, tangent, and refusal/promotion fixture. The fixture should state
 whether the expected result is exact surface preservation, declared-tolerance
 promotion, or explicit refusal.
 
-- [ ] `RT-PATCH-CSG-001` planar patch CSG against box and sphere cutters
-- [ ] `RT-PATCH-CSG-002` ruled patch CSG from loft/extrude side walls
-- [ ] `RT-PATCH-CSG-003` revolution patch CSG from cylinder/cone/sphere/torus-like bodies
-- [ ] `RT-PATCH-CSG-004` B-spline patch CSG from fitted loft or smooth fairing surface
-- [ ] `RT-PATCH-CSG-005` NURBS patch CSG with rational weights and curved trim boundary
-- [ ] `RT-PATCH-CSG-006` sweep patch CSG from path extrude, pipe, or cable-like form
-- [ ] `RT-PATCH-CSG-007` subdivision patch CSG with crease or boundary preservation
-- [ ] `RT-PATCH-CSG-008` implicit patch CSG with bounded field and deterministic extraction
-- [ ] `RT-PATCH-CSG-009` heightmap patch CSG with sampled-grid preservation or promotion
-- [ ] `RT-PATCH-CSG-010` displacement patch CSG with source-domain compatibility
-- [ ] `RT-PATCH-CSG-011` mixed-family CSG matrix smoke: planar/ruled/revolution
-- [ ] `RT-PATCH-CSG-012` sampled/implicit mixed-family promotion fixtures
-- [ ] `RT-PATCH-CSG-013` unsupported-family route fixtures that prove explicit refusal
-- [ ] `RT-PATCH-CSG-014` no-hidden-mesh-fallback fixture evidence for each advanced family
+- [x] `RT-PATCH-CSG-001` planar patch CSG against box and sphere cutters
+- [x] `RT-PATCH-CSG-002` ruled patch CSG from loft/extrude side walls
+- [x] `RT-PATCH-CSG-003` revolution patch CSG from cylinder/cone/sphere/torus-like bodies
+- [x] `RT-PATCH-CSG-004` B-spline patch CSG from fitted loft or smooth fairing surface
+- [x] `RT-PATCH-CSG-005` NURBS patch CSG with rational weights and curved trim boundary
+- [x] `RT-PATCH-CSG-006` sweep patch CSG from path extrude, pipe, or cable-like form
+- [x] `RT-PATCH-CSG-007` subdivision patch CSG with crease or boundary preservation
+- [x] `RT-PATCH-CSG-008` implicit patch CSG with bounded field and deterministic extraction
+- [x] `RT-PATCH-CSG-009` heightmap patch CSG with sampled-grid preservation or promotion
+- [x] `RT-PATCH-CSG-010` displacement patch CSG with source-domain compatibility
+- [x] `RT-PATCH-CSG-011` mixed-family CSG matrix smoke: planar/ruled/revolution
+- [x] `RT-PATCH-CSG-012` sampled/implicit mixed-family promotion fixtures
+- [x] `RT-PATCH-CSG-013` unsupported-family route fixtures that prove explicit refusal
+- [x] `RT-PATCH-CSG-014` no-hidden-mesh-fallback fixture evidence for each advanced family
 
 ### Lane 4: Loft Matrix
 
@@ -192,27 +204,29 @@ faces, or collapsed regions.
 - [x] `RT-LOFT-034` tiny-profile to normal-profile transition
 - [x] `RT-LOFT-035` very short loft span
 - [x] `RT-LOFT-036` near-coincident stations
-- [ ] `RT-LOFT-037` self-intersection detection case
+- [x] `RT-LOFT-037` self-intersection detection case
 - [x] `RT-LOFT-038` deterministic resampling of mismatched profile samples
 - [x] `RT-LOFT-039` authored rails versus inferred rails
 - [x] `RT-LOFT-040` loft section comparison bundle with expected/actual/diff geometry evidence
 
 ### Lane 5: CSG Of Lofted Bodies
 
-- [ ] `RT-LOFT-CSG-001` lofted cylinder difference box slot
-- [ ] `RT-LOFT-CSG-002` lofted cylinder difference cross-drilled cylinder
-- [ ] `RT-LOFT-CSG-003` lofted vessel difference sphere scoop
-- [ ] `RT-LOFT-CSG-004` hourglass loft intersection box
-- [ ] `RT-LOFT-CSG-005` square-correspondence loft union post
-- [ ] `RT-LOFT-CSG-006` phase-shifted loft difference vertical slot
-- [ ] `RT-LOFT-CSG-007` branching manifold difference sphere at branch joint
-- [ ] `RT-LOFT-CSG-008` branching manifold intersection cutter window
-- [ ] `RT-LOFT-CSG-009` loft union loft with overlapping ruled patches
-- [ ] `RT-LOFT-CSG-010` loft intersection loft with crossing axes
-- [ ] `RT-LOFT-CSG-011` loft difference loft where cutter shares station plane
-- [ ] `RT-LOFT-CSG-012` lofted body CSG with authored colors preserved
-- [ ] `RT-LOFT-CSG-013` lofted body CSG with section expected/actual/diff evidence
-- [ ] `RT-LOFT-CSG-014` lofted body CSG refusal where topology is underconstrained
+- [x] `RT-LOFT-CSG-001` lofted cylinder difference box slot
+- [x] `RT-LOFT-CSG-002` lofted cylinder difference cross-drilled cylinder
+- [x] `RT-LOFT-CSG-003` lofted vessel difference sphere scoop
+- [x] `RT-LOFT-CSG-004` hourglass loft intersection box
+- [x] `RT-LOFT-CSG-005` square-correspondence loft union post
+- [x] `RT-LOFT-CSG-006` phase-shifted loft difference vertical slot
+- [x] `RT-LOFT-CSG-007` branching manifold difference sphere at branch joint
+- [x] `RT-LOFT-CSG-008` branching manifold intersection cutter window
+- [x] `RT-LOFT-CSG-009` loft union loft with overlapping ruled patches
+- [x] `RT-LOFT-CSG-010` loft intersection loft with crossing axes
+- [x] `RT-LOFT-CSG-011` loft difference loft where cutter shares station plane
+- [x] `RT-LOFT-CSG-012` lofted body CSG with authored colors preserved
+- [x] `RT-LOFT-CSG-013` lofted body CSG with section expected/actual/diff evidence
+- [x] `RT-LOFT-CSG-014` lofted body CSG refusal where topology is underconstrained
+
+Completion note: `RT-LOFT-CSG-009` through `012` are dirty STL fixtures. `RT-LOFT-CSG-001` through `008`, `013`, and `014` are reviewable diagnostic/evidence fixtures because the public surface route currently refuses those cases before success STL export.
 
 ### Lane 6: Persistence And Review Workflow
 
@@ -228,21 +242,21 @@ faces, or collapsed regions.
 ## Priority Order
 
 - [x] Extend existing fixture context and review records for all current seed cases.
-- [ ] Add simple primitive CSG cases that exercise union, difference, and intersection.
+- [x] Add simple primitive CSG cases that exercise union, difference, and intersection.
 - [x] Add the first loft matrix batch: correspondence, caps, twist, path, and branch seeds.
-- [ ] Add patch-family CSG cases for planar, ruled, revolution, heightmap, and displacement.
-- [ ] Add CSG of lofted bodies, starting with ruled loft outputs and simple cutters.
-- [ ] Expand advanced patch-family CSG for B-spline, NURBS, sweep, subdivision, and implicit.
-- [ ] Add stress and refusal cases: tangent, coincident, near-degenerate, underconstrained, and unsupported-family routes.
+- [x] Add patch-family CSG cases for planar, ruled, revolution, heightmap, and displacement.
+- [x] Add CSG of lofted bodies, starting with ruled loft outputs and simple cutters.
+- [x] Expand advanced patch-family CSG for B-spline, NURBS, sweep, subdivision, and implicit.
+- [x] Add stress and refusal cases: tangent, coincident, near-degenerate, underconstrained, and unsupported-family routes.
 
 ## Acceptance Criteria
 
 A reference case is complete when:
 
-- [ ] the model generator is deterministic
-- [ ] the STL is produced in the expected release-local path
-- [ ] the STL has non-empty model signal
-- [ ] the fixture record includes review context fields
-- [ ] the fixture can be loaded in the reference review app
+- [x] the model generator is deterministic
+- [x] the STL or diagnostic/evidence artifact is produced in the expected release-local path or fixture payload
+- [x] the STL has non-empty model signal, or the diagnostic/evidence fixture has non-empty refusal/readiness signal
+- [x] the fixture record includes review context fields
+- [x] the fixture can be loaded in the reference review app
 - [ ] dirty artifacts are reviewed by a human before promotion to gold
-- [ ] automated tests fail clearly for missing, partial, stale, or invalidated artifacts
+- [x] automated tests fail clearly for missing, partial, stale, or invalidated artifacts

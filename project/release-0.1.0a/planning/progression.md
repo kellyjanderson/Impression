@@ -602,3 +602,201 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 376: Sampled Implicit Reference Fixture Promotion (v1.0)](../specifications/surface-376-sampled-implicit-reference-fixture-promotion-v1_0.md)
 - [x] [Surface Spec 377: Sampled Implicit No-Mesh-Fallback Evidence Gate (v1.0)](../specifications/surface-377-sampled-implicit-no-mesh-fallback-evidence-gate-v1_0.md)
 - [x] [Surface Spec 378: Sampled Implicit Dirty Evidence Rejection (v1.0)](../specifications/surface-378-sampled-implicit-dirty-evidence-rejection-v1_0.md)
+
+### Reference CSG Gap Closure Specifications
+- [x] [Surface Spec 379: Reference CSG Gap Audit And Fixture Gate (v1.0)](../specifications/surface-379-reference-csg-gap-audit-and-fixture-gate-v1_0.md)
+- [x] [Surface Spec 380: Coincident Contact Classifier (v1.0)](../specifications/surface-380-coincident-contact-classifier-v1_0.md)
+- [x] [Surface Spec 381: Face-Touch Union Shell Merger (v1.0)](../specifications/surface-381-face-touch-union-shell-merger-v1_0.md)
+- [x] [Surface Spec 382: Patch-Family Reference Matrix (v1.0)](../specifications/surface-382-patch-family-reference-matrix-v1_0.md)
+- [x] [Surface Spec 383: Planar And Revolution CSG Success Fixtures (v1.0)](../specifications/surface-383-planar-and-revolution-csg-success-fixtures-v1_0.md)
+- [x] [Surface Spec 402A: B-Spline/NURBS Body CSG Evidence Contract And Prerequisite Audit (v1.0)](../specifications/surface-402a-b-spline-nurbs-body-csg-evidence-contract-and-prerequisite-audit-v1_0.md)
+- [x] [Surface Spec 402B1: Analytic To B-Spline Body CSG Evidence Completion (v1.0)](../specifications/surface-402b1-analytic-to-b-spline-body-csg-evidence-completion-v1_0.md)
+- [x] [Surface Spec 402B2: Analytic To NURBS Body CSG Evidence Completion (v1.0)](../specifications/surface-402b2-analytic-to-nurbs-body-csg-evidence-completion-v1_0.md)
+- [x] [Surface Spec 402C: Spline/NURBS Pair Curve Body CSG Evidence Completion (v1.0)](../specifications/surface-402c-spline-nurbs-pair-curve-body-csg-evidence-completion-v1_0.md)
+- [x] [Surface Spec 402D: Spline/NURBS Coincident Region Body CSG Evidence Completion (v1.0)](../specifications/surface-402d-spline-nurbs-coincident-region-body-csg-evidence-completion-v1_0.md)
+- [x] [Surface Spec 402E: B-Spline/NURBS Patch Evidence Collector And Body-Route Readiness Gate (v1.0)](../specifications/surface-402e-b-spline-nurbs-patch-evidence-collector-and-body-route-readiness-gate-v1_0.md)
+- [x] [Surface Spec 401: B-Spline/NURBS Body-Level CSG Route Integration (v1.0)](../specifications/surface-401-b-spline-nurbs-body-level-csg-route-integration-v1_0.md)
+  - Complete; reachable and validated through `surface_boolean_result` with authored B-spline/NURBS closed-body operands, closed `SurfaceBody` success results, deterministic unsupported-operation refusal, provenance metadata, and no-mesh-fallback evidence.
+- [x] [Surface Spec 384: B-Spline And NURBS CSG Success Fixtures (v1.0)](../specifications/surface-384-b-spline-and-nurbs-csg-success-fixtures-v1_0.md)
+  - Complete; added analytic/B-spline, analytic/NURBS, and B-spline/NURBS public intersection dirty STL fixtures with review records, route metadata checks, generated artifacts, and no-mesh-fallback evidence.
+- [x] [Surface Spec 385: Sweep And Subdivision CSG Success Fixtures (v1.0)](../specifications/surface-385-sweep-and-subdivision-csg-success-fixtures-v1_0.md)
+  - Complete; added sweep/planar and subdivision/planar public intersection dirty STL fixtures with declared-tolerance route metadata checks, generated artifacts, and no-mesh-fallback evidence.
+- [x] [Surface Spec 386: Mixed Planar Ruled Revolution Matrix Fixtures (v1.0)](../specifications/surface-386-mixed-planar-ruled-revolution-matrix-fixtures-v1_0.md)
+  - Complete; added an explicit representative matrix coverage record/test for the existing planar/revolution, revolution/planar, and ruled/planar dirty STL fixtures.
+- [x] [Surface Spec 387: Sampled Implicit Promotion Success Fixtures (v1.0)](../specifications/surface-387-sampled-implicit-promotion-success-fixtures-v1_0.md)
+  - Complete; chose implicit, subdivision, NURBS, and B-spline promotion target expectations from the sampled/implicit promotion matrix, added dirty STL fixtures and review records, and validated target-family/no-mesh-fallback metadata before export.
+- [x] [Surface Spec 388: Unsupported-Family Refusal Fixtures (v1.0)](../specifications/surface-388-unsupported-family-refusal-fixtures-v1_0.md)
+  - Complete; added diagnostic-only RT-PATCH-CSG-013 review fixtures for non-CSG replacement, unsafe implicit, and malformed promotion refusals, with no artifact paths and no-mesh-fallback evidence checked through the sampled/implicit refusal matrix.
+- [x] [Surface Spec 389: No-Hidden-Mesh-Fallback Evidence Fixtures (v1.0)](../specifications/surface-389-no-hidden-mesh-fallback-evidence-fixtures-v1_0.md)
+  - Complete; added a bounded no-hidden-mesh-fallback audit matrix for advanced patch families plus sampled/implicit reference proofs, reusing stable CSG evidence payloads without generating new STL artifacts.
+- [x] [Surface Spec 390: Loft Self-Intersection Validity Detector (v1.0)](../specifications/surface-390-loft-self-intersection-validity-detector-v1_0.md)
+  - Complete; added planner and executed-body loft self-intersection validity reports based on stable branch-crossing metadata, exported the detector APIs, and covered clean and refusal paths without invoking mesh fallback.
+- [x] [Surface Spec 391: Loft Self-Intersection Diagnostic Reference Fixture (v1.0)](../specifications/surface-391-loft-self-intersection-diagnostic-reference-fixture-v1_0.md)
+  - Complete; added RT-LOFT-037 as a diagnostic-only review fixture backed by the loft self-intersection detector, with review context, no artifact paths, and no-mesh-fallback payload assertions.
+- [x] [Surface Spec 392: Loft CSG Eligibility Gate (v1.0)](../specifications/surface-392-loft-csg-eligibility-gate-v1_0.md)
+  - Complete; added loft-owned shell/provenance validity summaries, threaded them into CSG loft eligibility provenance, and verified eligible, branching, self-intersection, and underconstrained/no-mesh-fallback gate behavior.
+- [x] [Surface Spec 393: Loft Primitive Difference And Intersection Routes (v1.0)](../specifications/surface-393-loft-primitive-difference-and-intersection-routes-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 403-407 and 420-429 now provide eligible loft shell evidence, loft/primitive difference/intersection public routes, accepted box cut execution, structured unsupported cutter refusals, and no-hidden-mesh validation.
+- [x] [Surface Spec 394: Loft Primitive Union Route (v1.0)](../specifications/surface-394-loft-primitive-union-route-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 403-407 and 420-429 now provide eligible loft shell evidence plus exact and intersecting loft/primitive union public routes with surface-native result metadata and no-hidden-mesh validation.
+- [x] [Surface Spec 395: Loft Loft Pair Operation Routes (v1.0)](../specifications/surface-395-loft-loft-pair-operation-routes-v1_0.md)
+  - Complete; added the public `surface-csg.loft-pair` route, paired-loft operation plan metadata, exported executor, and public difference/union/intersection tests for eligible single-shell loft operands without hidden mesh fallback.
+- [x] [Surface Spec 396: Single-Shell Loft CSG Reference Fixtures (v1.0)](../specifications/surface-396-single-shell-loft-csg-reference-fixtures-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 430-431 and existing fixture-registry section bundle work now gate dirty STL and section evidence readiness on accepted public loft CSG result geometry.
+- [x] [Surface Spec 397: Branching Loft CSG Execution Policy (v1.0)](../specifications/surface-397-branching-loft-csg-execution-policy-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 408-410 provide branch graph evidence, branching policy classification, and decomposition/recomposition planning records.
+- [x] [Surface Spec 398: Underconstrained Branching Loft CSG Refusal Fixture (v1.0)](../specifications/surface-398-underconstrained-branching-loft-csg-refusal-fixture-v1_0.md)
+  - Complete; added RT-LOFT-CSG-014 as a diagnostic-only review fixture backed by the loft CSG eligibility gate, with no artifact paths and no-mesh-fallback refusal payload assertions.
+- [x] [Surface Spec 399: Loft CSG Metadata Color Propagation (v1.0)](../specifications/surface-399-loft-csg-metadata-color-propagation-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 411-412 provide fragment provenance, generated-surface style policy, and color ownership metadata on loft CSG results.
+- [x] [Surface Spec 400: Loft CSG Section Evidence Artifacts (v1.0)](../specifications/surface-400-loft-csg-section-evidence-artifacts-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 413-419 and 431 provide evidence bundle schema, registry integration, section contracts, and accepted-geometry section readiness handoff.
+
+#### ACD-Derived Loft CSG Completion Leaves
+
+- [x] [Surface Spec 403: Loft Boundary Graph And Seam Coverage Evidence (v1.0)](../specifications/surface-403-loft-boundary-graph-and-seam-coverage-evidence-v1_0.md)
+  - Complete; added loft boundary graph and seam coverage DTOs/helpers, executor-authored payloads, shell validity handoff, and public CSG eligibility coverage for complete/missing/duplicate/dangling seam diagnostics without tessellation.
+- [x] [Surface Spec 404: Loft Closure And Cap Validity Evidence (v1.0)](../specifications/surface-404-loft-closure-and-cap-validity-evidence-v1_0.md)
+  - Complete; added loft cap validity and closure evidence DTOs/helpers, executor-authored closed-valid gating, CSG consumption of closure evidence, and focused coverage for capped, uncapped, and invalid cap orientation paths.
+- [x] [Surface Spec 405: Loft CSG Operation Route Selection (v1.0)](../specifications/surface-405-loft-csg-operation-route-selection-v1_0.md)
+  - Complete; added loft CSG route selection records/helpers, executor-evidence scoping so legacy ruled-box routes stay on their existing path, public boolean API route-selection messaging, and supported/unsupported route tests without executing Surface Spec 406 geometry.
+- [x] [Surface Spec 406: Single-Shell Loft Primitive CSG Execution (v1.0)](../specifications/surface-406-single-shell-loft-primitive-csg-execution-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 420-429 now cover exact reuse, trim-fragment adaptation, kernel evidence, persistence/proof, and public cut executor integration for single-shell loft/primitive CSG.
+- [x] [Surface Spec 420: Loft Primitive Exact Reuse Execution (v1.0)](../specifications/surface-420-loft-primitive-exact-reuse-execution-v1_0.md)
+  - Complete; reachable and validated through the public `surface_boolean_result` route for exact no-cut/containment loft/primitive difference, intersection, and union cases, with loft primitive route metadata, result geometry metadata, fragment participation records, and no-hidden-mesh proof.
+- [x] [Surface Spec 421: Loft Primitive Trim-Fragment Adapter (v1.0)](../specifications/surface-421-loft-primitive-trim-fragment-adapter-v1_0.md)
+  - Complete; added exported loft primitive trim adapter and fragment classification records/helpers, wired intersecting loft/primitive public API cases to structured adapter evidence and no-hidden-mesh refusal pending Surface Spec 422 shell assembly, and validated adapter DTOs/classifications through focused public-route tests.
+- [x] [Surface Spec 422: Loft Primitive Cut Shell Assembly And Validity (v1.0)](../specifications/surface-422-loft-primitive-cut-shell-assembly-and-validity-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 423-429 split and complete source normalization, cut loops, generated caps, topology selection, shell assembly evidence, runtime validity, persistence, no-hidden-mesh proof, and public executor integration.
+- [x] [Surface Spec 423: Loft Primitive Intersection Source Normalization (v1.0)](../specifications/surface-423-loft-primitive-intersection-source-normalization-v1_0.md)
+  - Complete; added exported loft primitive source-region records/diagnostics and source normalizer, wired intersecting loft/primitive public API refusal payloads to include source-normalization evidence, and preserved no-hidden-mesh proof for box, sphere, cylinder, and unsupported-region diagnostics.
+- [x] [Surface Spec 423 Test: Loft Primitive Intersection Source Normalization](../test-specifications/surface-423-loft-primitive-intersection-source-normalization-v1_0.md)
+  - Complete; focused tests validate helper records and public Boolean route payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 424: Loft Patch-Local Cut Loop Construction (v1.0)](../specifications/surface-424-loft-patch-local-cut-loop-construction-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 424a-424c complete source-curve inversion, cut-loop closure/boundary participation, and degeneracy diagnostics.
+- [x] [Surface Spec 424a: Loft Patch-Local Source Curve Inversion (v1.0)](../specifications/surface-424a-loft-patch-local-source-curve-inversion-v1_0.md)
+  - Complete; added exported patch-local inversion records/diagnostics and inversion helper, reused validated trim-adapter patch-local curves without tessellation, and wired public loft/primitive refusal payloads to expose patch-local inversion records or deterministic no-mesh diagnostics.
+- [x] [Surface Spec 424a Test: Loft Patch-Local Source Curve Inversion](../test-specifications/surface-424a-loft-patch-local-source-curve-inversion-v1_0.md)
+  - Complete; focused tests validate box source-curve inversion, sphere missing-source-curve refusal, and public Boolean route inversion payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 424b: Loft Cut Loop Closure And Boundary Participation (v1.0)](../specifications/surface-424b-loft-cut-loop-closure-and-boundary-participation-v1_0.md)
+  - Complete; added exported cut-loop closure and boundary participation records/diagnostics, closed validated patch-local inversion extents without tessellation or shell assembly, and wired public loft/primitive refusal payloads to expose cut-loop closure evidence before generated-cap construction.
+- [x] [Surface Spec 424b Test: Loft Cut Loop Closure And Boundary Participation](../test-specifications/surface-424b-loft-cut-loop-closure-and-boundary-participation-v1_0.md)
+  - Complete; focused tests validate closed loop records, missing-inversion refusal, preserved source/cap/seam participation, and public Boolean route closure payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 424c: Loft Cut Loop Degeneracy Diagnostics (v1.0)](../specifications/surface-424c-loft-cut-loop-degeneracy-diagnostics-v1_0.md)
+  - Complete; added exported cut-loop degeneracy diagnostics/classifier, gates valid closed loops before generated-cap construction, and classifies open-loop, invalid-closure, zero-area, tangent, grazing, and duplicate-segment outcomes without tessellation.
+- [x] [Surface Spec 424c Test: Loft Cut Loop Degeneracy Diagnostics](../test-specifications/surface-424c-loft-cut-loop-degeneracy-diagnostics-v1_0.md)
+  - Complete; focused tests validate accepted loops, each degeneracy class, and public loft/primitive route refusal diagnostics with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 425: Loft Primitive Generated Cap Construction (v1.0)](../specifications/surface-425-loft-primitive-generated-cap-construction-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 425a-425c complete cap support classification, generated cap records, and cap-loop pairing diagnostics.
+- [x] [Surface Spec 425a: Loft Primitive Cap Support Classification (v1.0)](../specifications/surface-425a-loft-primitive-cap-support-classification-v1_0.md)
+  - Complete; added exported loft primitive cap support classification records/diagnostics, classifies box cut loops as planar-cap supported, and refuses missing or degenerate analytic cap paths through public loft/primitive route evidence without tessellation.
+- [x] [Surface Spec 425a Test: Loft Primitive Cap Support Classification](../test-specifications/surface-425a-loft-primitive-cap-support-classification-v1_0.md)
+  - Complete; focused tests validate supported box cap policy, unsupported sphere cap diagnostics, and public Boolean route cap-support payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 425b: Loft Primitive Generated Cap Record Construction (v1.0)](../specifications/surface-425b-loft-primitive-generated-cap-record-construction-v1_0.md)
+  - Complete; added exported generated cap records and builder, constructs source-native planar cap payloads from supported classifications, preserves source identity/provenance, and refuses missing or unsupported support classifications before construction.
+- [x] [Surface Spec 425b Test: Loft Primitive Generated Cap Record Construction](../test-specifications/surface-425b-loft-primitive-generated-cap-record-construction-v1_0.md)
+  - Complete; focused tests validate generated cap record identity/provenance, missing-support refusal, and public Boolean route generated-cap payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 425c: Loft Primitive Cap Loop Pairing And Diagnostics (v1.0)](../specifications/surface-425c-loft-primitive-cap-loop-pairing-and-diagnostics-v1_0.md)
+  - Complete; added exported cap-loop pairing records/diagnostics and exact pairing gate, pairs generated caps to their source cut loops exactly once, and refuses missing or duplicate cap-loop evidence before topology selection.
+- [x] [Surface Spec 425c Test: Loft Primitive Cap Loop Pairing And Diagnostics](../test-specifications/surface-425c-loft-primitive-cap-loop-pairing-and-diagnostics-v1_0.md)
+  - Complete; focused tests validate exact pairing, missing/duplicate pair refusals, and public Boolean route cap-loop pairing payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 426: Loft Primitive Fragment Topology And Operation Selection (v1.0)](../specifications/surface-426-loft-primitive-fragment-topology-and-operation-selection-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 426a-426c complete fragment retention, result topology classification, and topology orientation diagnostics.
+- [x] [Surface Spec 426a: Loft Primitive Operation Fragment Retention (v1.0)](../specifications/surface-426a-loft-primitive-operation-fragment-retention-v1_0.md)
+  - Complete; added exported retained-fragment records/diagnostics and operation retention helper, preserves source identity and operation provenance for union/difference/intersection, and exposes retention evidence through the public loft/primitive route before topology classification.
+- [x] [Surface Spec 426a Test: Loft Primitive Operation Fragment Retention](../test-specifications/surface-426a-loft-primitive-operation-fragment-retention-v1_0.md)
+  - Complete; focused tests validate retention for all Boolean operations, empty-classification refusal, and public Boolean route retention payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 426b: Loft Primitive Result Topology Classification (v1.0)](../specifications/surface-426b-loft-primitive-result-topology-classification-v1_0.md)
+  - Complete; added exported retained-fragment topology records/diagnostics and topology classifier, classifies empty, exterior edit, interior cavity, multi-shell, and refused topologies before shell assembly, and exposes topology evidence through the public loft/primitive route.
+- [x] [Surface Spec 426b Test: Loft Primitive Result Topology Classification](../test-specifications/surface-426b-loft-primitive-result-topology-classification-v1_0.md)
+  - Complete; focused tests validate deterministic topology classes, missing input/cap refusal, and public Boolean route topology payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 426c: Loft Primitive Topology Orientation And Refusal Diagnostics (v1.0)](../specifications/surface-426c-loft-primitive-topology-orientation-and-refusal-diagnostics-v1_0.md)
+  - Complete; added exported topology orientation readiness records/diagnostics and gate, reports ready topology handoff or precise refused-topology, ambiguous inside/outside, inverted-normal, and cap-orientation conflict diagnostics before seam/use pairing.
+- [x] [Surface Spec 426c Test: Loft Primitive Topology Orientation And Refusal Diagnostics](../test-specifications/surface-426c-loft-primitive-topology-orientation-and-refusal-diagnostics-v1_0.md)
+  - Complete; focused tests validate ready and refused orientation states plus public Boolean route orientation payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 427: Loft Primitive Seam And Shell Assembly (v1.0)](../specifications/surface-427-loft-primitive-seam-and-shell-assembly-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 427a-427c complete seam/use pairing, candidate shell assembly evidence, and adjacency rebuild diagnostics.
+- [x] [Surface Spec 427a: Loft Primitive Seam Use Pairing (v1.0)](../specifications/surface-427a-loft-primitive-seam-use-pairing-v1_0.md)
+  - Complete; added exported seam/use pairing records/diagnostics and boundary-use pairing gate, preserves source patch/cap identity, and refuses orientation-not-ready, dangling, duplicate, and one-to-many boundary uses before candidate shell assembly.
+- [x] [Surface Spec 427a Test: Loft Primitive Seam Use Pairing](../test-specifications/surface-427a-loft-primitive-seam-use-pairing-v1_0.md)
+  - Complete; focused tests validate valid seam/use pairing, invalid pairing diagnostics, and public Boolean route seam-use payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 427b: Loft Primitive Candidate Shell Assembly (v1.0)](../specifications/surface-427b-loft-primitive-candidate-shell-assembly-v1_0.md)
+  - Complete; added exported candidate shell records/diagnostics and candidate assembly helper, records retained fragments, generated caps, and seam/use pairings without runtime validity/persistence, and refuses missing orientation or seam/use evidence before body creation.
+- [x] [Surface Spec 427b Test: Loft Primitive Candidate Shell Assembly](../test-specifications/surface-427b-loft-primitive-candidate-shell-assembly-v1_0.md)
+  - Complete; focused tests validate supported candidate evidence, missing participant refusal, and public Boolean route candidate-shell payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 427c: Loft Primitive Adjacency Rebuild Diagnostics (v1.0)](../specifications/surface-427c-loft-primitive-adjacency-rebuild-diagnostics-v1_0.md)
+  - Complete; added exported adjacency rebuild records/diagnostics and readiness helper, reports complete candidate-shell adjacency or missing, duplicate, inconsistent, and candidate-not-ready diagnostics before runtime validity checks.
+- [x] [Surface Spec 427c Test: Loft Primitive Adjacency Rebuild Diagnostics](../test-specifications/surface-427c-loft-primitive-adjacency-rebuild-diagnostics-v1_0.md)
+  - Complete; focused tests validate complete adjacency, invalid link diagnostics, and public Boolean route adjacency payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 428: Loft Primitive Runtime Validity And Persistence Gate (v1.0)](../specifications/surface-428-loft-primitive-runtime-validity-and-persistence-gate-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 428a-428c complete runtime validity, accepted-result persistence/tessellation readiness, and no-hidden-mesh acceptance proof.
+- [x] [Surface Spec 428a: Loft Primitive Runtime Validity Checker (v1.0)](../specifications/surface-428a-loft-primitive-runtime-validity-checker-v1_0.md)
+  - Complete; added exported runtime validity records/diagnostics and validity checker, reports valid candidate shells or open-shell, non-manifold, inconsistent-orientation, and stale-evidence diagnostics before persistence.
+- [x] [Surface Spec 428a Test: Loft Primitive Runtime Validity Checker](../test-specifications/surface-428a-loft-primitive-runtime-validity-checker-v1_0.md)
+  - Complete; focused tests validate valid and invalid runtime states plus public Boolean route validity payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 428b: Loft Primitive Persistence And Tessellation Readiness (v1.0)](../specifications/surface-428b-loft-primitive-persistence-and-tessellation-readiness-v1_0.md)
+  - Complete; added exported accepted-result persistence/readiness records/diagnostics and metadata-only persistence gate, persists runtime-valid shell evidence with tessellation readiness while refusing invalid, stale, or non-ready shells without eager mesh/STL generation.
+- [x] [Surface Spec 428b Test: Loft Primitive Persistence And Tessellation Readiness](../test-specifications/surface-428b-loft-primitive-persistence-and-tessellation-readiness-v1_0.md)
+  - Complete; focused tests validate valid persistence, stale/invalid/non-ready refusal, and public Boolean route accepted-result readiness payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 428c: Loft Primitive No Hidden Mesh Acceptance Proof (v1.0)](../specifications/surface-428c-loft-primitive-no-hidden-mesh-acceptance-proof-v1_0.md)
+  - Complete; added exported no-hidden-mesh proof records/diagnostics, proof builder, and assertion hook so persisted loft/primitive accepted results can prove they remain surface-body results without hidden mesh fallback.
+- [x] [Surface Spec 428c Test: Loft Primitive No Hidden Mesh Acceptance Proof](../test-specifications/surface-428c-loft-primitive-no-hidden-mesh-acceptance-proof-v1_0.md)
+  - Complete; focused tests validate accepted proof construction, missing/fallback refusal, and public Boolean route proof payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 429: Loft Primitive Public Cut Executor Integration (v1.0)](../specifications/surface-429-loft-primitive-public-cut-executor-integration-v1_0.md)
+  - Complete; added exported public loft/primitive cut executor scope/diagnostic records and route integration so true intersecting loft/primitive box cuts return accepted `SurfaceBooleanResult` bodies with shared kernel evidence metadata while invalid cut evidence remains a structured no-mesh refusal.
+- [x] [Surface Spec 429 Test: Loft Primitive Public Cut Executor Integration](../test-specifications/surface-429-loft-primitive-public-cut-executor-integration-v1_0.md)
+  - Complete; focused route tests validate public difference, union, intersection, direct executor invocation, structured invalid refusal, and exact-reuse precedence with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 407: Loft CSG Result Geometry Reference Proof (v1.0)](../specifications/surface-407-loft-csg-result-geometry-reference-proof-v1_0.md)
+  - Closed as superseded and covered; Surface Spec 430 gates reference geometry proof on accepted public loft CSG result geometry.
+- [x] [Surface Spec 430: Loft CSG Reference Geometry Handoff Proof (v1.0)](../specifications/surface-430-loft-csg-reference-geometry-handoff-proof-v1_0.md)
+  - Complete; added loft CSG reference geometry handoff records/diagnostics and validation so dirty STL readiness is granted only to accepted public loft CSG `SurfaceBooleanResult` bodies with public executor metadata, while adapter-only, synthetic, sampled, or non-success payloads refuse before artifact writing.
+- [x] [Surface Spec 430 Test: Loft CSG Reference Geometry Handoff Proof](../test-specifications/surface-430-loft-csg-reference-geometry-handoff-proof-v1_0.md)
+  - Complete; workflow tests validate accepted handoff, refusal cases, dirty STL write smoke, and source-registry entrypoint integration with `.venv/bin/python -m pytest tests/test_reference_stl_expansion.py tests/test_reference_review_source_registry.py -q`.
+- [x] [Surface Spec 408: Loft Branch Graph Evidence (v1.0)](../specifications/surface-408-loft-branch-graph-evidence-v1_0.md)
+  - Complete; added exported loft branch graph and branch joint evidence records/builders, deterministic underconstrained branch diagnostics, and public CSG eligibility provenance coverage without tessellation.
+- [x] [Surface Spec 409: Branching Loft CSG Policy Classification (v1.0)](../specifications/surface-409-branching-loft-csg-policy-classification-v1_0.md)
+  - Complete; added exported branching loft CSG policy and diagnostic records, classified complete branch graphs as decomposition-required, refused underconstrained/self-intersecting branch graphs before execution, and wired the policy into public loft eligibility provenance.
+- [x] [Surface Spec 410: Branch Decomposition And Recomposition Records (v1.0)](../specifications/surface-410-branch-decomposition-and-recomposition-records-v1_0.md)
+  - Complete; added exported branch decomposition/sub-body/recomposition records, branch-local CSG planning from complete branch policy evidence, recomposition validation records, and eligibility provenance for decomposition-required branch routes without executing geometry prematurely.
+- [x] [Surface Spec 411: Loft CSG Fragment Provenance Map (v1.0)](../specifications/surface-411-loft-csg-fragment-provenance-map-v1_0.md)
+  - Complete; added exported loft CSG source/result fragment provenance records, deterministic missing/generated provenance handling, reusable provenance mapping, and attached provenance payloads to successful loft primitive result metadata.
+- [x] [Surface Spec 412: Loft CSG Color Ownership Resolver (v1.0)](../specifications/surface-412-loft-csg-color-ownership-resolver-v1_0.md)
+  - Complete; added exported loft CSG color ownership and generated-surface style policy records, authored/fallback color resolution from fragment provenance, successful result metadata attachment, and generated-fragment resolver tests.
+- [x] [Surface Spec 413: File Fixture Evidence Bundle Schema (v1.0)](../specifications/surface-413-file-fixture-evidence-bundle-schema-v1_0.md)
+  - Complete; added file-backed typed evidence bundle/artifact records, additive fixture parsing, required/optional artifact validation, path diagnostics, package exports, and compatibility tests preserving existing `artifact_paths`.
+- [x] [Surface Spec 414: Database Fixture Evidence Bundle Parity (v1.0)](../specifications/surface-414-database-fixture-evidence-bundle-parity-v1_0.md)
+  - Complete; added database evidence bundle load/serialize helpers, optional SQLite `evidence_bundles` hydration through the same source record shape, package exports, and DB parity tests while keeping legacy rows valid.
+- [x] [Surface Spec 415: Review UI Evidence Context Tab Display (v1.0)](../specifications/surface-415-review-ui-evidence-context-tab-display-v1_0.md)
+  - Complete; added context evidence summary display models/mapping, sanitized bundle/role summary text, selected-fixture context wiring, UI package exports, and focused view-model tests for bundled fixtures.
+- [x] [Surface Spec 416: Review UI Evidence Artifacts Tab Display (v1.0)](../specifications/surface-416-review-ui-evidence-artifacts-tab-display-v1_0.md)
+  - Complete; added artifact evidence row display models/mapping, required/optional missing status formatting, metadata-only artifacts tab wiring, UI package exports, and focused view-model tests without opening artifact payloads.
+- [x] [Surface Spec 417: Section Evidence Contract Records (v1.0)](../specifications/surface-417-section-evidence-contract-records-v1_0.md)
+  - Complete; added exported section evidence contract records and role/plane validation, parser support for section plane metadata, fixture-load diagnostics for missing expected/actual/diff roles or plane metadata, and focused loader tests.
+- [x] [Surface Spec 418: Loft CSG Section Artifact Generation (v1.0)](../specifications/surface-418-loft-csg-section-artifact-generation-v1_0.md)
+  - Closed as superseded and covered; Surface Spec 431 gates section evidence readiness on accepted public result geometry and declared section inputs.
+- [x] [Surface Spec 431: Loft CSG Section Evidence Readiness Handoff (v1.0)](../specifications/surface-431-loft-csg-section-evidence-readiness-handoff-v1_0.md)
+  - Complete; added section evidence readiness records/diagnostics and workflow validation so section bundles are ready only when backed by accepted loft CSG reference geometry handoff plus explicit section plane evidence.
+- [x] [Surface Spec 431 Test: Loft CSG Section Evidence Readiness Handoff](../test-specifications/surface-431-loft-csg-section-evidence-readiness-handoff-v1_0.md)
+  - Complete; workflow tests validate accepted readiness, missing-plane refusal, detached-evidence refusal, and source-registry entrypoint integration with `.venv/bin/python -m pytest tests/test_reference_stl_expansion.py tests/test_reference_review_source_registry.py -q`.
+- [x] [Surface Spec 419: Fixture Registry Integration For Section Bundles (v1.0)](../specifications/surface-419-fixture-registry-integration-for-section-bundles-v1_0.md)
+  - Complete; added exported dirty/gold evidence path-set and section bundle fixture-record builders, validated generated path references through standard evidence bundles, and covered fixture-loader integration for generated section bundle records.
+
+### CSG Reference Completion Ad Hoc Leaves
+- [x] [CSG Reference Spec 01: Primitive Analytic Surface Boolean Execution](../adhoc/2026-07-09-csg-reference-01-primitive-analytic-surface-boolean-execution.md)
+- [x] [CSG Reference Spec 02a: Trim Arrangement Graph Construction](../adhoc/2026-07-09-csg-reference-02a-trim-arrangement-graph-construction.md)
+- [x] [CSG Reference Spec 02b: Fragment Classification And Operation Selection](../adhoc/2026-07-09-csg-reference-02b-fragment-classification-and-operation-selection.md)
+- [x] [CSG Reference Spec 02c1: Shell And Seam Assembly](../adhoc/2026-07-09-csg-reference-02c1-shell-and-seam-assembly.md)
+- [x] [CSG Reference Spec 02c2: Cap Patch And Validity Gate](../adhoc/2026-07-09-csg-reference-02c2-cap-patch-and-validity-gate.md)
+- [x] [CSG Reference Spec 03: Multi-Operand Boolean Composition](../adhoc/2026-07-09-csg-reference-03-multi-operand-boolean-composition.md)
+- [x] [CSG Reference Spec 04a: Lofted Body Eligibility And Refusal Diagnostics](../adhoc/2026-07-09-csg-reference-04a-lofted-body-eligibility-and-refusal-diagnostics.md)
+- [x] [CSG Reference Spec 04b1: Ruled Patch Box-Cutter Execution](../adhoc/2026-07-09-csg-reference-04b1-ruled-patch-box-cutter-execution.md)
+- [x] [CSG Reference Spec 04b2: Ruled Patch Unsupported Cutter Diagnostics](../adhoc/2026-07-09-csg-reference-04b2-ruled-patch-unsupported-cutter-diagnostics.md)
+- [x] [CSG Reference Spec 04c: Loft CSG Reference Evidence](../adhoc/2026-07-09-csg-reference-04c-loft-csg-reference-evidence.md)
+- [x] [CSG Reference Spec 05a: Higher-Order Patch Family Boolean Routes](../adhoc/2026-07-09-csg-reference-05a-higher-order-patch-family-boolean-routes.md)
+- [x] [CSG Reference Spec 05b1: Implicit Field Boolean Routes](../adhoc/2026-07-09-csg-reference-05b1-implicit-field-boolean-routes.md)
+- [x] [CSG Reference Spec 05b2a: Heightmap Boolean Routes](../adhoc/2026-07-09-csg-reference-05b2a-heightmap-boolean-routes.md)
+- [x] [CSG Reference Spec 05b2b1: Displacement Source Identity And Refusal Route](../adhoc/2026-07-09-csg-reference-05b2b1-displacement-source-identity-and-refusal-route.md)
+- [x] [CSG Reference Spec 05b2b2a: Displacement Result Construction Route](../adhoc/2026-07-09-csg-reference-05b2b2a-displacement-result-construction-route.md)
+- [x] [CSG Reference Spec 05b2b2b: Displacement Payload Persistence Evidence](../adhoc/2026-07-09-csg-reference-05b2b2b-displacement-payload-persistence-evidence.md)
+- [x] [CSG Reference Spec 05c1: Supported Advanced Patch Dirty STL Evidence](../adhoc/2026-07-09-csg-reference-05c1-supported-advanced-patch-dirty-stl-evidence.md)
+- [x] [CSG Reference Spec 05c2: Unsupported Advanced Patch Diagnostic Evidence](../adhoc/2026-07-09-csg-reference-05c2-unsupported-advanced-patch-diagnostic-evidence.md)

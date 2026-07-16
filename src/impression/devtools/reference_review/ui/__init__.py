@@ -93,7 +93,15 @@ from .review_panels import (
     build_markdown_panel_state,
     build_refusal_display,
 )
-from .shell import WorkbenchLaunchResult, launch_workbench
+from .shell import (
+    ArtifactEvidenceRow,
+    ContextEvidenceSummary,
+    WorkbenchLaunchResult,
+    format_missing_artifact_status,
+    launch_workbench,
+    map_artifact_evidence_rows,
+    map_context_evidence_summary,
+)
 from .style import ComponentContractRecord, StyleLoadDiagnostic, StyleTokenRecord, load_style_tokens
 
 __all__ = [
@@ -102,6 +110,7 @@ __all__ = [
     "BridgeRegistry",
     "BlockedLinkDiagnostic",
     "ArtifactPreviewRecord",
+    "ArtifactEvidenceRow",
     "ArtifactPanelViewModel",
     "ArtifactRecord",
     "ArtifactTileViewModel",
@@ -114,6 +123,7 @@ __all__ = [
     "ComponentContractRecord",
     "ComponentGallery",
     "ComponentStateScenario",
+    "ContextEvidenceSummary",
     "DependencyPolicyRecord",
     "DependencyPolicyReport",
     "FixtureQueueItem",
@@ -170,10 +180,13 @@ __all__ = [
     "build_refusal_display",
     "choose_preview_adapter",
     "default_component_gallery",
+    "format_missing_artifact_status",
     "launch_workbench",
     "load_style_tokens",
     "preview_display_control_icon_record",
     "preview_display_control_icon_records",
+    "map_artifact_evidence_rows",
+    "map_context_evidence_summary",
     "preview_pane_empty_state",
     "preview_pane_failure_state",
     "preview_pane_loading_state",

@@ -121,6 +121,32 @@ Architecture-defined work:
 
 - [ ] replace diagnostic-only CSG completion with an executable CSG coverage
   gate that fails on `not-yet-implemented` and unresolved `unsupported` rows
+- [ ] convert unchecked reference-test CSG gaps into final specs from
+  [Reference CSG Gap Closure Architecture](reference-csg-gap-closure-architecture.md)
+  and its supplemental documents
+- [ ] implement face-touch coincident union support for `RT-CSG-009` from
+  [CSG Coincident Contact Architecture](csg-coincident-contact-architecture.md)
+- [ ] implement patch-family reference success, promotion, refusal, and
+  no-hidden-mesh-fallback fixture coverage from
+  [Patch-Family Reference CSG Completion Architecture](patch-family-reference-csg-completion-architecture.md)
+- [ ] implement loft self-intersection diagnostic reference coverage from
+  [Loft Self-Intersection Reference Architecture](loft-self-intersection-reference-architecture.md)
+- [ ] implement lofted-body CSG eligibility, operation routes, branching policy,
+  metadata propagation, and section evidence from
+  [Lofted Body CSG Reference Architecture](lofted-body-csg-reference-architecture.md)
+  - Status: `Architecture Change Documents Created`
+  - Active ACDs:
+    - [Loft Shell Connectivity And Closure Evidence](acd-loft-shell-connectivity-and-closure-evidence.md)
+    - [Single-Shell Loft CSG Operation Route](acd-single-shell-loft-csg-operation-route.md)
+    - [Branching Loft CSG Decomposition And Recomposition Policy](acd-branching-loft-csg-decomposition-and-recomposition-policy.md)
+    - [Loft CSG Result Provenance And Color Propagation](acd-loft-csg-result-provenance-and-color-propagation.md)
+    - [Reference Fixture Multi-Artifact Section Evidence Policy](acd-reference-fixture-multi-artifact-section-evidence-policy.md)
+  - Current implementation sequence:
+    1. loft shell connectivity and closure evidence
+    2. successful single-shell loft CSG routes
+    3. branch decomposition/recomposition policy
+    4. result provenance/color propagation
+    5. section evidence multi-artifact fixtures
 - [ ] split and implement higher-order parametric CSG routes for the 40
   per-operation rows involving B-spline, NURBS, sweep, and subdivision
 - [ ] split and implement higher-order CSG row taxonomy, analytic/spline,
@@ -175,6 +201,16 @@ Architecture-defined work:
 
 Manifest notes:
 
+- [x] Promoted the reference CSG gap closure manifest set into final Surface
+  Specs 379-400. These specs are linked from the specification README and
+  progression document; implementation checkboxes are tracked in progression.
+- [x] Completed five-pass review/update/rescore for Surface Specs 379-400,
+  added Work Units and Review History sections to each spec, and confirmed no
+  spec requires splitting before implementation.
+- [x] Reviewed the B-spline/NURBS body-level CSG blocker. Existing architecture
+  covers generic executable CSG flow and patch-level B-spline/NURBS routes, so
+  the missing item was captured as Surface Spec 401 rather than a new
+  architecture document.
 - [x] Critical review, rescore, split, review, rescore pass completed across
   the five depth-completion manifests.
 - [x] Two additional review/rescore/split cycles completed after the first

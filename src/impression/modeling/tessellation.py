@@ -377,6 +377,8 @@ def _seam_vertex_assignments(
 
 
 def _classify_shell(shell: SurfaceShell) -> SurfaceOutputClassification:
+    if shell.connected and shell.patches and all(isinstance(patch, ImplicitSurfacePatch) for patch in shell.patches):
+        return "closed"
     if not shell.seams:
         return "open"
     expected: dict[tuple[int, str], bool] = {}

@@ -14,8 +14,8 @@ with ruled or related loft-generated side patches.
 Unit: Implementation Work Unit (IWU).
 Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
 Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
-Count: 3 IWU.
-Basis: parent program document with three 1-IWU child leaves: eligibility/refusal, ruled execution, and loft CSG reference evidence.
+Count: 4 IWU.
+Basis: parent program document with four final 1-IWU descendant leaves: eligibility/refusal, ruled box-cutter execution, ruled unsupported-cutter diagnostics, and loft CSG reference evidence.
 
 ## Scope
 
@@ -135,7 +135,8 @@ Readiness blockers:
 Split decision:
 
 - Split completed. This parent is not an implementation leaf; implementation
-  lives in Specs 04a, 04b, and 04c.
+  lives in final descendant leaves Specs 04a, 04b1, 04b2, and 04c, with
+  Spec 04b retained only as a nested program document.
 
 ## Acceptance
 

@@ -72,6 +72,73 @@ class WorkbenchLaunchResult:
     engine: object | None = None
 
 
+@dataclass(frozen=True)
+class ContextEvidenceSummary:
+    bundle_id: str
+    evidence_kind: str
+    role_summary: str
+
+    def display_text(self) -> str:
+        return f"{self.bundle_id} ({self.evidence_kind}): {self.role_summary}"
+
+
+@dataclass(frozen=True)
+class ArtifactEvidenceRow:
+    bundle_id: str
+    role: str
+    kind: str
+    path_label: str
+    status: str
+
+    def display_text(self) -> str:
+        return f"{self.role} [{self.kind}] {self.path_label} - {self.status}"
+
+
+def map_context_evidence_summary(record: ReviewSourceModelRecord) -> tuple[ContextEvidenceSummary, ...]:
+    """Map fixture evidence bundles to compact context-tab labels."""
+
+    summaries: list[ContextEvidenceSummary] = []
+    for bundle in record.evidence_bundles:
+        roles = tuple(artifact.role for artifact in bundle.artifacts)
+        role_summary = ", ".join(roles) if roles else "no artifacts"
+        summaries.append(
+            ContextEvidenceSummary(
+                bundle_id=bundle.bundle_id,
+                evidence_kind=bundle.evidence_kind,
+                role_summary=role_summary,
+            )
+        )
+    return tuple(summaries)
+
+
+def format_missing_artifact_status(path: Path, *, required: bool) -> str:
+    """Format missing evidence artifact status without exposing absolute paths."""
+
+    return "missing required" if required else "missing optional"
+
+
+def map_artifact_evidence_rows(record: ReviewSourceModelRecord) -> tuple[ArtifactEvidenceRow, ...]:
+    """Map fixture evidence artifacts to metadata-only artifact-tab rows."""
+
+    rows: list[ArtifactEvidenceRow] = []
+    for bundle in record.evidence_bundles:
+        for artifact in bundle.artifacts:
+            status = "available" if artifact.path.is_file() else format_missing_artifact_status(
+                artifact.path,
+                required=artifact.required,
+            )
+            rows.append(
+                ArtifactEvidenceRow(
+                    bundle_id=bundle.bundle_id,
+                    role=artifact.role,
+                    kind=artifact.kind,
+                    path_label=artifact.path.name,
+                    status=status,
+                )
+            )
+    return tuple(rows)
+
+
 def _ensure_qt_app(argv: Sequence[str], *, offscreen: bool, widgets: bool = False) -> object:
     if offscreen:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -701,6 +768,7 @@ class ReferenceReviewWindow(QWidget):
             f"Source: {item['source_display_path']}\n"
             f"Expected: {item['expected_output'] or 'not declared'}\n"
             f"Artifact: {item['artifact_display_path']}"
+            f"{item['evidence_summary_text']}"
         )
         self._load_artifact_preview(item)
         self._load_selected_notes(self.queue.records[index])
@@ -753,6 +821,8 @@ class ReferenceReviewWindow(QWidget):
         live_artifact = artifact_path if artifact_path and artifact_path.is_file() else None
         self._preview_load_generation += 1
         self.artifact_thumb.setText(str(item.get("artifact_display_path", "")))
+        if item.get("artifact_evidence_text"):
+            self.artifact_thumb.setText(str(item["artifact_evidence_text"]))
         self.preview_surface.prepare_artifact(live_artifact)
         self.preview_surface.enqueue_render_command(PreviewRenderCommand.loading())
         self.preview_display_controls.set_ready(False)
@@ -994,8 +1064,10 @@ def _fixture_items_for_qml(
 ) -> list[dict[str, object]]:
     artifact_previews = artifact_previews or {}
     items: list[dict[str, object]] = []
-    for item in queue.items:
+    for item, record in zip(queue.items, queue.records, strict=True):
         preview = artifact_previews.get(item.fixture_id)
+        evidence_summary = tuple(summary.display_text() for summary in map_context_evidence_summary(record))
+        artifact_rows = tuple(row.display_text() for row in map_artifact_evidence_rows(record))
         items.append(
             {
                 "fixture_id": item.fixture_id,
@@ -1010,6 +1082,12 @@ def _fixture_items_for_qml(
                 "artifact_preview_status": getattr(preview, "diagnostic", None)
                 if preview is not None and getattr(preview, "diagnostic", None)
                 else "ready",
+                "evidence_summary_text": ""
+                if not evidence_summary
+                else "\n\nEvidence:\n" + "\n".join(evidence_summary),
+                "artifact_evidence_text": ""
+                if not artifact_rows
+                else "\n".join(artifact_rows),
                 "status": item.status,
             }
         )

@@ -13,7 +13,6 @@ log() {
 }
 
 venv_path=""
-use_local=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -l|--list)
@@ -34,13 +33,17 @@ while [[ $# -gt 0 ]]; do
             install_source="release"
             shift 2
             ;;
-        --local)
-            use_local=1
+        --from-local)
             install_source="local"
             shift 1
             ;;
+        --local)
+            echo "The --local option was renamed to --from-local because it installs from the local source tree." >&2
+            echo "Omit the flag to install the latest tagged release into the local venv." >&2
+            exit 1
+            ;;
         *)
-            echo "Usage: install_impression.sh [--venv PATH] [--release TAG] [--local] [--list] [--interactive]" >&2
+            echo "Usage: install_impression.sh [--venv PATH] [--release TAG] [--from-local] [--list] [--interactive]" >&2
             exit 1
             ;;
     esac
@@ -183,7 +186,7 @@ if [[ "$install_source" == "release" ]]; then
     fi
     log "Installing Impression release ${release_ref}."
     if ! command -v git >/dev/null 2>&1; then
-        echo "git is required to install a release. Install git or use --local." >&2
+        echo "git is required to install a release. Install git or use --from-local." >&2
         exit 1
     fi
     release_dir="$(mktemp -d)"

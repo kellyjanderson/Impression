@@ -43,6 +43,79 @@ class EntrypointParameterRecord:
 
 
 @dataclass(frozen=True)
+class ReferenceEvidenceArtifactRecord:
+    """Typed artifact entry inside a fixture evidence bundle."""
+
+    role: str
+    kind: str
+    path: Path
+    stage: str = "dirty"
+    required: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.role:
+            raise ValueError("evidence artifact role must not be empty")
+        if not self.kind:
+            raise ValueError("evidence artifact kind must not be empty")
+        object.__setattr__(self, "path", Path(self.path))
+        object.__setattr__(self, "stage", str(self.stage or "dirty"))
+        object.__setattr__(self, "required", bool(self.required))
+
+
+@dataclass(frozen=True)
+class ReferenceEvidenceBundleRecord:
+    """Typed evidence bundle exposed by file and database fixtures."""
+
+    bundle_id: str
+    evidence_kind: str
+    role_policy: str = "named-artifacts"
+    artifacts: tuple[ReferenceEvidenceArtifactRecord, ...] = ()
+    section_plane_metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.bundle_id:
+            raise ValueError("evidence bundle_id must not be empty")
+        if not self.evidence_kind:
+            raise ValueError("evidence evidence_kind must not be empty")
+        object.__setattr__(self, "artifacts", tuple(self.artifacts))
+        object.__setattr__(self, "section_plane_metadata", dict(self.section_plane_metadata))
+
+
+@dataclass(frozen=True)
+class SectionEvidenceContractRecord:
+    """Validation result for section evidence bundle role and plane metadata."""
+
+    bundle_id: str
+    required_roles: tuple[str, ...]
+    present_roles: tuple[str, ...]
+    missing_roles: tuple[str, ...]
+    section_plane_metadata: Mapping[str, Any]
+    diagnostics: tuple[str, ...] = ()
+
+    @property
+    def valid(self) -> bool:
+        return not self.missing_roles and not self.diagnostics
+
+
+@dataclass(frozen=True)
+class EvidencePathSet:
+    """Dirty/gold path references for one generated evidence bundle."""
+
+    dirty_paths: Mapping[str, Path]
+    gold_paths: Mapping[str, Path]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "dirty_paths",
+            {str(role): Path(path) for role, path in self.dirty_paths.items()},
+        )
+        object.__setattr__(
+            self,
+            "gold_paths",
+            {str(role): Path(path) for role, path in self.gold_paths.items()},
+        )
+@dataclass(frozen=True)
 class SourceIdentity:
     """Stable source identity for queue, preview, notes, and Codex context."""
 
@@ -76,6 +149,7 @@ class ReviewSourceModelRecord:
     notes: str = ""
     parameters: tuple[EntrypointParameterRecord, ...] = ()
     artifact_paths: tuple[Path, ...] = ()
+    evidence_bundles: tuple[ReferenceEvidenceBundleRecord, ...] = ()
     review_status: ReferenceReviewStatus = ReferenceReviewStatus.UNREVIEWED
     generated: bool = False
 
@@ -89,6 +163,7 @@ class ReviewSourceModelRecord:
         object.__setattr__(self, "load_mode", ReviewSourceLoadMode(self.load_mode))
         object.__setattr__(self, "source_path", Path(self.source_path))
         object.__setattr__(self, "artifact_paths", tuple(Path(path) for path in self.artifact_paths))
+        object.__setattr__(self, "evidence_bundles", tuple(self.evidence_bundles))
         object.__setattr__(self, "review_status", ReferenceReviewStatus(self.review_status))
 
     @property
@@ -118,6 +193,7 @@ class ReviewSourceModelRecord:
             artifact_paths = tuple(
                 path if path.is_absolute() else base_dir / path for path in artifact_paths
             )
+        evidence_bundles = tuple(parse_file_evidence_bundles(data, base_dir=base_dir))
         return cls(
             fixture_id=str(data.get("fixture_id", "")),
             feature_name=str(data.get("feature_name", "")),
@@ -132,6 +208,7 @@ class ReviewSourceModelRecord:
             notes=str(data.get("notes", data.get("review_notes", "")) or ""),
             parameters=parameters,
             artifact_paths=artifact_paths,
+            evidence_bundles=evidence_bundles,
             review_status=data.get("review_status", data.get("status", ReferenceReviewStatus.UNREVIEWED)),
             generated=bool(data.get("generated", False)),
         )
@@ -159,6 +236,224 @@ class ReferenceReviewStatusWriteResult:
     updated: bool
     diagnostics: tuple[SourceValidationDiagnostic, ...] = ()
     artifact_paths: tuple[Path, ...] = ()
+
+
+def parse_file_evidence_bundles(
+    data: Mapping[str, Any],
+    *,
+    base_dir: Path | None = None,
+) -> tuple[ReferenceEvidenceBundleRecord, ...]:
+    """Parse additive typed evidence bundles from a fixture row."""
+
+    raw_bundles = data.get("evidence_bundles", ())
+    if raw_bundles in (None, ""):
+        return ()
+    if not isinstance(raw_bundles, list | tuple):
+        raise ValueError("evidence_bundles must be a list")
+    bundles: list[ReferenceEvidenceBundleRecord] = []
+    for bundle_index, raw_bundle in enumerate(raw_bundles):
+        if not isinstance(raw_bundle, Mapping):
+            raise ValueError("evidence bundle entries must be objects")
+        raw_artifacts = raw_bundle.get("artifacts", ())
+        if not isinstance(raw_artifacts, list | tuple):
+            raise ValueError("evidence bundle artifacts must be a list")
+        artifacts: list[ReferenceEvidenceArtifactRecord] = []
+        for raw_artifact in raw_artifacts:
+            if not isinstance(raw_artifact, Mapping):
+                raise ValueError("evidence artifact entries must be objects")
+            artifact_path = Path(str(raw_artifact.get("path", "")))
+            if base_dir is not None and not artifact_path.is_absolute():
+                artifact_path = base_dir / artifact_path
+            artifacts.append(
+                ReferenceEvidenceArtifactRecord(
+                    role=str(raw_artifact.get("role", "")),
+                    kind=str(raw_artifact.get("kind", "")),
+                    path=artifact_path,
+                    stage=str(raw_artifact.get("stage", "dirty")),
+                    required=bool(raw_artifact.get("required", True)),
+                )
+            )
+        bundles.append(
+            ReferenceEvidenceBundleRecord(
+                bundle_id=str(raw_bundle.get("bundle_id", f"bundle-{bundle_index}")),
+                evidence_kind=str(raw_bundle.get("evidence_kind", "")),
+                role_policy=str(raw_bundle.get("role_policy", "named-artifacts")),
+                artifacts=tuple(artifacts),
+                section_plane_metadata=raw_bundle.get(
+                    "section_plane_metadata",
+                    raw_bundle.get("section_plane", {}),
+                )
+                or {},
+            )
+        )
+    return tuple(bundles)
+
+
+def load_database_evidence_bundles(
+    payload: str | list[object] | tuple[object, ...] | None,
+    *,
+    base_dir: Path | None = None,
+) -> tuple[ReferenceEvidenceBundleRecord, ...]:
+    """Hydrate database-stored evidence bundle JSON into file-compatible records."""
+
+    if payload in (None, ""):
+        return ()
+    raw_payload: object
+    if isinstance(payload, str):
+        raw_payload = json.loads(payload)
+    else:
+        raw_payload = payload
+    if not isinstance(raw_payload, list | tuple):
+        raise ValueError("database evidence_bundles must be a JSON array")
+    return parse_file_evidence_bundles({"evidence_bundles": raw_payload}, base_dir=base_dir)
+
+
+def serialize_database_evidence_bundles(
+    bundles: Iterable[ReferenceEvidenceBundleRecord],
+    *,
+    base_dir: Path,
+) -> str:
+    """Serialize evidence bundles for database storage using fixture-relative paths."""
+
+    payload = []
+    for bundle in bundles:
+        payload.append(
+            {
+                "bundle_id": bundle.bundle_id,
+                "evidence_kind": bundle.evidence_kind,
+                "role_policy": bundle.role_policy,
+                "section_plane_metadata": dict(bundle.section_plane_metadata),
+                "artifacts": [
+                    {
+                        "role": artifact.role,
+                        "kind": artifact.kind,
+                        "path": _path_for_fixture_storage(artifact.path, base_dir=base_dir),
+                        "stage": artifact.stage,
+                        "required": artifact.required,
+                    }
+                    for artifact in bundle.artifacts
+                ],
+            }
+        )
+    return json.dumps(payload, sort_keys=True)
+
+
+def validate_section_evidence_roles(
+    bundle: ReferenceEvidenceBundleRecord,
+    *,
+    required_roles: tuple[str, ...] = ("expected", "actual", "diff"),
+) -> SectionEvidenceContractRecord:
+    """Validate section evidence roles and section plane metadata without opening artifacts."""
+
+    present_roles = tuple(dict.fromkeys(artifact.role for artifact in bundle.artifacts))
+    missing_roles = tuple(role for role in required_roles if role not in present_roles)
+    diagnostics: list[str] = []
+    plane = dict(bundle.section_plane_metadata)
+    if not plane:
+        diagnostics.append("missing-section-plane-metadata")
+    else:
+        if "origin" not in plane:
+            diagnostics.append("missing-section-plane-origin")
+        if "normal" not in plane:
+            diagnostics.append("missing-section-plane-normal")
+    return SectionEvidenceContractRecord(
+        bundle_id=bundle.bundle_id,
+        required_roles=required_roles,
+        present_roles=present_roles,
+        missing_roles=missing_roles,
+        section_plane_metadata=plane,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def resolve_dirty_gold_evidence_paths(
+    dirty_root: Path,
+    gold_root: Path,
+    *,
+    fixture_stem: str,
+    roles: tuple[str, ...] = ("expected", "actual", "diff"),
+    suffix: str = ".png",
+) -> EvidencePathSet:
+    """Resolve deterministic dirty/gold evidence paths without touching payloads."""
+
+    if not fixture_stem:
+        raise ValueError("fixture_stem must not be empty")
+    if "/" in fixture_stem or ".." in fixture_stem.split("/"):
+        raise ValueError("fixture_stem must be a safe relative stem")
+    dirty_paths = {
+        role: Path(dirty_root) / f"{fixture_stem}-{role}{suffix}"
+        for role in roles
+    }
+    gold_paths = {
+        role: Path(gold_root) / f"{fixture_stem}-{role}{suffix}"
+        for role in roles
+    }
+    return EvidencePathSet(dirty_paths=dirty_paths, gold_paths=gold_paths)
+
+
+def build_section_bundle_fixture_record(
+    *,
+    bundle_id: str,
+    evidence_kind: str,
+    artifact_paths: Mapping[str, Path],
+    section_plane_metadata: Mapping[str, Any],
+    stage: str = "dirty",
+) -> ReferenceEvidenceBundleRecord:
+    """Build a typed section evidence bundle from generated artifact paths."""
+
+    artifacts = tuple(
+        ReferenceEvidenceArtifactRecord(
+            role=role,
+            kind="image/png",
+            path=path,
+            stage=stage,
+            required=True,
+        )
+        for role, path in artifact_paths.items()
+    )
+    bundle = ReferenceEvidenceBundleRecord(
+        bundle_id=bundle_id,
+        evidence_kind=evidence_kind,
+        artifacts=artifacts,
+        section_plane_metadata=section_plane_metadata,
+    )
+    contract = validate_section_evidence_roles(bundle)
+    if not contract.valid:
+        missing = ", ".join(contract.missing_roles + contract.diagnostics)
+        raise ValueError(f"section evidence bundle is incomplete: {missing}")
+    return bundle
+
+
+def validate_evidence_artifact_path(
+    artifact: ReferenceEvidenceArtifactRecord,
+    *,
+    fixture_id: str | None = None,
+    allowed_root: Path | None = None,
+) -> SourceValidationDiagnostic | None:
+    """Validate one evidence artifact path without loading artifact payloads."""
+
+    artifact_path = artifact.path
+    if allowed_root is not None:
+        root = allowed_root.resolve()
+        try:
+            artifact_path.resolve().relative_to(root)
+        except ValueError:
+            return SourceValidationDiagnostic(
+                "evidence-artifact-outside-root",
+                "evidence artifact path is outside the configured reference root",
+                fixture_id,
+            )
+    if not artifact_path.exists():
+        if not artifact.required:
+            return None
+        return SourceValidationDiagnostic(
+            "missing-evidence-artifact",
+            sanitize_error_text(str(artifact_path)),
+            fixture_id,
+        )
+    if not artifact_path.is_file():
+        return SourceValidationDiagnostic("evidence-artifact-not-file", artifact_path.name, fixture_id)
+    return None
 
 
 def validate_source_record(
@@ -229,6 +524,41 @@ def validate_source_record(
             diagnostics.append(
                 SourceValidationDiagnostic("artifact-not-file", artifact_path.name, record.fixture_id)
             )
+    for bundle in record.evidence_bundles:
+        if not bundle.artifacts:
+            diagnostics.append(
+                SourceValidationDiagnostic(
+                    "evidence-bundle-missing-artifacts",
+                    bundle.bundle_id,
+                    record.fixture_id,
+                )
+            )
+        for artifact in bundle.artifacts:
+            diagnostic = validate_evidence_artifact_path(
+                artifact,
+                fixture_id=record.fixture_id,
+                allowed_root=allowed_root,
+            )
+            if diagnostic is not None:
+                diagnostics.append(diagnostic)
+        if "section" in bundle.evidence_kind:
+            section_contract = validate_section_evidence_roles(bundle)
+            for missing_role in section_contract.missing_roles:
+                diagnostics.append(
+                    SourceValidationDiagnostic(
+                        "section-evidence-missing-role",
+                        f"{bundle.bundle_id}:{missing_role}",
+                        record.fixture_id,
+                    )
+                )
+            for section_diagnostic in section_contract.diagnostics:
+                diagnostics.append(
+                    SourceValidationDiagnostic(
+                        "section-evidence-invalid-plane",
+                        f"{bundle.bundle_id}:{section_diagnostic}",
+                        record.fixture_id,
+                    )
+                )
     return SourceValidationResult(record=record, diagnostics=tuple(diagnostics))
 
 
@@ -324,6 +654,13 @@ def load_source_records_from_database(path: Path) -> DiscoverySummary:
         artifact_paths = data.get("artifact_paths")
         if isinstance(artifact_paths, str) and artifact_paths:
             data["artifact_paths"] = json.loads(artifact_paths)
+        evidence_bundles = data.get("evidence_bundles")
+        if evidence_bundles:
+            data["evidence_bundles"] = (
+                json.loads(evidence_bundles)
+                if isinstance(evidence_bundles, str)
+                else evidence_bundles
+            )
         records.append(data)
     return _records_from_mappings(records, base_dir=path.parent, allowed_root=path.parent)
 
