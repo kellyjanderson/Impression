@@ -2512,6 +2512,7 @@ def test_implicit_surface_patch_constructor_runs_security_validator() -> None:
 
 def test_implicit_field_evaluator_handles_primitives_and_combinators() -> None:
     sphere = make_implicit_field_node("sphere", parameters={"radius": 1.0})
+    cylinder = make_implicit_field_node("cylinder", parameters={"radius": 0.5, "height": 2.0})
     shifted_box = make_implicit_field_node(
         "translate",
         parameters={"offset": (2.0, 0.0, 0.0)},
@@ -2521,12 +2522,15 @@ def test_implicit_field_evaluator_handles_primitives_and_combinators() -> None:
     difference = make_implicit_field_node("difference", children=(sphere, make_implicit_field_node("sphere", parameters={"radius": 0.25})))
 
     sphere_result = evaluate_implicit_field(sphere, (0.0, 0.0, 0.0))
+    cylinder_result = evaluate_implicit_field(cylinder, (0.25, 0.0, 0.0))
     union_result = evaluate_implicit_field(union, (2.0, 0.0, 0.0))
     difference_result = evaluate_implicit_field(difference, (0.0, 0.0, 0.0))
 
     assert isinstance(sphere_result, ImplicitFieldEvaluationResult)
     assert sphere_result.value == pytest.approx(-1.0)
     assert sphere_result.inside is True
+    assert cylinder_result.value == pytest.approx(-0.25)
+    assert cylinder_result.inside is True
     assert union_result.value == pytest.approx(-0.5)
     assert difference_result.value == pytest.approx(0.25)
 

@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 import impression.modeling.csg as csg_module
 import numpy as np
 import pytest
 import warnings
 
 from impression.mesh import Mesh
+from impression.modeling.drawing2d import make_circle, make_rect
 from tests.csg_reference_fixtures import (
     build_csg_difference_slot_fixture,
     build_csg_union_box_post_fixture,
+    make_box_with_subdivision_front_wall,
+    make_box_with_higher_order_front_wall,
+    make_box_with_sweep_front_wall,
     surface_body_section_loops,
 )
 from tests.reference_images import (
@@ -42,10 +47,62 @@ from impression.modeling import (
     SurfaceBooleanSplitRecord,
     SurfaceBooleanTrimmedPatchFragment,
     SurfacePatch,
+    LoftCutLoopBoundaryParticipationRecord,
+    LoftCutLoopClosureDiagnostic,
+    LoftCutLoopDegeneracyDiagnostic,
+    LoftCSGOperationRouteRecord,
+    LoftPairOperationPlanRecord,
+    LoftPatchLocalInversionDiagnostic,
+    LoftPatchLocalSourceCurveRecord,
+    LoftPatchLocalCutLoopRecord,
+    LoftPrimitiveAdjacencyDiagnostic,
+    LoftPrimitiveAdjacencyRebuildRecord,
+    LoftPrimitiveAcceptedResultRecord,
+    LoftPrimitiveCapSupportClassification,
+    LoftPrimitiveCapLoopPairingDiagnostic,
+    LoftPrimitiveCapLoopPairingRecord,
+    LoftPrimitiveCandidateShellDiagnostic,
+    LoftPrimitiveCandidateShellRecord,
+    LoftPrimitiveFragmentClassificationRecord,
+    LoftPrimitiveFragmentRetentionDiagnostic,
+    LoftPrimitiveFragmentTopologyRecord,
+    LoftPrimitiveGeneratedCapRecord,
+    LoftPrimitiveIntersectionSourceRecord,
+    LoftPrimitiveNoHiddenMeshDiagnostic,
+    LoftPrimitiveNoHiddenMeshProofRecord,
+    LoftPrimitiveExecutionScopeRecord,
+    LoftPrimitivePublicExecutorDiagnostic,
+    LoftPrimitiveRetainedFragmentRecord,
+    LoftPrimitivePersistenceDiagnostic,
+    LoftPrimitiveRuntimeValidityDiagnostic,
+    LoftPrimitiveRuntimeValidityRecord,
+    LoftPrimitiveSeamUsePairingDiagnostic,
+    LoftPrimitiveSeamUsePairingRecord,
+    LoftPrimitiveSourceRegionRecord,
+    LoftPrimitiveTopologyDiagnostic,
+    LoftPrimitiveTopologyOrientationDiagnostic,
+    LoftPrimitiveTopologyOrientationRecord,
+    LoftPrimitiveTessellationReadinessRecord,
+    LoftPrimitiveTrimAdapterRecord,
+    LoftPrimitiveUnsupportedCapDiagnostic,
+    LoftPrimitiveUnsupportedSourceDiagnostic,
+    LoftCSGResultGeometryRecord,
+    LoftPatchFragmentParticipationRecord,
+    BranchingLoftCSGDiagnostic,
+    BranchingLoftCSGPolicyRecord,
+    BranchDecompositionPlan,
+    BranchRecompositionRecord,
+    BranchSubBodyCSGPlan,
+    LoftCSGColorOwnershipRecord,
+    LoftCSGGeneratedSurfaceStylePolicy,
+    LoftCSGResultFragmentRecord,
+    LoftCSGSourceFragmentRecord,
     SurfaceCSGAnalyticBSplineIntersectionRecord,
     SurfaceCSGAnalyticIntersectionRecord,
     SurfaceCSGAnalyticNURBSIntersectionRecord,
     SurfaceCSGArrangementDiagnostic,
+    SurfaceCSGBodyRouteEvidenceRecord,
+    SurfaceCSGBodyRoutePatchPair,
     SurfaceCSGBoundaryExposureDiagnostic,
     SurfaceCSGBoundaryUseProvenanceRecord,
     SurfaceCSGCapConstructionRecord,
@@ -58,6 +115,7 @@ from impression.modeling import (
     SurfaceCSGCurvePrimitive,
     SurfaceCSGCurveMappingDiagnostic,
     SurfaceCSGFeatureGateDiagnostic,
+    SurfaceCSGLoftEligibilityRecord,
     SurfaceCSGCapEligibilityRecord,
     SurfaceCSGClassifiedFragmentSet,
     SurfaceCSGCoincidentOwnershipDiagnostic,
@@ -126,6 +184,14 @@ from impression.modeling import (
     SurfaceCSGResultPatchProvenanceRecord,
     SurfaceCSGResultProvenanceMap,
     SurfaceCSGRuntimeValidityReport,
+    build_loft_branch_graph_evidence,
+    classify_branching_loft_csg_policy,
+    map_loft_csg_fragment_provenance,
+    plan_branch_subbody_csg,
+    resolve_generated_surface_style,
+    resolve_loft_csg_color_ownership,
+    validate_branch_recomposition,
+    rebuild_loft_primitive_candidate_adjacency,
     SurfaceCSGRevolutionIntersectionRecord,
     SurfaceCSGShellAssemblyRecord,
     SurfaceCSGShellOrderingRecord,
@@ -153,7 +219,11 @@ from impression.modeling import (
     TrimLoop,
     assert_surface_csg_solver_registry_complete,
     assert_no_hidden_surface_csg_mesh_fallback,
+    assert_loft_primitive_no_hidden_mesh_fallback,
     assert_sampled_implicit_no_mesh_fallback_evidence_gate,
+    adapt_loft_patch_for_primitive_csg,
+    assemble_loft_primitive_candidate_shell,
+    audit_surface_csg_body_route_evidence,
     boolean_difference,
     boolean_intersection,
     boolean_union,
@@ -166,11 +236,34 @@ from impression.modeling import (
     build_surface_csg_fragment_graph,
     build_surface_csg_patch_arrangement,
     build_surface_csg_result_provenance_map,
+    build_loft_primitive_no_hidden_mesh_proof,
     check_surface_csg_runtime_result_validity,
+    check_loft_primitive_runtime_validity,
+    classify_loft_cut_loop_degeneracy,
+    classify_loft_primitive_cap_support,
+    classify_loft_primitive_result_topology,
+    build_loft_primitive_generated_cap_records,
+    evaluate_loft_primitive_topology_orientation,
+    pair_loft_primitive_generated_cap_loops,
+    pair_loft_primitive_seam_uses,
+    persist_loft_primitive_accepted_result,
+    select_loft_primitive_operation_fragments,
     classify_surface_csg_cap_eligibility,
+    classify_loft_patch_fragments,
+    classify_loft_primitive_fragments,
+    classify_surface_csg_loft_eligibility,
+    close_loft_patch_local_cut_loops,
+    execute_loft_pair_csg,
+    execute_loft_primitive_trim_fragment_csg,
+    execute_single_shell_loft_primitive_csg,
+    invert_loft_primitive_source_curves_to_patch_domains,
+    normalize_loft_primitive_intersection_sources,
+    select_loft_csg_route,
     classify_surface_csg_fragments_against_body,
     classify_surface_csg_fragment_against_body,
+    classify_surface_csg_contact,
     classify_surface_csg_point_against_bounds,
+    collect_surface_csg_body_route_patch_evidence,
     detect_spline_nurbs_coincident_regions,
     enumerate_higher_order_csg_pair_fixture_rows,
     enumerate_heightmap_csg_fixture_rows,
@@ -214,6 +307,8 @@ from impression.modeling import (
     make_surface_csg_line_curve,
     make_box,
     make_box_mesh,
+    make_cylinder,
+    loft,
     make_plane,
     make_sphere,
     make_surface_body,
@@ -229,6 +324,7 @@ from impression.modeling import (
     rebuild_surface_csg_shell_seams,
     record_surface_csg_continuity_handoff,
     sort_surface_csg_curves,
+    surface_csg_body_route_evidence_from_source_record,
     surface_csg_caller_inventory,
     surface_csg_curve_digest,
     surface_csg_curve_key,
@@ -437,7 +533,12 @@ def test_analytic_bspline_csg_intersection_emits_patch_local_curves() -> None:
     }
     spline_curve = next(curve for curve in result.patch_local_curves if curve.patch == SurfaceBooleanPatchRef(1, 0))
     assert spline_curve.points_uv
+    assert result.body_route_evidence is not None
+    assert result.body_route_evidence.evidence_kind == "curve"
+    assert result.body_route_evidence.family_pair == ("planar", "bspline")
+    assert audit_surface_csg_body_route_evidence((result.body_route_evidence,)).passed is True
     assert result.canonical_payload()["supported"] is True
+    assert result.canonical_payload()["body_route_evidence"]["no_mesh_fallback"] is True
 
 
 def test_analytic_bspline_csg_intersection_covers_ruled_and_revolution_pairs() -> None:
@@ -473,6 +574,13 @@ def test_analytic_bspline_csg_intersection_covers_ruled_and_revolution_pairs() -
     assert revolution_result.supported is True
     assert len(ruled_result.patch_local_curves) == 2
     assert len(revolution_result.patch_local_curves) == 2
+    assert ruled_result.body_route_evidence is not None
+    assert revolution_result.body_route_evidence is not None
+    assert ruled_result.body_route_evidence.family_pair == ("ruled", "bspline")
+    assert revolution_result.body_route_evidence.family_pair == ("revolution", "bspline")
+    assert audit_surface_csg_body_route_evidence(
+        (ruled_result.body_route_evidence, revolution_result.body_route_evidence)
+    ).passed is True
 
 
 def test_analytic_bspline_csg_intersection_reports_non_convergence_without_mesh() -> None:
@@ -497,6 +605,12 @@ def test_analytic_bspline_csg_intersection_reports_non_convergence_without_mesh(
     assert result.diagnostics[0].code == "unsupported-family-pair"
     assert "mesh" not in result.diagnostics[0].message.lower()
     assert result.residual_report.converged is False
+    assert result.body_route_evidence is not None
+    assert result.body_route_evidence.evidence_kind == "diagnostic-refusal"
+    assert result.body_route_evidence.classification == "refusal"
+    assert result.body_route_evidence.converged is False
+    assert result.body_route_evidence.no_mesh_fallback is True
+    assert audit_surface_csg_body_route_evidence((result.body_route_evidence,)).passed is True
 
 
 def test_analytic_nurbs_csg_intersection_emits_rational_patch_local_curves() -> None:
@@ -527,7 +641,14 @@ def test_analytic_nurbs_csg_intersection_emits_rational_patch_local_curves() -> 
     assert len(result.patch_local_curves) == 2
     nurbs_curve = next(curve for curve in result.patch_local_curves if curve.patch == SurfaceBooleanPatchRef(1, 0))
     assert nurbs_curve.points_uv
+    assert result.body_route_evidence is not None
+    assert result.body_route_evidence.evidence_kind == "curve"
+    assert result.body_route_evidence.family_pair == ("planar", "nurbs")
+    assert ("exact_conic_compatible", False) in result.body_route_evidence.route_metadata
+    assert ("weight_diagnostic_count", 0) in result.body_route_evidence.route_metadata
+    assert audit_surface_csg_body_route_evidence((result.body_route_evidence,)).passed is True
     assert result.canonical_payload()["weight_diagnostics"] == []
+    assert result.canonical_payload()["body_route_evidence"]["no_mesh_fallback"] is True
 
 
 def test_analytic_nurbs_csg_intersection_covers_ruled_and_revolution_pairs() -> None:
@@ -563,6 +684,13 @@ def test_analytic_nurbs_csg_intersection_covers_ruled_and_revolution_pairs() -> 
     assert revolution_result.supported is True
     assert len(ruled_result.patch_local_curves) == 2
     assert len(revolution_result.patch_local_curves) == 2
+    assert ruled_result.body_route_evidence is not None
+    assert revolution_result.body_route_evidence is not None
+    assert ruled_result.body_route_evidence.family_pair == ("ruled", "nurbs")
+    assert revolution_result.body_route_evidence.family_pair == ("revolution", "nurbs")
+    assert audit_surface_csg_body_route_evidence(
+        (ruled_result.body_route_evidence, revolution_result.body_route_evidence)
+    ).passed is True
 
 
 def test_analytic_nurbs_csg_intersection_reports_non_convergence_without_mesh() -> None:
@@ -587,6 +715,12 @@ def test_analytic_nurbs_csg_intersection_reports_non_convergence_without_mesh() 
     assert result.diagnostics[0].code == "unsupported-family-pair"
     assert "mesh" not in result.diagnostics[0].message.lower()
     assert result.residual_report.converged is False
+    assert result.body_route_evidence is not None
+    assert result.body_route_evidence.evidence_kind == "diagnostic-refusal"
+    assert result.body_route_evidence.classification == "refusal"
+    assert result.body_route_evidence.converged is False
+    assert ("weight_diagnostic_count", 0) in result.body_route_evidence.route_metadata
+    assert audit_surface_csg_body_route_evidence((result.body_route_evidence,)).passed is True
 
 
 @pytest.mark.parametrize(
@@ -618,7 +752,12 @@ def test_spline_nurbs_csg_intersection_emits_patch_local_curve_pairs(
         SurfaceBooleanPatchRef(0, 0),
         SurfaceBooleanPatchRef(1, 0),
     }
+    assert result.body_route_evidence is not None
+    assert result.body_route_evidence.evidence_kind == "curve"
+    assert result.body_route_evidence.family_pair == (first.family, second.family)
+    assert audit_surface_csg_body_route_evidence((result.body_route_evidence,)).passed is True
     assert result.canonical_payload()["supported"] is True
+    assert result.canonical_payload()["body_route_evidence"]["no_mesh_fallback"] is True
 
 
 def test_spline_nurbs_csg_intersection_reports_non_convergence_without_mesh() -> None:
@@ -644,6 +783,11 @@ def test_spline_nurbs_csg_intersection_reports_non_convergence_without_mesh() ->
     assert result.diagnostics[0].code == "unsupported-family-pair"
     assert "mesh" not in result.diagnostics[0].message.lower()
     assert result.residual_report.converged is False
+    assert result.body_route_evidence is not None
+    assert result.body_route_evidence.evidence_kind == "diagnostic-refusal"
+    assert result.body_route_evidence.classification == "refusal"
+    assert result.body_route_evidence.converged is False
+    assert audit_surface_csg_body_route_evidence((result.body_route_evidence,)).passed is True
 
 
 def test_spline_nurbs_coincident_region_detector_maps_overlap_loops() -> None:
@@ -663,7 +807,240 @@ def test_spline_nurbs_coincident_region_detector_maps_overlap_loops() -> None:
     assert result.intersection.overlap_regions[0].region_id == "spline-coincident-region-0"
     assert len(result.region_mappings) == 2
     assert all(mapping.supported for mapping in result.region_mappings)
+    assert result.body_route_evidence is not None
+    assert result.body_route_evidence.evidence_kind == "coincident-region"
+    assert result.body_route_evidence.classification == "coincident"
+    assert result.body_route_evidence.ownership_status == "resolved"
+    assert result.body_route_evidence.patch_local_region_loops
+    assert all(loop.orientation == "forward" for loop in result.body_route_evidence.patch_local_region_loops)
+    assert audit_surface_csg_body_route_evidence((result.body_route_evidence,)).passed is True
     assert result.canonical_payload()["supported"] is True
+    assert result.canonical_payload()["body_route_evidence"]["no_mesh_fallback"] is True
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    (
+        (BSplineSurfacePatch(family="bspline"), BSplineSurfacePatch(family="bspline")),
+        (NURBSSurfacePatch(family="nurbs"), NURBSSurfacePatch(family="nurbs")),
+    ),
+)
+def test_spline_nurbs_coincident_region_detector_covers_same_family_overlap(
+    first: BSplineSurfacePatch | NURBSSurfacePatch,
+    second: BSplineSurfacePatch | NURBSSurfacePatch,
+) -> None:
+    result = detect_spline_nurbs_coincident_regions(
+        SurfaceBooleanPatchRef(0, 0),
+        first,
+        SurfaceBooleanPatchRef(1, 0),
+        second,
+    )
+
+    assert result.supported is True
+    assert result.body_route_evidence is not None
+    assert result.body_route_evidence.evidence_kind == "coincident-region"
+    assert result.body_route_evidence.family_pair == (first.family, second.family)
+    assert audit_surface_csg_body_route_evidence((result.body_route_evidence,)).passed is True
+
+
+def test_spline_nurbs_coincident_region_detector_emits_partial_overlap_loops() -> None:
+    first = BSplineSurfacePatch(family="bspline")
+    second = NURBSSurfacePatch(
+        family="nurbs",
+        control_net=[
+            [(0.25, 0.25, 0.0), (0.25, 0.75, 0.0)],
+            [(0.75, 0.25, 0.0), (0.75, 0.75, 0.0)],
+        ],
+    )
+
+    result = detect_spline_nurbs_coincident_regions(
+        SurfaceBooleanPatchRef(0, 0),
+        first,
+        SurfaceBooleanPatchRef(1, 0),
+        second,
+    )
+
+    assert result.supported is True
+    assert np.allclose(
+        result.intersection.overlap_regions[0].first_loop_uv,
+        ((0.25, 0.25), (0.75, 0.25), (0.75, 0.75), (0.25, 0.75))
+    )
+    assert np.allclose(
+        result.intersection.overlap_regions[0].second_loop_uv,
+        ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
+    )
+    assert result.intersection.overlap_regions[0].boundary_curve_ids == tuple(
+        f"spline-coincident-boundary-{index}" for index in range(4)
+    )
+    assert result.body_route_evidence is not None
+    assert ("boundary_curve_id_count", 4) in result.body_route_evidence.route_metadata
+    assert audit_surface_csg_body_route_evidence((result.body_route_evidence,)).passed is True
+
+
+def test_spline_nurbs_coincident_region_detector_preserves_reversed_orientation() -> None:
+    first = BSplineSurfacePatch(family="bspline")
+    second = NURBSSurfacePatch(
+        family="nurbs",
+        control_net=[
+            [(1.0, 0.0, 0.0), (1.0, 1.0, 0.0)],
+            [(0.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+        ],
+    )
+
+    result = detect_spline_nurbs_coincident_regions(
+        SurfaceBooleanPatchRef(0, 0),
+        first,
+        SurfaceBooleanPatchRef(1, 0),
+        second,
+    )
+
+    assert result.supported is True
+    assert result.body_route_evidence is not None
+    orientations = tuple(loop.orientation for loop in result.body_route_evidence.patch_local_region_loops)
+    assert orientations == ("forward", "reversed")
+    assert audit_surface_csg_body_route_evidence((result.body_route_evidence,)).passed is True
+
+
+def test_spline_nurbs_coincident_region_detector_refuses_ambiguous_ownership() -> None:
+    patch_ref = SurfaceBooleanPatchRef(0, 0)
+
+    result = detect_spline_nurbs_coincident_regions(
+        patch_ref,
+        BSplineSurfacePatch(family="bspline"),
+        patch_ref,
+        NURBSSurfacePatch(family="nurbs"),
+    )
+
+    assert result.supported is False
+    assert result.ownership_diagnostics
+    assert result.ownership_diagnostics[0].code == "ambiguous-coincident-owner"
+    assert result.body_route_evidence is not None
+    assert result.body_route_evidence.evidence_kind == "diagnostic-refusal"
+    assert result.body_route_evidence.classification == "refusal"
+    assert any(diagnostic.code == "ambiguous-coincident-owner" for diagnostic in result.body_route_evidence.diagnostics)
+    assert audit_surface_csg_body_route_evidence((result.body_route_evidence,)).passed is True
+
+
+def test_surface_csg_body_route_evidence_collector_gathers_analytic_routes() -> None:
+    plane = PlanarSurfacePatch(
+        family="planar",
+        origin=(0.5, 0.0, 0.0),
+        u_axis=(0.0, 1.0, 0.0),
+        v_axis=(0.0, 0.0, 1.0),
+    )
+    report = collect_surface_csg_body_route_patch_evidence(
+        "intersection",
+        (
+            SurfaceCSGBodyRoutePatchPair(
+                SurfaceBooleanPatchRef(0, 0),
+                plane,
+                SurfaceBooleanPatchRef(1, 0),
+                BSplineSurfacePatch(family="bspline"),
+            ),
+            SurfaceCSGBodyRoutePatchPair(
+                SurfaceBooleanPatchRef(0, 1),
+                plane,
+                SurfaceBooleanPatchRef(1, 1),
+                NURBSSurfacePatch(family="nurbs", weights=((1.0, 2.0), (1.0, 2.0))),
+            ),
+        ),
+    )
+
+    assert report.ready is True
+    assert report.readiness == "success-ready"
+    assert report.audit_report.passed is True
+    assert report.no_mesh_fallback is True
+    assert [record.family_pair for record in report.records] == [("planar", "bspline"), ("planar", "nurbs")]
+
+
+def test_surface_csg_body_route_evidence_collector_gathers_spline_pair_curve_route() -> None:
+    vertical_nurbs = NURBSSurfacePatch(
+        family="nurbs",
+        control_net=[
+            [(0.5, 0.0, -0.5), (0.5, 1.0, -0.5)],
+            [(0.5, 0.0, 0.5), (0.5, 1.0, 0.5)],
+        ],
+    )
+
+    report = collect_surface_csg_body_route_patch_evidence(
+        "intersection",
+        (
+            SurfaceCSGBodyRoutePatchPair(
+                SurfaceBooleanPatchRef(0, 0),
+                BSplineSurfacePatch(family="bspline"),
+                SurfaceBooleanPatchRef(1, 0),
+                vertical_nurbs,
+            ),
+        ),
+    )
+
+    assert report.ready is True
+    assert report.readiness == "success-ready"
+    assert report.records[0].evidence_kind == "curve"
+    assert report.records[0].family_pair == ("bspline", "nurbs")
+    assert report.audit_report.passed is True
+
+
+def test_surface_csg_body_route_evidence_collector_reports_coincident_refusal_ready() -> None:
+    patch_ref = SurfaceBooleanPatchRef(0, 0)
+
+    report = collect_surface_csg_body_route_patch_evidence(
+        "intersection",
+        (
+            SurfaceCSGBodyRoutePatchPair(
+                patch_ref,
+                BSplineSurfacePatch(family="bspline"),
+                patch_ref,
+                NURBSSurfacePatch(family="nurbs"),
+            ),
+        ),
+    )
+
+    assert report.ready is True
+    assert report.readiness == "diagnostic-refusal-ready"
+    assert report.records[0].evidence_kind == "diagnostic-refusal"
+    assert any(diagnostic.code == "ambiguous-coincident-owner" for diagnostic in report.records[0].diagnostics)
+    assert report.no_mesh_fallback is True
+
+
+def test_surface_csg_body_route_evidence_collector_blocks_missing_route_coverage() -> None:
+    report = collect_surface_csg_body_route_patch_evidence(
+        "intersection",
+        (
+            SurfaceCSGBodyRoutePatchPair(
+                SurfaceBooleanPatchRef(0, 0),
+                PlanarSurfacePatch(family="planar"),
+                SurfaceBooleanPatchRef(1, 0),
+                PlanarSurfacePatch(family="planar"),
+            ),
+        ),
+    )
+
+    assert report.ready is False
+    assert report.readiness == "blocked"
+    assert report.records == ()
+    assert report.diagnostics[0].code == "missing-route-coverage"
+
+
+def test_surface_csg_body_route_evidence_collector_payload_is_401_facing() -> None:
+    report = collect_surface_csg_body_route_patch_evidence(
+        "intersection",
+        (
+            SurfaceCSGBodyRoutePatchPair(
+                SurfaceBooleanPatchRef(0, 0),
+                BSplineSurfacePatch(family="bspline"),
+                SurfaceBooleanPatchRef(1, 0),
+                NURBSSurfacePatch(family="nurbs"),
+            ),
+        ),
+    )
+    payload = report.canonical_payload()
+
+    assert payload["operation"] == "intersection"
+    assert payload["readiness"] == "success-ready"
+    assert payload["audit_report"]["passed"] is True
+    assert payload["records"][0]["evidence_kind"] == "coincident-region"
+    assert payload["no_mesh_fallback"] is True
 
 
 def test_spline_nurbs_coincident_region_detector_reports_ambiguous_overlap_without_mesh() -> None:
@@ -671,8 +1048,8 @@ def test_spline_nurbs_coincident_region_detector_reports_ambiguous_overlap_witho
     second = NURBSSurfacePatch(
         family="nurbs",
         control_net=[
-            [(0.1, 0.0, 0.0), (0.1, 1.0, 0.0)],
-            [(1.1, 0.0, 0.0), (1.1, 1.0, 0.0)],
+            [(0.0, 0.0, 1.0e-4), (0.0, 1.0, 1.0e-4)],
+            [(1.0, 0.0, 1.0e-4), (1.0, 1.0, 1.0e-4)],
         ],
     )
 
@@ -688,6 +1065,152 @@ def test_spline_nurbs_coincident_region_detector_reports_ambiguous_overlap_witho
     assert result.diagnostics[0].code == "ambiguous-overlap"
     assert "mesh" not in result.diagnostics[0].message.lower()
     assert result.intersection.classification == "unsupported"
+    assert result.body_route_evidence is not None
+    assert result.body_route_evidence.evidence_kind == "diagnostic-refusal"
+    assert result.body_route_evidence.classification == "refusal"
+    assert result.body_route_evidence.no_mesh_fallback is True
+    assert audit_surface_csg_body_route_evidence((result.body_route_evidence,)).passed is True
+
+
+def test_surface_csg_body_route_evidence_contract_serializes_and_passes_audit() -> None:
+    patch_ref = SurfaceBooleanPatchRef(0, 0)
+    local_curve = SurfaceCSGPatchLocalCurve(
+        source_curve_digest="curve-a",
+        patch=patch_ref,
+        points_uv=((0.0, 0.0), (1.0, 1.0)),
+        domain_bounds=(0.0, 1.0, 0.0, 1.0),
+    )
+    record = SurfaceCSGBodyRouteEvidenceRecord(
+        operation="intersection",
+        route_id="surface-csg.analytic-to-bspline",
+        family_pair=("planar", "bspline"),
+        source_patch_refs=(patch_ref, SurfaceBooleanPatchRef(1, 0)),
+        source_patch_ids=("left:0", "right:0"),
+        source_operand_refs=(0, 1),
+        evidence_kind="curve",
+        classification="crossing",
+        curve_ids=("curve-a",),
+        patch_local_curves=(local_curve,),
+        max_residual=0.0,
+        tolerance=1.0e-6,
+        iteration_count=1,
+        converged=True,
+        trim_readiness="ready",
+        no_mesh_fallback=True,
+    )
+
+    report = audit_surface_csg_body_route_evidence((record,))
+    payload = report.canonical_payload()
+
+    assert report.passed is True
+    assert payload["rows"][0]["record"]["route_id"] == "surface-csg.analytic-to-bspline"
+    assert payload["rows"][0]["record"]["patch_local_orientation_count"] == 1
+    assert payload["rows"][0]["record"]["no_mesh_fallback"] is True
+
+
+def test_surface_csg_body_route_evidence_audit_reports_missing_contract_fields() -> None:
+    record = SurfaceCSGBodyRouteEvidenceRecord(
+        operation="intersection",
+        route_id="",
+        family_pair=("", "bspline"),
+        source_patch_refs=(SurfaceBooleanPatchRef(0, 0),),
+        source_patch_ids=("",),
+        evidence_kind="curve",
+        classification="crossing",
+        no_mesh_fallback=False,
+    )
+
+    report = audit_surface_csg_body_route_evidence((record,))
+    codes = {diagnostic.code for diagnostic in report.rows[0].diagnostics}
+
+    assert report.passed is False
+    assert {
+        "missing-route-id",
+        "missing-family-pair",
+        "missing-patch-id",
+        "missing-curve-id",
+        "missing-patch-local-curve",
+        "missing-orientation",
+        "missing-residual",
+        "missing-tolerance",
+        "missing-iteration-count",
+        "missing-convergence",
+        "missing-trim-readiness",
+        "mesh-fallback-attempted",
+    }.issubset(codes)
+
+
+def test_surface_csg_body_route_evidence_adapts_checked_spline_source_records() -> None:
+    plane = PlanarSurfacePatch(
+        family="planar",
+        origin=(0.5, 0.0, 0.0),
+        u_axis=(0.0, 1.0, 0.0),
+        v_axis=(0.0, 0.0, 1.0),
+    )
+    bspline = BSplineSurfacePatch(family="bspline")
+    nurbs = NURBSSurfacePatch(family="nurbs", weights=((1.0, 2.0), (1.0, 2.0)))
+    analytic_bspline = intersect_analytic_bspline_patch_pair(
+        SurfaceBooleanPatchRef(0, 0),
+        plane,
+        SurfaceBooleanPatchRef(1, 0),
+        bspline,
+        sample_count=5,
+    )
+    analytic_nurbs = intersect_analytic_nurbs_patch_pair(
+        SurfaceBooleanPatchRef(0, 1),
+        plane,
+        SurfaceBooleanPatchRef(1, 1),
+        nurbs,
+        sample_count=5,
+    )
+    spline_pair = intersect_spline_nurbs_patch_pair(
+        SurfaceBooleanPatchRef(0, 2),
+        BSplineSurfacePatch(family="bspline"),
+        SurfaceBooleanPatchRef(1, 2),
+        NURBSSurfacePatch(family="nurbs"),
+        sample_count=5,
+    )
+    coincident_region = detect_spline_nurbs_coincident_regions(
+        SurfaceBooleanPatchRef(0, 3),
+        BSplineSurfacePatch(family="bspline"),
+        SurfaceBooleanPatchRef(1, 3),
+        NURBSSurfacePatch(family="nurbs"),
+    )
+
+    records = (
+        surface_csg_body_route_evidence_from_source_record(
+            analytic_bspline,
+            left_family="planar",
+            right_family="bspline",
+            source_patch_ids={
+                SurfaceBooleanPatchRef(0, 0): "analytic-body:patch-0",
+                SurfaceBooleanPatchRef(1, 0): "spline-body:patch-0",
+            },
+        ),
+        surface_csg_body_route_evidence_from_source_record(
+            analytic_nurbs,
+            left_family="planar",
+            right_family="nurbs",
+        ),
+        surface_csg_body_route_evidence_from_source_record(
+            spline_pair,
+            left_family="bspline",
+            right_family="nurbs",
+        ),
+        surface_csg_body_route_evidence_from_source_record(
+            coincident_region,
+            left_family="bspline",
+            right_family="nurbs",
+        ),
+    )
+
+    report = audit_surface_csg_body_route_evidence(records)
+
+    assert report.passed is True
+    assert [record.evidence_kind for record in records] == ["curve", "curve", "curve", "coincident-region"]
+    assert records[0].source_patch_ids == ("analytic-body:patch-0", "spline-body:patch-0")
+    assert records[-1].classification == "coincident"
+    assert records[-1].ownership_status == "resolved"
 
 
 @pytest.mark.parametrize(
@@ -871,6 +1394,42 @@ def test_surface_csg_patch_arrangement_preserves_loop_category_orientation_and_c
     assert graph.diagnostics == ()
 
 
+def test_surface_csg_patch_arrangement_accepts_arc_and_conic_cut_records() -> None:
+    patch = PlanarSurfacePatch(family="planar")
+    patch_ref = SurfaceBooleanPatchRef(0, 0)
+    arc = make_surface_csg_curve(
+        "arc",
+        ((0.25, 0.0, 0.0), (0.5, 0.25, 0.0), (0.75, 0.0, 0.0)),
+        parameters=(("radius", 0.25),),
+    )
+    conic = make_surface_csg_curve(
+        "conic",
+        ((0.25, 1.0, 0.0), (0.5, 0.75, 0.0), (0.75, 1.0, 0.0)),
+        parameters=(("eccentricity", 0.5),),
+    )
+    arc_mapping = map_surface_csg_curve_to_patch_local(arc, patch_ref, patch)
+    conic_mapping = map_surface_csg_curve_to_patch_local(conic, patch_ref, patch)
+    assert arc_mapping.curve is not None
+    assert conic_mapping.curve is not None
+    loop = TrimLoop(((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)), category="outer")
+
+    graph = build_surface_csg_patch_arrangement(
+        patch_ref,
+        patch,
+        patch_local_curves=(arc_mapping.curve, conic_mapping.curve),
+        generated_loop=loop,
+        cut_curve_ids=("arc-cut", "conic-cut"),
+    )
+
+    assert graph.supported is True
+    assert graph.diagnostics == ()
+    assert len(graph.patch_local_curves) == 2
+    assert {len(curve.points_uv) for curve in graph.patch_local_curves} == {3}
+    cut_curve_edges = [edge for edge in graph.edges if edge.source == "cut-curve"]
+    assert len(cut_curve_edges) == 4
+    assert all("mesh" not in diagnostic.message.lower() for diagnostic in graph.diagnostics)
+
+
 def test_surface_csg_patch_arrangement_reports_zero_length_fragments_and_outside_curves() -> None:
     patch = PlanarSurfacePatch(family="planar")
     patch_ref = SurfaceBooleanPatchRef(0, 0)
@@ -1020,6 +1579,27 @@ def test_surface_csg_fragment_classification_distinguishes_inside_outside_and_on
     assert boundary.cut_curve_ids == ("cut-on-boundary",)
     assert boundary.supported is True
     assert classify_surface_csg_point_against_bounds((0.0, 0.0, 1.0), opposing.bounds_estimate()) == "on"
+
+
+def test_surface_csg_fragment_classification_accepts_curved_patch_fragments() -> None:
+    opposing = make_box(size=(2.0, 2.0, 2.0))
+    patch_ref = SurfaceBooleanPatchRef(0, 1)
+    inside_revolution = RevolutionSurfacePatch(
+        family="revolution",
+        profile_curve=((0.5, 0.0, -0.5), (0.5, 0.0, 0.5)),
+    )
+    outside_revolution = RevolutionSurfacePatch(
+        family="revolution",
+        profile_curve=((3.0, 0.0, -0.5), (3.0, 0.0, 0.5)),
+    )
+
+    inside = classify_surface_csg_fragment_against_body(patch_ref, inside_revolution, opposing)
+    outside = classify_surface_csg_fragment_against_body(patch_ref, outside_revolution, opposing)
+
+    assert inside.supported is True
+    assert inside.relation == "inside"
+    assert outside.supported is True
+    assert outside.relation == "outside"
 
 
 def test_surface_csg_fragment_classification_reports_ambiguous_and_domain_failures() -> None:
@@ -2010,6 +2590,1525 @@ def test_surface_csg_feature_gate_reports_supported_and_unsupported_without_mesh
     assert "no mesh fallback" in unsupported.reason
 
 
+def test_surface_csg_loft_eligibility_accepts_closed_single_shell_loft_provenance() -> None:
+    loft_like = replace(
+        make_box(size=(1.0, 1.0, 1.0)),
+        metadata={"kernel": {"operation": "loft", "executor": "surface", "branch_count": 1}},
+    )
+
+    record = classify_surface_csg_loft_eligibility(loft_like, "difference")
+
+    assert isinstance(record, SurfaceCSGLoftEligibilityRecord)
+    assert record.supported is True
+    assert record.code == "eligible"
+    assert record.no_mesh_fallback is True
+    assert record.provenance["operation"] == "loft"
+    assert record.provenance["loft_shell_validity"]["constrained_single_shell"] is True
+    assert record.provenance["loft_shell_validity"]["no_mesh_fallback"] is True
+
+
+def test_surface_csg_loft_eligibility_consumes_executor_boundary_graph_evidence() -> None:
+    body = loft(
+        [make_circle(radius=0.4), make_circle(radius=0.52), make_circle(radius=0.34)],
+        path=[(0.0, 0.0, 0.0), (0.08, 0.02, 0.75), (0.12, -0.02, 1.5)],
+        cap_ends=True,
+        samples=32,
+    )
+
+    record = classify_surface_csg_loft_eligibility(body, "difference")
+
+    assert record.supported is True
+    assert record.code == "eligible"
+    shell_validity = record.provenance["loft_shell_validity"]
+    assert shell_validity["seam_coverage"]["complete"] is True
+    assert shell_validity["cap_validity"]["valid"] is True
+    assert shell_validity["closure_evidence"]["closed_valid"] is True
+    assert shell_validity["boundary_graph"]["boundary_refs"]
+
+
+def test_surface_csg_selects_loft_primitive_route_before_execution() -> None:
+    body = loft(
+        [make_circle(radius=0.4), make_circle(radius=0.52)],
+        path=[(0.0, 0.0, 0.0), (0.08, 0.02, 0.75)],
+        cap_ends=True,
+        samples=24,
+    )
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+
+    route = select_loft_csg_route(operands)
+    result = surface_boolean_result("difference", operands)
+
+    assert isinstance(route, LoftCSGOperationRouteRecord)
+    assert route.supported is True
+    assert route.route_id == "surface-csg.loft-primitive"
+    assert route.solver_path == "loft-primitive-surfacebody"
+    assert route.loft_operand_indices == (0,)
+    assert route.primitive_families == ("", "box")
+    assert route.canonical_payload()["no_mesh_fallback"] is True
+    assert result.status == "succeeded"
+    assert result.body is not None
+    scope_payload = result.body.kernel_metadata()["loft_primitive_public_executor"]["execution_scope"]
+    assert scope_payload["scope"] == "trim-fragment-cut"
+    assert scope_payload["accepted"] is True
+
+
+def test_surface_csg_route_selection_reports_supported_loft_pairing() -> None:
+    first = loft(
+        [make_circle(radius=0.4), make_circle(radius=0.52)],
+        path=[(0.0, 0.0, 0.0), (0.08, 0.02, 0.75)],
+        cap_ends=True,
+        samples=24,
+    )
+    second = loft(
+        [make_rect(size=(0.8, 0.8)), make_rect(size=(0.6, 0.6))],
+        path=[(0.0, 0.0, 0.0), (0.0, 0.0, 0.75)],
+        cap_ends=True,
+        samples=24,
+    )
+    operands = prepare_surface_boolean_operands("union", (first, second))
+
+    route = select_loft_csg_route(operands)
+
+    assert route.supported is True
+    assert route.route_id == "surface-csg.loft-pair"
+    assert route.solver_path == "loft-pair-surfacebody"
+    assert route.loft_operand_indices == (0, 1)
+    assert route.canonical_payload()["no_mesh_fallback"] is True
+
+
+def _small_capped_loft_body() -> SurfaceBody:
+    return loft(
+        [make_circle(radius=0.2), make_circle(radius=0.24)],
+        path=[(0.0, 0.0, 0.0), (0.03, 0.01, 0.5)],
+        cap_ends=True,
+        samples=24,
+    )
+
+
+def _offset_capped_loft_body() -> SurfaceBody:
+    return loft(
+        [make_circle(radius=0.18), make_circle(radius=0.22)],
+        path=[(0.02, 0.0, 0.1), (0.04, 0.02, 0.45)],
+        cap_ends=True,
+        samples=24,
+    )
+
+
+def _assert_loft_primitive_result_metadata(result: SurfaceBooleanResult) -> None:
+    assert result.body is not None
+    metadata = result.body.kernel_metadata()["loft_primitive_csg"]
+    assert metadata["no_mesh_fallback"] is True
+    assert metadata["route"]["route_id"] == "surface-csg.loft-primitive"
+    assert metadata["result_geometry"]["route_id"] == "surface-csg.loft-primitive"
+    assert metadata["fragment_participation"]
+    assert all(row["no_mesh_fallback"] is True for row in metadata["fragment_participation"])
+    assert metadata["fragment_provenance"]
+    assert all(row["has_provenance"] is True for row in metadata["fragment_provenance"])
+    assert all(row["no_mesh_fallback"] is True for row in metadata["fragment_provenance"])
+    assert metadata["color_ownership"]
+    assert all(row["no_mesh_fallback"] is True for row in metadata["color_ownership"])
+
+
+def test_surface_csg_executes_exact_loft_primitive_difference_without_mesh_fallback() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.2, 0.2, 0.2), center=(4.0, 4.0, 4.0))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+
+    result = surface_boolean_result("difference", operands)
+
+    assert result.status == "succeeded"
+    assert result.classification == "closed"
+    assert result.body is not None
+    assert result.body.patch_count == body.patch_count
+    _assert_loft_primitive_result_metadata(result)
+
+
+def test_surface_csg_executes_exact_loft_primitive_intersection_without_mesh_fallback() -> None:
+    body = _small_capped_loft_body()
+    container = make_box(size=(2.0, 2.0, 2.0), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_operands("intersection", (body, container))
+
+    result = surface_boolean_result("intersection", operands)
+
+    assert result.status == "succeeded"
+    assert result.classification == "closed"
+    assert result.body is not None
+    assert result.body.patch_count == body.patch_count
+    _assert_loft_primitive_result_metadata(result)
+
+
+def test_surface_csg_executes_exact_loft_primitive_union_without_mesh_fallback() -> None:
+    body = _small_capped_loft_body()
+    container = make_box(size=(2.0, 2.0, 2.0), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_operands("union", (body, container))
+
+    result = surface_boolean_result("union", operands)
+
+    assert result.status == "succeeded"
+    assert result.classification == "closed"
+    assert result.body is not None
+    assert result.body.patch_count == container.patch_count
+    _assert_loft_primitive_result_metadata(result)
+
+
+@pytest.mark.parametrize("operation", ("difference", "union", "intersection"))
+def test_surface_csg_executes_loft_pair_routes_without_mesh_fallback(operation: str) -> None:
+    first = _small_capped_loft_body()
+    second = _offset_capped_loft_body()
+    operands = (
+        prepare_surface_boolean_difference_operands(first, [second])
+        if operation == "difference"
+        else prepare_surface_boolean_operands(operation, (first, second))
+    )
+
+    route = select_loft_csg_route(operands)
+    direct = execute_loft_pair_csg(operands)
+    result = surface_boolean_result(operation, operands)
+
+    assert route.supported is True
+    assert route.route_id == "surface-csg.loft-pair"
+    assert route.solver_path == "loft-pair-surfacebody"
+    assert route.loft_operand_indices == (0, 1)
+    assert direct is not None
+    assert direct.status == "succeeded"
+    assert result.status == "succeeded"
+    assert result.classification == "closed"
+    assert result.body is not None
+    metadata = result.body.kernel_metadata()["loft_pair_csg"]
+    assert metadata["no_mesh_fallback"] is True
+    assert metadata["route"]["route_id"] == "surface-csg.loft-pair"
+    assert metadata["plan"] == LoftPairOperationPlanRecord(
+        operation=operation,
+        route_id="surface-csg.loft-pair",
+        solver_path="loft-pair-surfacebody",
+        loft_operand_ids=operands.body_ids,
+    ).canonical_payload()
+    if operation == "union":
+        assert result.body.shell_count == 2
+    else:
+        assert result.body.shell_count == 1
+
+
+def test_loft_primitive_executor_records_patch_participation() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.2, 0.2, 0.2), center=(4.0, 4.0, 4.0))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+
+    route_result = execute_single_shell_loft_primitive_csg(operands)
+    records = classify_loft_patch_fragments(body, result_role="preserved", route_id="surface-csg.loft-primitive")
+
+    assert route_result is not None
+    assert route_result.status == "succeeded"
+    assert all(isinstance(record, LoftPatchFragmentParticipationRecord) for record in records)
+    assert all(record.no_mesh_fallback is True for record in records)
+    geometry = route_result.body.kernel_metadata()["loft_primitive_csg"]["result_geometry"]
+    assert LoftCSGResultGeometryRecord(
+        operation="difference",
+        route_id="surface-csg.loft-primitive",
+        result_classification="closed",
+        shell_count=1,
+        patch_count=body.patch_count,
+        fragment_count=len(records),
+    ).canonical_payload() == geometry
+
+
+def test_loft_csg_fragment_provenance_and_color_resolver_support_generated_fragments() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.2, 0.2, 0.2), center=(4.0, 4.0, 4.0))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+    route = select_loft_csg_route(operands)
+    participation = classify_loft_patch_fragments(body, result_role="preserved", route_id="surface-csg.loft-primitive")
+
+    provenance = map_loft_csg_fragment_provenance(
+        operands,
+        participation[:1],
+        route=route,
+        generated_reasons={"result:generated-cut-cap": "cut-cap"},
+    )
+    colors = resolve_loft_csg_color_ownership(operands, provenance)
+    generated_style = resolve_generated_surface_style("cut-cap")
+
+    assert all(isinstance(record, LoftCSGResultFragmentRecord) for record in provenance)
+    assert isinstance(provenance[0].source, LoftCSGSourceFragmentRecord)
+    assert provenance[-1].generated_reason == "cut-cap"
+    assert all(isinstance(record, LoftCSGColorOwnershipRecord) for record in colors)
+    assert colors[-1].ownership == "generated-fallback"
+    assert isinstance(colors[-1].style_policy, LoftCSGGeneratedSurfaceStylePolicy)
+    assert colors[-1].color == generated_style.color
+
+
+def test_loft_primitive_trim_adapter_records_patch_local_evidence_without_mesh() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+
+    adapter = adapt_loft_patch_for_primitive_csg(operands, 0)
+
+    assert isinstance(adapter, LoftPrimitiveTrimAdapterRecord)
+    assert adapter.operation == "difference"
+    assert adapter.route_id == "surface-csg.loft-primitive"
+    assert adapter.primitive_family == "box"
+    assert adapter.primitive_operand_index == 1
+    assert adapter.no_mesh_fallback is True
+    assert adapter.canonical_payload()["no_mesh_fallback"] is True
+    assert adapter.canonical_payload()["loft_patch"] == {"operand_index": 0, "patch_index": 0}
+
+
+def test_loft_primitive_source_normalization_records_box_regions_without_mesh() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+
+    record = normalize_loft_primitive_intersection_sources(operands)
+
+    assert isinstance(record, LoftPrimitiveIntersectionSourceRecord)
+    assert record.supported is True
+    assert record.primitive_family == "box"
+    assert record.primitive_operand_index == 1
+    assert record.diagnostics == ()
+    assert record.source_regions
+    assert all(isinstance(region, LoftPrimitiveSourceRegionRecord) for region in record.source_regions)
+    assert {region.region_kind for region in record.source_regions} == {"box-overlap"}
+    assert all(region.no_mesh_fallback is True for region in record.source_regions)
+    assert record.canonical_payload()["no_mesh_fallback"] is True
+
+
+def test_loft_primitive_source_normalization_records_sphere_and_cylinder_regions_without_mesh() -> None:
+    body = _small_capped_loft_body()
+    cases = (
+        (make_sphere(radius=0.25, center=(0.0, 0.0, 0.25)), "sphere", "sphere-analytic-region"),
+        (make_cylinder(radius=0.16, height=0.35, center=(0.0, 0.0, 0.25)), "cylinder", "cylinder-analytic-region"),
+    )
+
+    for cutter, primitive_family, region_kind in cases:
+        operands = prepare_surface_boolean_difference_operands(body, [cutter])
+
+        record = normalize_loft_primitive_intersection_sources(operands)
+
+        assert record.supported is True
+        assert record.primitive_family == primitive_family
+        assert record.diagnostics == ()
+        assert record.source_regions
+        assert {region.region_kind for region in record.source_regions} == {region_kind}
+        assert all(region.no_mesh_fallback is True for region in record.source_regions)
+
+
+def test_loft_primitive_source_normalization_refuses_unsupported_region_without_mesh() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+    route = LoftCSGOperationRouteRecord(
+        supported=True,
+        operation="difference",
+        operand_ids=operands.body_ids,
+        route_id="surface-csg.loft-primitive",
+        solver_path="surface.csg.loft_primitive",
+        loft_operand_indices=(0,),
+        primitive_families=("loft", "cone"),
+    )
+
+    record = normalize_loft_primitive_intersection_sources(operands, route=route)
+
+    assert record.supported is False
+    assert record.source_regions == ()
+    assert record.diagnostics
+    assert all(isinstance(diagnostic, LoftPrimitiveUnsupportedSourceDiagnostic) for diagnostic in record.diagnostics)
+    assert record.diagnostics[0].code == "unsupported-primitive-region"
+    assert record.diagnostics[0].primitive_family == "cone"
+    assert record.diagnostics[0].no_mesh_fallback is True
+
+
+def test_loft_primitive_patch_local_inversion_records_box_source_curves_without_mesh() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+
+    records, diagnostics = invert_loft_primitive_source_curves_to_patch_domains(operands)
+
+    assert diagnostics == ()
+    assert records
+    assert all(isinstance(record, LoftPatchLocalSourceCurveRecord) for record in records)
+    assert {record.primitive_family for record in records} == {"box"}
+    assert {record.source_region_kind for record in records} == {"box-overlap"}
+    assert all(record.patch_local_curve.source_curve_digest == record.source_curve_id for record in records)
+    assert all(validate_surface_csg_patch_local_curve_domain(record.patch_local_curve) == () for record in records)
+    assert all(record.no_mesh_fallback is True for record in records)
+    assert all(record.max_residual == pytest.approx(0.0) for record in records)
+
+
+def test_loft_primitive_patch_local_inversion_refuses_missing_source_curves_without_mesh() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_sphere(radius=0.25, center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+
+    records, diagnostics = invert_loft_primitive_source_curves_to_patch_domains(operands)
+
+    assert records == ()
+    assert diagnostics
+    assert all(isinstance(diagnostic, LoftPatchLocalInversionDiagnostic) for diagnostic in diagnostics)
+    assert {diagnostic.code for diagnostic in diagnostics} == {"failed-inversion"}
+    assert {diagnostic.primitive_family for diagnostic in diagnostics} == {"sphere"}
+    assert all(diagnostic.no_mesh_fallback is True for diagnostic in diagnostics)
+
+
+def test_loft_primitive_cut_loop_closure_preserves_boundary_participation_without_mesh() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+    inversion_records, inversion_diagnostics = invert_loft_primitive_source_curves_to_patch_domains(operands)
+
+    loops, diagnostics = close_loft_patch_local_cut_loops(
+        operands,
+        inversion_records=inversion_records,
+        inversion_diagnostics=inversion_diagnostics,
+    )
+
+    assert diagnostics == ()
+    assert loops
+    assert all(isinstance(loop, LoftPatchLocalCutLoopRecord) for loop in loops)
+    assert all(loop.loop.category == "inner" for loop in loops)
+    assert all(loop.source_curve_ids for loop in loops)
+    assert all(loop.boundary_participation for loop in loops)
+    assert all(
+        isinstance(participant, LoftCutLoopBoundaryParticipationRecord)
+        for loop in loops
+        for participant in loop.boundary_participation
+    )
+    participant_kinds = {
+        participant.kind
+        for loop in loops
+        for participant in loop.boundary_participation
+    }
+    assert "source-curve" in participant_kinds
+    assert participant_kinds & {"cap-trim", "station-seam"}
+    assert all(loop.no_mesh_fallback is True for loop in loops)
+
+
+def test_loft_primitive_cut_loop_closure_refuses_open_records_without_mesh() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+
+    loops, diagnostics = close_loft_patch_local_cut_loops(operands)
+
+    assert loops == ()
+    assert diagnostics
+    assert all(isinstance(diagnostic, LoftCutLoopClosureDiagnostic) for diagnostic in diagnostics)
+    assert diagnostics[0].code == "missing-inversion-records"
+    assert diagnostics[0].no_mesh_fallback is True
+
+
+def test_loft_primitive_cut_loop_degeneracy_accepts_valid_closed_loops_without_mesh() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+    inversion_records, inversion_diagnostics = invert_loft_primitive_source_curves_to_patch_domains(operands)
+    loops, closure_diagnostics = close_loft_patch_local_cut_loops(
+        operands,
+        inversion_records=inversion_records,
+        inversion_diagnostics=inversion_diagnostics,
+    )
+
+    diagnostics = classify_loft_cut_loop_degeneracy(loops, closure_diagnostics=closure_diagnostics)
+
+    assert diagnostics == ()
+
+
+def test_loft_primitive_cut_loop_degeneracy_classifies_failure_cases_without_mesh() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+    inversion_records, _inversion_diagnostics = invert_loft_primitive_source_curves_to_patch_domains(operands)
+    loops, _closure_diagnostics = close_loft_patch_local_cut_loops(operands, inversion_records=inversion_records)
+    base_loop = loops[0]
+    open_diagnostic = LoftCutLoopClosureDiagnostic(
+        code="open-loop",
+        message="open fixture",
+        operation="difference",
+        route_id="surface-csg.loft-primitive",
+        loft_patch=base_loop.loft_patch,
+    )
+    zero_area_loop = replace(
+        base_loop,
+        loop=TrimLoop(((0.0, 0.0), (1e-6, 0.0), (0.0, 1e-6)), category="inner"),
+    )
+    tangent_loop = replace(
+        base_loop,
+        loop=TrimLoop(((0.0, 0.0), (6e-7, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)), category="inner"),
+    )
+    grazing_loop = replace(
+        base_loop,
+        loop=TrimLoop(((0.0, 0.0), (2e-6, 0.0), (2e-6, 2.0), (0.0, 2.0)), category="inner"),
+    )
+    duplicate_loop = replace(
+        base_loop,
+        loop=TrimLoop(((0.0, 0.0), (4e-7, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)), category="inner"),
+    )
+
+    open_result = classify_loft_cut_loop_degeneracy((), closure_diagnostics=(open_diagnostic,))
+    zero_result = classify_loft_cut_loop_degeneracy((zero_area_loop,), policy={"degeneracy_tolerance": 1e-12})
+    tangent_result = classify_loft_cut_loop_degeneracy((tangent_loop,), policy={"degeneracy_tolerance": 1e-6})
+    grazing_result = classify_loft_cut_loop_degeneracy((grazing_loop,), policy={"degeneracy_tolerance": 1e-6})
+    duplicate_result = classify_loft_cut_loop_degeneracy((duplicate_loop,), policy={"degeneracy_tolerance": 1e-6})
+
+    assert open_result[0].code == "open-loop"
+    assert zero_result[0].code == "zero-area"
+    assert tangent_result[0].code == "tangent"
+    assert grazing_result[0].code == "grazing"
+    assert duplicate_result[0].code == "duplicate-segment"
+    assert all(
+        isinstance(diagnostic, LoftCutLoopDegeneracyDiagnostic)
+        for diagnostic in (*open_result, *zero_result, *tangent_result, *grazing_result, *duplicate_result)
+    )
+    assert all(
+        diagnostic.no_mesh_fallback is True
+        for diagnostic in (*open_result, *zero_result, *tangent_result, *grazing_result, *duplicate_result)
+    )
+
+
+def test_loft_primitive_cap_support_classifies_box_caps_before_construction_without_mesh() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+    source_record = normalize_loft_primitive_intersection_sources(operands)
+    inversion_records, inversion_diagnostics = invert_loft_primitive_source_curves_to_patch_domains(
+        operands,
+        source_record=source_record,
+    )
+    loops, closure_diagnostics = close_loft_patch_local_cut_loops(
+        operands,
+        inversion_records=inversion_records,
+        inversion_diagnostics=inversion_diagnostics,
+    )
+    degeneracy = classify_loft_cut_loop_degeneracy(loops, closure_diagnostics=closure_diagnostics)
+
+    classifications = classify_loft_primitive_cap_support(
+        operands,
+        source_record=source_record,
+        cut_loops=loops,
+        degeneracy_diagnostics=degeneracy,
+    )
+
+    assert classifications
+    assert all(isinstance(classification, LoftPrimitiveCapSupportClassification) for classification in classifications)
+    assert {classification.primitive_family for classification in classifications} == {"box"}
+    assert {classification.cap_family for classification in classifications} == {"planar"}
+    assert all(classification.supported for classification in classifications)
+    assert all(classification.cut_loop_ids for classification in classifications)
+    assert all(classification.diagnostics == () for classification in classifications)
+    assert all(classification.no_mesh_fallback is True for classification in classifications)
+
+
+def test_loft_primitive_cap_support_refuses_sphere_without_cut_loops_before_construction() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_sphere(radius=0.25, center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+    source_record = normalize_loft_primitive_intersection_sources(operands)
+
+    classifications = classify_loft_primitive_cap_support(operands, source_record=source_record)
+
+    assert classifications
+    assert {classification.primitive_family for classification in classifications} == {"sphere"}
+    assert {classification.cap_family for classification in classifications} == {"revolution"}
+    assert not any(classification.supported for classification in classifications)
+    diagnostics = tuple(diagnostic for classification in classifications for diagnostic in classification.diagnostics)
+    assert diagnostics
+    assert all(isinstance(diagnostic, LoftPrimitiveUnsupportedCapDiagnostic) for diagnostic in diagnostics)
+    assert {diagnostic.code for diagnostic in diagnostics} == {"missing-cut-loop"}
+    assert all(diagnostic.cap_family == "revolution" for diagnostic in diagnostics)
+    assert all(diagnostic.no_mesh_fallback is True for diagnostic in diagnostics)
+
+
+def _loft_primitive_box_generated_cap_records() -> tuple[
+    SurfaceBooleanOperands,
+    tuple[LoftPatchLocalCutLoopRecord, ...],
+    tuple[LoftPrimitiveGeneratedCapRecord, ...],
+]:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+    source_record = normalize_loft_primitive_intersection_sources(operands)
+    inversion_records, inversion_diagnostics = invert_loft_primitive_source_curves_to_patch_domains(
+        operands,
+        source_record=source_record,
+    )
+    loops, closure_diagnostics = close_loft_patch_local_cut_loops(
+        operands,
+        inversion_records=inversion_records,
+        inversion_diagnostics=inversion_diagnostics,
+    )
+    degeneracy = classify_loft_cut_loop_degeneracy(loops, closure_diagnostics=closure_diagnostics)
+    cap_support = classify_loft_primitive_cap_support(
+        operands,
+        source_record=source_record,
+        cut_loops=loops,
+        degeneracy_diagnostics=degeneracy,
+    )
+    records, diagnostics = build_loft_primitive_generated_cap_records(
+        operands,
+        cap_support=cap_support,
+        cut_loops=loops,
+    )
+    assert diagnostics == ()
+    return operands, loops, records
+
+
+def test_loft_primitive_generated_cap_records_preserve_source_identity_without_mesh() -> None:
+    _operands, _loops, records = _loft_primitive_box_generated_cap_records()
+
+    assert records
+    assert all(isinstance(record, LoftPrimitiveGeneratedCapRecord) for record in records)
+    assert {record.cap_family for record in records} == {"planar"}
+    assert {record.primitive_family for record in records} == {"box"}
+    assert all(record.cap_id.startswith("loft-primitive-cap:surface-csg.loft-primitive") for record in records)
+    assert all(record.source_curve_ids for record in records)
+    assert all("surface-425b:generated-cap-record-construction" in record.provenance for record in records)
+    assert all(record.support_classification.supported for record in records)
+    assert all(record.no_mesh_fallback is True for record in records)
+
+
+def test_loft_primitive_generated_cap_records_refuse_missing_support_before_construction() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+
+    records, diagnostics = build_loft_primitive_generated_cap_records(operands)
+
+    assert records == ()
+    assert diagnostics
+    assert {diagnostic.code for diagnostic in diagnostics} == {"missing-support-classification"}
+    assert all(diagnostic.no_mesh_fallback is True for diagnostic in diagnostics)
+
+
+def test_loft_primitive_cap_loop_pairing_pairs_caps_exactly_once_without_mesh() -> None:
+    operands, loops, generated_caps = _loft_primitive_box_generated_cap_records()
+
+    pairings, diagnostics = pair_loft_primitive_generated_cap_loops(
+        operands,
+        generated_caps=generated_caps,
+        cut_loops=loops,
+    )
+
+    assert diagnostics == ()
+    assert pairings
+    assert all(isinstance(pairing, LoftPrimitiveCapLoopPairingRecord) for pairing in pairings)
+    assert {pairing.cap_id for pairing in pairings} == {cap.cap_id for cap in generated_caps}
+    assert all(pairing.source_curve_ids for pairing in pairings)
+    assert all(pairing.no_mesh_fallback is True for pairing in pairings)
+
+
+def test_loft_primitive_cap_loop_pairing_refuses_missing_and_duplicate_pairs_without_mesh() -> None:
+    operands, loops, generated_caps = _loft_primitive_box_generated_cap_records()
+    duplicated_caps = (generated_caps[0], generated_caps[0], *generated_caps[1:])
+
+    missing_caps, missing_diagnostics = pair_loft_primitive_generated_cap_loops(operands, cut_loops=loops)
+    missing_loops, missing_loop_diagnostics = pair_loft_primitive_generated_cap_loops(
+        operands,
+        generated_caps=generated_caps,
+    )
+    duplicate_pairings, duplicate_diagnostics = pair_loft_primitive_generated_cap_loops(
+        operands,
+        generated_caps=duplicated_caps,
+        cut_loops=loops,
+    )
+
+    assert missing_caps == ()
+    assert missing_loops == ()
+    assert duplicate_pairings == ()
+    assert all(isinstance(diagnostic, LoftPrimitiveCapLoopPairingDiagnostic) for diagnostic in missing_diagnostics)
+    assert {diagnostic.code for diagnostic in missing_diagnostics} == {"missing-generated-cap"}
+    assert {diagnostic.code for diagnostic in missing_loop_diagnostics} == {"missing-cut-loop"}
+    assert {diagnostic.code for diagnostic in duplicate_diagnostics} == {"duplicate-generated-cap"}
+    assert all(
+        diagnostic.no_mesh_fallback is True
+        for diagnostic in (*missing_diagnostics, *missing_loop_diagnostics, *duplicate_diagnostics)
+    )
+
+
+def test_loft_primitive_operation_fragment_retention_covers_boolean_operations_without_mesh() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    cases = (
+        prepare_surface_boolean_operands("union", [body, cutter]),
+        prepare_surface_boolean_difference_operands(body, [cutter]),
+        prepare_surface_boolean_operands("intersection", [body, cutter]),
+    )
+
+    for operands in cases:
+        classifications = classify_loft_primitive_fragments(operands)
+        records, diagnostics = select_loft_primitive_operation_fragments(
+            operands,
+            classifications=classifications,
+        )
+
+        assert diagnostics == ()
+        assert records
+        assert all(isinstance(record, LoftPrimitiveRetainedFragmentRecord) for record in records)
+        assert {record.operation for record in records} == {operands.operation}
+        assert all(record.source_body_role == "loft" for record in records)
+        assert all(record.fragment_id.startswith("loft-primitive-fragment:surface-csg.loft-primitive") for record in records)
+        assert any(record.retained for record in records)
+        assert all(record.no_mesh_fallback is True for record in records)
+
+
+def test_loft_primitive_operation_fragment_retention_refuses_empty_classifications_without_mesh() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+
+    records, diagnostics = select_loft_primitive_operation_fragments(operands)
+
+    assert records == ()
+    assert diagnostics
+    assert all(isinstance(diagnostic, LoftPrimitiveFragmentRetentionDiagnostic) for diagnostic in diagnostics)
+    assert {diagnostic.code for diagnostic in diagnostics} == {"missing-fragment-classification"}
+    assert all(diagnostic.no_mesh_fallback is True for diagnostic in diagnostics)
+
+
+def test_loft_primitive_result_topology_classifies_retained_fragment_sets_without_mesh() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    difference_operands = prepare_surface_boolean_difference_operands(body, [cutter])
+    union_operands = prepare_surface_boolean_operands("union", [body, cutter])
+    intersection_operands = prepare_surface_boolean_operands("intersection", [body, cutter])
+    _box_operands, _loops, generated_caps = _loft_primitive_box_generated_cap_records()
+    pairings, pairing_diagnostics = pair_loft_primitive_generated_cap_loops(
+        difference_operands,
+        generated_caps=generated_caps,
+        cut_loops=_loops,
+    )
+    assert pairing_diagnostics == ()
+    difference_records, _difference_diagnostics = select_loft_primitive_operation_fragments(
+        difference_operands,
+        classifications=classify_loft_primitive_fragments(difference_operands),
+        cap_pairings=pairings,
+    )
+    union_records = tuple(
+        replace(record, operation="union", result_role="survive", retained=True)
+        for record in difference_records[:2]
+    )
+    intersection_records = tuple(
+        replace(record, operation="intersection", result_role="survive", retained=True)
+        for record in difference_records[:1]
+    )
+    empty_records = tuple(replace(record, retained=False, result_role="discard") for record in intersection_records)
+
+    difference_topology = classify_loft_primitive_result_topology(
+        difference_operands,
+        retained_fragments=difference_records,
+        cap_pairings=pairings,
+    )
+    union_topology = classify_loft_primitive_result_topology(union_operands, retained_fragments=union_records)
+    intersection_topology = classify_loft_primitive_result_topology(
+        intersection_operands,
+        retained_fragments=intersection_records,
+    )
+    empty_topology = classify_loft_primitive_result_topology(intersection_operands, retained_fragments=empty_records)
+
+    assert isinstance(difference_topology, LoftPrimitiveFragmentTopologyRecord)
+    assert difference_topology.topology_class == "interior-cavity"
+    assert union_topology.topology_class in {"multi-shell", "exterior-shell-edit"}
+    assert intersection_topology.topology_class in {"exterior-shell-edit", "multi-shell"}
+    assert empty_topology.topology_class == "empty"
+    assert all(
+        topology.assembly_ready
+        for topology in (difference_topology, union_topology, intersection_topology, empty_topology)
+    )
+    assert difference_topology.generated_cap_ids
+    assert difference_topology.no_mesh_fallback is True
+
+
+def test_loft_primitive_result_topology_refuses_missing_inputs_before_shell_assembly() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+    records, _diagnostics = select_loft_primitive_operation_fragments(
+        operands,
+        classifications=classify_loft_primitive_fragments(operands),
+    )
+
+    missing_records = classify_loft_primitive_result_topology(operands)
+    missing_caps = classify_loft_primitive_result_topology(operands, retained_fragments=records)
+
+    assert missing_records.topology_class == "refused"
+    assert missing_records.diagnostics
+    assert all(isinstance(diagnostic, LoftPrimitiveTopologyDiagnostic) for diagnostic in missing_records.diagnostics)
+    assert {diagnostic.code for diagnostic in missing_records.diagnostics} == {"missing-retained-fragments"}
+    assert missing_caps.topology_class == "refused"
+    assert {diagnostic.code for diagnostic in missing_caps.diagnostics} == {"missing-cap-pairing"}
+    assert all(diagnostic.no_mesh_fallback is True for diagnostic in (*missing_records.diagnostics, *missing_caps.diagnostics))
+
+
+def test_loft_primitive_topology_orientation_gate_reports_ready_and_refusals_without_mesh() -> None:
+    operands, loops, generated_caps = _loft_primitive_box_generated_cap_records()
+    pairings, _pairing_diagnostics = pair_loft_primitive_generated_cap_loops(
+        operands,
+        generated_caps=generated_caps,
+        cut_loops=loops,
+    )
+    records, _retention_diagnostics = select_loft_primitive_operation_fragments(
+        operands,
+        classifications=classify_loft_primitive_fragments(operands),
+        cap_pairings=pairings,
+    )
+    topology = classify_loft_primitive_result_topology(operands, retained_fragments=records, cap_pairings=pairings)
+
+    ready = evaluate_loft_primitive_topology_orientation(topology)
+    inverted = evaluate_loft_primitive_topology_orientation(topology, source_normal_state="inverted")
+    ambiguous = evaluate_loft_primitive_topology_orientation(topology, source_normal_state="ambiguous")
+    cap_conflict = evaluate_loft_primitive_topology_orientation(
+        topology,
+        cap_orientation_conflicts=(generated_caps[0].cap_id,),
+    )
+
+    assert isinstance(ready, LoftPrimitiveTopologyOrientationRecord)
+    assert ready.ready is True
+    assert ready.diagnostics == ()
+    assert inverted.ready is False
+    assert ambiguous.ready is False
+    assert cap_conflict.ready is False
+    assert all(
+        isinstance(diagnostic, LoftPrimitiveTopologyOrientationDiagnostic)
+        for diagnostic in (*inverted.diagnostics, *ambiguous.diagnostics, *cap_conflict.diagnostics)
+    )
+    assert {diagnostic.code for diagnostic in inverted.diagnostics} == {"inverted-source-normal"}
+    assert {diagnostic.code for diagnostic in ambiguous.diagnostics} == {"ambiguous-inside-outside"}
+    assert {diagnostic.code for diagnostic in cap_conflict.diagnostics} == {"cap-orientation-conflict"}
+    assert cap_conflict.diagnostics[0].cap_id == generated_caps[0].cap_id
+    assert all(
+        diagnostic.no_mesh_fallback is True
+        for diagnostic in (*inverted.diagnostics, *ambiguous.diagnostics, *cap_conflict.diagnostics)
+    )
+
+
+def test_loft_primitive_topology_orientation_refuses_refused_topology_without_mesh() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+    topology = classify_loft_primitive_result_topology(operands)
+
+    orientation = evaluate_loft_primitive_topology_orientation(topology)
+
+    assert orientation.ready is False
+    assert {diagnostic.code for diagnostic in orientation.diagnostics} == {"refused-topology"}
+    assert orientation.no_mesh_fallback is True
+
+
+def test_loft_primitive_seam_use_pairing_pairs_orientation_ready_boundaries_without_mesh() -> None:
+    operands, loops, generated_caps = _loft_primitive_box_generated_cap_records()
+    cap_pairings, _pairing_diagnostics = pair_loft_primitive_generated_cap_loops(
+        operands,
+        generated_caps=generated_caps,
+        cut_loops=loops,
+    )
+    retention, _retention_diagnostics = select_loft_primitive_operation_fragments(
+        operands,
+        classifications=classify_loft_primitive_fragments(operands),
+        cap_pairings=cap_pairings,
+    )
+    topology = classify_loft_primitive_result_topology(operands, retained_fragments=retention, cap_pairings=cap_pairings)
+    orientation = evaluate_loft_primitive_topology_orientation(topology)
+
+    pairings, diagnostics = pair_loft_primitive_seam_uses(orientation, cap_pairings=cap_pairings)
+
+    assert diagnostics == ()
+    assert pairings
+    assert all(isinstance(pairing, LoftPrimitiveSeamUsePairingRecord) for pairing in pairings)
+    assert {pairing.cap_id for pairing in pairings} == {pairing.cap_id for pairing in cap_pairings}
+    assert all(pairing.source_patch.operand_index == 0 for pairing in pairings)
+    assert all(pairing.no_mesh_fallback is True for pairing in pairings)
+
+
+def test_loft_primitive_seam_use_pairing_refuses_invalid_uses_without_mesh() -> None:
+    operands, loops, generated_caps = _loft_primitive_box_generated_cap_records()
+    cap_pairings, _pairing_diagnostics = pair_loft_primitive_generated_cap_loops(
+        operands,
+        generated_caps=generated_caps,
+        cut_loops=loops,
+    )
+    topology = classify_loft_primitive_result_topology(operands)
+    refused_orientation = evaluate_loft_primitive_topology_orientation(topology)
+    ready_orientation = evaluate_loft_primitive_topology_orientation(
+        LoftPrimitiveFragmentTopologyRecord(
+            operation="difference",
+            route_id="surface-csg.loft-primitive",
+            topology_class="interior-cavity",
+            retained_fragment_ids=("fragment-a",),
+            generated_cap_ids=(generated_caps[0].cap_id,),
+            assembly_ready=True,
+        )
+    )
+
+    refused_pairings, refused_diagnostics = pair_loft_primitive_seam_uses(refused_orientation)
+    dangling_pairings, dangling_diagnostics = pair_loft_primitive_seam_uses(
+        ready_orientation,
+        extra_boundary_uses=("dangling-use",),
+    )
+    duplicate_pairings, duplicate_diagnostics = pair_loft_primitive_seam_uses(
+        ready_orientation,
+        cap_pairings=cap_pairings,
+        extra_boundary_uses=(cap_pairings[0].pairing_id,),
+    )
+    ambiguous_cap_pairings = (
+        cap_pairings[0],
+        replace(
+            cap_pairings[0],
+            pairing_id=f"{cap_pairings[0].pairing_id}:duplicate",
+            cap_id=f"{cap_pairings[0].cap_id}:duplicate",
+        ),
+    )
+    ambiguous_pairings, ambiguous_diagnostics = pair_loft_primitive_seam_uses(
+        ready_orientation,
+        cap_pairings=ambiguous_cap_pairings,
+    )
+
+    assert refused_pairings == dangling_pairings == duplicate_pairings == ambiguous_pairings == ()
+    assert {diagnostic.code for diagnostic in refused_diagnostics} == {"orientation-not-ready"}
+    assert {diagnostic.code for diagnostic in dangling_diagnostics} == {"dangling-use"}
+    assert {diagnostic.code for diagnostic in duplicate_diagnostics} == {"duplicate-use"}
+    assert {diagnostic.code for diagnostic in ambiguous_diagnostics} == {"ambiguous-one-to-many"}
+    assert all(
+        isinstance(diagnostic, LoftPrimitiveSeamUsePairingDiagnostic)
+        for diagnostic in (*refused_diagnostics, *dangling_diagnostics, *duplicate_diagnostics, *ambiguous_diagnostics)
+    )
+
+
+def test_loft_primitive_candidate_shell_assembly_records_supported_candidates_without_mesh() -> None:
+    operands, loops, generated_caps = _loft_primitive_box_generated_cap_records()
+    cap_pairings, _pairing_diagnostics = pair_loft_primitive_generated_cap_loops(
+        operands,
+        generated_caps=generated_caps,
+        cut_loops=loops,
+    )
+    retention, _retention_diagnostics = select_loft_primitive_operation_fragments(
+        operands,
+        classifications=classify_loft_primitive_fragments(operands),
+        cap_pairings=cap_pairings,
+    )
+    topology = classify_loft_primitive_result_topology(operands, retained_fragments=retention, cap_pairings=cap_pairings)
+    orientation = evaluate_loft_primitive_topology_orientation(topology)
+    seam_uses, seam_diagnostics = pair_loft_primitive_seam_uses(orientation, cap_pairings=cap_pairings)
+    assert seam_diagnostics == ()
+
+    candidate = assemble_loft_primitive_candidate_shell(orientation, seam_use_pairings=seam_uses)
+
+    assert isinstance(candidate, LoftPrimitiveCandidateShellRecord)
+    assert candidate.assembly_ready is True
+    assert candidate.diagnostics == ()
+    assert candidate.retained_fragment_ids == orientation.retained_fragment_ids
+    assert candidate.generated_cap_ids == orientation.generated_cap_ids
+    assert candidate.seam_use_pairing_ids
+    assert candidate.candidate_shell_id.startswith("loft-primitive-candidate-shell:")
+    assert candidate.no_mesh_fallback is True
+
+
+def test_loft_primitive_candidate_shell_assembly_refuses_missing_participants_without_mesh() -> None:
+    topology = LoftPrimitiveFragmentTopologyRecord(
+        operation="difference",
+        route_id="surface-csg.loft-primitive",
+        topology_class="interior-cavity",
+        retained_fragment_ids=("fragment-a",),
+        generated_cap_ids=("cap-a",),
+        assembly_ready=True,
+    )
+    orientation = evaluate_loft_primitive_topology_orientation(topology)
+    refused_orientation = evaluate_loft_primitive_topology_orientation(
+        LoftPrimitiveFragmentTopologyRecord(
+            operation="difference",
+            route_id="surface-csg.loft-primitive",
+            topology_class="refused",
+            assembly_ready=False,
+        )
+    )
+
+    missing_pairing = assemble_loft_primitive_candidate_shell(orientation)
+    refused = assemble_loft_primitive_candidate_shell(refused_orientation)
+
+    assert missing_pairing.assembly_ready is False
+    assert refused.assembly_ready is False
+    assert all(isinstance(diagnostic, LoftPrimitiveCandidateShellDiagnostic) for diagnostic in missing_pairing.diagnostics)
+    assert {diagnostic.code for diagnostic in missing_pairing.diagnostics} == {"missing-seam-use-pairing"}
+    assert {diagnostic.code for diagnostic in refused.diagnostics} >= {"missing-topology-orientation", "unsupported-topology"}
+
+
+def test_loft_primitive_adjacency_rebuild_reports_complete_candidate_without_mesh() -> None:
+    operands, loops, generated_caps = _loft_primitive_box_generated_cap_records()
+    cap_pairings, _pairing_diagnostics = pair_loft_primitive_generated_cap_loops(
+        operands,
+        generated_caps=generated_caps,
+        cut_loops=loops,
+    )
+    retention, _retention_diagnostics = select_loft_primitive_operation_fragments(
+        operands,
+        classifications=classify_loft_primitive_fragments(operands),
+        cap_pairings=cap_pairings,
+    )
+    topology = classify_loft_primitive_result_topology(operands, retained_fragments=retention, cap_pairings=cap_pairings)
+    orientation = evaluate_loft_primitive_topology_orientation(topology)
+    seam_uses, _seam_diagnostics = pair_loft_primitive_seam_uses(orientation, cap_pairings=cap_pairings)
+    candidate = assemble_loft_primitive_candidate_shell(orientation, seam_use_pairings=seam_uses)
+
+    adjacency = rebuild_loft_primitive_candidate_adjacency(candidate)
+
+    assert isinstance(adjacency, LoftPrimitiveAdjacencyRebuildRecord)
+    assert adjacency.complete is True
+    assert adjacency.diagnostics == ()
+    assert adjacency.shell_id == candidate.candidate_shell_id
+    assert adjacency.adjacency_links
+    assert adjacency.no_mesh_fallback is True
+
+
+def test_loft_primitive_adjacency_rebuild_refuses_invalid_links_without_mesh() -> None:
+    candidate = LoftPrimitiveCandidateShellRecord(
+        operation="difference",
+        route_id="surface-csg.loft-primitive",
+        topology_class="interior-cavity",
+        retained_fragment_ids=("fragment-a",),
+        generated_cap_ids=("cap-a",),
+        seam_use_pairing_ids=("use-a", "use-b"),
+        candidate_shell_id="candidate-a",
+        assembly_ready=True,
+    )
+    not_ready = replace(candidate, assembly_ready=False)
+
+    missing = rebuild_loft_primitive_candidate_adjacency(candidate, adjacency_links=(("use-a", "use-a"),))
+    duplicate = rebuild_loft_primitive_candidate_adjacency(
+        candidate,
+        adjacency_links=(("use-a", "use-a"), ("use-a", "use-a"), ("use-b", "use-b")),
+    )
+    inconsistent = rebuild_loft_primitive_candidate_adjacency(candidate, adjacency_links=(("use-a", ""), ("use-b", "use-b")))
+    not_ready_result = rebuild_loft_primitive_candidate_adjacency(not_ready)
+
+    assert {diagnostic.code for diagnostic in missing.diagnostics} == {"missing-link"}
+    assert {diagnostic.code for diagnostic in duplicate.diagnostics} == {"duplicate-link"}
+    assert {diagnostic.code for diagnostic in inconsistent.diagnostics} == {"inconsistent-link"}
+    assert {diagnostic.code for diagnostic in not_ready_result.diagnostics} == {"candidate-not-ready"}
+    assert all(
+        isinstance(diagnostic, LoftPrimitiveAdjacencyDiagnostic)
+        for diagnostic in (*missing.diagnostics, *duplicate.diagnostics, *inconsistent.diagnostics, *not_ready_result.diagnostics)
+    )
+
+
+def test_loft_primitive_runtime_validity_accepts_adjacency_complete_candidate_without_persisting() -> None:
+    operands, loops, generated_caps = _loft_primitive_box_generated_cap_records()
+    cap_pairings, _pairing_diagnostics = pair_loft_primitive_generated_cap_loops(
+        operands,
+        generated_caps=generated_caps,
+        cut_loops=loops,
+    )
+    retention, _retention_diagnostics = select_loft_primitive_operation_fragments(
+        operands,
+        classifications=classify_loft_primitive_fragments(operands),
+        cap_pairings=cap_pairings,
+    )
+    topology = classify_loft_primitive_result_topology(operands, retained_fragments=retention, cap_pairings=cap_pairings)
+    orientation = evaluate_loft_primitive_topology_orientation(topology)
+    seam_uses, _seam_diagnostics = pair_loft_primitive_seam_uses(orientation, cap_pairings=cap_pairings)
+    candidate = assemble_loft_primitive_candidate_shell(orientation, seam_use_pairings=seam_uses)
+    adjacency = rebuild_loft_primitive_candidate_adjacency(candidate)
+
+    validity = check_loft_primitive_runtime_validity(adjacency)
+
+    assert isinstance(validity, LoftPrimitiveRuntimeValidityRecord)
+    assert validity.valid is True
+    assert validity.persisted is False
+    assert validity.diagnostics == ()
+    assert validity.shell_id == adjacency.shell_id
+    assert validity.no_mesh_fallback is True
+
+
+def test_loft_primitive_runtime_validity_refuses_invalid_shell_states_without_persisting() -> None:
+    adjacency = LoftPrimitiveAdjacencyRebuildRecord(
+        operation="difference",
+        route_id="surface-csg.loft-primitive",
+        shell_id="candidate-a",
+        adjacency_links=(("use-a", "use-a"),),
+        complete=True,
+    )
+    stale_adjacency = replace(adjacency, complete=False)
+
+    open_shell = check_loft_primitive_runtime_validity(adjacency, closure_state="open")
+    non_manifold = check_loft_primitive_runtime_validity(adjacency, manifold_state="non-manifold")
+    inconsistent = check_loft_primitive_runtime_validity(adjacency, orientation_state="inconsistent")
+    stale = check_loft_primitive_runtime_validity(stale_adjacency)
+
+    assert {diagnostic.code for diagnostic in open_shell.diagnostics} == {"open-shell"}
+    assert {diagnostic.code for diagnostic in non_manifold.diagnostics} == {"non-manifold-adjacency"}
+    assert {diagnostic.code for diagnostic in inconsistent.diagnostics} == {"inconsistent-orientation"}
+    assert {diagnostic.code for diagnostic in stale.diagnostics} == {"stale-evidence"}
+    assert all(not record.valid and not record.persisted for record in (open_shell, non_manifold, inconsistent, stale))
+    assert all(
+        isinstance(diagnostic, LoftPrimitiveRuntimeValidityDiagnostic)
+        for diagnostic in (*open_shell.diagnostics, *non_manifold.diagnostics, *inconsistent.diagnostics, *stale.diagnostics)
+    )
+
+
+def test_loft_primitive_persistence_readiness_accepts_runtime_valid_shell_without_eager_tessellation() -> None:
+    validity = LoftPrimitiveRuntimeValidityRecord(
+        operation="difference",
+        route_id="surface-csg.loft-primitive",
+        shell_id="candidate-a",
+        valid=True,
+    )
+
+    accepted = persist_loft_primitive_accepted_result(validity)
+
+    assert isinstance(accepted, LoftPrimitiveAcceptedResultRecord)
+    assert accepted.persisted is True
+    assert accepted.accepted_body_id == "accepted:candidate-a"
+    assert isinstance(accepted.tessellation_readiness, LoftPrimitiveTessellationReadinessRecord)
+    assert accepted.tessellation_readiness.ready is True
+    assert accepted.tessellation_readiness.eager_tessellation is False
+    assert accepted.diagnostics == ()
+    assert accepted.no_mesh_fallback is True
+
+
+def test_loft_primitive_persistence_readiness_refuses_invalid_or_stale_shells_without_tessellation() -> None:
+    invalid = LoftPrimitiveRuntimeValidityRecord(
+        operation="difference",
+        route_id="surface-csg.loft-primitive",
+        shell_id="candidate-a",
+        valid=False,
+        diagnostics=(
+            LoftPrimitiveRuntimeValidityDiagnostic(
+                code="open-shell",
+                message="open",
+                operation="difference",
+                route_id="surface-csg.loft-primitive",
+                shell_id="candidate-a",
+            ),
+        ),
+    )
+    valid = replace(invalid, valid=True, diagnostics=())
+
+    invalid_result = persist_loft_primitive_accepted_result(invalid)
+    stale_result = persist_loft_primitive_accepted_result(valid, stale=True)
+    non_ready_result = persist_loft_primitive_accepted_result(valid, ready=False)
+
+    assert not invalid_result.persisted
+    assert not stale_result.persisted
+    assert not non_ready_result.persisted
+    assert invalid_result.accepted_body_id is None
+    assert {diagnostic.code for diagnostic in invalid_result.diagnostics} == {"invalid-runtime-shell"}
+    assert {diagnostic.code for diagnostic in stale_result.diagnostics} == {"stale-runtime-evidence"}
+    assert {diagnostic.code for diagnostic in non_ready_result.diagnostics} == {"non-ready-shell"}
+    assert all(
+        isinstance(diagnostic, LoftPrimitivePersistenceDiagnostic)
+        for diagnostic in (*invalid_result.diagnostics, *stale_result.diagnostics, *non_ready_result.diagnostics)
+    )
+    assert all(
+        result.tessellation_readiness.eager_tessellation is False
+        for result in (invalid_result, stale_result, non_ready_result)
+    )
+
+
+def test_loft_primitive_no_hidden_mesh_proof_accepts_persisted_surface_body_result() -> None:
+    validity = LoftPrimitiveRuntimeValidityRecord(
+        operation="difference",
+        route_id="surface-csg.loft-primitive",
+        shell_id="candidate-a",
+        valid=True,
+    )
+    accepted = persist_loft_primitive_accepted_result(validity)
+
+    proof = build_loft_primitive_no_hidden_mesh_proof(accepted)
+
+    assert isinstance(proof, LoftPrimitiveNoHiddenMeshProofRecord)
+    assert proof.accepted is True
+    assert proof.source_body_kind == "surface-body"
+    assert proof.mesh_fallback_invoked is False
+    assert proof.construction_proof_id == "loft-primitive-no-hidden-mesh:accepted:candidate-a"
+    assert proof.diagnostics == ()
+    assert proof.no_mesh_fallback is True
+    assert assert_loft_primitive_no_hidden_mesh_fallback(proof) is proof
+
+
+def test_loft_primitive_no_hidden_mesh_proof_refuses_missing_or_mesh_fallback_evidence() -> None:
+    validity = LoftPrimitiveRuntimeValidityRecord(
+        operation="difference",
+        route_id="surface-csg.loft-primitive",
+        shell_id="candidate-a",
+        valid=True,
+    )
+    accepted = persist_loft_primitive_accepted_result(validity)
+
+    missing = build_loft_primitive_no_hidden_mesh_proof(None)
+    fallback = build_loft_primitive_no_hidden_mesh_proof(accepted, mesh_fallback_invoked=True)
+
+    assert missing.accepted is False
+    assert missing.source_body_kind == "missing"
+    assert {diagnostic.code for diagnostic in missing.diagnostics} == {"missing-accepted-result"}
+    assert all(isinstance(diagnostic, LoftPrimitiveNoHiddenMeshDiagnostic) for diagnostic in missing.diagnostics)
+    assert fallback.accepted is False
+    assert fallback.mesh_fallback_invoked is True
+    assert {diagnostic.code for diagnostic in fallback.diagnostics} == {"mesh-fallback-invoked"}
+    with pytest.raises(AssertionError, match="mesh-fallback-invoked"):
+        assert_loft_primitive_no_hidden_mesh_fallback(fallback)
+
+
+def test_loft_primitive_fragment_classification_preserves_roles_and_station_evidence() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+
+    records = classify_loft_primitive_fragments(operands)
+
+    assert records
+    assert all(isinstance(record, LoftPrimitiveFragmentClassificationRecord) for record in records)
+    patch_roles = {record.patch_role for record in records}
+    assert {"start-cap", "end-cap"} <= patch_roles
+    assert any(role in {"stable", "sidewall"} or "sidewall" in role for role in patch_roles)
+    assert all(record.no_mesh_fallback is True for record in records)
+    assert any(record.result_role == "cut_cap" for record in records)
+    assert all(record.canonical_payload()["route_id"] == "surface-csg.loft-primitive" for record in records)
+
+
+def test_public_api_intersecting_loft_box_returns_public_cut_executor_result_without_mesh() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+
+    result = surface_boolean_result("difference", operands)
+
+    assert result.status == "succeeded"
+    assert result.classification == "closed"
+    assert result.body is not None
+    assert result.failure_reason is None
+    payload = result.body.kernel_metadata()["loft_primitive_csg"]
+    executor_payload = result.body.kernel_metadata()["loft_primitive_public_executor"]
+    assert executor_payload["execution_scope"]["scope"] == "trim-fragment-cut"
+    assert executor_payload["execution_scope"]["status"] == "succeeded"
+    assert executor_payload["execution_scope"]["accepted"] is True
+    assert executor_payload["no_mesh_fallback"] is True
+    source_payload = payload["source_normalization"]
+    assert source_payload["supported"] is True
+    assert source_payload["primitive_family"] == "box"
+    assert source_payload["no_mesh_fallback"] is True
+    assert source_payload["source_regions"]
+    assert {region["region_kind"] for region in source_payload["source_regions"]} == {"box-overlap"}
+    inversion_payload = payload["patch_local_inversion"]
+    assert inversion_payload["supported"] is True
+    assert inversion_payload["diagnostics"] == []
+    assert inversion_payload["records"]
+    assert {record["source_region_kind"] for record in inversion_payload["records"]} == {"box-overlap"}
+    assert {record["primitive_family"] for record in inversion_payload["records"]} == {"box"}
+    closure_payload = payload["cut_loop_closure"]
+    assert closure_payload["supported"] is True
+    assert closure_payload["diagnostics"] == []
+    assert closure_payload["records"]
+    closure_participants = {
+        participant["kind"]
+        for record in closure_payload["records"]
+        for participant in record["boundary_participation"]
+    }
+    assert "source-curve" in closure_participants
+    assert closure_participants & {"cap-trim", "station-seam"}
+    degeneracy_payload = payload["cut_loop_degeneracy"]
+    assert degeneracy_payload["supported"] is True
+    assert degeneracy_payload["diagnostics"] == []
+    assert degeneracy_payload["accepted_loop_count"] == len(closure_payload["records"])
+    cap_support_payload = payload["cap_support"]
+    assert cap_support_payload["supported"] is True
+    assert cap_support_payload["classifications"]
+    assert {record["primitive_family"] for record in cap_support_payload["classifications"]} == {"box"}
+    assert {record["cap_family"] for record in cap_support_payload["classifications"]} == {"planar"}
+    assert all(record["supported"] for record in cap_support_payload["classifications"])
+    generated_caps_payload = payload["generated_caps"]
+    assert generated_caps_payload["supported"] is True
+    assert generated_caps_payload["diagnostics"] == []
+    assert generated_caps_payload["records"]
+    assert {record["cap_family"] for record in generated_caps_payload["records"]} == {"planar"}
+    assert all(record["source_curve_ids"] for record in generated_caps_payload["records"])
+    assert all(
+        "surface-425b:generated-cap-record-construction" in record["provenance"]
+        for record in generated_caps_payload["records"]
+    )
+    cap_loop_pairing_payload = payload["cap_loop_pairing"]
+    assert cap_loop_pairing_payload["supported"] is True
+    assert cap_loop_pairing_payload["diagnostics"] == []
+    assert cap_loop_pairing_payload["records"]
+    assert {record["cap_id"] for record in cap_loop_pairing_payload["records"]} == {
+        record["cap_id"] for record in generated_caps_payload["records"]
+    }
+    retention_payload = payload["fragment_retention"]
+    assert retention_payload["supported"] is True
+    assert retention_payload["diagnostics"] == []
+    assert retention_payload["records"]
+    assert any(record["retained"] for record in retention_payload["records"])
+    assert {record["source_body_role"] for record in retention_payload["records"]} == {"loft"}
+    topology_payload = payload["result_topology"]
+    assert topology_payload["assembly_ready"] is True
+    assert topology_payload["topology_class"] in {"interior-cavity", "exterior-shell-edit", "multi-shell"}
+    assert topology_payload["retained_fragment_ids"]
+    assert topology_payload["no_mesh_fallback"] is True
+    orientation_payload = payload["topology_orientation"]
+    assert orientation_payload["ready"] is True
+    assert orientation_payload["diagnostics"] == []
+    assert orientation_payload["retained_fragment_ids"] == topology_payload["retained_fragment_ids"]
+    seam_use_payload = payload["seam_use_pairing"]
+    assert seam_use_payload["supported"] is True
+    assert seam_use_payload["diagnostics"] == []
+    assert seam_use_payload["records"]
+    candidate_shell_payload = payload["candidate_shell"]
+    assert candidate_shell_payload["assembly_ready"] is True
+    assert candidate_shell_payload["seam_use_pairing_ids"]
+    assert candidate_shell_payload["no_mesh_fallback"] is True
+    adjacency_payload = payload["adjacency_rebuild"]
+    assert adjacency_payload["complete"] is True
+    assert adjacency_payload["diagnostics"] == []
+    assert adjacency_payload["shell_id"] == candidate_shell_payload["candidate_shell_id"]
+    validity_payload = payload["runtime_validity"]
+    assert validity_payload["valid"] is True
+    assert validity_payload["persisted"] is False
+    assert validity_payload["diagnostics"] == []
+    accepted_payload = payload["accepted_result"]
+    assert accepted_payload["persisted"] is True
+    assert accepted_payload["accepted_body_id"]
+    assert accepted_payload["tessellation_readiness"]["ready"] is True
+    assert accepted_payload["tessellation_readiness"]["eager_tessellation"] is False
+    proof_payload = payload["no_hidden_mesh_proof"]
+    assert proof_payload["accepted"] is True
+    assert proof_payload["source_body_kind"] == "surface-body"
+    assert proof_payload["mesh_fallback_invoked"] is False
+    assert proof_payload["construction_proof_id"]
+    assert proof_payload["diagnostics"] == []
+
+
+def test_loft_primitive_public_cut_executor_can_be_called_directly_without_rerouting() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+
+    result = execute_loft_primitive_trim_fragment_csg(operands)
+
+    assert result is not None
+    assert result.status == "succeeded"
+    assert result.body is not None
+    scope_payload = result.body.kernel_metadata()["loft_primitive_public_executor"]["execution_scope"]
+    assert isinstance(
+        LoftPrimitiveExecutionScopeRecord(
+            operation="difference",
+            route_id="surface-csg.loft-primitive",
+            scope="trim-fragment-cut",
+            status="succeeded",
+            accepted=True,
+        ),
+        LoftPrimitiveExecutionScopeRecord,
+    )
+    assert scope_payload["scope"] == "trim-fragment-cut"
+    assert scope_payload["accepted"] is True
+
+
+@pytest.mark.parametrize("operation", ("union", "intersection"))
+def test_public_api_intersecting_loft_box_accepts_union_and_intersection_cut_routes(operation: str) -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_operands(operation, (body, cutter))
+
+    result = surface_boolean_result(operation, operands)
+
+    assert result.status == "succeeded"
+    assert result.classification == "closed"
+    assert result.body is not None
+    metadata = result.body.kernel_metadata()
+    scope_payload = metadata["loft_primitive_public_executor"]["execution_scope"]
+    assert scope_payload["scope"] == "trim-fragment-cut"
+    assert scope_payload["accepted"] is True
+    assert metadata["loft_primitive_csg"]["no_hidden_mesh_proof"]["accepted"] is True
+
+
+def test_public_api_intersecting_loft_sphere_exposes_cut_loop_degeneracy_refusal_without_mesh() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_sphere(radius=0.25, center=(0.0, 0.0, 0.25))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+
+    result = surface_boolean_result("difference", operands)
+
+    assert result.status == "unsupported"
+    assert result.body is None
+    assert "loft_primitive_trim_adapter=" in str(result.failure_reason)
+    payload = json.loads(str(result.failure_reason).split("loft_primitive_trim_adapter=", 1)[1])
+    scope_payload = payload["execution_scope"]
+    assert scope_payload["scope"] == "structured-refusal"
+    assert scope_payload["status"] == "unsupported"
+    assert scope_payload["accepted"] is False
+    assert {diagnostic["code"] for diagnostic in payload["public_executor_diagnostics"]} == {"invalid-kernel-evidence"}
+    assert all(
+        isinstance(
+            LoftPrimitivePublicExecutorDiagnostic(
+                code=diagnostic["code"],
+                message=diagnostic["message"],
+                operation=diagnostic["operation"],
+                route_id=diagnostic["route_id"],
+                status=diagnostic["status"],
+            ),
+            LoftPrimitivePublicExecutorDiagnostic,
+        )
+        for diagnostic in payload["public_executor_diagnostics"]
+    )
+    degeneracy_payload = payload["cut_loop_degeneracy"]
+    assert degeneracy_payload["supported"] is False
+    assert degeneracy_payload["accepted_loop_count"] == 0
+    assert {diagnostic["code"] for diagnostic in degeneracy_payload["diagnostics"]} == {"invalid-closure"}
+    assert all(diagnostic["no_mesh_fallback"] is True for diagnostic in degeneracy_payload["diagnostics"])
+    cap_support_payload = payload["cap_support"]
+    assert cap_support_payload["supported"] is False
+    assert cap_support_payload["classifications"]
+    cap_diagnostics = tuple(
+        diagnostic
+        for classification in cap_support_payload["classifications"]
+        for diagnostic in classification["diagnostics"]
+    )
+    assert {diagnostic["code"] for diagnostic in cap_diagnostics} >= {"missing-cut-loop"}
+    assert all(diagnostic["no_mesh_fallback"] is True for diagnostic in cap_diagnostics)
+    generated_caps_payload = payload["generated_caps"]
+    assert generated_caps_payload["supported"] is False
+    assert generated_caps_payload["records"] == []
+    assert {diagnostic["code"] for diagnostic in generated_caps_payload["diagnostics"]} >= {
+        "unsupported-cap-classification"
+    }
+    cap_loop_pairing_payload = payload["cap_loop_pairing"]
+    assert cap_loop_pairing_payload["supported"] is False
+    assert cap_loop_pairing_payload["records"] == []
+    assert {diagnostic["code"] for diagnostic in cap_loop_pairing_payload["diagnostics"]} >= {"missing-generated-cap"}
+    retention_payload = payload["fragment_retention"]
+    assert retention_payload["supported"] is True
+    assert retention_payload["records"]
+    topology_payload = payload["result_topology"]
+    assert topology_payload["topology_class"] in {"exterior-shell-edit", "multi-shell"}
+    orientation_payload = payload["topology_orientation"]
+    assert orientation_payload["ready"] is True
+    seam_use_payload = payload["seam_use_pairing"]
+    assert seam_use_payload["supported"] is False
+    candidate_shell_payload = payload["candidate_shell"]
+    assert candidate_shell_payload["assembly_ready"] is True
+    adjacency_payload = payload["adjacency_rebuild"]
+    assert adjacency_payload["complete"] is True
+    validity_payload = payload["runtime_validity"]
+    assert validity_payload["valid"] is True
+    assert validity_payload["persisted"] is False
+    accepted_payload = payload["accepted_result"]
+    assert accepted_payload["persisted"] is True
+    assert accepted_payload["accepted_body_id"]
+    proof_payload = payload["no_hidden_mesh_proof"]
+    assert proof_payload["accepted"] is True
+    assert proof_payload["source_body_kind"] == "surface-body"
+    assert proof_payload["diagnostics"] == []
+
+
+def test_surface_csg_loft_eligibility_refuses_underconstrained_branching_and_risk() -> None:
+    underconstrained = make_surface_body(
+        (make_surface_shell((PlanarSurfacePatch(family="planar"),), metadata={"kernel": {"operation": "loft", "executor": "surface"}}),),
+        metadata={"kernel": {"operation": "loft", "executor": "surface"}},
+    )
+    branching = replace(
+        make_box(size=(1.0, 1.0, 1.0)),
+        metadata={"kernel": {"operation": "loft", "executor": "surface", "branch_count": 2}},
+    )
+    risk = replace(
+        make_box(size=(1.0, 1.0, 1.0)),
+        metadata={"kernel": {"operation": "loft", "executor": "surface", "branch_crossing_count": 1.0}},
+    )
+
+    underconstrained_record = classify_surface_csg_loft_eligibility(underconstrained, "difference")
+    branching_record = classify_surface_csg_loft_eligibility(branching, "difference")
+    risk_record = classify_surface_csg_loft_eligibility(risk, "difference")
+
+    assert underconstrained_record.supported is False
+    assert underconstrained_record.code == "underconstrained"
+    assert branching_record.supported is False
+    assert branching_record.code == "branching-topology"
+    assert risk_record.supported is False
+    assert risk_record.code == "self-intersection-risk"
+    assert branching_record.provenance["loft_shell_validity"]["branch_count"] == 2
+    assert branching_record.provenance["loft_branch_graph"]["underconstrained"] is True
+    assert branching_record.provenance["branching_loft_csg_policy"]["policy_class"] == "refused"
+    assert risk_record.provenance["loft_shell_validity"]["branch_crossing_count"] == pytest.approx(1.0)
+    assert all("no mesh fallback" in record.message for record in (underconstrained_record, branching_record, risk_record))
+
+
+def test_loft_branch_graph_evidence_and_policy_classify_explicit_decomposition_route() -> None:
+    body = replace(
+        make_box(size=(1.0, 1.0, 1.0)),
+        metadata={
+            "kernel": {
+                "operation": "loft",
+                "executor": "surface",
+                "branch_count": 2,
+                "transition_count": 1,
+                "loft_branch_graph": {
+                    "source": "executor",
+                    "branch_ids": ("left", "right"),
+                    "joints": (
+                        {
+                            "joint_id": "split-0",
+                            "transition_interval": (0, 1),
+                            "branch_ids": ("left", "right"),
+                            "topology_case": "one_to_many",
+                            "owner": "station-1",
+                        },
+                    ),
+                },
+            }
+        },
+    )
+
+    evidence = build_loft_branch_graph_evidence(body)
+    policy = classify_branching_loft_csg_policy(body, "difference")
+    plan = plan_branch_subbody_csg(body, "difference")
+    invalid_recomposition = validate_branch_recomposition(plan)
+    valid_recomposition = validate_branch_recomposition(
+        plan,
+        result_body_ids=("left-result", "right-result"),
+        recomposition_seams=("split-0:seam",),
+    )
+    eligibility = classify_surface_csg_loft_eligibility(body, "difference")
+
+    assert evidence.branch_count == 2
+    assert evidence.underconstrained is False
+    assert evidence.joints[0].constrained is True
+    assert isinstance(policy, BranchingLoftCSGPolicyRecord)
+    assert isinstance(policy.diagnostics[0], BranchingLoftCSGDiagnostic)
+    assert policy.policy_class == "decomposition-required"
+    assert policy.executable is False
+    assert isinstance(plan, BranchDecompositionPlan)
+    assert plan.executable is True
+    assert len(plan.subbody_plans) == 2
+    assert all(isinstance(subplan, BranchSubBodyCSGPlan) for subplan in plan.subbody_plans)
+    assert isinstance(invalid_recomposition, BranchRecompositionRecord)
+    assert invalid_recomposition.valid is False
+    assert "subbody-result-count-mismatch" in invalid_recomposition.diagnostics
+    assert valid_recomposition.valid is True
+    assert valid_recomposition.result_shape == "single-shell"
+    assert eligibility.supported is False
+    assert eligibility.provenance["branching_loft_csg_policy"]["policy_class"] == "decomposition-required"
+    assert eligibility.provenance["branch_decomposition_plan"]["executable"] is True
+    assert "Surface Spec 410" in eligibility.message
+
+
+def test_surface_csg_feature_gate_reports_loft_specific_refusal_without_mesh_fallback() -> None:
+    body = loft(
+        [make_circle(radius=0.4), make_circle(radius=0.52), make_circle(radius=0.34)],
+        path=[(0.0, 0.0, 0.0), (0.08, 0.02, 0.75), (0.12, -0.02, 1.5)],
+        cap_ends=False,
+        samples=32,
+    )
+    cutter = make_box(size=(0.5, 0.5, 0.8), center=(0.0, 0.0, 0.75))
+
+    gate = surface_csg_feature_gate("fixture.boolean_difference", "difference", (body, cutter))
+    result = boolean_difference(body, [cutter])
+
+    assert gate.supported is False
+    assert gate.boundary == "loft-eligibility"
+    assert "Loft CSG eligibility" in gate.reason
+    assert "closed-valid" in gate.reason
+    assert "no mesh fallback" in gate.reason
+    assert isinstance(result, SurfaceBooleanResult)
+    assert result.status == "unsupported"
+    assert "Loft CSG eligibility" in str(result.failure_reason)
+
+
 def test_surface_csg_no_hidden_mesh_fallback_assertion_rejects_mesh_results() -> None:
     mesh = make_box_mesh(size=(1.0, 1.0, 1.0))
 
@@ -2041,6 +4140,37 @@ def test_surface_csg_shell_assembly_builds_single_shell_with_provenance() -> Non
     assert all(isinstance(record, SurfaceCSGFragmentProvenanceRecord) for record in assembly.provenance)
     assert tuple(record.source_patch for record in assembly.provenance) == (SurfaceBooleanPatchRef(0, 2), SurfaceBooleanPatchRef(1, 1))
     assert assembly.to_body() is not None
+
+
+def test_surface_csg_shell_assembly_reuses_source_seams_and_adjacency() -> None:
+    box = make_box(size=(1.0, 1.0, 1.0))
+    source_shell = box.iter_shells(world=True)[0]
+    fragments = (
+        SurfaceBooleanTrimmedPatchFragment(
+            source_patch=SurfaceBooleanPatchRef(0, 0),
+            patch=source_shell.patches[0],
+            cut_curve_ids=("cut-front",),
+        ),
+        SurfaceBooleanTrimmedPatchFragment(
+            source_patch=SurfaceBooleanPatchRef(0, 1),
+            patch=source_shell.patches[1],
+            cut_curve_ids=("cut-right",),
+        ),
+    )
+
+    assembly = assemble_surface_csg_shells_from_fragments(
+        "union",
+        fragments,
+        operands=SurfaceBooleanOperands(operation="union", bodies=(box, box)),
+    )
+
+    assert assembly.supported is True
+    assert len(assembly.shells) == 1
+    shell = assembly.shells[0]
+    assert len(shell.seams) == 1
+    assert shell.seams[0].metadata["kernel"]["source_seam_id"] == "front-right"
+    assert len(shell.adjacency) == 2
+    assert {record.seam_id for record in shell.adjacency} == {shell.seams[0].seam_id}
 
 
 def test_surface_csg_shell_assembly_represents_empty_and_multi_shell_results() -> None:
@@ -2529,20 +4659,39 @@ def test_planar_linear_analytic_intersection_classifies_parallel_coincident_disj
     assert all(isinstance(record.diagnostics[0], SurfaceCSGPlanarRelationDiagnostic) for record in records)
 
 
-def test_planar_linear_analytic_intersection_gates_ruled_pairs() -> None:
+def test_planar_linear_analytic_intersection_supports_affine_ruled_pairs() -> None:
     ref_a = SurfaceBooleanPatchRef(0, 0)
     ref_b = SurfaceBooleanPatchRef(1, 0)
     ruled = RuledSurfacePatch(
         family="ruled",
-        start_curve=((0.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
-        end_curve=((1.0, 0.0, 0.0), (1.0, 1.0, 0.0)),
+        start_curve=((0.5, 0.0, -0.5), (0.5, 1.0, -0.5)),
+        end_curve=((0.5, 0.0, 0.5), (0.5, 1.0, 0.5)),
+    )
+
+    record = intersect_planar_linear_patch_pair(ref_a, PlanarSurfacePatch(family="planar"), ref_b, ruled)
+
+    assert record.supported is True
+    assert record.relation == "crossing"
+    assert record.curve is not None
+    assert record.curve.kind == "line"
+    assert len(record.patch_local_curves) == 2
+    assert record.diagnostics == ()
+
+
+def test_planar_linear_analytic_intersection_refuses_non_affine_ruled_pairs() -> None:
+    ref_a = SurfaceBooleanPatchRef(0, 0)
+    ref_b = SurfaceBooleanPatchRef(1, 0)
+    ruled = RuledSurfacePatch(
+        family="ruled",
+        start_curve=((0.0, 0.0, 0.0), (0.2, 0.5, 0.25), (0.0, 1.0, 0.0)),
+        end_curve=((1.0, 0.0, 0.0), (1.0, 0.5, -0.2), (1.0, 1.0, 0.0)),
     )
 
     record = intersect_planar_linear_patch_pair(ref_a, PlanarSurfacePatch(family="planar"), ref_b, ruled)
 
     assert record.relation == "unsupported-linear"
     assert record.supported is False
-    assert "Ruled patch analytic intersection is gated" in record.diagnostics[0].message
+    assert "affine planar ruled side wall" in record.diagnostics[0].message
 
 
 def test_plane_revolution_intersection_emits_circle_records_for_cylinder_cone_and_sphere() -> None:
@@ -2750,9 +4899,9 @@ def test_public_surface_boolean_returns_structured_result_without_deprecation() 
     assert not [item for item in caught if issubclass(item.category, DeprecationWarning)]
 
 
-def test_surface_boolean_result_contract_is_structured_and_unsupported_for_now() -> None:
+def test_surface_boolean_result_contract_supports_partial_box_sphere_union() -> None:
     left = make_box(size=(1.0, 1.0, 1.0))
-    right = make_sphere(radius=0.75)
+    right = make_sphere(radius=0.75, center=(0.4, 0.0, 0.0))
     operands = prepare_surface_boolean_operands("union", [left, right])
 
     result = surface_boolean_result("union", operands)
@@ -2760,11 +4909,15 @@ def test_surface_boolean_result_contract_is_structured_and_unsupported_for_now()
     assert isinstance(result, SurfaceBooleanResult)
     assert result.operation == "union"
     assert result.operands is operands
-    assert result.status == "unsupported"
-    assert result.body is None
-    assert result.classification is None
-    assert "not implemented yet" in str(result.failure_reason)
-    assert result.body_id is None
+    assert result.status == "succeeded"
+    assert result.body is not None
+    assert result.classification == "closed"
+    assert result.body_id is not None
+    assert result.body.patch_count == 1
+    patch = result.body.iter_shells(world=True)[0].iter_patches(world=True)[0]
+    assert patch.family == "implicit"
+    assert result.body.kernel_metadata()["boolean_surface_route"] == "primitive-implicit"
+    assert result.body.kernel_metadata()["primitive_implicit_csg"]["no_mesh_fallback"] is True
 
 
 def test_surface_boolean_result_supports_empty_success_for_disjoint_intersection() -> None:
@@ -2794,6 +4947,38 @@ def test_surface_boolean_result_supports_empty_success_for_touching_intersection
     assert result.body is None
 
 
+def test_surface_csg_contact_classifier_distinguishes_face_and_edge_touch() -> None:
+    face_left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.5, 0.0, 0.0))
+    face_right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.5, 0.0, 0.0))
+    edge_left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.5, -0.5, 0.0))
+    edge_right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.5, 0.5, 0.0))
+
+    face_contact = classify_surface_csg_contact(face_left, face_right)
+    edge_contact = classify_surface_csg_contact(edge_left, edge_right)
+
+    assert face_contact.body_relation == "touching"
+    assert face_contact.contact_kind == "face-touch"
+    assert face_contact.execution_eligible
+    assert face_contact.tolerance.zero_span_count == 1
+    assert edge_contact.body_relation == "touching"
+    assert edge_contact.contact_kind == "edge-touch"
+    assert not edge_contact.execution_eligible
+    assert edge_contact.diagnostics[0].code == "non-manifold-touch"
+
+
+def test_surface_csg_contact_classifier_reports_near_touch_ambiguity() -> None:
+    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.5, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.5000000005, 0.0, 0.0))
+
+    contact = classify_surface_csg_contact(left, right, {"equality_tolerance": 1e-8})
+
+    assert contact.body_relation == "disjoint"
+    assert contact.contact_kind == "near-touch"
+    assert not contact.execution_eligible
+    assert contact.tolerance.ambiguous_near_touch
+    assert contact.diagnostics[0].code == "ambiguous-near-touch"
+
+
 def test_surface_boolean_result_supports_multi_shell_union_for_disjoint_boxes() -> None:
     left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-2.0, 0.0, 0.0))
     right = _translated(make_box(size=(1.0, 1.0, 1.0)), (2.0, 0.0, 0.0))
@@ -2805,6 +4990,21 @@ def test_surface_boolean_result_supports_multi_shell_union_for_disjoint_boxes() 
     assert result.classification == "closed"
     assert result.body is not None
     assert result.body.shell_count == 2
+
+
+def test_surface_boolean_result_merges_full_face_touching_box_union() -> None:
+    left = _translated(make_box(size=(1.0, 1.0, 1.0)), (-0.5, 0.0, 0.0))
+    right = _translated(make_box(size=(1.0, 1.0, 1.0)), (0.5, 0.0, 0.0))
+    operands = prepare_surface_boolean_operands("union", [left, right])
+
+    result = surface_boolean_result("union", operands)
+
+    assert result.status == "succeeded"
+    assert result.classification == "closed"
+    assert result.body is not None
+    assert result.body.shell_count == 1
+    assert result.body.bounds_estimate() == pytest.approx((-1.0, 1.0, -0.5, 0.5, -0.5, 0.5))
+    assert result.body.patch_count == 6
 
 
 def test_surface_boolean_result_supports_exact_reuse_for_equal_operands() -> None:
@@ -2935,19 +5135,301 @@ def test_surface_boolean_result_supports_difference_when_cutter_fully_contains_b
     assert result.body is None
 
 
-def test_surface_boolean_result_remains_explicitly_unsupported_for_partial_box_sphere_overlap() -> None:
+def test_surface_boolean_result_supports_partial_box_sphere_overlap() -> None:
     box = make_box(size=(2.0, 2.0, 2.0))
     sphere = make_sphere(radius=1.0, center=(0.75, 0.0, 0.0))
 
-    result = surface_boolean_result(
+    union_result = surface_boolean_result(
+        "union",
+        prepare_surface_boolean_operands("union", [box, sphere]),
+    )
+    intersection_result = surface_boolean_result(
         "intersection",
         prepare_surface_boolean_operands("intersection", [box, sphere]),
+    )
+    difference_result = surface_boolean_result(
+        "difference",
+        prepare_surface_boolean_difference_operands(box, [sphere]),
+    )
+
+    for result in (union_result, intersection_result, difference_result):
+        assert result.status == "succeeded"
+        assert result.classification == "closed"
+        assert result.body is not None
+        assert result.body.patch_count == 1
+        patch = result.body.iter_shells(world=True)[0].iter_patches(world=True)[0]
+        assert patch.family == "implicit"
+        metadata = result.body.kernel_metadata()["primitive_implicit_csg"]
+        assert sorted(metadata["source_primitive_families"]) == ["box", "sphere"]
+        assert metadata["no_mesh_fallback"] is True
+
+
+def test_surface_boolean_result_supports_primitive_cylinder_routes() -> None:
+    box = make_box(size=(2.0, 2.0, 2.0))
+    cylinder_z = make_cylinder(radius=0.5, height=3.0, center=(0.5, 0.0, 0.0), direction=(0.0, 0.0, 1.0))
+    cylinder_x = make_cylinder(radius=0.5, height=3.0, center=(0.0, 0.0, 0.0), direction=(1.0, 0.0, 0.0))
+    cylinder_y = make_cylinder(radius=0.5, height=3.0, center=(0.0, 0.0, 0.0), direction=(0.0, 1.0, 0.0))
+
+    box_difference = surface_boolean_result(
+        "difference",
+        prepare_surface_boolean_difference_operands(box, [cylinder_z]),
+    )
+    cylinder_difference = surface_boolean_result(
+        "difference",
+        prepare_surface_boolean_difference_operands(cylinder_z, [box]),
+    )
+    cylinder_union = surface_boolean_result(
+        "union",
+        prepare_surface_boolean_operands("union", [cylinder_x, cylinder_y]),
+    )
+    cylinder_intersection = surface_boolean_result(
+        "intersection",
+        prepare_surface_boolean_operands("intersection", [cylinder_x, cylinder_y]),
+    )
+
+    for result in (box_difference, cylinder_difference, cylinder_union, cylinder_intersection):
+        assert result.status == "succeeded"
+        assert result.classification == "closed"
+        assert result.body is not None
+        assert result.body.patch_count == 1
+        assert result.body.iter_shells(world=True)[0].iter_patches(world=True)[0].family == "implicit"
+        assert result.body.kernel_metadata()["primitive_implicit_csg"]["no_mesh_fallback"] is True
+
+
+def _box_with_affine_ruled_front_wall() -> SurfaceBody:
+    box = make_box(size=(1.0, 1.0, 1.0))
+    shell = box.iter_shells(world=True)[0]
+    front = shell.patches[0]
+    ruled_front = RuledSurfacePatch(
+        family="ruled",
+        start_curve=(front.point_at(0.0, 0.0), front.point_at(0.0, 1.0)),
+        end_curve=(front.point_at(1.0, 0.0), front.point_at(1.0, 1.0)),
+        metadata={"kernel": {"operation": "loft", "surface_role": "sidewall"}},
+    )
+    return make_surface_body(
+        (
+            make_surface_shell(
+                (ruled_front, *shell.patches[1:]),
+                connected=True,
+                seams=shell.seams,
+                adjacency=shell.adjacency,
+                metadata={"kernel": {"operation": "loft", "executor": "surface", "branch_count": 1}},
+            ),
+        ),
+        metadata={"kernel": {"operation": "loft", "executor": "surface", "branch_count": 1}},
+    )
+
+
+def _assert_bspline_nurbs_body_route_success(result: SurfaceBooleanResult, expected_family: str) -> None:
+    assert result.status == "succeeded"
+    assert result.classification == "closed"
+    assert result.body is not None
+    metadata = result.body.kernel_metadata()["bspline_nurbs_body_csg"]
+    assert metadata["source_patch_family"] == expected_family
+    assert metadata["no_mesh_fallback"] is True
+    assert metadata["evidence"]["readiness"] == "success-ready"
+    assert metadata["evidence"]["no_mesh_fallback"] is True
+    routed_patch = next(
+        patch
+        for patch in result.body.iter_shells(world=True)[0].iter_patches(world=True)
+        if patch.family == expected_family
+    )
+    assert routed_patch.kernel_metadata()["boolean_surface_route"] == "bspline-nurbs-body-csg"
+
+
+def test_surface_boolean_result_supports_analytic_bspline_body_route_without_mesh_fallback() -> None:
+    analytic = make_box(size=(1.0, 1.0, 1.0))
+    spline = make_box_with_higher_order_front_wall("bspline")
+
+    result = surface_boolean_result(
+        "intersection",
+        prepare_surface_boolean_operands("intersection", [analytic, spline]),
+    )
+
+    _assert_bspline_nurbs_body_route_success(result, "bspline")
+
+
+def test_surface_boolean_result_supports_analytic_nurbs_body_route_without_mesh_fallback() -> None:
+    analytic = make_box(size=(1.0, 1.0, 1.0))
+    nurbs = make_box_with_higher_order_front_wall("nurbs")
+
+    result = surface_boolean_result(
+        "intersection",
+        prepare_surface_boolean_operands("intersection", [analytic, nurbs]),
+    )
+
+    _assert_bspline_nurbs_body_route_success(result, "nurbs")
+
+
+def test_surface_boolean_result_supports_bspline_nurbs_body_pair_route_without_mesh_fallback() -> None:
+    spline = make_box_with_higher_order_front_wall("bspline")
+    nurbs = make_box_with_higher_order_front_wall("nurbs")
+
+    result = surface_boolean_result(
+        "intersection",
+        prepare_surface_boolean_operands("intersection", [spline, nurbs]),
+    )
+
+    _assert_bspline_nurbs_body_route_success(result, "bspline")
+
+
+def test_surface_boolean_result_refuses_bspline_nurbs_unsupported_operation_before_tessellation() -> None:
+    spline = make_box_with_higher_order_front_wall("bspline")
+    nurbs = make_box_with_higher_order_front_wall("nurbs")
+
+    result = surface_boolean_result(
+        "union",
+        prepare_surface_boolean_operands("union", [spline, nurbs]),
     )
 
     assert result.status == "unsupported"
     assert result.body is None
-    assert result.classification is None
-    assert "not implemented yet" in str(result.failure_reason)
+    assert result.failure_reason is not None
+    assert "stage=operation-selection" in result.failure_reason
+    assert "no_mesh_fallback=True" in result.failure_reason
+
+
+def _assert_sweep_subdivision_body_route_success(result: SurfaceBooleanResult, expected_family: str) -> None:
+    assert result.status == "succeeded"
+    assert result.classification == "closed"
+    assert result.body is not None
+    metadata = result.body.kernel_metadata()["sweep_subdivision_body_csg"]
+    assert metadata["source_patch_family"] == expected_family
+    assert metadata["no_mesh_fallback"] is True
+    assert metadata["evidence"]["supported"] is True
+    routed_patch = next(
+        patch
+        for patch in result.body.iter_shells(world=True)[0].iter_patches(world=True)
+        if patch.family == expected_family
+    )
+    assert routed_patch.kernel_metadata()["boolean_surface_route"] == "sweep-subdivision-body-csg"
+
+
+def test_surface_boolean_result_supports_sweep_body_route_without_mesh_fallback() -> None:
+    analytic = make_box(size=(1.0, 1.0, 1.0))
+    sweep = make_box_with_sweep_front_wall()
+
+    result = surface_boolean_result(
+        "intersection",
+        prepare_surface_boolean_operands("intersection", [analytic, sweep]),
+    )
+
+    _assert_sweep_subdivision_body_route_success(result, "sweep")
+
+
+def test_surface_boolean_result_supports_subdivision_body_route_without_mesh_fallback() -> None:
+    analytic = make_box(size=(1.0, 1.0, 1.0))
+    subdivision = make_box_with_subdivision_front_wall()
+
+    result = surface_boolean_result(
+        "intersection",
+        prepare_surface_boolean_operands("intersection", [analytic, subdivision]),
+    )
+
+    _assert_sweep_subdivision_body_route_success(result, "subdivision")
+
+
+def test_surface_boolean_result_supports_affine_ruled_box_cutter_difference_without_mesh_fallback() -> None:
+    body = _box_with_affine_ruled_front_wall()
+    cutter = make_box(size=(0.45, 0.45, 0.45), center=(0.25, 0.0, 0.0))
+
+    result = boolean_difference(body, [cutter])
+
+    assert isinstance(result, SurfaceBooleanResult)
+    assert result.status == "succeeded"
+    assert result.classification == "closed"
+    assert result.body is not None
+    assert result.body.patch_count == 1
+    assert result.body.iter_shells(world=True)[0].iter_patches(world=True)[0].family == "implicit"
+    metadata = result.body.kernel_metadata()["primitive_implicit_csg"]
+    assert metadata["source_primitive_families"] == ("ruled-affine-box", "box")
+    assert metadata["operand_ids"] == result.operands.body_ids
+    assert metadata["no_mesh_fallback"] is True
+
+
+def test_surface_csg_feature_gate_refuses_ruled_sphere_and_cylinder_cutters_without_mesh_fallback() -> None:
+    body = _box_with_affine_ruled_front_wall()
+    sphere = make_sphere(radius=0.3, center=(0.2, 0.0, 0.0))
+    cylinder = make_cylinder(radius=0.2, height=1.4, center=(0.2, 0.0, 0.0), direction=(0.0, 0.0, 1.0))
+
+    sphere_gate = surface_csg_feature_gate("fixture.boolean_difference", "difference", (body, sphere))
+    cylinder_gate = surface_csg_feature_gate("fixture.boolean_difference", "difference", (body, cylinder))
+    sphere_result = boolean_difference(body, [sphere])
+    cylinder_result = boolean_difference(body, [cylinder])
+
+    assert sphere_gate.supported is False
+    assert sphere_gate.boundary == "ruled-cutter-eligibility"
+    assert "sphere cutter" in sphere_gate.reason
+    assert "no mesh fallback" in sphere_gate.reason
+    assert cylinder_gate.supported is False
+    assert cylinder_gate.boundary == "ruled-cutter-eligibility"
+    assert "cylinder cutter" in cylinder_gate.reason
+    assert "no mesh fallback" in cylinder_gate.reason
+    assert isinstance(sphere_result, SurfaceBooleanResult)
+    assert sphere_result.status == "unsupported"
+    assert "sphere cutter" in str(sphere_result.failure_reason)
+    assert isinstance(cylinder_result, SurfaceBooleanResult)
+    assert cylinder_result.status == "unsupported"
+    assert "cylinder cutter" in str(cylinder_result.failure_reason)
+
+
+def test_surface_boolean_result_refuses_prepared_ruled_unsupported_cutters_deterministically() -> None:
+    body = _box_with_affine_ruled_front_wall()
+    sphere = make_sphere(radius=0.3, center=(0.2, 0.0, 0.0))
+    cylinder = make_cylinder(radius=0.2, height=1.4, center=(0.2, 0.0, 0.0), direction=(0.0, 0.0, 1.0))
+
+    sphere_result = surface_boolean_result(
+        "difference",
+        prepare_surface_boolean_difference_operands(body, [sphere]),
+    )
+    cylinder_result = surface_boolean_result(
+        "difference",
+        prepare_surface_boolean_difference_operands(body, [cylinder]),
+    )
+
+    assert sphere_result.status == "unsupported"
+    assert "Ruled patch CSG difference does not support sphere cutter operand 1" in str(sphere_result.failure_reason)
+    assert "no mesh fallback" in str(sphere_result.failure_reason)
+    assert cylinder_result.status == "unsupported"
+    assert "Ruled patch CSG difference does not support cylinder cutter operand 1" in str(cylinder_result.failure_reason)
+    assert "no mesh fallback" in str(cylinder_result.failure_reason)
+
+
+def test_surface_boolean_result_supports_deterministic_multi_operand_primitive_union() -> None:
+    box = make_box(size=(1.1, 1.1, 1.1), center=(-0.25, 0.0, 0.0))
+    sphere = make_sphere(radius=0.45, center=(0.4, 0.0, 0.0))
+    cylinder = make_cylinder(radius=0.22, height=1.4, direction=(0.0, 1.0, 0.0))
+
+    first = boolean_union([box, sphere, cylinder])
+    second = boolean_union([cylinder, box, sphere])
+
+    assert isinstance(first, SurfaceBooleanResult)
+    assert isinstance(second, SurfaceBooleanResult)
+    assert first.status == "succeeded"
+    assert second.status == "succeeded"
+    assert first.body is not None
+    assert second.body is not None
+    assert first.body.stable_identity == second.body.stable_identity
+    metadata = first.body.kernel_metadata()["primitive_implicit_csg"]
+    assert metadata["no_mesh_fallback"] is True
+    assert sorted(metadata["source_primitive_families"]) == ["box", "cylinder", "sphere"]
+
+
+def test_surface_boolean_result_supports_declared_order_multi_operand_difference() -> None:
+    base = make_box(size=(1.4, 1.4, 1.4))
+    sphere = make_sphere(radius=0.5, center=(0.4, 0.0, 0.0))
+    cylinder = make_cylinder(radius=0.24, height=1.8, direction=(0.0, 1.0, 0.0))
+
+    result = boolean_difference(base, [sphere, cylinder])
+
+    assert isinstance(result, SurfaceBooleanResult)
+    assert result.status == "succeeded"
+    assert result.classification == "closed"
+    assert result.body is not None
+    metadata = result.body.kernel_metadata()["primitive_implicit_csg"]
+    assert metadata["source_primitive_families"] == ("box", "sphere", "cylinder")
+    assert metadata["operand_ids"] == result.operands.body_ids
+    assert metadata["no_mesh_fallback"] is True
 
 
 def test_surface_boolean_result_propagates_boolean_metadata_for_supported_results() -> None:
@@ -3440,7 +5922,7 @@ def test_surface_boolean_initial_executable_scope_matrix_is_explicit() -> None:
         make_box(size=(1.0, 1.0, 1.0)),
         [make_sphere(radius=2.0)],
     )
-    unsupported_overlap = boolean_intersection(
+    primitive_overlap = boolean_intersection(
         [
             make_box(size=(2.0, 2.0, 2.0)),
             make_sphere(radius=1.0, center=(0.75, 0.0, 0.0)),
@@ -3452,13 +5934,13 @@ def test_surface_boolean_initial_executable_scope_matrix_is_explicit() -> None:
     assert isinstance(overlap_intersection, SurfaceBooleanResult)
     assert isinstance(overlap_difference, SurfaceBooleanResult)
     assert isinstance(no_cut_difference, SurfaceBooleanResult)
-    assert isinstance(unsupported_overlap, SurfaceBooleanResult)
+    assert isinstance(primitive_overlap, SurfaceBooleanResult)
     assert disjoint_union.status == "succeeded"
     assert overlap_union.status == "succeeded"
     assert overlap_intersection.status == "succeeded"
     assert overlap_difference.status == "succeeded"
     assert no_cut_difference.status == "succeeded"
-    assert unsupported_overlap.status == "unsupported"
+    assert primitive_overlap.status == "succeeded"
 
 
 def test_surface_boolean_intersection_stage_is_explicitly_unsupported_for_non_box_operands() -> None:

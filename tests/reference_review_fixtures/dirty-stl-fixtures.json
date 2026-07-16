@@ -576,6 +576,32 @@
       ]
     },
     {
+      "fixture_id": "surfacebody/csg/box_contains_sphere_intersection",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_box_contains_sphere_intersection",
+      "expected_output": "dirty STL",
+      "purpose": "Validate surfaced CSG intersection for the supported box-containing-sphere containment route.",
+      "methodology": "Build a SurfaceBody box that fully contains a smaller SurfaceBody sphere, execute boolean_intersection, and inspect that the result preserves the contained sphere as a clean closed surface.",
+      "render_description": "The rendered model should be a standalone smooth sphere centered at the origin, with no leftover box faces, cracks, or flattened patches from the containment operation.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/box_contains_sphere_intersection.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/box_contains_sphere_union",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_box_contains_sphere_union",
+      "expected_output": "dirty STL",
+      "purpose": "Validate surfaced CSG union for the supported case where a box fully contains a sphere operand.",
+      "methodology": "Build a SurfaceBody box that fully contains a smaller SurfaceBody sphere, execute boolean_union, and inspect that the result preserves the containing box without leaking the interior sphere shell.",
+      "render_description": "The rendered model should be a simple closed cube with crisp planar faces; the contained sphere should not appear as an internal or duplicate shell.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/box_contains_sphere_union.stl"
+      ]
+    },
+    {
       "fixture_id": "surfacebody/csg/box_difference_corner_notch",
       "feature_name": "surfacebody",
       "source_path": "stl_review_sources.py",
@@ -690,6 +716,370 @@
       "render_description": "The rendered model should be a single orthogonal surface body combining a rectangular base and offset post-like overlap, with clean planar faces and no boolean artifacts.",
       "artifact_paths": [
         "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/box_union_overlap.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/mixed_family_disjoint_union",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_mixed_family_disjoint_union",
+      "expected_output": "dirty STL",
+      "purpose": "Validate surfaced CSG union for disjoint operands from different surface patch families.",
+      "methodology": "Build a planar box SurfaceBody and a revolution sphere SurfaceBody with separated bounds, execute boolean_union, and inspect that both shells remain present in a single CSG result.",
+      "render_description": "The rendered model should show a separated cube and sphere as one union result, with both solids closed, intact, and free of accidental bridging or dropped shells.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/mixed_family_disjoint_union.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_csg_001_cube_union_sphere",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_csg_001_cube_union_sphere",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-CSG-001: primitive analytic cube union sphere with an obvious curved protrusion.",
+      "methodology": "Build a cube and partially overlapping sphere as SurfaceBody operands, execute boolean_union through the primitive implicit surfaced route, and inspect the exported STL only after the surface result succeeds.",
+      "render_description": "The rendered model should show a cube joined to a smooth spherical protrusion on one side, with no hidden duplicate operand shell or mesh-fallback artifact.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/rt_csg_001_cube_union_sphere.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_csg_002_cube_difference_sphere",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_csg_002_cube_difference_sphere",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-CSG-002: primitive analytic cube difference sphere with a visible concave bowl.",
+      "methodology": "Build a cube and partially overlapping sphere, execute boolean_difference through the surfaced primitive route, and inspect the exported STL for the subtractive curved cut.",
+      "render_description": "The rendered model should show a cube with a smooth spherical concavity cut into one side and no remaining sphere shell.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/rt_csg_002_cube_difference_sphere.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_csg_003_cube_intersection_sphere",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_csg_003_cube_intersection_sphere",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-CSG-003: primitive analytic cube intersection sphere with reduced curved and flat result volume.",
+      "methodology": "Build a partially overlapping cube and sphere, execute boolean_intersection through the primitive implicit surfaced route, and inspect the exported shared-volume STL.",
+      "render_description": "The rendered model should be smaller than either operand, with a mix of curved spherical surface and planar cube-clipped sides.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/rt_csg_003_cube_intersection_sphere.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_csg_004_cylinder_difference_cube_slot",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_csg_004_cylinder_difference_cube_slot",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-CSG-004: primitive analytic cylinder difference cube slot.",
+      "methodology": "Build a cylinder and overlapping cube cutter, execute boolean_difference, and inspect the surfaced result for a box-like slot cut from the cylindrical body.",
+      "render_description": "The rendered model should show a cylinder with a crisp cubic slot removed from one side and no loose cutter geometry.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/rt_csg_004_cylinder_difference_cube_slot.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_csg_005_cube_difference_cylinder_through_hole",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_csg_005_cube_difference_cylinder_through_hole",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-CSG-005: primitive analytic cube difference cylinder through-hole.",
+      "methodology": "Build a cube and a cylinder passing through it, execute boolean_difference through the primitive route, and inspect the exported STL for a clean cylindrical through-hole.",
+      "render_description": "The rendered model should show a cube pierced by a round through-hole with smooth cylindrical walls and intact outer faces.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/rt_csg_005_cube_difference_cylinder_through_hole.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_csg_006_orthogonal_cylinders_union",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_csg_006_orthogonal_cylinders_union",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-CSG-006: primitive analytic union of two orthogonal cylinders.",
+      "methodology": "Build two perpendicular cylinders, execute boolean_union through the surfaced primitive route, and inspect the exported STL for the joined cross-cylinder volume.",
+      "render_description": "The rendered model should resemble two smooth cylinders joined at right angles, with no duplicate internal shells or dropped operand.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/rt_csg_006_orthogonal_cylinders_union.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_csg_007_orthogonal_cylinders_intersection",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_csg_007_orthogonal_cylinders_intersection",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-CSG-007: primitive analytic intersection of two orthogonal cylinders.",
+      "methodology": "Build two perpendicular cylinders, execute boolean_intersection through the surfaced primitive route, and inspect the exported Steinmetz-style overlap volume.",
+      "render_description": "The rendered model should show only the shared central volume of the two cylinders, with smooth symmetric curved sides.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/rt_csg_007_orthogonal_cylinders_intersection.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_csg_008_tangent_sphere_cube_union",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_csg_008_tangent_sphere_cube_union",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-CSG-008: tangent sphere/cube union with stable tangent handling.",
+      "methodology": "Build a cube and sphere touching at a tangent point, execute boolean_union through the surfaced primitive route, and inspect that the STL avoids sliver geometry at the tangent contact.",
+      "render_description": "The rendered model should show a cube and tangent sphere meeting cleanly at one point, without unstable spikes, cracks, or bridging slivers.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/rt_csg_008_tangent_sphere_cube_union.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_csg_009_coincident_face_box_union",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_csg_009_coincident_face_box_union",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-CSG-009: primitive analytic coincident-face box union.",
+      "methodology": "Build two SurfaceBody boxes that share one complete face, execute boolean_union through the surfaced CSG route, and inspect the exported STL only after the surface result succeeds.",
+      "render_description": "The rendered model should be one rectangular box twice as long as either operand, with the shared internal face removed and no duplicate seam, crack, or second shell.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/rt_csg_009_coincident_face_box_union.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_csg_010_nested_cutters_box_sphere_cylinder",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_csg_010_nested_cutters_box_sphere_cylinder",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-CSG-010: nested primitive cutters for box minus sphere minus cylinder.",
+      "methodology": "Build a cube, spherical cutter, and cylindrical cutter, execute boolean_difference with cutters in declared order through the multi-operand surfaced route, and inspect the exported STL.",
+      "render_description": "The rendered model should show one cube with both a spherical recess and cylindrical through cut, with no cutter shells left behind.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/rt_csg_010_nested_cutters_box_sphere_cylinder.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_csg_011_multi_operand_union_chain",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_csg_011_multi_operand_union_chain",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-CSG-011: deterministic multi-operand primitive union chain.",
+      "methodology": "Build cube, sphere, and cylinder operands in a non-sorted input order, execute boolean_union through deterministic primitive composition, and inspect the exported STL.",
+      "render_description": "The rendered model should show the three primitive volumes joined into one surfaced union with deterministic ordering and no duplicated internal operand shells.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/rt_csg_011_multi_operand_union_chain.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_csg_012_multi_operand_difference_chain",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_csg_012_multi_operand_difference_chain",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-CSG-012: deterministic multi-operand primitive difference chain.",
+      "methodology": "Build a cube with sphere and cylinder cutters, execute boolean_difference in declared cutter order, and inspect the exported surfaced STL.",
+      "render_description": "The rendered model should show a rectangular solid with both declared subtractive cuts applied and no evidence that cutter order was ignored or mesh fallback was used.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/rt_csg_012_multi_operand_difference_chain.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_patch_csg_002_loft_ruled_box_difference",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_patch_csg_002_loft_ruled_box_difference",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-PATCH-CSG-002: loft-provenance ruled side-wall CSG with a planar box cutter.",
+      "methodology": "Build a closed SurfaceBody with loft-authored ruled side-wall provenance, execute boolean_difference with a box cutter through the surfaced ruled route, and inspect the exported STL only after the surface result succeeds.",
+      "render_description": "The rendered model should show a box-like loft side-wall body with a crisp rectangular subtractive cut and no loose cutter shell or mesh-fallback artifact.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/rt_patch_csg_002_loft_ruled_box_difference.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_patch_csg_001_planar_box_sphere_difference",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_patch_csg_001_planar_box_sphere_difference",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-PATCH-CSG-001: planar box CSG against a sphere cutter.",
+      "methodology": "Build a planar box SurfaceBody and revolution sphere cutter, execute boolean_difference through the surfaced CSG route, and inspect the exported STL only after the surface result succeeds.",
+      "render_description": "The rendered model should show a box with a smooth spherical concavity cut into one side, preserving the planar outer faces and showing no cutter shell or mesh-fallback duplicate.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/rt_patch_csg_001_planar_box_sphere_difference.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_patch_csg_003_revolution_cylinder_box_difference",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_patch_csg_003_revolution_cylinder_box_difference",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-PATCH-CSG-003: revolution cylinder CSG against a box cutter.",
+      "methodology": "Build a revolution cylinder SurfaceBody and planar box cutter, execute boolean_difference through the surfaced CSG route, and inspect the exported STL only after the surface result succeeds.",
+      "render_description": "The rendered model should show a cylinder with a crisp rectangular slot removed from one side, keeping curved revolution surfaces visible and leaving no loose box cutter geometry.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/rt_patch_csg_003_revolution_cylinder_box_difference.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/bspline_planar_intersection",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_bspline_planar_intersection",
+      "expected_output": "dirty STL",
+      "purpose": "Validate B-spline authored patch participation in a public surfaced CSG intersection.",
+      "methodology": "Build a closed box with an authored B-spline front wall and a matching analytic box, execute boolean_intersection through the public SurfaceBooleanResult route, require a closed SurfaceBody result with B-spline/NURBS route provenance and no-mesh-fallback evidence, then export the dirty STL.",
+      "render_description": "The rendered model should look like a clean closed box with the authored B-spline face preserved as part of the result. It should have no loose duplicate operand, triangulated boolean seam artifact, or missing front face.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/bspline_planar_intersection.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/nurbs_planar_intersection",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_nurbs_planar_intersection",
+      "expected_output": "dirty STL",
+      "purpose": "Validate NURBS authored patch participation in a public surfaced CSG intersection.",
+      "methodology": "Build a closed box with an authored NURBS front wall and a matching analytic box, execute boolean_intersection through the public SurfaceBooleanResult route, require a closed SurfaceBody result with B-spline/NURBS route provenance and no-mesh-fallback evidence, then export the dirty STL.",
+      "render_description": "The rendered model should look like a clean closed box with the authored NURBS face preserved as part of the result. It should have no loose duplicate operand, triangulated boolean seam artifact, or missing front face.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/nurbs_planar_intersection.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/bspline_nurbs_intersection",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_bspline_nurbs_intersection",
+      "expected_output": "dirty STL",
+      "purpose": "Validate B-spline to NURBS authored patch participation in a public surfaced CSG intersection.",
+      "methodology": "Build closed boxes with authored B-spline and NURBS front walls, execute boolean_intersection through the public SurfaceBooleanResult route, require a closed SurfaceBody result with spline/NURBS evidence and no-mesh-fallback provenance, then export the dirty STL.",
+      "render_description": "The rendered model should look like one clean closed box with the authored higher-order face preserved. It should not show two overlapping boxes, missing side seams, transparent back faces, or mesh-fallback artifacts.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/bspline_nurbs_intersection.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/sweep_planar_intersection",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_sweep_planar_intersection",
+      "expected_output": "dirty STL",
+      "purpose": "Validate sweep authored patch participation in a public surfaced CSG intersection.",
+      "methodology": "Build a closed box with an authored sweep front wall and a matching analytic box, execute boolean_intersection through the public SurfaceBooleanResult route, require declared-tolerance sweep evidence and no-mesh-fallback provenance, then export the dirty STL.",
+      "render_description": "The rendered model should look like a clean closed box with the authored sweep face preserved. It should not show duplicated operands, missing shell seams, or mesh-fallback triangulation artifacts.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/sweep_planar_intersection.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/subdivision_planar_intersection",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_subdivision_planar_intersection",
+      "expected_output": "dirty STL",
+      "purpose": "Validate subdivision authored patch participation in a public surfaced CSG intersection.",
+      "methodology": "Build a closed box with an authored subdivision front wall and a matching analytic box, execute boolean_intersection through the public SurfaceBooleanResult route, require declared-tolerance subdivision adapter evidence and no-mesh-fallback provenance, then export the dirty STL.",
+      "render_description": "The rendered model should look like a clean closed box with the authored subdivision face preserved. It should not show approximation debris, loose duplicate operands, or mesh-fallback artifacts.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/subdivision_planar_intersection.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/advanced_implicit_union",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_advanced_implicit_union",
+      "expected_output": "dirty STL",
+      "purpose": "Validate supported implicit patch CSG union evidence as an exportable surfaced result.",
+      "methodology": "Build two adapted implicit field operands from planar patches, execute compose_implicit_field_csg_result for union, require a supported SurfaceBody result, and export the STL only after that success.",
+      "render_description": "The rendered model should show a compact implicit union volume derived from two slab-like fields, with no mesh-fallback source shell or unsupported-route artifact.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/advanced_implicit_union.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/advanced_heightmap_union",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_advanced_heightmap_union",
+      "expected_output": "dirty STL",
+      "purpose": "Validate supported heightmap patch CSG union evidence as an exportable surfaced result.",
+      "methodology": "Build two compatible heightmap patches, execute compose_heightmap_csg_result for union, require a supported SurfaceBody result, and export the STL only after that success.",
+      "render_description": "The rendered model should show one terrain-like heightmap surface whose samples reflect the supported union composition without hidden mesh fallback.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/advanced_heightmap_union.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/advanced_displacement_union",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_advanced_displacement_union",
+      "expected_output": "dirty STL",
+      "purpose": "Validate supported displacement patch CSG union evidence as an exportable surfaced result.",
+      "methodology": "Build two displacement patches sharing the same source patch identity, execute compose_displacement_csg_result for union, require a supported SurfaceBody result, and export the STL only after that success.",
+      "render_description": "The rendered model should show a displacement-preserving composed surface over the shared planar source domain with no source-mismatch fallback artifact.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/advanced_displacement_union.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/sampled_implicit_promotion_implicit",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_sampled_implicit_promotion_implicit",
+      "expected_output": "dirty STL",
+      "purpose": "Validate sampled/implicit CSG promotion to an implicit target family.",
+      "methodology": "Select an implicit target from the sampled/implicit promotion matrix, build a SurfaceBody carrying supported promotion provenance and no-mesh-fallback evidence, and export the STL only after the target-family metadata is verified.",
+      "render_description": "The rendered model should show a compact implicit-field target shape with promotion provenance in the fixture context. It should not show a source sampled grid or any mesh fallback duplicate.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/sampled_implicit_promotion_implicit.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/sampled_implicit_promotion_subdivision",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_sampled_implicit_promotion_subdivision",
+      "expected_output": "dirty STL",
+      "purpose": "Validate sampled/implicit CSG promotion to a subdivision target family.",
+      "methodology": "Select a subdivision target from the sampled/implicit promotion matrix, build a SurfaceBody carrying supported promotion provenance and no-mesh-fallback evidence, and export the STL only after the target-family metadata is verified.",
+      "render_description": "The rendered model should show a simple subdivision target patch with promotion provenance in the fixture context. It should not show stale sampled-source geometry or any mesh fallback artifact.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/sampled_implicit_promotion_subdivision.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/sampled_implicit_promotion_nurbs",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_sampled_implicit_promotion_nurbs",
+      "expected_output": "dirty STL",
+      "purpose": "Validate sampled/implicit CSG promotion to a NURBS target family.",
+      "methodology": "Select a NURBS target from the sampled/implicit promotion matrix, build a SurfaceBody carrying supported promotion provenance and exact-reconstruction metadata, and export the STL only after the target-family metadata is verified.",
+      "render_description": "The rendered model should show a simple NURBS target patch with exact-reconstruction promotion metadata. It should not show a sampled grid, stale native route output, or mesh fallback artifact.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/sampled_implicit_promotion_nurbs.stl"
+      ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/sampled_implicit_promotion_bspline",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_sampled_implicit_promotion_bspline",
+      "expected_output": "dirty STL",
+      "purpose": "Validate sampled/implicit CSG promotion to a B-spline target family.",
+      "methodology": "Select a B-spline target from the sampled/implicit promotion matrix, build a SurfaceBody carrying supported promotion provenance and exact-reconstruction metadata, and export the STL only after the target-family metadata is verified.",
+      "render_description": "The rendered model should show a simple B-spline target patch with exact-reconstruction promotion metadata. It should not show a sampled grid, stale native route output, or mesh fallback artifact.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/csg/sampled_implicit_promotion_bspline.stl"
       ]
     },
     {
@@ -914,6 +1304,212 @@
       "artifact_paths": [
         "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/primitives/transformed_group.stl"
       ]
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_patch_csg_013_non_csg_replacement_refusal",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_patch_csg_013_non_csg_replacement_refusal",
+      "expected_output": "diagnostic evidence",
+      "purpose": "Validate RT-PATCH-CSG-013: unsupported sampled/implicit family routes are represented as explicit diagnostic refusals rather than success STL artifacts.",
+      "methodology": "Load the sampled/implicit reference fixture promotion matrix and verify that the deliberate non-CSG replacement row is clean, artifact-free diagnostic evidence with no mesh fallback.",
+      "render_description": "No rendered STL is expected. The context should describe a refusal where the requested operation is better handled by an authored replacement workflow instead of CSG.",
+      "artifact_paths": []
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_patch_csg_013_unsafe_implicit_refusal",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_patch_csg_013_unsafe_implicit_refusal",
+      "expected_output": "diagnostic evidence",
+      "purpose": "Validate RT-PATCH-CSG-013: unsafe implicit-field composition refuses deterministically without creating a dirty STL.",
+      "methodology": "Load the sampled/implicit reference fixture promotion matrix and verify that the unsafe implicit route is clean, artifact-free diagnostic evidence with no mesh fallback.",
+      "render_description": "No rendered STL is expected. The context should describe an unsafe implicit result that refuses because the field safety budget cannot be satisfied.",
+      "artifact_paths": []
+    },
+    {
+      "fixture_id": "surfacebody/csg/rt_patch_csg_013_malformed_promotion_refusal",
+      "feature_name": "surfacebody",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_surfacebody_csg_rt_patch_csg_013_malformed_promotion_refusal",
+      "expected_output": "diagnostic evidence",
+      "purpose": "Validate RT-PATCH-CSG-013: malformed sampled/implicit promotion policy refuses with a missing-target diagnostic instead of falling back to mesh CSG.",
+      "methodology": "Load the sampled/implicit reference fixture promotion matrix and verify that the malformed promotion route is clean, artifact-free diagnostic evidence with no mesh fallback.",
+      "render_description": "No rendered STL is expected. The context should describe a missing promotion target refusal with the unsupported route captured as diagnostic evidence.",
+      "artifact_paths": []
+    },
+    {
+      "fixture_id": "loft/rt_loft_037_self_intersection_diagnostic",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_rt_loft_037_self_intersection_reference",
+      "expected_output": "diagnostic evidence",
+      "purpose": "Validate RT-LOFT-037: self-intersection detection refuses a loft plan with branch-crossing risk before any success STL export.",
+      "methodology": "Build a bounded loft plan with injected branch-crossing diagnostics, run the loft self-intersection detector, and inspect the diagnostic payload for a planner self-intersection refusal with no mesh fallback.",
+      "render_description": "No rendered STL is expected. The context should describe a loft plan rejected for branch-crossing self-intersection risk before export.",
+      "artifact_paths": []
+    },
+    {
+      "fixture_id": "loft/csg/rt_loft_csg_014_underconstrained_branch_refusal",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_rt_loft_csg_014_underconstrained_branch_reference",
+      "expected_output": "diagnostic evidence",
+      "purpose": "Validate RT-LOFT-CSG-014: underconstrained branching loft topology refuses before CSG execution or success STL export.",
+      "methodology": "Build a loft-authored SurfaceBody with insufficient shell, seam, and branch validity evidence, run the loft CSG eligibility gate, and inspect the underconstrained refusal diagnostic.",
+      "render_description": "No rendered STL is expected. The context should describe a loft CSG refusal caused by underconstrained topology and no mesh fallback.",
+      "artifact_paths": []
+    },
+    {
+      "fixture_id": "loft/csg/rt_loft_csg_001_cylinder_difference_box_slot",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_csg_rt_loft_csg_001_cylinder_difference_box_slot_reference",
+      "expected_output": "diagnostic evidence",
+      "purpose": "Validate RT-LOFT-CSG-001: lofted cylinder difference box slot is represented as a guarded diagnostic until the loft/primitive generated-cap executor can produce a public success body.",
+      "methodology": "Build the lofted cylinder and box cutter, run the public surface boolean route, and inspect the refusal payload for no mesh fallback and kernel evidence diagnostics.",
+      "render_description": "No rendered STL is expected yet. The context should describe a lofted cylinder with a box slot request refused before export because the public loft/primitive cut route is not fully supported.",
+      "artifact_paths": []
+    },
+    {
+      "fixture_id": "loft/csg/rt_loft_csg_002_cylinder_difference_cross_drilled_cylinder",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_csg_rt_loft_csg_002_cylinder_difference_cross_drilled_cylinder_reference",
+      "expected_output": "diagnostic evidence",
+      "purpose": "Validate RT-LOFT-CSG-002: lofted cylinder difference cross-drilled cylinder refuses without hidden mesh fallback while cylinder-cutter support remains incomplete.",
+      "methodology": "Build the lofted cylinder and cylindrical cutter, run the public difference route, and inspect the diagnostic payload for an unsupported loft/primitive CSG path.",
+      "render_description": "No rendered STL is expected yet. The context should describe a cross-drilled lofted cylinder request refused before success STL export.",
+      "artifact_paths": []
+    },
+    {
+      "fixture_id": "loft/csg/rt_loft_csg_003_vessel_difference_sphere_scoop",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_csg_rt_loft_csg_003_vessel_difference_sphere_scoop_reference",
+      "expected_output": "diagnostic evidence",
+      "purpose": "Validate RT-LOFT-CSG-003: lofted vessel difference sphere scoop refuses without hidden mesh fallback while sphere-cutter support remains incomplete.",
+      "methodology": "Build the bulb loft vessel and spherical cutter, run the public difference route, and inspect the diagnostic payload for the unsupported loft/sphere route.",
+      "render_description": "No rendered STL is expected yet. The context should describe a rounded loft vessel with a spherical scoop request refused before export.",
+      "artifact_paths": []
+    },
+    {
+      "fixture_id": "loft/csg/rt_loft_csg_004_hourglass_intersection_box",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_csg_rt_loft_csg_004_hourglass_intersection_box_reference",
+      "expected_output": "diagnostic evidence",
+      "purpose": "Validate RT-LOFT-CSG-004: hourglass loft intersection box reports the current connected-shell prerequisite instead of producing a partial STL.",
+      "methodology": "Build the hourglass loft and box cutter, prepare the public intersection operands, and capture the eligibility refusal caused by disconnected or unsupported shell state.",
+      "render_description": "No rendered STL is expected yet. The context should describe an hourglass loft clipped by a box request refused before export.",
+      "artifact_paths": []
+    },
+    {
+      "fixture_id": "loft/csg/rt_loft_csg_005_square_correspondence_union_post",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_csg_rt_loft_csg_005_square_correspondence_union_post_reference",
+      "expected_output": "diagnostic evidence",
+      "purpose": "Validate RT-LOFT-CSG-005: square-correspondence loft union post records the guarded loft/primitive union refusal rather than exporting questionable geometry.",
+      "methodology": "Build the square-correspondence loft and box post, run the public union route, and inspect the refusal payload for no hidden mesh fallback.",
+      "render_description": "No rendered STL is expected yet. The context should describe a square loft plus post union request refused before success STL export.",
+      "artifact_paths": []
+    },
+    {
+      "fixture_id": "loft/csg/rt_loft_csg_006_phase_shift_difference_vertical_slot",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_csg_rt_loft_csg_006_phase_shift_difference_vertical_slot_reference",
+      "expected_output": "diagnostic evidence",
+      "purpose": "Validate RT-LOFT-CSG-006: phase-shifted loft difference vertical slot records the current generated-cap refusal before STL export.",
+      "methodology": "Build the phase-shifted loft and vertical box slot, run the public difference route, and inspect the diagnostic payload for unsupported cut-loop/cap evidence.",
+      "render_description": "No rendered STL is expected yet. The context should describe a twisted or phase-shifted loft with a vertical slot request refused before export.",
+      "artifact_paths": []
+    },
+    {
+      "fixture_id": "loft/csg/rt_loft_csg_007_branch_difference_sphere_joint",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_csg_rt_loft_csg_007_branch_difference_sphere_joint_reference",
+      "expected_output": "diagnostic evidence",
+      "purpose": "Validate RT-LOFT-CSG-007: branching manifold difference sphere at a branch joint refuses until branching decomposition and recomposition are implemented.",
+      "methodology": "Build the branching loft manifold and spherical cutter, run the public difference route, and inspect the diagnostic payload for the branching loft CSG refusal.",
+      "render_description": "No rendered STL is expected yet. The context should describe a branch-joint sphere cut request refused before export.",
+      "artifact_paths": []
+    },
+    {
+      "fixture_id": "loft/csg/rt_loft_csg_008_branch_intersection_cutter_window",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_csg_rt_loft_csg_008_branch_intersection_cutter_window_reference",
+      "expected_output": "diagnostic evidence",
+      "purpose": "Validate RT-LOFT-CSG-008: branching manifold intersection cutter window refuses until branching loft CSG execution is supported.",
+      "methodology": "Build the branching loft manifold and box cutter window, run the public intersection route, and inspect the diagnostic payload for branching topology refusal.",
+      "render_description": "No rendered STL is expected yet. The context should describe a branching loft clipped by a box window request refused before export.",
+      "artifact_paths": []
+    },
+    {
+      "fixture_id": "loft/csg/rt_loft_csg_009_loft_union_loft_overlapping_ruled",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_csg_rt_loft_csg_009_loft_union_loft_overlapping_ruled",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-LOFT-CSG-009: union of two overlapping ruled loft bodies produces a deterministic dirty STL through the loft/loft CSG route.",
+      "methodology": "Build two compatible single-shell loft bodies, run public union, export the resulting SurfaceBody as a dirty STL, and inspect the combined loft shells for preserved ruled surfaces.",
+      "render_description": "The rendered model should show two overlapping lofted bodies merged into one review item, with both ruled loft forms visible and no missing sidewalls or collapsed caps.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/loft/csg/rt_loft_csg_009_loft_union_loft_overlapping_ruled.stl"
+      ]
+    },
+    {
+      "fixture_id": "loft/csg/rt_loft_csg_010_loft_intersection_loft_crossing_axes",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_csg_rt_loft_csg_010_loft_intersection_loft_crossing_axes",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-LOFT-CSG-010: intersection of crossing loft bodies produces a deterministic dirty STL through the loft/loft CSG route.",
+      "methodology": "Build two crossing ruled loft bodies, run public intersection, export the accepted SurfaceBody, and inspect the retained intersecting loft volume for stable topology.",
+      "render_description": "The rendered model should show the retained crossing-loft intersection volume with clean ruled faces and no disconnected fragments outside the overlap region.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/loft/csg/rt_loft_csg_010_loft_intersection_loft_crossing_axes.stl"
+      ]
+    },
+    {
+      "fixture_id": "loft/csg/rt_loft_csg_011_loft_difference_loft_shared_station",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_csg_rt_loft_csg_011_loft_difference_loft_shared_station",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-LOFT-CSG-011: difference of loft bodies sharing a station plane produces deterministic review geometry through the loft/loft CSG route.",
+      "methodology": "Build a base loft and station-aligned cutter loft, run public difference, export the accepted SurfaceBody, and inspect the retained base loft for stable station-plane behavior.",
+      "render_description": "The rendered model should show the base loft after a shared-station cutter operation, with clean retained faces and no unexpected gaps around the station plane.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/loft/csg/rt_loft_csg_011_loft_difference_loft_shared_station.stl"
+      ]
+    },
+    {
+      "fixture_id": "loft/csg/rt_loft_csg_012_authored_color_preserved",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_csg_rt_loft_csg_012_authored_color_preserved",
+      "expected_output": "dirty STL",
+      "purpose": "Validate RT-LOFT-CSG-012: authored color metadata survives a loft/loft CSG union while producing deterministic review geometry.",
+      "methodology": "Build two colored loft bodies, run public union, export the accepted SurfaceBody, and inspect the context metadata plus rendered geometry for authored-color preservation behavior.",
+      "render_description": "The rendered model should show overlapping lofted geometry suitable for authored-color review, with no missing surfaces and metadata indicating color ownership was preserved through the CSG route.",
+      "artifact_paths": [
+        "../../project/release-0.1.0a/reference-stl/dirty/loft/csg/rt_loft_csg_012_authored_color_preserved.stl"
+      ]
+    },
+    {
+      "fixture_id": "loft/csg/rt_loft_csg_013_section_evidence_reference",
+      "feature_name": "loft",
+      "source_path": "stl_review_sources.py",
+      "entrypoint": "build_loft_csg_rt_loft_csg_013_section_evidence_reference",
+      "expected_output": "section evidence readiness",
+      "purpose": "Validate RT-LOFT-CSG-013: loft CSG section expected/actual/diff evidence can be represented as a reviewable readiness payload.",
+      "methodology": "Build the section evidence readiness smoke record, inspect bundle metadata for expected, actual, and diff roles, and verify the accepted body identity is present.",
+      "render_description": "No primary STL is expected for this evidence fixture. The context should describe a section-comparison bundle with expected, actual, and diff artifacts ready for review integration.",
+      "artifact_paths": []
     },
     {
       "fixture_id": "surfacebody/text_surface",

@@ -37,6 +37,13 @@ from impression.modeling.surface import (
     make_surface_shell,
 )
 from impression.modeling.topology import TopologyPath
+from tests.reference_review_fixtures.stl_review_sources import (
+    build_patch_family_csg_reference_matrix,
+    build_reference_csg_fixture_readiness_report,
+    build_unsupported_family_refusal_fixture_matrix,
+    collect_reference_csg_gap_records,
+    probe_reference_csg_runtime_support,
+)
 from tests.reference_images import (
     CvArtifactBundle,
     CvArtifactBundleContract,
@@ -128,7 +135,8 @@ def test_reference_expansion_lofted_body_csg_refuses_without_fallback() -> None:
 
     assert result.status == "unsupported"
     assert result.body is None
-    assert "difference base shell must be connected" in str(result.failure_reason)
+    assert "Loft CSG eligibility" in str(result.failure_reason)
+    assert "no mesh fallback" in str(result.failure_reason)
 
 
 def test_reference_expansion_approval_moves_dirty_stl_to_gold_and_persists_status(tmp_path: Path) -> None:
@@ -241,6 +249,118 @@ def test_reference_expansion_queue_prefers_unreviewed_fixture_when_approved_is_p
         "demo/declined",
         "demo/unreviewed",
     ]
+
+
+def test_reference_csg_gap_audit_maps_progression_to_fixture_readiness(tmp_path: Path) -> None:
+    plan = tmp_path / "reference-test-expansion-plan.md"
+    plan.write_text(
+        "\n".join(
+            [
+                "- [x] `RT-CSG-001` cube union sphere",
+                "- [ ] `RT-CSG-009` coincident-face box union and difference",
+            ]
+        )
+    )
+    artifact = tmp_path / "reference-stl" / "dirty" / "surfacebody" / "csg" / "rt_csg_001.stl"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_text("solid rt_csg_001\nendsolid rt_csg_001\n")
+    fixture_file = tmp_path / "fixtures.json"
+    fixture_file.write_text(
+        json.dumps(
+            {
+                "fixtures": [
+                    {
+                        "fixture_id": "surfacebody/csg/rt_csg_001_cube_union_sphere",
+                        "source_path": "stl_review_sources.py",
+                        "entrypoint": "build_surfacebody_csg_rt_csg_001_cube_union_sphere",
+                        "purpose": "Validate RT-CSG-001: primitive analytic cube union sphere.",
+                        "artifact_paths": [artifact.relative_to(tmp_path).as_posix()],
+                    }
+                ]
+            }
+        )
+    )
+
+    records = collect_reference_csg_gap_records(plan_path=plan, fixture_file=fixture_file)
+    support = probe_reference_csg_runtime_support(records)
+    readiness = build_reference_csg_fixture_readiness_report(plan_path=plan, fixture_file=fixture_file)
+
+    assert [record.reference_id for record in records] == ["RT-CSG-001", "RT-CSG-009"]
+    assert records[0].fixture_id == "surfacebody/csg/rt_csg_001_cube_union_sphere"
+    assert records[0].source_entrypoint == "build_surfacebody_csg_rt_csg_001_cube_union_sphere"
+    assert records[1].fixture_id is None
+    assert {result.reference_id: result.supported for result in support} == {
+        "RT-CSG-001": True,
+        "RT-CSG-009": False,
+    }
+    assert readiness[0].ready_for_fixture
+    assert readiness[0].artifact_paths == (artifact.resolve(),)
+    assert readiness[1].unsupported_implementation_gap
+    assert readiness[1].diagnostics == ("progression-unchecked", "missing-fixture-record")
+
+
+def test_patch_family_csg_reference_matrix_formats_artifact_policy() -> None:
+    rows = build_patch_family_csg_reference_matrix(families=("planar", "implicit"))
+
+    assert rows == tuple(sorted(rows, key=lambda row: (row.operation, row.left_family, row.right_family)))
+    assert {row.artifact_policy for row in rows} == {"dirty-stl", "diagnostic-refusal"}
+    assert all(row.no_hidden_mesh_fallback_required for row in rows)
+    assert all(row.fixture_ready is (row.artifact_policy == "dirty-stl") for row in rows)
+    assert all(row.diagnostic for row in rows if row.artifact_policy == "diagnostic-refusal")
+
+
+def test_unsupported_family_refusal_fixtures_are_diagnostic_only() -> None:
+    rows = build_unsupported_family_refusal_fixture_matrix()
+
+    assert {row.route_kind for row in rows} == {"refusal", "unsafe", "malformed"}
+    assert all(row.fixture_id.startswith("surfacebody/csg/rt_patch_csg_013_") for row in rows)
+    assert {row.artifact_policy for row in rows} == {"diagnostic-refusal"}
+    assert {row.expected_output for row in rows} == {"diagnostic evidence"}
+    assert all(row.fixture_ready for row in rows)
+    assert all(row.no_mesh_fallback for row in rows)
+    assert all(row.diagnostic for row in rows)
+    assert all("stl" not in row.expected_output.lower() for row in rows)
+
+
+def test_unsupported_family_refusal_review_records_load_without_artifacts() -> None:
+    summary = load_source_records_from_file(Path("tests/reference_review_fixtures/dirty-stl-fixtures.json"))
+    records = {
+        item.record.fixture_id: item.record
+        for item in summary.valid_items
+        if item.record.fixture_id.startswith("surfacebody/csg/rt_patch_csg_013_")
+    }
+
+    assert set(records) == {row.fixture_id for row in build_unsupported_family_refusal_fixture_matrix()}
+    assert {record.expected_output for record in records.values()} == {"diagnostic evidence"}
+    assert all(record.artifact_paths == () for record in records.values())
+
+
+def test_loft_self_intersection_diagnostic_review_record_loads_without_artifact() -> None:
+    summary = load_source_records_from_file(Path("tests/reference_review_fixtures/dirty-stl-fixtures.json"))
+    record = next(
+        item.record
+        for item in summary.valid_items
+        if item.record.fixture_id == "loft/rt_loft_037_self_intersection_diagnostic"
+    )
+
+    assert record.expected_output == "diagnostic evidence"
+    assert record.entrypoint == "build_loft_rt_loft_037_self_intersection_reference"
+    assert record.artifact_paths == ()
+    assert "RT-LOFT-037" in (record.purpose or "")
+
+
+def test_underconstrained_branching_loft_csg_review_record_loads_without_artifact() -> None:
+    summary = load_source_records_from_file(Path("tests/reference_review_fixtures/dirty-stl-fixtures.json"))
+    record = next(
+        item.record
+        for item in summary.valid_items
+        if item.record.fixture_id == "loft/csg/rt_loft_csg_014_underconstrained_branch_refusal"
+    )
+
+    assert record.expected_output == "diagnostic evidence"
+    assert record.entrypoint == "build_loft_rt_loft_csg_014_underconstrained_branch_reference"
+    assert record.artifact_paths == ()
+    assert "RT-LOFT-CSG-014" in (record.purpose or "")
 
 
 def test_reference_expansion_fixture_generator_refuses_stale_contract_versions(tmp_path: Path) -> None:

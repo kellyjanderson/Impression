@@ -4369,6 +4369,7 @@ def build_subdivision_approximation_diagnostic(
 ImplicitFieldNodeKind = Literal[
     "sphere",
     "box",
+    "cylinder",
     "plane",
     "constant",
     "union",
@@ -4384,6 +4385,7 @@ IMPLICIT_FIELD_NODE_KINDS: frozenset[str] = frozenset(
     {
         "sphere",
         "box",
+        "cylinder",
         "plane",
         "constant",
         "union",
@@ -6159,6 +6161,23 @@ def _evaluate_implicit_field_value(node: ImplicitFieldNode, point: np.ndarray) -
         outside = np.maximum(q, 0.0)
         inside = min(float(np.max(q)), 0.0)
         return float(np.linalg.norm(outside) + inside)
+    if node.kind == "cylinder":
+        center = _field_param_vec3(node, "center", (0.0, 0.0, 0.0))
+        axis = _normalize_axis(_field_param_vec3(node, "axis", (0.0, 0.0, 1.0)), name="cylinder.axis")
+        radius = _field_param_float(node, "radius", 1.0)
+        height = _field_param_float(node, "height", 1.0)
+        if radius <= 0.0:
+            raise ValueError("cylinder.radius must be > 0.")
+        if height <= 0.0:
+            raise ValueError("cylinder.height must be > 0.")
+        rel = point - center
+        axial = float(np.dot(rel, axis))
+        radial_vec = rel - axis * axial
+        radial_distance = float(np.linalg.norm(radial_vec)) - radius
+        axial_distance = abs(axial) - height * 0.5
+        outside = np.maximum(np.asarray((radial_distance, axial_distance), dtype=float), 0.0)
+        inside = min(max(radial_distance, axial_distance), 0.0)
+        return float(np.linalg.norm(outside) + inside)
     if node.kind == "plane":
         normal = _normalize_axis(_field_param_vec3(node, "normal", (0.0, 0.0, 1.0)), name="plane.normal")
         offset = _field_param_float(node, "offset", 0.0)
@@ -6242,6 +6261,21 @@ def implicit_box_field(
     """Build an allow-listed box signed-distance field node."""
 
     return make_implicit_field_node("box", parameters={"center": tuple(center), "half_extents": tuple(half_extents)})
+
+
+def implicit_cylinder_field(
+    *,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    axis: Sequence[float] = (0.0, 0.0, 1.0),
+    radius: float = 1.0,
+    height: float = 1.0,
+) -> ImplicitFieldNode:
+    """Build an allow-listed capped cylinder signed-distance field node."""
+
+    return make_implicit_field_node(
+        "cylinder",
+        parameters={"center": tuple(center), "axis": tuple(axis), "radius": radius, "height": height},
+    )
 
 
 def implicit_plane_field(
@@ -8111,6 +8145,7 @@ __all__ = [
     "normalize_implicit_field_expression_graph",
     "adapt_surface_patch_to_implicit_field",
     "build_implicit_field_safety_validation_report",
+    "implicit_cylinder_field",
     "validate_implicit_field_safety_for_csg",
     "validate_implicit_field_security",
     "refine_subdivision_control_cage",

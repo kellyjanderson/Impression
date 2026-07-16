@@ -38,6 +38,11 @@ Architecture documents define:
 - [Mesh Execution To Tessellation Boundary Architecture](mesh-execution-tessellation-boundary-architecture.md)
 - [SurfaceBody Seam and Adjacency Architecture](surfacebody-seam-adjacency-architecture.md)
 - [SurfaceBody CSG Architecture](surfacebody-csg-architecture.md)
+- [Reference CSG Gap Closure Architecture](reference-csg-gap-closure-architecture.md)
+- [CSG Coincident Contact Architecture](csg-coincident-contact-architecture.md)
+- [Patch-Family Reference CSG Completion Architecture](patch-family-reference-csg-completion-architecture.md)
+- [Loft Self-Intersection Reference Architecture](loft-self-intersection-reference-architecture.md)
+- [Lofted Body CSG Reference Architecture](lofted-body-csg-reference-architecture.md)
 - [Loft Evolution System Architecture](loft-evolution-system.md)
 - [Loft Planner / Executor Architecture](loft-planner-executor-architecture.md)
 - [Loft Ambiguity and Diagnostics Architecture](loft-ambiguity-and-diagnostics.md)
@@ -81,6 +86,20 @@ Architecture documents define:
 - [Priority 05 - Spanwise Grouping And Compatibility Architecture](priority-05-spanwise-grouping-and-compatibility-architecture.md)
 - [Priority 06 - Reconstruction And Repair Intermediates Architecture](priority-06-reconstruction-and-repair-intermediates-architecture.md)
 - [Priority 07 - Surfaced B-Spline Patch Family Architecture](priority-07-surfaced-b-spline-patch-family-architecture.md)
+
+## Active Architectural Change Documents
+
+- [ACD: Loft Shell Connectivity And Closure Evidence](acd-loft-shell-connectivity-and-closure-evidence.md)
+- [ACD: Single-Shell Loft CSG Operation Route](acd-single-shell-loft-csg-operation-route.md)
+- [ACD: Loft Primitive Trim-Fragment Execution Adapter](acd-loft-primitive-trim-fragment-execution-adapter.md)
+- [ACD: Loft Primitive Cut-Shell Geometric Kernel](acd-loft-primitive-cut-shell-geometric-kernel.md)
+- [ACD: Loft Primitive Intersection And Cut-Loop Kernel](acd-loft-primitive-intersection-and-cut-loop-kernel.md)
+- [ACD: Loft Primitive Generated Cap And Topology Policy](acd-loft-primitive-generated-cap-and-topology-policy.md)
+- [ACD: Loft Primitive Seam Shell Validity Execution](acd-loft-primitive-seam-shell-validity-execution.md)
+- [ACD: Loft CSG Reference Geometry Handoff](acd-loft-csg-reference-geometry-handoff.md)
+- [ACD: Branching Loft CSG Decomposition And Recomposition Policy](acd-branching-loft-csg-decomposition-and-recomposition-policy.md)
+- [ACD: Loft CSG Result Provenance And Color Propagation](acd-loft-csg-result-provenance-and-color-propagation.md)
+- [ACD: Reference Fixture Multi-Artifact Section Evidence Policy](acd-reference-fixture-multi-artifact-section-evidence-policy.md)
 
 ## Notes
 

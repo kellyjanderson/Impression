@@ -16,8 +16,8 @@ with deterministic evidence. No family may fall back to mesh truth.
 Unit: Implementation Work Unit (IWU).
 Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
 Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
-Count: 3 IWU.
-Basis: this is now a parent program document with three 1-IWU child leaves: higher-order family routes, sampled/implicit family routes, and reference evidence.
+Count: 8 IWU.
+Basis: this is now a parent program document with eight final 1-IWU descendant leaves: higher-order family routes, implicit field routes, heightmap routes, displacement source/refusal, displacement result construction, displacement persistence evidence, supported advanced dirty STL evidence, and unsupported advanced diagnostic evidence.
 
 ## Scope
 
@@ -149,4 +149,6 @@ Readiness blockers:
 Split decision:
 
 - Split completed. This parent is not an implementation leaf; implementation
-  lives in Specs 05a, 05b, and 05c.
+  lives in final descendant leaves Specs 05a, 05b1, 05b2a, 05b2b1,
+  05b2b2a, 05b2b2b, 05c1, and 05c2, with Specs 05b, 05b2, 05b2b,
+  05b2b2, and 05c retained only as nested program documents.

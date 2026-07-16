@@ -12,6 +12,33 @@
 - [Feature Spec 08 Test: Progression Model Upgrade Program](feature-08-progression-model-upgrade-program-v1_0.md)
 - [Feature Spec 09 Test: Inference Diagnostics and Explainability Program](feature-09-inference-diagnostics-and-explainability-program-v1_0.md)
 
+## Loft Primitive Cut-Shell CSG Test Specs
+
+- [Surface Spec 423 Test: Loft Primitive Intersection Source Normalization](surface-423-loft-primitive-intersection-source-normalization-v1_0.md)
+- [Surface Spec 424 Test: Loft Patch-Local Cut Loop Construction](surface-424-loft-patch-local-cut-loop-construction-v1_0.md) - superseded parent
+- [Surface Spec 424a Test: Loft Patch-Local Source Curve Inversion](surface-424a-loft-patch-local-source-curve-inversion-v1_0.md)
+- [Surface Spec 424b Test: Loft Cut Loop Closure And Boundary Participation](surface-424b-loft-cut-loop-closure-and-boundary-participation-v1_0.md)
+- [Surface Spec 424c Test: Loft Cut Loop Degeneracy Diagnostics](surface-424c-loft-cut-loop-degeneracy-diagnostics-v1_0.md)
+- [Surface Spec 425 Test: Loft Primitive Generated Cap Construction](surface-425-loft-primitive-generated-cap-construction-v1_0.md) - superseded parent
+- [Surface Spec 425a Test: Loft Primitive Cap Support Classification](surface-425a-loft-primitive-cap-support-classification-v1_0.md)
+- [Surface Spec 425b Test: Loft Primitive Generated Cap Record Construction](surface-425b-loft-primitive-generated-cap-record-construction-v1_0.md)
+- [Surface Spec 425c Test: Loft Primitive Cap Loop Pairing And Diagnostics](surface-425c-loft-primitive-cap-loop-pairing-and-diagnostics-v1_0.md)
+- [Surface Spec 426 Test: Loft Primitive Fragment Topology And Operation Selection](surface-426-loft-primitive-fragment-topology-and-operation-selection-v1_0.md) - superseded parent
+- [Surface Spec 426a Test: Loft Primitive Operation Fragment Retention](surface-426a-loft-primitive-operation-fragment-retention-v1_0.md)
+- [Surface Spec 426b Test: Loft Primitive Result Topology Classification](surface-426b-loft-primitive-result-topology-classification-v1_0.md)
+- [Surface Spec 426c Test: Loft Primitive Topology Orientation And Refusal Diagnostics](surface-426c-loft-primitive-topology-orientation-and-refusal-diagnostics-v1_0.md)
+- [Surface Spec 427 Test: Loft Primitive Seam And Shell Assembly](surface-427-loft-primitive-seam-and-shell-assembly-v1_0.md) - superseded parent
+- [Surface Spec 427a Test: Loft Primitive Seam Use Pairing](surface-427a-loft-primitive-seam-use-pairing-v1_0.md)
+- [Surface Spec 427b Test: Loft Primitive Candidate Shell Assembly](surface-427b-loft-primitive-candidate-shell-assembly-v1_0.md)
+- [Surface Spec 427c Test: Loft Primitive Adjacency Rebuild Diagnostics](surface-427c-loft-primitive-adjacency-rebuild-diagnostics-v1_0.md)
+- [Surface Spec 428 Test: Loft Primitive Runtime Validity And Persistence Gate](surface-428-loft-primitive-runtime-validity-and-persistence-gate-v1_0.md) - superseded parent
+- [Surface Spec 428a Test: Loft Primitive Runtime Validity Checker](surface-428a-loft-primitive-runtime-validity-checker-v1_0.md)
+- [Surface Spec 428b Test: Loft Primitive Persistence And Tessellation Readiness](surface-428b-loft-primitive-persistence-and-tessellation-readiness-v1_0.md)
+- [Surface Spec 428c Test: Loft Primitive No Hidden Mesh Acceptance Proof](surface-428c-loft-primitive-no-hidden-mesh-acceptance-proof-v1_0.md)
+- [Surface Spec 429 Test: Loft Primitive Public Cut Executor Integration](surface-429-loft-primitive-public-cut-executor-integration-v1_0.md)
+- [Surface Spec 430 Test: Loft CSG Reference Geometry Handoff Proof](surface-430-loft-csg-reference-geometry-handoff-proof-v1_0.md)
+- [Surface Spec 431 Test: Loft CSG Section Evidence Readiness Handoff](surface-431-loft-csg-section-evidence-readiness-handoff-v1_0.md)
+
 ## Existing Test Specs
 
 - [Loft Spec 18 Test: Probabilistic Ambiguity Disambiguation](loft-18-probabilistic-disambiguation-v1_0.md)

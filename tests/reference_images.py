@@ -16,6 +16,7 @@ from skimage import morphology, transform
 from fontTools.ttLib import TTFont, TTLibFileIsCollectionError
 
 from impression.io.stl import write_stl
+from impression.devtools.reference_review import ReferenceEvidenceBundleRecord, validate_section_evidence_roles
 from impression.mesh import Mesh, combine_meshes, mesh_to_pyvista, section_mesh_with_plane
 from impression.modeling import SurfaceBody, SurfaceConsumerCollection, TessellationRequest, tessellate_surface_body
 from impression.modeling.text import text_profiles
@@ -117,6 +118,143 @@ class ReferenceArtifactPromotionGateReport:
     state: ReferenceFixturePairState
     contract: ReferenceFixtureContractVersionRecord
     diagnostics: tuple[ReferencePromotionDiagnostic, ...]
+
+
+LoftCsgSectionEvidenceReadinessDiagnosticCode = Literal[
+    "missing-handoff",
+    "missing-section-plane",
+    "invalid-section-contract",
+]
+
+
+@dataclass(frozen=True)
+class LoftCsgSectionEvidenceReadinessDiagnostic:
+    code: LoftCsgSectionEvidenceReadinessDiagnosticCode
+    fixture_id: str
+    operation_id: str
+    message: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "fixture_id": self.fixture_id,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation_id": self.operation_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftCsgSectionEvidenceReadinessRecord:
+    fixture_id: str
+    operation_id: str
+    accepted_body_identity: str | None
+    section_plane_metadata: dict[str, object]
+    ready: bool
+    bundle_payload: dict[str, object] | None = None
+    diagnostics: tuple[LoftCsgSectionEvidenceReadinessDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "accepted_body_identity": self.accepted_body_identity,
+            "bundle_payload": self.bundle_payload or {},
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "fixture_id": self.fixture_id,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation_id": self.operation_id,
+            "ready": self.ready,
+            "section_plane_metadata": dict(self.section_plane_metadata),
+        }
+
+
+def _section_evidence_bundle_payload(bundle: ReferenceEvidenceBundleRecord) -> dict[str, object]:
+    return {
+        "artifacts": [
+            {
+                "kind": artifact.kind,
+                "path": artifact.path.as_posix(),
+                "required": artifact.required,
+                "role": artifact.role,
+                "stage": artifact.stage,
+            }
+            for artifact in bundle.artifacts
+        ],
+        "bundle_id": bundle.bundle_id,
+        "evidence_kind": bundle.evidence_kind,
+        "role_policy": bundle.role_policy,
+        "section_plane_metadata": dict(bundle.section_plane_metadata),
+    }
+
+
+def validate_loft_csg_section_readiness(
+    accepted_handoff: object,
+    bundle: ReferenceEvidenceBundleRecord,
+    *,
+    fixture_id: str,
+    operation_id: str,
+) -> tuple[LoftCsgSectionEvidenceReadinessDiagnostic, ...]:
+    diagnostics: list[LoftCsgSectionEvidenceReadinessDiagnostic] = []
+    accepted = bool(getattr(accepted_handoff, "accepted", False))
+    ready = bool(getattr(accepted_handoff, "dirty_stl_source_ready", False))
+    body_identity = getattr(accepted_handoff, "accepted_body_identity", None)
+    if not accepted or not ready or not isinstance(body_identity, str) or not body_identity:
+        diagnostics.append(
+            LoftCsgSectionEvidenceReadinessDiagnostic(
+                code="missing-handoff",
+                fixture_id=fixture_id,
+                operation_id=operation_id,
+                message="Loft CSG section evidence requires an accepted reference geometry handoff.",
+            )
+        )
+    contract = validate_section_evidence_roles(bundle)
+    if any(diagnostic.startswith("missing-section-plane") for diagnostic in contract.diagnostics):
+        diagnostics.append(
+            LoftCsgSectionEvidenceReadinessDiagnostic(
+                code="missing-section-plane",
+                fixture_id=fixture_id,
+                operation_id=operation_id,
+                message="Loft CSG section evidence requires explicit section plane origin and normal.",
+            )
+        )
+    if contract.missing_roles or any(
+        not diagnostic.startswith("missing-section-plane") for diagnostic in contract.diagnostics
+    ):
+        diagnostics.append(
+            LoftCsgSectionEvidenceReadinessDiagnostic(
+                code="invalid-section-contract",
+                fixture_id=fixture_id,
+                operation_id=operation_id,
+                message="Loft CSG section evidence bundle is missing required roles or contract metadata.",
+            )
+        )
+    return tuple(diagnostics)
+
+
+def build_loft_csg_section_evidence_handoff(
+    *,
+    fixture_id: str,
+    operation_id: str,
+    accepted_handoff: object,
+    bundle: ReferenceEvidenceBundleRecord,
+) -> LoftCsgSectionEvidenceReadinessRecord:
+    diagnostics = validate_loft_csg_section_readiness(
+        accepted_handoff,
+        bundle,
+        fixture_id=fixture_id,
+        operation_id=operation_id,
+    )
+    body_identity = getattr(accepted_handoff, "accepted_body_identity", None)
+    return LoftCsgSectionEvidenceReadinessRecord(
+        fixture_id=fixture_id,
+        operation_id=operation_id,
+        accepted_body_identity=body_identity if isinstance(body_identity, str) else None,
+        section_plane_metadata=dict(bundle.section_plane_metadata),
+        ready=not diagnostics,
+        bundle_payload=_section_evidence_bundle_payload(bundle) if not diagnostics else None,
+        diagnostics=diagnostics,
+    )
 
 
 @dataclass(frozen=True)

@@ -38,12 +38,12 @@ To pick interactively with arrow keys:
 scripts/dev/install_impression.sh --interactive
 ```
 
-If you want to install a local wheel (to mimic a packaged release), use the helper:
+If you want to install from the local source tree instead of a tagged release, use the helper:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-scripts/dev/install_impression.sh --local
+scripts/dev/install_impression.sh --from-local
 ```
 
 The installer builds a wheel, installs it into the active venv, and forces `manifold3d` to build
@@ -104,7 +104,7 @@ Full CLI reference: [`docs/cli.md`](docs/cli.md)
 
 - `scripts/dev/setup_dev_env.sh` - create/update the repo virtual environment, install the package,
   and append the `source ~/.impression/env` line to your shell configuration files.
-- `scripts/dev/install_impression.sh` - install the latest tagged release or the local repo into a
+- `scripts/dev/install_impression.sh` - install the latest tagged release or local source tree into a
   target virtual environment.
 - `scripts/dev/reset_impression_env.sh` - remove the auto-installed CLI (`~/.impression-cli`),
   delete `~/.impression/env`, strip the sourcing line from your shell rc files, and clear VS Code
