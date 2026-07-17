@@ -60,6 +60,9 @@ from .preview_bridge import (
     choose_preview_adapter,
 )
 from .preview_widget import (
+    PreviewCameraDisplayMetadata,
+    PreviewImageCaptureRecord,
+    PreviewImageFileReference,
     PreviewPaneVisibleState,
     PreviewRendererLifecycleState,
     PreviewRendererLifecycleWidget,
@@ -157,6 +160,9 @@ __all__ = [
     "PreviewDisplayCommandRecord",
     "PreviewDisplayControlBar",
     "PreviewDisplayOptions",
+    "PreviewCameraDisplayMetadata",
+    "PreviewImageCaptureRecord",
+    "PreviewImageFileReference",
     "PreviewRenderCommand",
     "PreviewRenderCommandKind",
     "PreviewRenderCommandQueue",

@@ -63,6 +63,7 @@ Architecture documents define:
 - [Reference Review Preview Payload Boundary Architecture](reference-review-preview-payload-boundary-architecture.md)
 - [Reference Review Promotion And Notes Lifecycle](reference-review-promotion-and-notes-lifecycle.md)
 - [Reference Review Codex Sandbox](reference-review-codex-sandbox.md)
+- [Reference Review And Impression Bench GUI Delta Review](reference-review-impression-bench-gui-delta-review.md)
 
 ## Inference And Curve Fitting Documents
 
@@ -100,6 +101,7 @@ Architecture documents define:
 - [ACD: Branching Loft CSG Decomposition And Recomposition Policy](acd-branching-loft-csg-decomposition-and-recomposition-policy.md)
 - [ACD: Loft CSG Result Provenance And Color Propagation](acd-loft-csg-result-provenance-and-color-propagation.md)
 - [ACD: Reference Fixture Multi-Artifact Section Evidence Policy](acd-reference-fixture-multi-artifact-section-evidence-policy.md)
+- [ACD: Reference Review Hybrid Stabilization](acd-reference-review-hybrid-stabilization.md)
 
 ## Notes
 

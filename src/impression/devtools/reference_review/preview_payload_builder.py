@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import struct
 import sys
 import tempfile
 from contextlib import contextmanager
@@ -14,6 +15,8 @@ from threading import Lock
 from types import ModuleType
 from typing import Any, Callable, Iterator
 
+import numpy as np
+
 from impression.mesh import Mesh, Polyline
 from impression.modeling import (
     SurfaceBody,
@@ -21,6 +24,10 @@ from impression.modeling import (
     preview_tessellation_request,
     tessellate_surface_body,
 )
+from impression.modeling.drawing2d import Path2D
+from impression.modeling.group import MeshGroup
+from impression.modeling.path3d import Path3D
+from impression.modeling.topology import Region, Section
 
 from .preview_payload import (
     PreviewPayload,
@@ -31,6 +38,7 @@ from .preview_payload import (
 
 PREVIEW_PAYLOAD_FORMAT = "impression.reference-review.preview-payload.v1"
 _PREVIEW_SOURCE_IMPORT_LOCK = Lock()
+_RENDERABLE_ARTIFACT_SUFFIXES = frozenset({".stl", ".impress"})
 
 
 @dataclass(frozen=True)
@@ -103,6 +111,27 @@ def load_impress_preview_datasets(artifact_path: Path) -> tuple[object, ...]:
     return tuple(tessellate_surface_body(body, request).mesh for body in loaded.bodies)
 
 
+def load_artifact_preview_dataset(request: PreviewPayloadRequest) -> LoadedPreviewDataset | None:
+    """Load the selected renderable artifact when a fixture has STL/.impress output."""
+
+    artifact_path = _first_renderable_artifact_path(request)
+    if artifact_path is None:
+        return None
+    if artifact_path.suffix.lower() == ".impress":
+        datasets = load_impress_preview_datasets(artifact_path)
+    elif artifact_path.suffix.lower() == ".stl":
+        datasets = (_load_stl_preview_mesh(artifact_path),)
+    else:
+        return None
+    if not datasets:
+        raise ValueError("artifact produced no preview datasets")
+    return LoadedPreviewDataset(
+        request=request,
+        datasets=tuple(datasets),
+        source_type=f"artifact:{artifact_path.suffix.lower()}",
+    )
+
+
 def build_impress_preview_result(generation: int, artifact_path: Path) -> ImpressPreviewBuildResult:
     """Build preview datasets for `.impress` artifacts in a non-UI worker."""
 
@@ -124,6 +153,7 @@ def load_preview_source(
     kwargs = {parameter.name: parameter.value for parameter in request.parameters}
     with _PREVIEW_SOURCE_IMPORT_LOCK:
         with _temporary_import_roots(_source_import_roots(request, import_roots)):
+            _evict_preview_source_modules(request)
             if "." in entrypoint and not request.source_path.is_file():
                 module_name, function_name = entrypoint.rsplit(".", 1)
                 module = importlib.import_module(module_name)
@@ -145,8 +175,23 @@ def tessellate_preview_source(
     datasets: list[Mesh | Polyline] = []
     tessellation_request = preview_tessellation_request(require_watertight=False)
 
+    def loop_to_polyline(loop_points: np.ndarray) -> Polyline:
+        pts = np.asarray(loop_points, dtype=float).reshape(-1, 2)
+        pts3 = np.column_stack([pts, np.zeros((pts.shape[0], 1), dtype=float)])
+        return Polyline(pts3, closed=True, color=None)
+
+    def region_to_polylines(region: Region) -> list[Polyline]:
+        normalized = region.normalized()
+        polylines = [loop_to_polyline(normalized.outer.points)]
+        polylines.extend(loop_to_polyline(hole.points) for hole in normalized.holes)
+        return polylines
+
     def visit(item: object) -> None:
         if item is None:
+            return
+        if isinstance(item, MeshGroup) or (hasattr(item, "to_meshes") and callable(getattr(item, "to_meshes"))):
+            for mesh in item.to_meshes():
+                visit(mesh)
             return
         if isinstance(item, Mesh):
             datasets.append(item)
@@ -161,13 +206,22 @@ def tessellate_preview_source(
             for record in item.items:
                 visit(record.body)
             return
-        if hasattr(item, "to_meshes") and callable(getattr(item, "to_meshes")):
-            for mesh in item.to_meshes():
-                visit(mesh)
+        if isinstance(item, Path2D):
+            datasets.append(item.to_polyline())
             return
         if hasattr(item, "to_polylines") and callable(getattr(item, "to_polylines")):
             for polyline in item.to_polylines():
                 visit(polyline)
+            return
+        if isinstance(item, Region):
+            datasets.extend(region_to_polylines(item))
+            return
+        if isinstance(item, Section):
+            for region in item.normalized().regions:
+                datasets.extend(region_to_polylines(region))
+            return
+        if isinstance(item, Path3D):
+            datasets.append(item.to_polyline())
             return
         if isinstance(item, (list, tuple, set)):
             for value in item:
@@ -194,8 +248,10 @@ def build_preview_dataset(
     """Load and tessellate a preview request, returning sanitized diagnostics."""
 
     try:
-        source = load_preview_source(request, import_roots=(() if cwd is None else (cwd,)))
-        dataset = tessellate_preview_source(request, source)
+        dataset = load_artifact_preview_dataset(request)
+        if dataset is None:
+            source = load_preview_source(request, import_roots=(() if cwd is None else (cwd,)))
+            dataset = tessellate_preview_source(request, source)
     except Exception as exc:
         return PreviewDatasetBuildResult(
             request=request,
@@ -301,6 +357,103 @@ def _load_module_from_path(path: Path, request: PreviewPayloadRequest) -> Module
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _first_renderable_artifact_path(request: PreviewPayloadRequest) -> Path | None:
+    for path in request.artifact_paths:
+        artifact_path = Path(path)
+        if artifact_path.suffix.lower() not in _RENDERABLE_ARTIFACT_SUFFIXES:
+            continue
+        if artifact_path.is_file():
+            return artifact_path
+    return None
+
+
+def _load_stl_preview_mesh(artifact_path: Path) -> Mesh:
+    data = artifact_path.read_bytes()
+    vertices, faces = _read_binary_stl(data)
+    if faces.size == 0:
+        vertices, faces = _read_ascii_stl(data)
+    if faces.size == 0:
+        raise ValueError("STL artifact has no faces")
+    return Mesh(
+        vertices=vertices,
+        faces=faces,
+        metadata={"source_artifact": artifact_path.as_posix()},
+    )
+
+
+def _read_binary_stl(data: bytes) -> tuple[np.ndarray, np.ndarray]:
+    if len(data) < 84:
+        return np.empty((0, 3), dtype=float), np.empty((0, 3), dtype=int)
+    triangle_count = struct.unpack_from("<I", data, 80)[0]
+    expected_size = 84 + triangle_count * 50
+    if triangle_count < 1 or expected_size != len(data):
+        return np.empty((0, 3), dtype=float), np.empty((0, 3), dtype=int)
+    vertices = np.empty((triangle_count * 3, 3), dtype=float)
+    faces = np.empty((triangle_count, 3), dtype=int)
+    offset = 84
+    for index in range(triangle_count):
+        values = struct.unpack_from("<12fH", data, offset)
+        vertices[index * 3 : index * 3 + 3] = np.asarray(values[3:12], dtype=float).reshape(3, 3)
+        faces[index] = (index * 3, index * 3 + 1, index * 3 + 2)
+        offset += 50
+    return vertices, faces
+
+
+def _read_ascii_stl(data: bytes) -> tuple[np.ndarray, np.ndarray]:
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        text = data.decode("latin-1", errors="ignore")
+    vertices: list[tuple[float, float, float]] = []
+    for line in text.splitlines():
+        parts = line.strip().split()
+        if len(parts) != 4 or parts[0].lower() != "vertex":
+            continue
+        try:
+            vertices.append((float(parts[1]), float(parts[2]), float(parts[3])))
+        except ValueError:
+            continue
+    usable_count = len(vertices) - (len(vertices) % 3)
+    if usable_count < 3:
+        return np.empty((0, 3), dtype=float), np.empty((0, 3), dtype=int)
+    vertex_array = np.asarray(vertices[:usable_count], dtype=float)
+    faces = np.arange(usable_count, dtype=int).reshape(-1, 3)
+    return vertex_array, faces
+
+
+def _evict_preview_source_modules(request: PreviewPayloadRequest) -> None:
+    source_paths = _preview_source_cache_paths(request)
+    if not source_paths:
+        return
+    for module_name, module in tuple(sys.modules.items()):
+        module_file = getattr(module, "__file__", None)
+        if not module_file:
+            continue
+        try:
+            module_path = Path(module_file).expanduser().resolve()
+        except OSError:
+            continue
+        if module_path in source_paths or _is_previous_preview_temp_module(module_path):
+            sys.modules.pop(module_name, None)
+
+
+def _preview_source_cache_paths(request: PreviewPayloadRequest) -> set[Path]:
+    paths = {Path(request.source_path).expanduser().resolve()}
+    metadata_paths = request.metadata.get("source_snapshot_paths", ())
+    if isinstance(metadata_paths, (list, tuple)):
+        for value in metadata_paths:
+            if isinstance(value, str):
+                paths.add(Path(value).expanduser().resolve())
+    original_subject = request.metadata.get("original_subject_path")
+    if isinstance(original_subject, str):
+        paths.add(Path(original_subject).expanduser().resolve())
+    return paths
+
+
+def _is_previous_preview_temp_module(path: Path) -> bool:
+    return any(part.startswith("impression-bench-preview-source-") for part in path.parts)
 
 
 def _source_import_roots(

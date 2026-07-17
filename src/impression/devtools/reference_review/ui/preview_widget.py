@@ -5,9 +5,10 @@ from __future__ import annotations
 import os
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from types import MappingProxyType
+from typing import Any, Callable, Mapping
 
 os.environ.setdefault("QT_OPENGL", "desktop")
 
@@ -104,6 +105,40 @@ class PreviewWrapperSmokeRecord:
     command: tuple[str, ...]
     expected_fixture_type: str = ".impress"
     verifies_lifecycle: bool = True
+
+
+@dataclass(frozen=True)
+class PreviewCameraDisplayMetadata:
+    width: int
+    height: int
+    payload_generation: int | None = None
+    fixture_id: str | None = None
+    display_options: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "display_options", MappingProxyType(dict(self.display_options)))
+
+
+@dataclass(frozen=True)
+class PreviewImageFileReference:
+    path: Path
+    image_format: str
+    mime_type: str
+    byte_count: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "path", Path(self.path))
+
+
+@dataclass(frozen=True)
+class PreviewImageCaptureRecord:
+    file_reference: PreviewImageFileReference | None
+    metadata: PreviewCameraDisplayMetadata | None = None
+    diagnostic: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.file_reference is not None and self.diagnostic is None
 
 
 @dataclass(frozen=True)
@@ -284,6 +319,7 @@ class PreviewRendererLifecycleWidget(QWidget):
     """Widget host that owns one long-lived embedded preview renderer."""
 
     renderCommandApplied = Signal(object)
+    captureDiagnostic = Signal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         _ensure_widget_app()
@@ -468,6 +504,38 @@ class PreviewRendererLifecycleWidget(QWidget):
         if callable(render):
             render()
 
+    def capture_visible_preview_image(
+        self,
+        output_dir: Path | str,
+        *,
+        basename: str = "preview-capture",
+        image_format: str = "png",
+    ) -> PreviewImageCaptureRecord:
+        if self._render_drain_scheduled or self._render_queue.state.pending_count:
+            return self._capture_diagnostic("preview-capture-busy")
+        if self._plotter is None or not self._payload_state.ready:
+            return self._capture_diagnostic("preview-capture-missing-render")
+        image_format = image_format.lower()
+        if image_format != "png":
+            return self._capture_diagnostic("preview-capture-unsupported-format")
+        output_root = Path(output_dir)
+        output_root.mkdir(parents=True, exist_ok=True)
+        output_path = _unique_capture_path(output_root, basename, image_format)
+        target = self._plotter if isinstance(self._plotter, QWidget) else self
+        pixmap = target.grab()
+        if pixmap.isNull():
+            return self._capture_diagnostic("preview-capture-empty-image")
+        if not pixmap.save(str(output_path), image_format.upper()):
+            return self._capture_diagnostic("preview-capture-save-failed")
+        metadata = self._capture_metadata(target)
+        reference = PreviewImageFileReference(
+            output_path,
+            image_format,
+            "image/png",
+            output_path.stat().st_size,
+        )
+        return PreviewImageCaptureRecord(reference, metadata)
+
     def set_preview_payload(
         self,
         payload: PreviewPayload,
@@ -475,6 +543,8 @@ class PreviewRendererLifecycleWidget(QWidget):
         renderer_factory: Callable[[QWidget], object] | None = None,
         previewer_factory: Callable[[], object] | None = None,
     ) -> PreviewWidgetPayloadState:
+        if payload.diagnostic is not None:
+            return self._fail_payload(payload, payload.diagnostic.message)
         if payload.payload_path is None:
             return self._fail_payload(payload, "preview-payload-missing-path")
         try:
@@ -499,6 +569,26 @@ class PreviewRendererLifecycleWidget(QWidget):
         except Exception as exc:
             return self._fail_payload(payload, str(exc) or exc.__class__.__name__)
 
+    def _capture_metadata(self, target: QWidget) -> PreviewCameraDisplayMetadata:
+        return PreviewCameraDisplayMetadata(
+            width=max(target.width(), 0),
+            height=max(target.height(), 0),
+            payload_generation=self._payload_state.generation,
+            fixture_id=self._payload_state.fixture_id,
+            display_options={
+                "show_object_fill": self._display_options.show_object_fill,
+                "show_object_edges": self._display_options.show_object_edges,
+                "show_gradient_background": self._display_options.show_gradient_background,
+                "color_mode": self._display_options.color_mode,
+                "lighting_mode": self._display_options.lighting_mode,
+            },
+        )
+
+    def _capture_diagnostic(self, code: str) -> PreviewImageCaptureRecord:
+        record = PreviewImageCaptureRecord(None, diagnostic=code)
+        self.captureDiagnostic.emit(record)
+        return record
+
     def dispose_renderer(self) -> None:
         self._render_queue.clear()
         self._render_drain_scheduled = False
@@ -508,10 +598,25 @@ class PreviewRendererLifecycleWidget(QWidget):
         self._renderer_state = PreviewRendererLifecycleState(disposed=True)
 
     def _fail_payload(self, payload: PreviewPayload, diagnostic: str) -> PreviewWidgetPayloadState:
+        sanitized = sanitize_error_text(diagnostic)
+        if (
+            self._payload_state.ready
+            and self._payload_state.fixture_id == payload.request.fixture_id
+            and self._current_datasets
+        ):
+            self._payload_state = PreviewWidgetPayloadState(
+                generation=self._payload_state.generation,
+                fixture_id=self._payload_state.fixture_id,
+                ready=True,
+                diagnostic=sanitized,
+            )
+            self._status.setText(f"Preview stale: {sanitized}")
+            self._status.show()
+            return self._payload_state
         self._payload_state = PreviewWidgetPayloadState(
             generation=payload.request.generation,
             fixture_id=payload.request.fixture_id,
-            diagnostic=sanitize_error_text(diagnostic),
+            diagnostic=sanitized,
         )
         self._current_datasets = []
         self._status.setText(f"Preview unavailable: {self._payload_state.diagnostic}")
@@ -742,6 +847,19 @@ def _should_use_pyvistaqt_preview() -> bool:
         os.environ.get("IMPRESSION_REFERENCE_REVIEW_FORCE_SOFTWARE") != "1"
         and qt_preview_supported_environment()
     )
+
+
+def _unique_capture_path(output_dir: Path, basename: str, image_format: str) -> Path:
+    safe_basename = "".join(
+        character if character.isalnum() or character in {"-", "_"} else "-"
+        for character in basename
+    )
+    candidate = output_dir / f"{safe_basename or 'preview-capture'}.{image_format}"
+    index = 2
+    while candidate.exists():
+        candidate = output_dir / f"{safe_basename or 'preview-capture'}-{index:02d}.{image_format}"
+        index += 1
+    return candidate
 
 
 def _apply_pyvistaqt_scene(

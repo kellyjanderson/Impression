@@ -63,6 +63,7 @@ options:
   --offscreen   use Qt's offscreen platform plugin
   -h, --help    show this help message and exit
 """
+_RENDERABLE_ARTIFACT_SUFFIXES = frozenset({".stl", ".impress"})
 
 
 @dataclass(frozen=True)
@@ -137,6 +138,42 @@ def map_artifact_evidence_rows(record: ReviewSourceModelRecord) -> tuple[Artifac
                 )
             )
     return tuple(rows)
+
+
+def _renderable_artifact_paths(record: ReviewSourceModelRecord) -> tuple[Path, ...]:
+    return tuple(
+        path for path in record.artifact_paths if path.suffix.lower() in _RENDERABLE_ARTIFACT_SUFFIXES
+    )
+
+
+def _fixture_artifact_kind_label(record: ReviewSourceModelRecord) -> str:
+    renderable_paths = _renderable_artifact_paths(record)
+    if renderable_paths:
+        return renderable_paths[0].name
+    expected = (record.expected_output or "").lower()
+    if "diagnostic" in expected:
+        return "diagnostic evidence"
+    if "evidence" in expected:
+        return "evidence payload"
+    if not record.artifact_paths:
+        return "no renderable artifact"
+    return "non-renderable artifact"
+
+
+def _fixture_preview_empty_message(record: ReviewSourceModelRecord) -> str:
+    renderable_paths = _renderable_artifact_paths(record)
+    if renderable_paths:
+        path = renderable_paths[0]
+        if path.is_file():
+            return ""
+        return f"Renderable artifact missing: {path.name}"
+    expected = (record.expected_output or "").lower()
+    if "diagnostic" in expected or "evidence" in expected:
+        return (
+            "Diagnostic/evidence fixture: no STL or .impress artifact to render. "
+            "Review the Context and Artifacts tabs."
+        )
+    return "No STL or .impress artifact is declared for this fixture."
 
 
 def _ensure_qt_app(argv: Sequence[str], *, offscreen: bool, widgets: bool = False) -> object:
@@ -395,7 +432,7 @@ class ReferenceReviewWindow(QWidget):
         self._fixture_databases = fixture_databases
         self._offscreen = offscreen
         self._interactive_preview_ready = True
-        self._selected_index = queue.selected_index if queue.selected_index is not None else -1
+        self._selected_index = -1
         self._all_fixture_items = _fixture_items_for_qml(queue, artifact_previews)
         self._show_approved = False
         self._visible_record_indices: list[int] = []
@@ -483,10 +520,14 @@ class ReferenceReviewWindow(QWidget):
         self.preview_frame.setMinimumSize(360, 260)
         self.preview_layout = QVBoxLayout(self.preview_frame)
         self.preview_layout.setContentsMargins(0, 0, 0, 0)
+        self.preview_stale_label = QLabel("Preview current.")
+        self.preview_stale_label.setObjectName("reviewPreviewStaleIndicator")
+        self.preview_stale_label.setStyleSheet("color: #9fb0c2; padding: 4px 8px;")
         self.preview_surface = InteractiveStlPreviewLabel(self.preview_frame)
         self.preview_surface.renderCommandApplied.connect(
             self._handle_preview_render_command_result
         )
+        self.preview_layout.addWidget(self.preview_stale_label)
         self.preview_layout.addWidget(self.preview_surface)
         main_layout.addWidget(self.preview_frame, 1, 0, 2, 1)
 
@@ -560,10 +601,7 @@ class ReferenceReviewWindow(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
-        if self._selected_index >= 0:
-            self._select_initial_fixture(self._selected_index)
-        else:
-            self._sync_properties()
+        self._sync_properties()
 
     def _select_initial_fixture(self, index: int) -> None:
         row = self._visible_row_for_record_index(index)
@@ -603,9 +641,10 @@ class ReferenceReviewWindow(QWidget):
         try:
             self.list_widget.clear()
             for row, item in enumerate(self._fixture_items):
+                artifact_label = item["artifact_kind_label"]
                 label = (
                     f"{item['fixture_id']} [{item['status']}]\n"
-                    f"{item['artifact_display_path'] or item['source_display_path']}"
+                    f"{artifact_label}"
                 )
                 widget_item = QListWidgetItem(label)
                 widget_item.setData(256, item["fixture_id"])
@@ -816,18 +855,28 @@ class ReferenceReviewWindow(QWidget):
         return True
 
     def _load_artifact_preview(self, item: dict[str, object]) -> None:
-        record = self.queue.records[self._selected_index]
-        artifact_path = record.artifact_paths[0] if record.artifact_paths else None
+        record_index = self._record_index_for_fixture_id(str(item.get("fixture_id", "")))
+        if record_index is None:
+            self.preview_surface.enqueue_render_command(
+                PreviewRenderCommand.clear("No fixture selected.")
+            )
+            return
+        record = self.queue.records[record_index]
+        renderable_paths = _renderable_artifact_paths(record)
+        artifact_path = renderable_paths[0] if renderable_paths else None
         live_artifact = artifact_path if artifact_path and artifact_path.is_file() else None
         self._preview_load_generation += 1
-        self.artifact_thumb.setText(str(item.get("artifact_display_path", "")))
+        self.artifact_thumb.setText(str(item.get("artifact_kind_label", "")))
         if item.get("artifact_evidence_text"):
             self.artifact_thumb.setText(str(item["artifact_evidence_text"]))
         self.preview_surface.prepare_artifact(live_artifact)
         self.preview_surface.enqueue_render_command(PreviewRenderCommand.loading())
+        self.preview_stale_label.setText("Preview loading...")
         self.preview_display_controls.set_ready(False)
         if live_artifact is None:
-            self.preview_surface.enqueue_render_command(PreviewRenderCommand.clear())
+            self.preview_surface.enqueue_render_command(
+                PreviewRenderCommand.clear(str(item.get("preview_empty_message", "")) or "No fixture selected.")
+            )
             return
         result = self._preview_controller.launch(record)
         if not result.accepted or result.future is None:
@@ -856,6 +905,12 @@ class ReferenceReviewWindow(QWidget):
         if generation != self._preview_load_generation:
             return
         self.preview_surface.set_artifact(artifact_path)
+
+    def _record_index_for_fixture_id(self, fixture_id: str) -> int | None:
+        for index, record in enumerate(self.queue.records):
+            if record.fixture_id == fixture_id:
+                return index
+        return None
 
     def _poll_preview_payloads(self) -> None:
         pending: list[Future[WorkerResultEnvelope]] = []
@@ -921,6 +976,7 @@ class ReferenceReviewWindow(QWidget):
             self._preview_poll_timer.start()
 
     def _apply_preview_payload_ready(self, event: PreviewPayloadReadyEvent) -> None:
+        self.preview_stale_label.setText("Preview current.")
         self.preview_surface.enqueue_render_command(
             PreviewRenderCommand.payload_ready(
                 event.payload,
@@ -929,6 +985,10 @@ class ReferenceReviewWindow(QWidget):
         )
 
     def _apply_preview_payload_failed(self, event: PreviewPayloadFailedEvent) -> None:
+        if self.preview_surface.payload_state.ready:
+            self.preview_stale_label.setText(f"Preview stale: {event.diagnostic.message}")
+            self.preview_display_controls.set_ready(True)
+            return
         self.preview_surface.enqueue_render_command(
             PreviewRenderCommand.failure(
                 f"Preview unavailable: {event.diagnostic.message}",
@@ -936,6 +996,7 @@ class ReferenceReviewWindow(QWidget):
                 identity=self._preview_controller.active_identity,
             )
         )
+        self.preview_stale_label.setText("Preview unavailable.")
         self.preview_display_controls.set_ready(False)
 
     def _handle_preview_render_command_result(
@@ -1078,6 +1139,9 @@ def _fixture_items_for_qml(
                 "methodology": item.methodology or "",
                 "render_description": item.render_description or "",
                 "artifact_display_path": item.artifact_display_path or "",
+                "artifact_kind_label": _fixture_artifact_kind_label(record),
+                "renderable_artifact": bool(_renderable_artifact_paths(record)),
+                "preview_empty_message": _fixture_preview_empty_message(record),
                 "artifact_preview_url": getattr(preview, "preview_url", "") if preview is not None else "",
                 "artifact_preview_status": getattr(preview, "diagnostic", None)
                 if preview is not None and getattr(preview, "diagnostic", None)

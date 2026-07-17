@@ -108,6 +108,46 @@ def test_preview_dataset_builder_tessellates_real_dirty_impress_source_fixture(
     assert result.diagnostic is None
 
 
+def test_preview_dataset_builder_prefers_renderable_stl_artifact_over_source_dict(
+    project_root: Path,
+    tmp_path: Path,
+) -> None:
+    artifact_path = tmp_path / "triangle.stl"
+    artifact_path.write_text(
+        "\n".join(
+            (
+                "solid triangle",
+                "  facet normal 0 0 1",
+                "    outer loop",
+                "      vertex 0 0 0",
+                "      vertex 1 0 0",
+                "      vertex 0 1 0",
+                "    endloop",
+                "  endfacet",
+                "endsolid triangle",
+            )
+        )
+    )
+    source = tmp_path / "evidence_source.py"
+    source.write_text("def build():\n    return {'expected_output': 'diagnostic evidence'}\n")
+    record = ReviewSourceModelRecord(
+        fixture_id="fixture/artifact-first",
+        feature_name="Artifact First",
+        source_path=source,
+        artifact_paths=(artifact_path,),
+    )
+    request = _request_from_record(record, request_id=14)
+
+    result = build_preview_dataset(request, cwd=project_root)
+
+    assert result.ok
+    assert result.dataset is not None
+    assert result.dataset.source_type == "artifact:.stl"
+    assert result.dataset.dataset_count == 1
+    assert result.dataset.datasets[0].faces.tolist() == [[0, 1, 2]]
+    assert result.diagnostic is None
+
+
 def test_preview_dataset_builder_adds_workspace_root_for_fixture_imports(
     tmp_path: Path,
 ) -> None:
