@@ -157,7 +157,7 @@ ApplicationWindow {
                             }
                             Text {
                                 width: parent.width
-                                text: (modelData.status || "unreviewed") + " - " + (modelData.artifact_display_path || modelData.source_display_path)
+                                text: (modelData.status || "unreviewed") + " - " + (modelData.artifact_kind_label || modelData.source_display_path)
                                 color: "#565a51"
                                 font.pixelSize: 11
                                 elide: Text.ElideMiddle
@@ -244,7 +244,7 @@ ApplicationWindow {
                         anchors.centerIn: parent
                         width: Math.min(parent.width - 48, 520)
                         text: root.hasFixture && root.currentFixture().artifact_preview_url === ""
-                            ? "No STL preview available for " + root.currentFixture().artifact_display_path
+                            ? (root.currentFixture().preview_empty_message || "No STL or .impress preview is available.")
                             : root.selectedMessageText
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.WordWrap

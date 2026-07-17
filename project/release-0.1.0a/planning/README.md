@@ -15,6 +15,7 @@ Inference and curve-fitting planning lives under:
 Reference Review Workbench planning lives under:
 
 - [`reference-review-workbench-progression.md`](reference-review-workbench-progression.md)
+- [`reference-review-hybrid-stabilization-plan.md`](reference-review-hybrid-stabilization-plan.md)
 
 Reference test expansion planning lives under:
 

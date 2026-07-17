@@ -48,6 +48,7 @@ from impression.devtools.reference_review.ui import (
     map_artifact_evidence_rows,
     map_context_evidence_summary,
     PreviewRendererLifecycleWidget,
+    PreviewWidgetPayloadState,
     SoftwarePreviewSurface,
     preview_display_control_icon_record,
     preview_display_control_icon_records,
@@ -58,6 +59,7 @@ from impression.devtools.reference_review.ui import (
 from impression.devtools.reference_review import (
     LoadedPreviewDataset,
     PreviewPayload,
+    PreviewPayloadDiagnostic,
     PreviewPayloadRequest,
     build_impress_preview_result,
     write_preview_payload_file,
@@ -431,8 +433,54 @@ def test_shell_loads_fixture_file_into_selectable_queue(tmp_path: Path) -> None:
     assert result.launched
     assert diagnostics == ()
     assert root.property("queueStatusText") == "1 fixture shown"
+    assert root.property("selectedMessageText") == "No fixture selected."
+    assert not root.property("hasFixture")
+    queue = root.findChild(QObject, "fixtureQueueList")
+    assert isinstance(queue, QListWidget)
+    queue.setCurrentRow(0)
     assert root.property("selectedMessageText") == "demo/selectable"
     assert root.property("hasFixture")
+
+
+def test_shell_startup_does_not_launch_preview_controller(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    artifact = tmp_path / "part.impress"
+    artifact.write_text('{"format": "impress"}\n')
+    source = tmp_path / "model.py"
+    source.write_text("def build():\n    return None\n")
+    record = ReviewSourceModelRecord(
+        "demo/no-startup-preview",
+        "demo",
+        source,
+        artifact_paths=(artifact,),
+    )
+    launches = []
+
+    class StartupProbePreviewController:
+        active_identity = None
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def launch(self, record):
+            launches.append(record)
+            return SimpleNamespace(accepted=False, future=None, diagnostic="unexpected-launch")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(shell, "PreviewPayloadProcessController", StartupProbePreviewController)
+
+    result = launch_workbench(fixture_records=(record,), offscreen=True)
+    root = result.engine.rootObjects()[0]
+
+    assert result.launched
+    assert launches == []
+    assert root.property("selectedMessageText") == "No fixture selected."
+    assert not root.property("hasFixture")
 
 
 def test_context_tab_shows_fixture_purpose_methodology_and_render_description(tmp_path: Path) -> None:
@@ -450,8 +498,11 @@ def test_context_tab_shows_fixture_purpose_methodology_and_render_description(tm
 
     result = launch_workbench(fixture_records=(record,), offscreen=True)
     root = result.engine.rootObjects()[0]
+    queue = root.findChild(QObject, "fixtureQueueList")
     context = root.findChild(QObject, "selectedFixtureContextText")
 
+    assert isinstance(queue, QListWidget)
+    queue.setCurrentRow(0)
     assert isinstance(context, QLabel)
     assert "Purpose: Validate bevel edge visibility." in context.text()
     assert "Methodology: Render with object edges enabled and inspect the silhouette." in context.text()
@@ -508,7 +559,7 @@ def test_fixture_queue_hides_approved_until_checkbox_is_checked(tmp_path: Path) 
     assert "demo/approved" not in "\n".join(queue.item(index).text() for index in range(queue.count()))
     assert root.property("reviewFixtures")[0]["status"] == "declined"
     assert root.property("reviewFixtures")[1]["status"] == "unreviewed"
-    assert root.property("selectedMessageText") == "demo/unreviewed"
+    assert root.property("selectedMessageText") == "No fixture selected."
     assert badge.text() == "UNREVIEWED"
     assert "#5f6368" in badge.styleSheet()
 
@@ -555,8 +606,11 @@ def test_decline_button_marks_fixture_file_declined(tmp_path: Path) -> None:
         offscreen=True,
     )
     root = result.engine.rootObjects()[0]
+    queue = root.findChild(QObject, "fixtureQueueList")
     decline = root.findChild(QObject, "declineFixtureButton")
 
+    assert isinstance(queue, QListWidget)
+    queue.setCurrentRow(0)
     assert isinstance(decline, QPushButton)
     decline.click()
 
@@ -609,6 +663,8 @@ def test_notes_editor_persists_to_selected_fixture_file_and_loads_on_selection(t
 
     assert isinstance(queue, QListWidget)
     assert isinstance(notes, QTextEdit)
+    assert notes.toPlainText() == ""
+    queue.setCurrentRow(0)
     assert notes.toPlainText() == "Existing first note."
 
     notes.setPlainText("Edited first note.")
@@ -1100,6 +1156,28 @@ def test_dirty_impress_fixture_launch_exposes_artifact_without_startup_render(pr
     assert fixtures[0]["artifact_preview_status"] == "ready"
 
 
+def test_diagnostic_fixture_queue_item_is_marked_non_renderable(project_root: Path) -> None:
+    source = project_root / "tests/reference_review_fixtures/stl_review_sources.py"
+    record = ReviewSourceModelRecord(
+        "loft/csg/diagnostic",
+        "loft",
+        source,
+        expected_output="diagnostic evidence",
+        purpose="Explain a refusal.",
+        methodology="Build diagnostic evidence only.",
+        render_description="No STL should render.",
+        artifact_paths=(),
+    )
+    queue = shell.FixtureQueueViewModel((record,))
+
+    item = shell._fixture_items_for_qml(queue)[0]
+
+    assert item["artifact_display_path"] == ""
+    assert item["artifact_kind_label"] == "diagnostic evidence"
+    assert item["renderable_artifact"] is False
+    assert "no STL or .impress artifact to render" in item["preview_empty_message"]
+
+
 def test_dirty_impress_fixture_selects_embedded_preview_surface(project_root: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     source = project_root / "tests/reference_review_fixtures/stl_review_sources.py"
@@ -1119,8 +1197,13 @@ def test_dirty_impress_fixture_selects_embedded_preview_surface(project_root: Pa
         offscreen=True,
     )
     root = result.engine.rootObjects()[0]
+    queue = root.findChild(QObject, "fixtureQueueList")
 
     assert result.launched
+    assert isinstance(queue, QListWidget)
+    assert root.property("selectedMessageText") == "No fixture selected."
+    assert not root.property("hasFixture")
+    queue.setCurrentRow(0)
     assert root.property("selectedMessageText") == "surfacebody/box"
     assert root.property("hasFixture")
     assert root.findChild(QObject, "openPreviewButton") is None
@@ -1379,6 +1462,131 @@ def test_preview_renderer_lifecycle_widget_applies_payload_without_recreating_re
     assert len(created) == 1
     assert len(created[0].datasets) == 2
     assert created[0].datasets[-1][0].n_faces == 1
+
+
+def test_preview_renderer_lifecycle_widget_failure_payload_shows_payload_diagnostic() -> None:
+    widget = PreviewRendererLifecycleWidget()
+    request = PreviewPayloadRequest(
+        owner="test",
+        request_id=1,
+        fixture_id="fixture",
+        generation=1,
+        source_path=Path("model.py"),
+        entrypoint="build",
+    )
+    payload = PreviewPayload.failure(
+        request,
+        PreviewPayloadDiagnostic(
+            "preview-source-load-failed",
+            "difference base must be a SurfaceBody.",
+            "fixture",
+            "test",
+            1,
+            1,
+        ),
+    )
+
+    state = widget.set_preview_payload(payload)
+
+    assert not state.ready
+    assert state.diagnostic == "difference base must be a SurfaceBody."
+    assert widget._status.text() == "Preview unavailable: difference base must be a SurfaceBody."
+
+
+def test_preview_renderer_lifecycle_widget_preserves_last_good_same_fixture_failure(
+    tmp_path: Path,
+) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    widget = PreviewRendererLifecycleWidget()
+    record = ReviewSourceModelRecord(
+        fixture_id="fixture/last-good",
+        feature_name="Last Good",
+        source_path=tmp_path / "model.py",
+    )
+    request = PreviewPayloadRequest.from_source_record(
+        record,
+        owner="preview-payload",
+        request_id=1,
+        generation=1,
+    )
+    loaded = LoadedPreviewDataset(
+        request=request,
+        datasets=(
+            Mesh(
+                vertices=np.asarray(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))),
+                faces=np.asarray(((0, 1, 2),)),
+            ),
+        ),
+        source_type="SurfaceBody",
+    )
+    payload = write_preview_payload_file(loaded, payload_dir=tmp_path)
+    ready_state = widget.set_preview_payload(payload)
+    failure = PreviewPayload.failure(
+        PreviewPayloadRequest.from_source_record(
+            record,
+            owner="preview-payload",
+            request_id=2,
+            generation=2,
+        ),
+        PreviewPayloadDiagnostic(
+            "preview-source-load-failed",
+            "temporary build failure",
+            record.fixture_id,
+            "preview-payload",
+            2,
+            2,
+        ),
+    )
+
+    failed_state = widget.set_preview_payload(failure)
+
+    assert ready_state.ready
+    assert failed_state.ready
+    assert failed_state.generation == 1
+    assert failed_state.diagnostic == "temporary build failure"
+    assert len(widget._current_datasets) == 1
+    assert widget._status.text() == "Preview stale: temporary build failure"
+
+
+def test_preview_image_capture_reports_missing_render(tmp_path: Path) -> None:
+    widget = PreviewRendererLifecycleWidget()
+
+    result = widget.capture_visible_preview_image(tmp_path)
+
+    assert not result.ok
+    assert result.diagnostic == "preview-capture-missing-render"
+
+
+def test_preview_image_capture_reports_busy_render_queue(tmp_path: Path) -> None:
+    widget = PreviewRendererLifecycleWidget()
+    widget.ensure_renderer(renderer_factory=lambda parent: QLabel("rendered", parent))
+    widget._payload_state = PreviewWidgetPayloadState(generation=1, fixture_id="fixture", ready=True)
+    widget._render_drain_scheduled = True
+
+    result = widget.capture_visible_preview_image(tmp_path)
+
+    assert not result.ok
+    assert result.diagnostic == "preview-capture-busy"
+
+
+def test_preview_image_capture_writes_local_png_with_metadata(tmp_path: Path) -> None:
+    widget = PreviewRendererLifecycleWidget()
+    widget.resize(320, 240)
+    widget.ensure_renderer(renderer_factory=lambda parent: QLabel("rendered", parent))
+    widget._payload_state = PreviewWidgetPayloadState(generation=3, fixture_id="fixture", ready=True)
+    widget.show()
+
+    result = widget.capture_visible_preview_image(tmp_path, basename="test preview")
+
+    assert result.ok
+    assert result.file_reference is not None
+    assert result.metadata is not None
+    assert result.file_reference.path.is_file()
+    assert result.file_reference.mime_type == "image/png"
+    assert result.file_reference.byte_count > 0
+    assert result.file_reference.path.name == "test-preview.png"
+    assert result.metadata.fixture_id == "fixture"
+    assert result.metadata.payload_generation == 3
 
 
 def test_preview_renderer_lifecycle_widget_applies_payload_to_software_surface(
@@ -1964,6 +2172,7 @@ def test_window_preview_retries_latest_coalesced_request(tmp_path: Path) -> None
     window._preview_future_identities = {}
     window._pending_preview_record = None
     window._preview_controller = CoalescingPreviewController()
+    window._selected_index = 0
 
     window._load_artifact_preview(window._fixture_items[0])
     window._load_artifact_preview(window._fixture_items[0])
@@ -2069,9 +2278,11 @@ def test_shell_next_button_selects_fixture_record(tmp_path: Path) -> None:
     root = result.engine.rootObjects()[0]
     next_button = root.findChild(QObject, "nextFixtureButton")
 
-    assert root.property("selectedMessageText") == "demo/first"
+    assert root.property("selectedMessageText") == "No fixture selected."
     assert next_button is not None
     assert isinstance(next_button, QPushButton)
+    next_button.click()
+    assert root.property("selectedMessageText") == "demo/first"
     next_button.click()
     assert root.property("selectedMessageText") == "demo/second"
 
