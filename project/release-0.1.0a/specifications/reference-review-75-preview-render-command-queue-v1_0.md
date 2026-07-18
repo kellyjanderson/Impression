@@ -133,8 +133,8 @@ Routes:
   - enqueue a display-options command
   - queue coalesces repeated display-options commands
 - renderer:
-  - preview widget/controller drains queue and mutates `QtPreviewSurface` or
-    `SoftwarePreviewSurface` only on the Qt UI thread
+  - preview widget/controller drains queue and mutates `QtPreviewSurface`
+    only on the Qt UI thread
 
 Reuse/extraction decision:
 
@@ -228,8 +228,8 @@ Staleness:
 
 Thread affinity:
 
-- Qt widgets, `QtPreviewSurface`, `QtInteractor`, and `SoftwarePreviewSurface`
-  are touched only on the Qt UI thread.
+- Qt widgets, `QtPreviewSurface`, and `QtInteractor` are touched only on the
+  Qt UI thread.
 - Worker completions cross into the UI thread through Qt queued delivery or
   are polled by the UI thread and then enqueued.
 

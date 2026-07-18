@@ -3,6 +3,7 @@
 import os
 
 os.environ.setdefault("QT_OPENGL", "desktop")
+os.environ.setdefault("QT_WIDGETS_RHI", "0")
 
 from .artifact_preview import ArtifactPreviewRecord, render_stl_preview
 from .bridge import BridgeAvailabilityDiagnostic, BridgeRecord, BridgeRegistry
@@ -67,7 +68,6 @@ from .preview_widget import (
     PreviewRendererLifecycleState,
     PreviewRendererLifecycleWidget,
     PyVistaQtPreviewSurface,
-    SoftwarePreviewSurface,
     PreviewToolbarCommandRecord,
     PreviewWidgetPayloadState,
     PreviewWrapperSmokeRecord,
@@ -149,7 +149,6 @@ __all__ = [
     "PreviewRendererLifecycleState",
     "PreviewRendererLifecycleWidget",
     "PyVistaQtPreviewSurface",
-    "SoftwarePreviewSurface",
     "PreviewToolbarCommandRecord",
     "PreviewWidgetPayloadState",
     "PreviewWrapperSmokeRecord",

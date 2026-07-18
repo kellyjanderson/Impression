@@ -634,6 +634,14 @@ def test_qt_preview_configures_opengl_compatibility_surface_format() -> None:
     assert fmt.stencilBufferSize() == 8
 
 
+def test_qt_preview_defaults_disable_widgets_rhi_compositor() -> None:
+    import os
+    import impression.preview_qt  # noqa: F401
+
+    assert os.environ["QT_OPENGL"] == "desktop"
+    assert os.environ["QT_WIDGETS_RHI"] == "0"
+
+
 def test_qt_preview_supported_environment_rejects_offscreen_by_default(monkeypatch) -> None:
     monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
     assert qt_preview_supported_environment()

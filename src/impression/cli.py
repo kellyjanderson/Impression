@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import importlib
 import pathlib
 from dataclasses import dataclass
 from types import ModuleType
@@ -8,7 +9,8 @@ import sys
 import traceback
 import inspect
 import time
-from typing import Callable
+import threading
+from typing import Callable, Iterable
 
 import typer
 from rich.console import Console
@@ -29,6 +31,7 @@ from impression.preview import PyVistaPreviewer, PreviewBackendError
 
 console = Console()
 app = typer.Typer(help="Experiment with parametric models and preview pipelines.")
+WatchPathsCallback = Callable[[tuple[pathlib.Path, ...]], None]
 
 
 @dataclass(frozen=True)
@@ -64,8 +67,74 @@ def _load_module(path: pathlib.Path) -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     # Register module so features relying on sys.modules (e.g., dataclasses) work.
     sys.modules[module_name] = module
-    spec.loader.exec_module(module)
+    model_dir = str(path.resolve().parent)
+    added_model_dir = model_dir not in sys.path
+    if added_model_dir:
+        sys.path.insert(0, model_dir)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if added_model_dir:
+            try:
+                sys.path.remove(model_dir)
+            except ValueError:
+                pass
     return module
+
+
+def _path_is_relative_to(path: pathlib.Path, root: pathlib.Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _tracked_preview_module_paths(
+    model_path: pathlib.Path,
+    module_names: Iterable[str],
+) -> dict[str, pathlib.Path]:
+    """Return local Python modules that should hot-reload with the preview model."""
+
+    resolved_model = model_path.resolve()
+    package_root = pathlib.Path(__file__).resolve().parent
+    runtime_roots = {pathlib.Path(sys.prefix).resolve(), pathlib.Path(sys.base_prefix).resolve()}
+    tracked: dict[str, pathlib.Path] = {"impression_user_model": resolved_model}
+
+    for name in module_names:
+        module = sys.modules.get(name)
+        if module is None:
+            continue
+        module_file = getattr(module, "__file__", None)
+        if not module_file:
+            continue
+        try:
+            path = pathlib.Path(module_file).resolve()
+        except OSError:
+            continue
+        if path.suffix not in {".py", ".pyw"}:
+            continue
+        if path == resolved_model:
+            tracked[name] = path
+            continue
+        if _path_is_relative_to(path, package_root):
+            continue
+        if any(_path_is_relative_to(path, root) for root in runtime_roots):
+            continue
+        if "site-packages" in path.parts or "dist-packages" in path.parts:
+            continue
+        tracked[name] = path
+    return tracked
+
+
+def _watch_mtimes(paths: Iterable[pathlib.Path]) -> dict[pathlib.Path, int | None]:
+    mtimes: dict[pathlib.Path, int | None] = {}
+    for path in paths:
+        try:
+            mtimes[path.resolve()] = path.stat().st_mtime_ns
+        except OSError:
+            mtimes[path.resolve()] = None
+    return mtimes
 
 
 class ModelBuildError(RuntimeError):
@@ -222,10 +291,12 @@ def _scene_factory_from_module(
     model_path: pathlib.Path,
     *,
     on_module_loaded: Callable[[ModuleType], None] | None = None,
+    on_watch_paths_changed: WatchPathsCallback | None = None,
     cache_module: bool = False,
 ) -> Callable[[], object]:
     cached_module: ModuleType | None = None
-    cached_mtime_ns: int | None = None
+    cached_mtimes: dict[pathlib.Path, int | None] = {}
+    cached_module_names: set[str] = set()
     builder_signature: inspect.Signature | None = None
     accepts_kwargs = False
     accepted_kw_names: set[str] = set()
@@ -245,38 +316,56 @@ def _scene_factory_from_module(
             if param.kind in {inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}
         }
 
-    def _load_cached_or_fresh_module() -> ModuleType:
-        nonlocal cached_module, cached_mtime_ns, start_time, last_build_time, previous_scene
-        if not cache_module:
-            module = _load_module(model_path)
-            if on_module_loaded is not None:
-                on_module_loaded(module)
-            builder = getattr(module, "build", None)
-            if builder is None or not callable(builder):
-                raise ModelBuildError(f"{model_path} must define a callable build() function.")
-            _refresh_builder_metadata(builder)
-            start_time = time.monotonic()
-            last_build_time = None
-            previous_scene = None
-            return module
+    def _notify_watch_paths_changed(paths: Iterable[pathlib.Path]) -> None:
+        if on_watch_paths_changed is None:
+            return
+        on_watch_paths_changed(tuple(sorted({path.resolve() for path in paths})))
 
-        try:
-            mtime_ns = model_path.stat().st_mtime_ns
-        except OSError:
-            mtime_ns = None
-        needs_reload = cached_module is None or mtime_ns != cached_mtime_ns
+    def _drop_cached_modules() -> None:
+        for name in sorted(cached_module_names):
+            module = sys.modules.pop(name, None)
+            cached_path = getattr(module, "__cached__", None) if module is not None else None
+            if cached_path:
+                try:
+                    pathlib.Path(cached_path).unlink(missing_ok=True)
+                except OSError:
+                    pass
+        importlib.invalidate_caches()
+
+    def _finish_module_load(module: ModuleType, loaded_module_names: Iterable[str]) -> ModuleType:
+        nonlocal start_time, last_build_time, previous_scene, cached_module_names, cached_mtimes
+        if on_module_loaded is not None:
+            on_module_loaded(module)
+        builder = getattr(module, "build", None)
+        if builder is None or not callable(builder):
+            raise ModelBuildError(f"{model_path} must define a callable build() function.")
+        _refresh_builder_metadata(builder)
+        tracked_paths_by_module = _tracked_preview_module_paths(
+            model_path,
+            set(loaded_module_names) | {module.__name__},
+        )
+        cached_module_names = set(tracked_paths_by_module)
+        cached_mtimes = _watch_mtimes(tracked_paths_by_module.values())
+        _notify_watch_paths_changed(cached_mtimes)
+        start_time = time.monotonic()
+        last_build_time = None
+        previous_scene = None
+        return module
+
+    def _load_cached_or_fresh_module() -> ModuleType:
+        nonlocal cached_module
+        if not cache_module:
+            before_names = set(sys.modules)
+            module = _load_module(model_path)
+            return _finish_module_load(module, set(sys.modules) - before_names)
+
+        current_mtimes = _watch_mtimes(cached_mtimes or [model_path])
+        needs_reload = cached_module is None or current_mtimes != cached_mtimes
         if needs_reload:
+            _drop_cached_modules()
+            before_names = set(sys.modules)
             cached_module = _load_module(model_path)
-            cached_mtime_ns = mtime_ns
-            if on_module_loaded is not None:
-                on_module_loaded(cached_module)
-            builder = getattr(cached_module, "build", None)
-            if builder is None or not callable(builder):
-                raise ModelBuildError(f"{model_path} must define a callable build() function.")
-            _refresh_builder_metadata(builder)
-            start_time = time.monotonic()
-            last_build_time = None
-            previous_scene = None
+            _finish_module_load(cached_module, set(sys.modules) - before_names)
         return cached_module
 
     def factory() -> object:
@@ -301,6 +390,37 @@ def _scene_factory_from_module(
     return factory
 
 
+def _scene_factory_from_impress(model_path: pathlib.Path) -> Callable[[], object]:
+    def factory() -> object:
+        from impression.io import load_impress
+        from impression.modeling import preview_tessellation_request, tessellate_surface_body
+
+        loaded = load_impress(model_path)
+        request = preview_tessellation_request(require_watertight=False)
+        return tuple(tessellate_surface_body(body, request).mesh for body in loaded.bodies)
+
+    return factory
+
+
+def _scene_factory_from_path(
+    model_path: pathlib.Path,
+    *,
+    on_module_loaded: Callable[[ModuleType], None] | None = None,
+    on_watch_paths_changed: WatchPathsCallback | None = None,
+    cache_module: bool = False,
+) -> Callable[[], object]:
+    if model_path.suffix.lower() == ".impress":
+        if on_watch_paths_changed is not None:
+            on_watch_paths_changed((model_path.resolve(),))
+        return _scene_factory_from_impress(model_path)
+    return _scene_factory_from_module(
+        model_path,
+        on_module_loaded=on_module_loaded,
+        on_watch_paths_changed=on_watch_paths_changed,
+        cache_module=cache_module,
+    )
+
+
 def _next_available_path(path: pathlib.Path) -> pathlib.Path:
     """Return a non-conflicting path by appending ' (n)' before the suffix."""
 
@@ -320,7 +440,7 @@ def _next_available_path(path: pathlib.Path) -> pathlib.Path:
 
 @app.command()
 def preview(
-    model: pathlib.Path = typer.Argument(..., help="Path to a Python module that defines a model scene."),
+    model: pathlib.Path = typer.Argument(..., help="Path to a Python module or .impress document to preview."),
     watch: bool = typer.Option(True, help="Watch the model file for changes and hot-reload."),
     target_fps: int = typer.Option(60, min=1, max=240, help="Preview framerate budget."),
     control_file: pathlib.Path | None = typer.Option(
@@ -344,7 +464,7 @@ def preview(
     ),
 ) -> None:
     """
-    Load a model module, build PyVista datasets, and open an interactive preview window.
+    Load a Python model module or .impress document and open an interactive preview window.
     """
 
     if not model.exists():
@@ -437,15 +557,27 @@ def preview(
         "path": None,
         "factory": None,
     }
+    watched_paths_lock = threading.Lock()
+    watched_paths: set[pathlib.Path] = {model.resolve()}
+
+    def _on_watch_paths_changed(paths: tuple[pathlib.Path, ...]) -> None:
+        nonlocal watched_paths
+        with watched_paths_lock:
+            watched_paths = {path.resolve() for path in paths}
+
+    def _get_watch_paths() -> tuple[pathlib.Path, ...]:
+        with watched_paths_lock:
+            return tuple(watched_paths)
 
     def _get_scene_factory(path: pathlib.Path) -> Callable[[], object]:
         current_path = scene_factory_cache["path"]
         factory = scene_factory_cache["factory"]
         resolved = path.resolve()
         if current_path is None or factory is None or resolved != current_path:
-            factory = _scene_factory_from_module(
+            factory = _scene_factory_from_path(
                 path,
                 on_module_loaded=_on_module_loaded,
+                on_watch_paths_changed=_on_watch_paths_changed,
                 cache_module=True,
             )
             scene_factory_cache["path"] = resolved
@@ -494,6 +626,7 @@ def preview(
             show_bounds=preview_chrome_state["show_bounds"],
             show_axes=preview_chrome_state["show_axes"],
             control_file=control_path,
+            watch_paths_getter=_get_watch_paths,
             auto_rebuild_interval_getter=lambda: auto_rebuild_state["interval"],
         )
     except PreviewBackendError as exc:

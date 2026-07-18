@@ -129,8 +129,8 @@ State rules:
 | Control | Type | Default | Behavior |
 | --- | --- | --- | --- |
 | Object Fill | toggle | on | Shows or hides filled mesh faces. Turning it off creates an edge/diagnostic-only view. |
-| Object Edges | toggle | on | Shows or hides boundary, feature, and non-manifold object edges. It does not show all triangle edges. |
-| Triangle Wireframe | toggle | off | Shows or hides every triangle edge. This is intentionally available because triangle seams can expose rendering and tessellation issues. |
+| Object Edges | toggle | on | Shows or hides the complete rendered object wireframe. |
+| Triangle Wireframe | toggle | off | Shows or hides the explicit triangle-wireframe diagnostic overlay. This is intentionally available because triangle seams can expose rendering and tessellation issues. |
 | Bounds Grid | toggle | on | Shows or hides the floor/bounds grid. |
 | Axis Triad | toggle | on | Shows or hides the RGB X/Y/Z axis triad. |
 | Gradient Background | toggle | on | Switches between the preview's dark gradient background and a flat dark background. |
@@ -227,7 +227,7 @@ The button bar should make display changes immediately obvious:
 - Switching lighting mode changes face shading without changing geometry,
   colors, grid, axes, or camera.
 - Toggling object fill removes or restores filled polygons.
-- Toggling object edges removes or restores only feature/object edges.
+- Toggling object edges removes or restores the complete rendered object wireframe.
 - Toggling triangle wireframe overlays or removes all triangle seams.
 - Toggling grid, axes, background, and polylines affects only those layers.
 

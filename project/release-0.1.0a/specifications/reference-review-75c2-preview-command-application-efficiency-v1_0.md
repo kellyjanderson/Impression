@@ -44,7 +44,6 @@ This specification covers:
 - Dependencies/services:
   - `PreviewRendererLifecycleWidget`
   - `QtPreviewSurface`
-  - `SoftwarePreviewSurface`
 - Returns/outputs/signals:
   - command application result
 - UI surfaces/components:

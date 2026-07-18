@@ -7,6 +7,9 @@ import sys
 from dataclasses import dataclass, field, replace
 from typing import Iterable
 
+os.environ.setdefault("QT_OPENGL", "desktop")
+os.environ.setdefault("QT_WIDGETS_RHI", "0")
+
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from impression.mesh import Mesh, Polyline

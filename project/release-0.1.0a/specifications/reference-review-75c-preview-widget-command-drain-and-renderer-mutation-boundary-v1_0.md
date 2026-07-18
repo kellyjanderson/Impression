@@ -40,7 +40,6 @@ This specification covers:
   - `PreviewRenderCommandQueue`
   - `PreviewRendererLifecycleWidget`
   - `QtPreviewSurface`
-  - `SoftwarePreviewSurface`
 - Returns/outputs/signals:
   - command application result
 - UI surfaces/components:
@@ -52,7 +51,6 @@ This specification covers:
 - Reusable code plan:
   - Existing code reused as-is:
     - shared Qt preview surface
-    - software preview fallback
   - Additions to existing reusable library/module:
     - preview widget command-drain methods
   - New reusable library/module to create:
