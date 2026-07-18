@@ -37,6 +37,7 @@ def _prepare_vtk_runtime() -> None:
 
 SceneFactory = Callable[[], object]
 ModelPathState = MutableMapping[str, Path]
+WatchPathsGetter = Callable[[], Iterable[Path]]
 
 def _next_available_path(path: Path) -> Path:
     if not path.exists():
@@ -724,6 +725,7 @@ class PyVistaPreviewer:
         show_axes: bool = True,
         control_file: Path | None = None,
         model_path_state: ModelPathState | None = None,
+        watch_paths_getter: WatchPathsGetter | None = None,
         auto_rebuild_interval_getter: Callable[[], float | None] | None = None,
     ) -> None:
         datasets = []
@@ -820,7 +822,11 @@ class PyVistaPreviewer:
             roots.append(resolved if resolved.is_dir() else resolved.parent)
             if control_path is not None:
                 roots.append(control_path.parent)
-            return roots
+            if watch_paths_getter is not None:
+                for watch_path in watch_paths_getter():
+                    resolved_watch_path = watch_path.resolve()
+                    roots.append(resolved_watch_path if resolved_watch_path.is_dir() else resolved_watch_path.parent)
+            return sorted(set(roots))
 
         def _start_watcher(current_path: Path) -> None:
             nonlocal stop_event, watcher_thread, watch_roots
@@ -833,6 +839,7 @@ class PyVistaPreviewer:
             watcher_thread = threading.Thread(
                 target=self._watch_model_file,
                 args=(model_state, reload_queue, stop_event, watch_roots, control_path),
+                kwargs={"watch_paths_getter": watch_paths_getter},
                 name="impression-watch",
                 daemon=True,
             )
@@ -893,6 +900,9 @@ class PyVistaPreviewer:
                     )
                     plotter.render()
                     self.console.print(f"[green]Reloaded {model_state['path']}[/green]")
+                    new_roots = _watch_roots_for(model_state["path"])
+                    if set(new_roots) != set(watch_roots):
+                        _start_watcher(model_state["path"])
             if build_state["queued"]:
                 _submit_scene_build(f"[yellow]Reloading {model_state['path']}…[/yellow]")
 
@@ -1219,6 +1229,8 @@ class PyVistaPreviewer:
         stop_event: threading.Event,
         watch_roots: list[Path],
         control_path: Path | None,
+        *,
+        watch_paths_getter: WatchPathsGetter | None = None,
     ) -> None:
         watch_paths = [str(root) for root in watch_roots]
         resolved_control = control_path.resolve() if control_path is not None else None
@@ -1230,12 +1242,15 @@ class PyVistaPreviewer:
             for change, changed_path in changes:
                 changed = Path(changed_path).resolve()
                 resolved_model = model_path_state["path"].resolve()
+                resolved_watch_paths = set()
+                if watch_paths_getter is not None:
+                    resolved_watch_paths = {path.resolve() for path in watch_paths_getter()}
                 if resolved_control is not None and changed == resolved_control:
                     reload_queue.put_nowait(0.0)
                     break
                 if Change.deleted == change and changed == resolved_model:
                     reload_queue.put_nowait(0.0)
                     break
-                if changed == resolved_model:
+                if changed == resolved_model or changed in resolved_watch_paths:
                     reload_queue.put_nowait(0.0)
                     break

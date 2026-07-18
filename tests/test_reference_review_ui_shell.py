@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 import numpy as np
 from PySide6.QtCore import QObject, QSize, Qt
-from PySide6.QtGui import QIcon, QImage, QPainter
+from PySide6.QtGui import QIcon, QImage
 from PySide6.QtWidgets import QApplication, QCheckBox, QLabel, QListWidget, QPushButton, QTabWidget, QTextEdit, QToolButton, QWidget
 
 from impression.mesh import Mesh, Polyline
@@ -49,7 +49,6 @@ from impression.devtools.reference_review.ui import (
     map_context_evidence_summary,
     PreviewRendererLifecycleWidget,
     PreviewWidgetPayloadState,
-    SoftwarePreviewSurface,
     preview_display_control_icon_record,
     preview_display_control_icon_records,
     route_preview_display_command,
@@ -67,13 +66,7 @@ from impression.devtools.reference_review import (
 import impression.devtools.reference_review.ui.preview_widget as preview_widget
 from impression.devtools.reference_review.ui import artifact_preview
 from impression.devtools.reference_review.ui.preview_widget import (
-    _SOFTWARE_PREVIEW_DEFAULT_MESH,
-    _object_edge_keys,
     _apply_pyvistaqt_scene,
-    _project_prepared_geometry,
-    _project_datasets,
-    _should_use_pyvistaqt_preview,
-    _wheel_zoom_direction,
 )
 from impression.devtools.reference_review.ui import shell
 from impression.devtools.reference_review.ui.shell import InteractiveStlPreviewLabel
@@ -696,447 +689,6 @@ def test_impress_preview_edge_overlay_uses_object_edges_not_triangle_wireframe(p
     assert triangle_edges.n_cells > object_edges.n_cells
 
 
-def test_software_preview_projects_object_edges_not_triangle_wireframe() -> None:
-    mesh = Mesh(
-        vertices=np.asarray(
-            (
-                (0.0, 0.0, 0.0),
-                (1.0, 0.0, 0.0),
-                (1.0, 1.0, 0.0),
-                (0.0, 1.0, 0.0),
-            )
-        ),
-        faces=np.asarray(((0, 1, 2), (0, 2, 3))),
-    )
-
-    scene = _project_datasets(
-        (mesh,),
-        width=200,
-        height=200,
-        rotation_x=0.0,
-        rotation_y=0.0,
-        zoom=1.0,
-    )
-
-    assert len(scene.faces) == 2
-    assert _object_edge_keys(mesh) == {(0, 1), (1, 2), (2, 3), (0, 3)}
-    assert sum(len(face.edge_segments) for face in scene.faces) == 4
-    assert sum(len(face.triangle_segments) for face in scene.faces) == 0
-    assert len(scene.grid_lines) == 10
-    assert len(scene.axis_lines) == 3
-    assert any(
-        face.color.name() != _SOFTWARE_PREVIEW_DEFAULT_MESH.name()
-        for face in scene.faces
-    )
-
-
-def test_software_preview_layer_options_are_projected_without_topology_rebuild(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    mesh = Mesh(
-        vertices=np.asarray(
-            (
-                (0.0, 0.0, 0.0),
-                (1.0, 0.0, 0.0),
-                (1.0, 1.0, 0.0),
-                (0.0, 1.0, 0.0),
-            )
-        ),
-        faces=np.asarray(((0, 1, 2), (0, 2, 3))),
-    )
-    calls = 0
-    original_object_edge_keys = preview_widget._object_edge_keys
-
-    def counting_object_edge_keys(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        return original_object_edge_keys(*args, **kwargs)
-
-    monkeypatch.setattr(preview_widget, "_object_edge_keys", counting_object_edge_keys)
-    surface = SoftwarePreviewSurface()
-    surface.set_datasets((mesh,))
-    assert calls == 1
-    assert surface._geometry is not None
-
-    overlays_off = _project_prepared_geometry(
-        surface._geometry,
-        width=200,
-        height=200,
-        rotation_x=0.0,
-        rotation_y=0.0,
-        zoom=1.0,
-        options=PreviewDisplayOptions(
-            show_object_edges=False,
-            show_bounds_grid=False,
-            show_axis_triad=False,
-            show_polylines=False,
-        ),
-    )
-    wireframe = _project_prepared_geometry(
-        surface._geometry,
-        width=200,
-        height=200,
-        rotation_x=0.0,
-        rotation_y=0.0,
-        zoom=1.0,
-        options=PreviewDisplayOptions(show_triangle_wireframe=True),
-    )
-
-    assert overlays_off.grid_lines == ()
-    assert overlays_off.axis_lines == ()
-    assert sum(len(face.edge_segments) for face in overlays_off.faces) == 0
-    assert sum(len(face.triangle_segments) for face in wireframe.faces) == 6
-    assert calls == 1
-
-
-def test_software_preview_authored_color_and_lighting_modes() -> None:
-    mesh = Mesh(
-        vertices=np.asarray(
-            (
-                (0.0, 0.0, 0.0),
-                (1.0, 0.0, 0.0),
-                (1.0, 1.0, 0.0),
-                (0.0, 1.0, 0.0),
-            )
-        ),
-        faces=np.asarray(((0, 1, 2), (0, 2, 3))),
-        color=(0.0, 1.0, 0.0, 1.0),
-        face_colors=np.asarray(((0.5, 0.0, 0.0, 1.0), (0.0, 0.0, 0.5, 1.0))),
-    )
-
-    authored_flat = _project_datasets(
-        (mesh,),
-        width=200,
-        height=200,
-        rotation_x=0.0,
-        rotation_y=0.0,
-        zoom=1.0,
-        options=PreviewDisplayOptions(color_mode="authored", lighting_mode="flat"),
-    )
-    inspection_flat = _project_datasets(
-        (mesh,),
-        width=200,
-        height=200,
-        rotation_x=0.0,
-        rotation_y=0.0,
-        zoom=1.0,
-        options=PreviewDisplayOptions(lighting_mode="flat"),
-    )
-    camera_lit = _project_datasets(
-        (mesh,),
-        width=200,
-        height=200,
-        rotation_x=0.0,
-        rotation_y=0.0,
-        zoom=1.0,
-        options=PreviewDisplayOptions(color_mode="authored", lighting_mode="camera"),
-    )
-
-    assert {face.color.name() for face in authored_flat.faces} == {"#800000", "#000080"}
-    assert {face.color.name() for face in inspection_flat.faces} == {
-        _SOFTWARE_PREVIEW_DEFAULT_MESH.name()
-    }
-    assert {face.color.name() for face in camera_lit.faces} != {"#800000", "#000080"}
-
-
-def test_software_preview_forces_mesh_fill_opaque_for_review() -> None:
-    mesh = Mesh(
-        vertices=np.asarray(
-            (
-                (0.0, 0.0, 0.0),
-                (1.0, 0.0, 0.0),
-                (1.0, 1.0, 0.0),
-                (0.0, 1.0, 0.0),
-            )
-        ),
-        faces=np.asarray(((0, 1, 2), (0, 2, 3))),
-        color=(0.0, 1.0, 0.0, 0.2),
-        face_colors=np.asarray(((0.5, 0.0, 0.0, 0.2), (0.0, 0.0, 0.5, 0.3))),
-    )
-
-    authored_flat = _project_datasets(
-        (mesh,),
-        width=200,
-        height=200,
-        rotation_x=0.0,
-        rotation_y=0.0,
-        zoom=1.0,
-        options=PreviewDisplayOptions(color_mode="authored", lighting_mode="flat"),
-    )
-    authored_lit = _project_datasets(
-        (mesh,),
-        width=200,
-        height=200,
-        rotation_x=0.0,
-        rotation_y=0.0,
-        zoom=1.0,
-        options=PreviewDisplayOptions(color_mode="authored", lighting_mode="face_normals"),
-    )
-
-    assert {face.color.alpha() for face in authored_flat.faces} == {255}
-    assert {face.color.alpha() for face in authored_lit.faces} == {255}
-
-
-def test_software_preview_depth_order_hides_far_faces_without_normal_culling() -> None:
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    QApplication.instance() or QApplication([])
-    mesh = Mesh(
-        vertices=np.asarray(
-            (
-                (0.0, 0.0, 0.0),
-                (1.0, 0.0, 0.0),
-                (1.0, 1.0, 0.0),
-                (0.0, 1.0, 0.0),
-                (0.0, 0.0, 1.0),
-                (1.0, 0.0, 1.0),
-                (1.0, 1.0, 1.0),
-                (0.0, 1.0, 1.0),
-            )
-        ),
-        faces=np.asarray(
-            (
-                (0, 2, 1),
-                (0, 3, 2),
-                (4, 5, 6),
-                (4, 6, 7),
-            )
-        ),
-        face_colors=np.asarray(
-            (
-                (1.0, 0.0, 0.0, 1.0),
-                (1.0, 0.0, 0.0, 1.0),
-                (0.0, 0.0, 1.0, 1.0),
-                (0.0, 0.0, 1.0, 1.0),
-            )
-        ),
-    )
-
-    surface = SoftwarePreviewSurface()
-    surface.resize(200, 200)
-    surface.set_display_options(
-        PreviewDisplayOptions(
-            color_mode="authored",
-            lighting_mode="flat",
-            show_object_edges=False,
-            show_bounds_grid=False,
-            show_axis_triad=False,
-            show_gradient_background=False,
-            show_polylines=False,
-        )
-    )
-    surface.set_datasets((mesh,))
-    surface._rotation_x = 0.0
-    surface._rotation_y = 0.0
-    image = QImage(surface.size(), QImage.Format.Format_ARGB32)
-    image.fill(0)
-    painter = QPainter(image)
-
-    surface.render(painter)
-    painter.end()
-
-    scene = _project_datasets(
-        (mesh,),
-        width=200,
-        height=200,
-        rotation_x=0.0,
-        rotation_y=0.0,
-        zoom=1.0,
-        options=surface.display_options,
-    )
-    assert len(scene.faces) == 4
-    assert {face.color.name() for face in scene.faces} == {"#ff0000", "#0000ff"}
-    assert image.pixelColor(100, 100).name() == "#0000ff"
-
-
-def test_software_preview_caches_object_edges_between_repaints(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    mesh = Mesh(
-        vertices=np.asarray(
-            (
-                (0.0, 0.0, 0.0),
-                (1.0, 0.0, 0.0),
-                (1.0, 1.0, 0.0),
-                (0.0, 1.0, 0.0),
-            )
-        ),
-        faces=np.asarray(((0, 1, 2), (0, 2, 3))),
-    )
-    calls = 0
-    original_object_edge_keys = preview_widget._object_edge_keys
-
-    def counting_object_edge_keys(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        return original_object_edge_keys(*args, **kwargs)
-
-    monkeypatch.setattr(preview_widget, "_object_edge_keys", counting_object_edge_keys)
-    surface = SoftwarePreviewSurface()
-    surface.set_datasets((mesh,))
-
-    assert calls == 1
-    assert surface._geometry is not None
-    _project_prepared_geometry(
-        surface._geometry,
-        width=200,
-        height=200,
-        rotation_x=0.0,
-        rotation_y=0.0,
-        zoom=1.0,
-    )
-    _project_prepared_geometry(
-        surface._geometry,
-        width=300,
-        height=300,
-        rotation_x=0.2,
-        rotation_y=0.3,
-        zoom=1.1,
-    )
-
-    assert calls == 1
-
-
-def test_software_preview_renders_to_qt_paint_device() -> None:
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    QApplication.instance() or QApplication([])
-    mesh = Mesh(
-        vertices=np.asarray(
-            (
-                (0.0, 0.0, 0.0),
-                (1.0, 0.0, 0.0),
-                (1.0, 1.0, 0.0),
-                (0.0, 1.0, 0.0),
-                (0.0, 0.0, 1.0),
-                (1.0, 0.0, 1.0),
-                (1.0, 1.0, 1.0),
-                (0.0, 1.0, 1.0),
-            )
-        ),
-        faces=np.asarray(
-            (
-                (0, 1, 2),
-                (0, 2, 3),
-                (4, 6, 5),
-                (4, 7, 6),
-                (0, 4, 5),
-                (0, 5, 1),
-                (1, 5, 6),
-                (1, 6, 2),
-                (2, 6, 7),
-                (2, 7, 3),
-                (3, 7, 4),
-                (3, 4, 0),
-            )
-        ),
-    )
-    surface = SoftwarePreviewSurface()
-    surface.resize(360, 260)
-    surface.set_datasets((mesh,))
-    image = QImage(surface.size(), QImage.Format.Format_ARGB32)
-    image.fill(0)
-    painter = QPainter(image)
-
-    surface.render(painter)
-    painter.end()
-
-    sampled_colors = {
-        image.pixelColor(x, y).name()
-        for y in range(0, image.height(), 10)
-        for x in range(0, image.width(), 10)
-    }
-    assert len(sampled_colors) > 8
-    assert any(color.startswith("#") and int(color[1:3], 16) > 100 for color in sampled_colors)
-
-
-def test_software_preview_latches_trackpad_zoom_direction_during_gesture() -> None:
-    latched = None
-    first = _wheel_zoom_direction(_FakeWheelEvent(120, Qt.ScrollPhase.ScrollUpdate), latched)
-    latched = first
-    noisy_opposite = _wheel_zoom_direction(
-        _FakeWheelEvent(-120, Qt.ScrollPhase.ScrollUpdate),
-        latched,
-    )
-    momentum_opposite = _wheel_zoom_direction(
-        _FakeWheelEvent(-120, Qt.ScrollPhase.ScrollMomentum),
-        latched,
-    )
-    after_end = _wheel_zoom_direction(_FakeWheelEvent(-120), None)
-
-    assert first == 1
-    assert noisy_opposite == 1
-    assert momentum_opposite == 1
-    assert after_end == -1
-
-
-def test_software_preview_wheel_event_keeps_long_swipe_zoom_monotonic() -> None:
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    QApplication.instance() or QApplication([])
-    surface = SoftwarePreviewSurface()
-
-    surface.wheelEvent(_FakeWheelEvent(120, Qt.ScrollPhase.ScrollUpdate))
-    first_zoom = surface._zoom
-    surface.wheelEvent(_FakeWheelEvent(-120, Qt.ScrollPhase.ScrollUpdate))
-    second_zoom = surface._zoom
-    surface.wheelEvent(_FakeWheelEvent(0, Qt.ScrollPhase.ScrollEnd))
-    surface.wheelEvent(_FakeWheelEvent(-120, Qt.ScrollPhase.ScrollUpdate))
-
-    assert first_zoom > 1.0
-    assert second_zoom > first_zoom
-    assert surface._zoom < second_zoom
-
-
-def test_software_preview_wheel_event_can_reverse_direction_without_finger_lift() -> None:
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    QApplication.instance() or QApplication([])
-    surface = SoftwarePreviewSurface()
-
-    surface.wheelEvent(_FakeWheelEvent(120, Qt.ScrollPhase.ScrollUpdate))
-    first_zoom = surface._zoom
-    surface.wheelEvent(_FakeWheelEvent(-120, Qt.ScrollPhase.ScrollUpdate))
-    jitter_ignored_zoom = surface._zoom
-    surface.wheelEvent(_FakeWheelEvent(-120, Qt.ScrollPhase.ScrollUpdate))
-    reversed_zoom = surface._zoom
-
-    assert first_zoom > 1.0
-    assert jitter_ignored_zoom > first_zoom
-    assert reversed_zoom < jitter_ignored_zoom
-
-
-class _FakeDelta:
-    def __init__(self, y: int) -> None:
-        self._y = y
-
-    def y(self) -> int:
-        return self._y
-
-
-class _FakeWheelEvent:
-    def __init__(
-        self,
-        angle_y: int,
-        phase: Qt.ScrollPhase = Qt.ScrollPhase.NoScrollPhase,
-        *,
-        pixel_y: int = 0,
-    ) -> None:
-        self._angle_y = angle_y
-        self._pixel_y = pixel_y
-        self._phase = phase
-        self.accepted = False
-
-    def angleDelta(self) -> _FakeDelta:
-        return _FakeDelta(self._angle_y)
-
-    def pixelDelta(self) -> _FakeDelta:
-        return _FakeDelta(self._pixel_y)
-
-    def phase(self) -> Qt.ScrollPhase:
-        return self._phase
-
-    def accept(self) -> None:
-        self.accepted = True
-
-
 def test_dirty_impress_fixture_launch_exposes_artifact_without_startup_render(project_root: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     fixture_file = project_root / "tests/reference_review_fixtures/dirty-impress-fixtures.json"
@@ -1378,17 +930,6 @@ def test_preview_renderer_lifecycle_widget_reuses_single_render_surface() -> Non
     assert widget.renderer_state.disposed
 
 
-def test_preview_renderer_lifecycle_widget_uses_software_surface_by_default() -> None:
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    widget = PreviewRendererLifecycleWidget()
-
-    renderer = widget.ensure_renderer()
-
-    assert isinstance(renderer, SoftwarePreviewSurface)
-    assert widget.renderer_state.created
-    assert widget._previewer is None
-
-
 def test_preview_renderer_lifecycle_widget_default_previewer_is_disabled() -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     widget = PreviewRendererLifecycleWidget()
@@ -1520,7 +1061,25 @@ def test_preview_renderer_lifecycle_widget_preserves_last_good_same_fixture_fail
         source_type="SurfaceBody",
     )
     payload = write_preview_payload_file(loaded, payload_dir=tmp_path)
-    ready_state = widget.set_preview_payload(payload)
+
+    class FakePreviewSurface(QWidget):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.datasets = ()
+
+        def clear(self) -> None:
+            self.datasets = ()
+
+        def set_display_options(self, options) -> None:
+            self.display_options = options
+
+        def set_datasets(self, datasets) -> None:
+            self.datasets = tuple(datasets)
+
+    ready_state = widget.set_preview_payload(
+        payload,
+        renderer_factory=lambda parent: FakePreviewSurface(parent),
+    )
     failure = PreviewPayload.failure(
         PreviewPayloadRequest.from_source_record(
             record,
@@ -1589,7 +1148,7 @@ def test_preview_image_capture_writes_local_png_with_metadata(tmp_path: Path) ->
     assert result.metadata.payload_generation == 3
 
 
-def test_preview_renderer_lifecycle_widget_applies_payload_to_software_surface(
+def test_preview_renderer_lifecycle_widget_applies_payload_to_injected_surface(
     tmp_path: Path,
 ) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -1617,12 +1176,29 @@ def test_preview_renderer_lifecycle_widget_applies_payload_to_software_surface(
     )
     payload = write_preview_payload_file(loaded, payload_dir=tmp_path)
 
-    state = widget.set_preview_payload(payload)
+    class FakePreviewSurface(QWidget):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.datasets = ()
+
+        def clear(self) -> None:
+            self.datasets = ()
+
+        def set_display_options(self, options) -> None:
+            self.display_options = options
+
+        def set_datasets(self, datasets) -> None:
+            self.datasets = tuple(datasets)
+
+    state = widget.set_preview_payload(
+        payload,
+        renderer_factory=lambda parent: FakePreviewSurface(parent),
+    )
 
     assert state.ready
-    assert isinstance(widget._plotter, SoftwarePreviewSurface)
+    assert isinstance(widget._plotter, FakePreviewSurface)
     assert widget._previewer is None
-    assert len(widget._plotter._datasets) == 1
+    assert len(widget._plotter.datasets) == 1
 
 
 def test_preview_renderer_lifecycle_widget_reports_invalid_payload(
@@ -1652,17 +1228,39 @@ def test_preview_renderer_lifecycle_widget_reports_invalid_payload(
     assert widget._status.text() == "Preview unavailable: unsupported-preview-payload-format"
 
 
-def test_default_renderer_policy_avoids_vtk_qt_interactor_in_offscreen_mode(
+def test_default_renderer_policy_requires_pyvistaqt_support(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("IMPRESSION_REFERENCE_REVIEW_FORCE_SOFTWARE", raising=False)
-    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
-    assert _should_use_pyvistaqt_preview()
-    monkeypatch.setenv("IMPRESSION_REFERENCE_REVIEW_FORCE_SOFTWARE", "1")
-    assert not _should_use_pyvistaqt_preview()
-    monkeypatch.setenv("IMPRESSION_REFERENCE_REVIEW_FORCE_SOFTWARE", "0")
-    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
-    assert not _should_use_pyvistaqt_preview()
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    widget = PreviewRendererLifecycleWidget()
+    monkeypatch.setattr(preview_widget, "qt_preview_supported_environment", lambda: False)
+
+    with pytest.raises(RuntimeError, match="pyvistaqt-preview-unavailable"):
+        widget.ensure_renderer()
+
+
+def test_default_renderer_policy_uses_pyvistaqt_surface_when_supported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    widget = PreviewRendererLifecycleWidget()
+    created = []
+
+    class FakePyVistaQtPreviewSurface(QWidget):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            created.append(parent)
+
+        def set_display_options(self, options) -> None:
+            self.display_options = options
+
+    monkeypatch.setattr(preview_widget, "qt_preview_supported_environment", lambda: True)
+    monkeypatch.setattr(preview_widget, "PyVistaQtPreviewSurface", FakePyVistaQtPreviewSurface)
+
+    renderer = widget.ensure_renderer()
+
+    assert isinstance(renderer, FakePyVistaQtPreviewSurface)
+    assert created == [widget]
 
 
 def test_pyvistaqt_preview_surface_uses_lightweight_scene_handoff(
@@ -2222,18 +1820,33 @@ def test_live_preview_ignores_stale_build_result(project_root: Path) -> None:
     assert preview._status.text() == "No fixture selected."
 
 
-def test_live_preview_legacy_build_result_uses_software_surface(project_root: Path) -> None:
+def test_live_preview_legacy_build_result_applies_to_existing_surface(project_root: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     preview = InteractiveStlPreviewLabel()
     artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/box.impress"
     preview._artifact_path = artifact
     preview._load_generation = 1
     datasets = shell._load_impress_preview_datasets(artifact)
+    applied = []
 
+    class FakePreviewSurface:
+        def set_datasets(self, datasets):
+            applied.append(tuple(datasets))
+
+        def reset_camera(self):
+            pass
+
+        def reset_camera_clipping_range(self):
+            pass
+
+        def render(self):
+            pass
+
+    preview._ensure_plotter = lambda: FakePreviewSurface()
     preview._apply_build_result(shell._LivePreviewBuildResult(1, artifact, datasets=datasets))
 
-    assert isinstance(preview._plotter, SoftwarePreviewSurface)
-    assert len(preview._plotter._datasets) == 1
+    assert len(applied) == 1
+    assert len(applied[0]) == 1
 
 
 def test_window_defers_preview_load_and_ignores_stale_loads(tmp_path: Path) -> None:
