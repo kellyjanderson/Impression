@@ -10,7 +10,6 @@ cycler==0.12.1
 fonttools==4.61.1
 idna==3.11
 ImageIO==2.37.2
--e git+https://github.com/kellyjanderson/Impression.git@f14999fc4ea5e687400fc1f9e49a1296679b1906#egg=impression
 iniconfig==2.3.0
 kiwisolver==1.4.9
 lazy_loader==0.4

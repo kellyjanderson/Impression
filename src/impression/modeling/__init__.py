@@ -1105,17 +1105,6 @@ from .surface_scene import (
     tessellate_surface_composition,
     traverse_surface_composition,
 )
-from .hinges import (
-    HingeBackend,
-    HingeSurfaceAssembly,
-    HingeSurfaceComponent,
-    hinge_feature_csg_dependencies,
-    handoff_hinge_surface,
-    make_traditional_hinge_leaf,
-    make_traditional_hinge_pair,
-    make_living_hinge,
-    make_bistable_hinge,
-)
 from impression.mesh_quality import MeshQuality
 
 __all__ = [
@@ -2136,14 +2125,5 @@ __all__ = [
     "surface_group",
     "tessellate_surface_composition",
     "traverse_surface_composition",
-    "make_traditional_hinge_leaf",
-    "make_traditional_hinge_pair",
-    "make_living_hinge",
-    "make_bistable_hinge",
-    "HingeBackend",
-    "HingeSurfaceComponent",
-    "HingeSurfaceAssembly",
-    "hinge_feature_csg_dependencies",
-    "handoff_hinge_surface",
     "MeshQuality",
 ]

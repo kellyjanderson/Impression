@@ -34,8 +34,6 @@ _DEPRECATION_NODEID_SUBSTRINGS = (
     "tests/test_loft.py::test_private_surface_loft_consumer_handoff_uses_standard_surface_collection_and_tessellation",
     "tests/test_loft.py::test_private_surface_loft_consumer_handoff_supports_staged_split_merge_output",
 )
-
-
 def pytest_configure():
     os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
