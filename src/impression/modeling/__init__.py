@@ -50,6 +50,8 @@ from .drawing2d import (
     Bezier2D,
     Line2D,
     Path2D,
+    PlanarShape2D,
+    Profile2D,
     round_corners,
     round_path,
     make_circle,
@@ -718,6 +720,7 @@ from .heightmap import (
     resolve_heightmap_projection_bounds_policy,
     resolve_heightmap_alpha_mask_policy,
 )
+from .sdf import extrude_sdf, loft_sdf
 from .drafting import make_line, make_plane, make_arrow, make_dimension
 from .text import (
     TextMeshCompatibilityResult,
@@ -1151,6 +1154,8 @@ __all__ = [
     "Bezier2D",
     "Line2D",
     "Path2D",
+    "PlanarShape2D",
+    "Profile2D",
     "round_corners",
     "round_path",
     "make_rect",
@@ -1769,6 +1774,8 @@ __all__ = [
     "plan_heightmap_grid_alignment",
     "resolve_heightmap_projection_bounds_policy",
     "resolve_heightmap_alpha_mask_policy",
+    "extrude_sdf",
+    "loft_sdf",
     "make_line",
     "make_plane",
     "make_arrow",

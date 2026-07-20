@@ -354,6 +354,9 @@ class PlanarShape2D:
         return self
 
 
+Profile2D = PlanarShape2D
+
+
 def make_rect(
     size: Sequence[float] = (1.0, 1.0),
     center: Sequence[float] = (0.0, 0.0),
@@ -454,6 +457,7 @@ __all__ = [
     "Line2D",
     "Path2D",
     "PlanarShape2D",
+    "Profile2D",
     "make_circle",
     "make_ngon",
     "make_polyline",
