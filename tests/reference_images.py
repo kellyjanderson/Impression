@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
+import re
 import shutil
 from typing import Literal, Sequence
 
@@ -14,6 +16,7 @@ from skimage import morphology, transform
 from fontTools.ttLib import TTFont, TTLibFileIsCollectionError
 
 from impression.io.stl import write_stl
+from impression.devtools.reference_review import ReferenceEvidenceBundleRecord, validate_section_evidence_roles
 from impression.mesh import Mesh, combine_meshes, mesh_to_pyvista, section_mesh_with_plane
 from impression.modeling import SurfaceBody, SurfaceConsumerCollection, TessellationRequest, tessellate_surface_body
 from impression.modeling.text import text_profiles
@@ -50,6 +53,7 @@ TextCvResultClass = Literal[
     "unreadable",
 ]
 DiagnosticPanelLabel = Literal["left", "result", "right", "expected", "actual", "diff"]
+DiagnosticSnapshotDriftKind = Literal["matches", "changed"]
 
 
 @dataclass(frozen=True)
@@ -85,6 +89,262 @@ class ReferenceFixturePairState:
     @property
     def has_partial_group(self) -> bool:
         return self.image.exists != self.stl.exists
+
+
+@dataclass(frozen=True)
+class ReferenceFixtureContractVersionRecord:
+    fixture_id: str
+    contract_version: str
+
+    def __post_init__(self) -> None:
+        if not self.fixture_id.strip():
+            raise ValueError("ReferenceFixtureContractVersionRecord.fixture_id must be non-empty.")
+        if not self.contract_version.strip():
+            raise ValueError("ReferenceFixtureContractVersionRecord.contract_version must be non-empty.")
+
+
+@dataclass(frozen=True)
+class ReferencePromotionDiagnostic:
+    code: Literal["missing-artifact", "dirty-artifact", "partial-fixture", "invalidated-contract"]
+    fixture_id: str
+    artifact_kind: ReferenceArtifactKind | Literal["fixture"]
+    message: str
+
+
+@dataclass(frozen=True)
+class ReferenceArtifactPromotionGateReport:
+    fixture_id: str
+    promoted: bool
+    state: ReferenceFixturePairState
+    contract: ReferenceFixtureContractVersionRecord
+    diagnostics: tuple[ReferencePromotionDiagnostic, ...]
+
+
+LoftCsgSectionEvidenceReadinessDiagnosticCode = Literal[
+    "missing-handoff",
+    "missing-section-plane",
+    "invalid-section-contract",
+]
+
+
+@dataclass(frozen=True)
+class LoftCsgSectionEvidenceReadinessDiagnostic:
+    code: LoftCsgSectionEvidenceReadinessDiagnosticCode
+    fixture_id: str
+    operation_id: str
+    message: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "fixture_id": self.fixture_id,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation_id": self.operation_id,
+        }
+
+
+@dataclass(frozen=True)
+class LoftCsgSectionEvidenceReadinessRecord:
+    fixture_id: str
+    operation_id: str
+    accepted_body_identity: str | None
+    section_plane_metadata: dict[str, object]
+    ready: bool
+    bundle_payload: dict[str, object] | None = None
+    diagnostics: tuple[LoftCsgSectionEvidenceReadinessDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "accepted_body_identity": self.accepted_body_identity,
+            "bundle_payload": self.bundle_payload or {},
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "fixture_id": self.fixture_id,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "operation_id": self.operation_id,
+            "ready": self.ready,
+            "section_plane_metadata": dict(self.section_plane_metadata),
+        }
+
+
+def _section_evidence_bundle_payload(bundle: ReferenceEvidenceBundleRecord) -> dict[str, object]:
+    return {
+        "artifacts": [
+            {
+                "kind": artifact.kind,
+                "path": artifact.path.as_posix(),
+                "required": artifact.required,
+                "role": artifact.role,
+                "stage": artifact.stage,
+            }
+            for artifact in bundle.artifacts
+        ],
+        "bundle_id": bundle.bundle_id,
+        "evidence_kind": bundle.evidence_kind,
+        "role_policy": bundle.role_policy,
+        "section_plane_metadata": dict(bundle.section_plane_metadata),
+    }
+
+
+def validate_loft_csg_section_readiness(
+    accepted_handoff: object,
+    bundle: ReferenceEvidenceBundleRecord,
+    *,
+    fixture_id: str,
+    operation_id: str,
+) -> tuple[LoftCsgSectionEvidenceReadinessDiagnostic, ...]:
+    diagnostics: list[LoftCsgSectionEvidenceReadinessDiagnostic] = []
+    accepted = bool(getattr(accepted_handoff, "accepted", False))
+    ready = bool(getattr(accepted_handoff, "dirty_stl_source_ready", False))
+    body_identity = getattr(accepted_handoff, "accepted_body_identity", None)
+    if not accepted or not ready or not isinstance(body_identity, str) or not body_identity:
+        diagnostics.append(
+            LoftCsgSectionEvidenceReadinessDiagnostic(
+                code="missing-handoff",
+                fixture_id=fixture_id,
+                operation_id=operation_id,
+                message="Loft CSG section evidence requires an accepted reference geometry handoff.",
+            )
+        )
+    contract = validate_section_evidence_roles(bundle)
+    if any(diagnostic.startswith("missing-section-plane") for diagnostic in contract.diagnostics):
+        diagnostics.append(
+            LoftCsgSectionEvidenceReadinessDiagnostic(
+                code="missing-section-plane",
+                fixture_id=fixture_id,
+                operation_id=operation_id,
+                message="Loft CSG section evidence requires explicit section plane origin and normal.",
+            )
+        )
+    if contract.missing_roles or any(
+        not diagnostic.startswith("missing-section-plane") for diagnostic in contract.diagnostics
+    ):
+        diagnostics.append(
+            LoftCsgSectionEvidenceReadinessDiagnostic(
+                code="invalid-section-contract",
+                fixture_id=fixture_id,
+                operation_id=operation_id,
+                message="Loft CSG section evidence bundle is missing required roles or contract metadata.",
+            )
+        )
+    return tuple(diagnostics)
+
+
+def build_loft_csg_section_evidence_handoff(
+    *,
+    fixture_id: str,
+    operation_id: str,
+    accepted_handoff: object,
+    bundle: ReferenceEvidenceBundleRecord,
+) -> LoftCsgSectionEvidenceReadinessRecord:
+    diagnostics = validate_loft_csg_section_readiness(
+        accepted_handoff,
+        bundle,
+        fixture_id=fixture_id,
+        operation_id=operation_id,
+    )
+    body_identity = getattr(accepted_handoff, "accepted_body_identity", None)
+    return LoftCsgSectionEvidenceReadinessRecord(
+        fixture_id=fixture_id,
+        operation_id=operation_id,
+        accepted_body_identity=body_identity if isinstance(body_identity, str) else None,
+        section_plane_metadata=dict(bundle.section_plane_metadata),
+        ready=not diagnostics,
+        bundle_payload=_section_evidence_bundle_payload(bundle) if not diagnostics else None,
+        diagnostics=diagnostics,
+    )
+
+
+@dataclass(frozen=True)
+class DiagnosticSnapshotKeyPolicy:
+    """Stable diagnostic snapshot key policy that excludes volatile details."""
+
+    ignored_keys: tuple[str, ...] = ("traceback", "stack", "stack_trace", "cwd", "tmp_path", "temporary_path")
+    path_keys: tuple[str, ...] = ("path", "file", "filename", "implementation_owner")
+
+    def __post_init__(self) -> None:
+        _validate_unique_nonempty_strings("ignored_keys", self.ignored_keys)
+        _validate_unique_nonempty_strings("path_keys", self.path_keys)
+
+
+@dataclass(frozen=True)
+class DiagnosticSnapshotRecord:
+    fixture_id: str
+    diagnostic_type: str
+    payload: dict[str, object]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "diagnostic_type": self.diagnostic_type,
+            "fixture_id": self.fixture_id,
+            "payload": self.payload,
+        }
+
+    def stable_json(self) -> str:
+        return json.dumps(self.canonical_payload(), sort_keys=True, separators=(",", ":"))
+
+
+@dataclass(frozen=True)
+class DiagnosticSnapshotComparison:
+    fixture_id: str
+    drift_kind: DiagnosticSnapshotDriftKind
+    expected: DiagnosticSnapshotRecord
+    actual: DiagnosticSnapshotRecord
+    message: str = ""
+
+    @property
+    def matches(self) -> bool:
+        return self.drift_kind == "matches"
+
+
+@dataclass(frozen=True)
+class ExpectedDiagnosticKeyRecord:
+    key_path: tuple[str, ...]
+    expected_value: object | None = None
+
+    def __post_init__(self) -> None:
+        _validate_unique_nonempty_strings("key_path", self.key_path)
+
+
+@dataclass(frozen=True)
+class NegativeDiagnosticFixtureRecord:
+    fixture_id: str
+    domain: str
+    expected_keys: tuple[ExpectedDiagnosticKeyRecord, ...]
+    expected_snapshot: DiagnosticSnapshotRecord | None = None
+
+    def __post_init__(self) -> None:
+        if not self.fixture_id.strip():
+            raise ValueError("NegativeDiagnosticFixtureRecord.fixture_id must be non-empty.")
+        if not self.domain.strip():
+            raise ValueError("NegativeDiagnosticFixtureRecord.domain must be non-empty.")
+        if not self.expected_keys:
+            raise ValueError("NegativeDiagnosticFixtureRecord.expected_keys must be non-empty.")
+
+
+@dataclass(frozen=True)
+class NegativeDiagnosticDomainCoverageRecord:
+    domain: str
+    fixture_count: int
+    covered: bool
+
+
+@dataclass(frozen=True)
+class NegativeDiagnosticFixtureMatrixDiagnostic:
+    code: Literal["missing-domain", "missing-diagnostic-key", "snapshot-drift"]
+    fixture_id: str
+    domain: str
+    message: str
+
+
+@dataclass(frozen=True)
+class NegativeDiagnosticFixtureMatrixReport:
+    passed: bool
+    fixtures: tuple[NegativeDiagnosticFixtureRecord, ...]
+    domain_coverage: tuple[NegativeDiagnosticDomainCoverageRecord, ...]
+    diagnostics: tuple[NegativeDiagnosticFixtureMatrixDiagnostic, ...]
 
 
 @dataclass(frozen=True)
@@ -574,6 +834,33 @@ def reference_artifact_state(
     )
 
 
+def reference_artifact_contract_version_path(state: ReferenceArtifactState) -> Path:
+    return state.clean_path.with_suffix(state.clean_path.suffix + ".contract")
+
+
+def write_reference_artifact_contract_version(
+    state: ReferenceArtifactState,
+    contract: ReferenceFixtureContractVersionRecord,
+) -> Path:
+    path = reference_artifact_contract_version_path(state)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{contract.fixture_id}\n{contract.contract_version}\n", encoding="utf-8")
+    return path
+
+
+def reference_artifact_contract_version_matches(
+    state: ReferenceArtifactState,
+    contract: ReferenceFixtureContractVersionRecord,
+) -> bool:
+    if state.selected_tier != "clean":
+        return False
+    path = reference_artifact_contract_version_path(state)
+    if not path.exists():
+        return False
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return lines[:2] == [contract.fixture_id, contract.contract_version]
+
+
 def reference_fixture_pair_state(
     *,
     reference_image_root: Path,
@@ -584,6 +871,239 @@ def reference_fixture_pair_state(
         image=reference_artifact_state(reference_image_root, name, kind="image"),
         stl=reference_artifact_state(reference_stl_root, name, kind="stl"),
     )
+
+
+def classify_reference_fixture_pair_promotion_gate(
+    *,
+    reference_image_root: Path,
+    reference_stl_root: Path,
+    name: str,
+    contract_version: str = "v1",
+) -> ReferenceArtifactPromotionGateReport:
+    """Classify whether a reference fixture pair is promoted clean evidence."""
+
+    state = reference_fixture_pair_state(
+        reference_image_root=reference_image_root,
+        reference_stl_root=reference_stl_root,
+        name=name,
+    )
+    contract = ReferenceFixtureContractVersionRecord(fixture_id=name, contract_version=contract_version)
+    diagnostics: list[ReferencePromotionDiagnostic] = []
+    if state.has_partial_group:
+        diagnostics.append(
+            ReferencePromotionDiagnostic(
+                code="partial-fixture",
+                fixture_id=name,
+                artifact_kind="fixture",
+                message=f"{name} has a partial reference fixture group.",
+            )
+        )
+    for artifact_kind, artifact_state in (("image", state.image), ("stl", state.stl)):
+        if artifact_state.selected_tier == "missing":
+            diagnostics.append(
+                ReferencePromotionDiagnostic(
+                    code="missing-artifact",
+                    fixture_id=name,
+                    artifact_kind=artifact_kind,
+                    message=f"{name} is missing a promoted {artifact_kind} reference artifact.",
+                )
+            )
+        elif artifact_state.selected_tier == "dirty":
+            diagnostics.append(
+                ReferencePromotionDiagnostic(
+                    code="dirty-artifact",
+                    fixture_id=name,
+                    artifact_kind=artifact_kind,
+                    message=f"{name} has only a dirty {artifact_kind} reference artifact.",
+                )
+            )
+        elif not reference_artifact_contract_version_matches(artifact_state, contract):
+            diagnostics.append(
+                ReferencePromotionDiagnostic(
+                    code="invalidated-contract",
+                    fixture_id=name,
+                    artifact_kind=artifact_kind,
+                    message=f"{name} promoted {artifact_kind} reference artifact has no matching contract version.",
+                )
+            )
+    return ReferenceArtifactPromotionGateReport(
+        fixture_id=name,
+        promoted=not diagnostics,
+        state=state,
+        contract=contract,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+_PATH_FRAGMENT_RE = re.compile(r"(?P<path>(?:~|/)[^\s:]+)")
+
+
+def _normalize_snapshot_string(value: str) -> str:
+    def replace_path(match: re.Match[str]) -> str:
+        path = match.group("path")
+        name = Path(path).name
+        return f"<path:{name}>" if name else "<path>"
+
+    return _PATH_FRAGMENT_RE.sub(replace_path, value)
+
+
+def _normalize_diagnostic_snapshot_value(value: object, policy: DiagnosticSnapshotKeyPolicy) -> object:
+    if hasattr(value, "canonical_payload") and callable(value.canonical_payload):
+        value = value.canonical_payload()
+    if isinstance(value, BaseException):
+        return {"message": _normalize_snapshot_string(str(value)), "type": type(value).__name__}
+    if isinstance(value, Path):
+        return f"<path:{value.name}>"
+    if isinstance(value, dict):
+        normalized: dict[str, object] = {}
+        for raw_key in sorted(value, key=lambda item: str(item)):
+            key = str(raw_key)
+            if key in policy.ignored_keys:
+                continue
+            raw_value = value[raw_key]
+            if key in policy.path_keys and isinstance(raw_value, (str, Path)):
+                normalized[key] = _normalize_snapshot_string(str(raw_value))
+            else:
+                normalized[key] = _normalize_diagnostic_snapshot_value(raw_value, policy)
+        return normalized
+    if isinstance(value, (list, tuple, set)):
+        return tuple(_normalize_diagnostic_snapshot_value(item, policy) for item in value)
+    if isinstance(value, str):
+        return _normalize_snapshot_string(value)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return repr(value)
+
+
+def normalize_diagnostic_snapshot(
+    diagnostic: object,
+    *,
+    fixture_id: str,
+    policy: DiagnosticSnapshotKeyPolicy | None = None,
+) -> DiagnosticSnapshotRecord:
+    """Normalize a refusal diagnostic into a stable, portable snapshot."""
+
+    snapshot_policy = DiagnosticSnapshotKeyPolicy() if policy is None else policy
+    payload = _normalize_diagnostic_snapshot_value(diagnostic, snapshot_policy)
+    if not isinstance(payload, dict):
+        payload = {"value": payload}
+    return DiagnosticSnapshotRecord(
+        fixture_id=fixture_id,
+        diagnostic_type=type(diagnostic).__name__,
+        payload=payload,
+    )
+
+
+def compare_diagnostic_snapshots(
+    expected: DiagnosticSnapshotRecord,
+    actual: DiagnosticSnapshotRecord,
+) -> DiagnosticSnapshotComparison:
+    """Compare normalized diagnostic snapshots without incidental formatting drift."""
+
+    if expected.stable_json() == actual.stable_json():
+        return DiagnosticSnapshotComparison(
+            fixture_id=actual.fixture_id,
+            drift_kind="matches",
+            expected=expected,
+            actual=actual,
+        )
+    return DiagnosticSnapshotComparison(
+        fixture_id=actual.fixture_id,
+        drift_kind="changed",
+        expected=expected,
+        actual=actual,
+        message=f"Diagnostic snapshot drift for {actual.fixture_id}.",
+    )
+
+
+def _snapshot_value_at(payload: dict[str, object], key_path: tuple[str, ...]) -> object:
+    current: object = payload
+    for key in key_path:
+        if not isinstance(current, dict) or key not in current:
+            raise KeyError(".".join(key_path))
+        current = current[key]
+    return current
+
+
+def evaluate_negative_diagnostic_fixture_matrix(
+    fixtures: Sequence[NegativeDiagnosticFixtureRecord],
+    *,
+    required_domains: Sequence[str],
+) -> NegativeDiagnosticFixtureMatrixReport:
+    """Evaluate domain coverage and expected-key coverage for negative diagnostics."""
+
+    fixture_records = tuple(fixtures)
+    domains = tuple(str(domain).strip() for domain in required_domains)
+    _validate_unique_nonempty_strings("required_domains", domains)
+    diagnostics: list[NegativeDiagnosticFixtureMatrixDiagnostic] = []
+    by_domain = {domain: tuple(record for record in fixture_records if record.domain == domain) for domain in domains}
+    coverage: list[NegativeDiagnosticDomainCoverageRecord] = []
+    for domain in domains:
+        domain_fixtures = by_domain[domain]
+        coverage.append(
+            NegativeDiagnosticDomainCoverageRecord(
+                domain=domain,
+                fixture_count=len(domain_fixtures),
+                covered=bool(domain_fixtures),
+            )
+        )
+        if not domain_fixtures:
+            diagnostics.append(
+                NegativeDiagnosticFixtureMatrixDiagnostic(
+                    code="missing-domain",
+                    fixture_id="",
+                    domain=domain,
+                    message=f"Negative diagnostic fixture matrix has no fixture for domain '{domain}'.",
+                )
+            )
+    for fixture in fixture_records:
+        if fixture.expected_snapshot is None:
+            continue
+        for expected_key in fixture.expected_keys:
+            try:
+                observed = _snapshot_value_at(fixture.expected_snapshot.payload, expected_key.key_path)
+            except KeyError:
+                diagnostics.append(
+                    NegativeDiagnosticFixtureMatrixDiagnostic(
+                        code="missing-diagnostic-key",
+                        fixture_id=fixture.fixture_id,
+                        domain=fixture.domain,
+                        message=(
+                            f"Negative diagnostic fixture '{fixture.fixture_id}' is missing "
+                            f"expected key '{'.'.join(expected_key.key_path)}'."
+                        ),
+                    )
+                )
+                continue
+            if expected_key.expected_value is not None and observed != expected_key.expected_value:
+                diagnostics.append(
+                    NegativeDiagnosticFixtureMatrixDiagnostic(
+                        code="missing-diagnostic-key",
+                        fixture_id=fixture.fixture_id,
+                        domain=fixture.domain,
+                        message=(
+                            f"Negative diagnostic fixture '{fixture.fixture_id}' expected "
+                            f"'{'.'.join(expected_key.key_path)}' to equal {expected_key.expected_value!r}."
+                        ),
+                    )
+                )
+    return NegativeDiagnosticFixtureMatrixReport(
+        passed=not diagnostics,
+        fixtures=fixture_records,
+        domain_coverage=tuple(coverage),
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def compare_negative_diagnostic_fixture_snapshot(
+    fixture: NegativeDiagnosticFixtureRecord,
+    actual_snapshot: DiagnosticSnapshotRecord,
+) -> DiagnosticSnapshotComparison:
+    """Compare a domain-owned negative diagnostic fixture against its expected snapshot."""
+
+    if fixture.expected_snapshot is None:
+        raise ValueError("Negative diagnostic fixture has no expected snapshot to compare.")
+    return compare_diagnostic_snapshots(fixture.expected_snapshot, actual_snapshot)
 
 
 def reference_fixture_pair_failures(

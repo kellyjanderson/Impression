@@ -11,9 +11,6 @@ from ._profile2d import _profile_loops
 from .drawing2d import Profile2D
 from .path3d import Path3D
 from .paths import Path as PolyPath
-from .extrude import linear_extrude
-from .loft import loft
-from .csg import boolean_difference, boolean_union
 
 
 @dataclass
@@ -67,22 +64,7 @@ def extrude_sdf(
     dz = np.abs(z) - height / 2.0
     sdf = _rounded_intersection(d2, dz, cap_radius)
     sdf_mesh = _mesh_from_sdf(sdf, grid.origin, grid.spacing)
-    if cap_radius <= 0 or sdf_mesh.n_faces == 0:
-        return sdf_mesh
-    body = linear_extrude(
-        profile,
-        height=height,
-        direction=(0.0, 0.0, 1.0),
-        center=(0.0, 0.0, -height / 2.0),
-        segments_per_circle=segments_per_circle,
-        bezier_samples=bezier_samples,
-    )
-    caps = boolean_difference(sdf_mesh, [body])
-    if caps.n_faces == 0:
-        merged = boolean_union([body, sdf_mesh])
-        return merged if merged.n_faces else sdf_mesh
-    merged = boolean_union([body, caps])
-    return merged if merged.n_faces else sdf_mesh
+    return sdf_mesh
 
 
 def loft_sdf(
@@ -153,24 +135,7 @@ def loft_sdf(
         sdf = np.maximum.reduce([body, cap_bot, cap_top])
 
     sdf_mesh = _mesh_from_sdf(sdf, grid.origin, grid.spacing)
-    if cap_radius <= 0 or sdf_mesh.n_faces == 0:
-        return sdf_mesh
-    body = loft(
-        profiles=profiles,
-        path=[(0.0, 0.0, float(zv)) for zv in positions],
-        cap_ends=False,
-        start_cap="none",
-        end_cap="none",
-        samples=200,
-        segments_per_circle=segments_per_circle,
-        bezier_samples=bezier_samples,
-    )
-    caps = boolean_difference(sdf_mesh, [body])
-    if caps.n_faces == 0:
-        merged = boolean_union([body, sdf_mesh])
-        return merged if merged.n_faces else sdf_mesh
-    merged = boolean_union([body, caps])
-    return merged if merged.n_faces else sdf_mesh
+    return sdf_mesh
 
 
 def _resolve_positions(

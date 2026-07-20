@@ -1,0 +1,802 @@
+# Surface and Loft Program Progression
+
+This progression document sequences implementation of the surface-first
+internal-model program together with the active loft work that depends on it.
+
+Only final leaf specifications appear here.
+
+## Core Functionality
+
+### Surface Kernel Contracts
+
+- [x] [Surface Spec 59: SurfaceBody Ownership and Containment Contract (v1.0)](../specifications/surface-59-surfacebody-ownership-containment-v1_0.md)
+- [x] [Surface Spec 60: SurfaceShell Multiplicity and Connectivity Policy (v1.0)](../specifications/surface-60-surfaceshell-multiplicity-connectivity-v1_0.md)
+- [x] [Surface Spec 61: Deterministic Body/Shell Traversal and Ordering Rules (v1.0)](../specifications/surface-61-body-shell-traversal-ordering-v1_0.md)
+- [x] [Surface Spec 62: SurfacePatch Interface and Required Methods (v1.0)](../specifications/surface-62-surfacepatch-interface-required-methods-v1_0.md)
+- [x] [Surface Spec 63: Patch Evaluation Semantics and Parameter Queries (v1.0)](../specifications/surface-63-patch-evaluation-semantics-v1_0.md)
+- [x] [Surface Spec 64: Family-Agnostic Patch Properties and Capability Flags (v1.0)](../specifications/surface-64-family-agnostic-patch-properties-v1_0.md)
+- [x] [Surface Spec 65: Required V1 Patch Families (v1.0)](../specifications/surface-65-required-v1-patch-families-v1_0.md)
+- [x] [Surface Spec 66: Deferred Patch Families and Explicit Exclusions (v1.0)](../specifications/surface-66-deferred-patch-families-exclusions-v1_0.md)
+- [x] [Surface Spec 67: Patch-Family to Feature Coverage Matrix (v1.0)](../specifications/surface-67-patch-family-feature-coverage-v1_0.md)
+
+### Parameter Domains and Trims
+
+- [x] [Surface Spec 68: Patch Domain Existence and Shape Contract (v1.0)](../specifications/surface-68-patch-domain-existence-shape-v1_0.md)
+- [x] [Surface Spec 69: Parameter Domain Normalization Policy (v1.0)](../specifications/surface-69-parameter-domain-normalization-policy-v1_0.md)
+- [x] [Surface Spec 70: Downstream Parameter-Space Assumptions Contract (v1.0)](../specifications/surface-70-downstream-parameter-space-assumptions-v1_0.md)
+- [x] [Surface Spec 71: Trim Loop Data Structure Contract (v1.0)](../specifications/surface-71-trim-loop-data-structure-v1_0.md)
+- [x] [Surface Spec 72: Trim Ownership and Attachment Policy (v1.0)](../specifications/surface-72-trim-ownership-attachment-policy-v1_0.md)
+- [x] [Surface Spec 73: Outer and Inner Trim Categorization Rules (v1.0)](../specifications/surface-73-outer-inner-trim-categorization-v1_0.md)
+- [x] [Surface Spec 74: Trim Validity Conditions and Failure Modes (v1.0)](../specifications/surface-74-trim-validity-failure-modes-v1_0.md)
+- [x] [Surface Spec 75: Trim Orientation Semantics (v1.0)](../specifications/surface-75-trim-orientation-semantics-v1_0.md)
+- [x] [Surface Spec 76: Boundary Inclusion and Interior Meaning Rules (v1.0)](../specifications/surface-76-boundary-inclusion-interior-meaning-v1_0.md)
+
+### Adjacency and Seams
+
+- [x] [Surface Spec 77: Patch Adjacency Record Structure (v1.0)](../specifications/surface-77-patch-adjacency-record-structure-v1_0.md)
+- [x] [Surface Spec 78: Adjacency Lookup and Navigation Semantics (v1.0)](../specifications/surface-78-adjacency-lookup-navigation-v1_0.md)
+- [x] [Surface Spec 79: Adjacency Identity and Index Stability Rules (v1.0)](../specifications/surface-79-adjacency-identity-index-stability-v1_0.md)
+- [x] [Surface Spec 80: Explicit Versus Implicit Seam Representation Policy (v1.0)](../specifications/surface-80-explicit-vs-implicit-seam-policy-v1_0.md)
+- [x] [Surface Spec 81: Seam Identity Contract (v1.0)](../specifications/surface-81-seam-identity-contract-v1_0.md)
+- [x] [Surface Spec 82: Seam Ownership and Source-of-Truth Policy (v1.0)](../specifications/surface-82-seam-ownership-source-of-truth-v1_0.md)
+- [x] [Surface Spec 83: Shared-Boundary Validity Rules (v1.0)](../specifications/surface-83-shared-boundary-validity-rules-v1_0.md)
+- [x] [Surface Spec 84: Open Boundary Versus Shared Boundary Distinction (v1.0)](../specifications/surface-84-open-vs-shared-boundary-v1_0.md)
+- [x] [Surface Spec 85: Surface Continuity Metadata Contract (v1.0)](../specifications/surface-85-surface-continuity-metadata-v1_0.md)
+
+### Transforms, Metadata, and Identity
+
+- [x] [Surface Spec 86: Default Attached-Transform Policy (v1.0)](../specifications/surface-86-default-attached-transform-policy-v1_0.md)
+- [x] [Surface Spec 87: Geometry Baking Triggers and Required Cases (v1.0)](../specifications/surface-87-geometry-baking-triggers-v1_0.md)
+- [x] [Surface Spec 88: Downstream Transformed-Object Assumptions (v1.0)](../specifications/surface-88-downstream-transformed-object-assumptions-v1_0.md)
+- [x] [Surface Spec 89: Metadata Placement by Body, Shell, and Patch Level (v1.0)](../specifications/surface-89-metadata-placement-by-level-v1_0.md)
+- [x] [Surface Spec 90: Metadata Inheritance and Override Rules (v1.0)](../specifications/surface-90-metadata-inheritance-override-rules-v1_0.md)
+- [x] [Surface Spec 91: Kernel-Native Versus Consumer Metadata Boundary (v1.0)](../specifications/surface-91-kernel-vs-consumer-metadata-boundary-v1_0.md)
+- [x] [Surface Spec 92: Stable Surface Identity Contract (v1.0)](../specifications/surface-92-stable-surface-identity-contract-v1_0.md)
+- [x] [Surface Spec 93: Identity Preservation Through Transform and Composition (v1.0)](../specifications/surface-93-identity-preservation-transform-composition-v1_0.md)
+- [x] [Surface Spec 94: Cache-Key Dependency and Identity Usage Rules (v1.0)](../specifications/surface-94-cache-key-identity-usage-rules-v1_0.md)
+
+## Obligate Specifications
+
+### Tessellation Boundary
+
+- [x] [Surface Spec 32: Tessellation Request Object and Field Contract (v1.0)](../specifications/surface-32-tessellation-request-object-contract-v1_0.md)
+- [x] [Surface Spec 33: Quality Presets and Explicit Tolerance Normalization (v1.0)](../specifications/surface-33-quality-preset-tolerance-normalization-v1_0.md)
+- [x] [Surface Spec 34: Canonical Executor Input and Request Normalization (v1.0)](../specifications/surface-34-executor-input-request-canonicalization-v1_0.md)
+- [x] [Surface Spec 35: Preview Tessellation Policy Contract (v1.0)](../specifications/surface-35-preview-tessellation-policy-v1_0.md)
+- [x] [Surface Spec 36: Export and Analysis Tessellation Policy Contract (v1.0)](../specifications/surface-36-export-analysis-tessellation-policy-v1_0.md)
+- [x] [Surface Spec 37: Cross-Mode Equivalence and Drift Bounds (v1.0)](../specifications/surface-37-cross-mode-equivalence-drift-bounds-v1_0.md)
+- [x] [Surface Spec 38: Shared-Boundary Sampling and Edge Agreement Rules (v1.0)](../specifications/surface-38-shared-boundary-sampling-edge-agreement-v1_0.md)
+- [x] [Surface Spec 38 Test: Shared-Boundary Sampling and Edge Agreement](../test-specifications/surface-38-shared-boundary-sampling-edge-agreement-v1_0.md)
+- [x] [Surface Spec 39: Closed-Body Watertight Tessellation Contract (v1.0)](../specifications/surface-39-closed-body-watertight-tessellation-v1_0.md)
+- [x] [Surface Spec 39 Test: Closed-Body Watertight Tessellation](../test-specifications/surface-39-closed-body-watertight-tessellation-v1_0.md)
+- [x] [Surface Spec 40: Open-Surface Classification and Mesh QA Contract (v1.0)](../specifications/surface-40-open-surface-classification-mesh-qa-v1_0.md)
+
+### Scene and Modeling Adoption
+
+- [x] [Surface Spec 41: Scene Node Surface Payload Contract (v1.0)](../specifications/surface-41-scene-node-surface-payload-v1_0.md)
+- [x] [Surface Spec 42: Group Traversal, Ordering, and Composition Rules (v1.0)](../specifications/surface-42-group-traversal-ordering-composition-v1_0.md)
+- [x] [Surface Spec 43: Scene-to-Tessellation Consumer Handoff Contract (v1.0)](../specifications/surface-43-scene-to-tessellation-handoff-v1_0.md)
+- [x] [Surface Spec 44: Primitive API Surface Return-Type Migration (v1.0)](../specifications/surface-44-primitive-api-surface-return-migration-v1_0.md)
+- [x] [Surface Spec 44 Test: Primitive API Surface Return Migration](../test-specifications/surface-44-primitive-api-surface-return-migration-v1_0.md)
+- [x] [Surface Spec 45: Modeling Operation Surface Return-Type Migration (v1.0)](../specifications/surface-45-modeling-op-surface-return-migration-v1_0.md)
+- [x] [Surface Spec 45 Test: Modeling Operation Surface Return Migration](../test-specifications/surface-45-modeling-op-surface-return-migration-v1_0.md)
+- [x] [Surface Spec 46: Public/Internal API Transition and Documentation Boundary (v1.0)](../specifications/surface-46-public-internal-api-transition-boundary-v1_0.md)
+- [x] [Surface Spec 46 Test: Public/Internal API Transition Boundary](../test-specifications/surface-46-public-internal-api-transition-boundary-v1_0.md)
+- [x] [Surface Spec 47: Surface Collection Consumer Interface (v1.0)](../specifications/surface-47-surface-collection-consumer-interface-v1_0.md)
+- [x] [Surface Spec 48: Composition Flattening and Traversal Rules (v1.0)](../specifications/surface-48-composition-flattening-traversal-v1_0.md)
+- [x] [Surface Spec 49: Composition-to-Tessellation Invocation Boundary (v1.0)](../specifications/surface-49-composition-to-tessellation-boundary-v1_0.md)
+
+### Migration and Compatibility
+
+- [x] [Surface Spec 50: Surface-to-Mesh Adapter Contract (v1.0)](../specifications/surface-50-surface-to-mesh-adapter-contract-v1_0.md)
+- [x] [Surface Spec 51: Legacy Mesh Consumer Bridge Policy (v1.0)](../specifications/surface-51-legacy-mesh-consumer-bridge-policy-v1_0.md)
+- [x] [Surface Spec 52: Adapter Lossiness and Lifecycle Rules (v1.0)](../specifications/surface-52-adapter-lossiness-lifecycle-rules-v1_0.md)
+- [x] [Surface Spec 53: Surface Migration Phase Ordering (v1.0)](../specifications/surface-53-surface-migration-phase-ordering-v1_0.md)
+- [x] [Surface Spec 53 Test: Surface Migration Phase Ordering](../test-specifications/surface-53-surface-migration-phase-ordering-v1_0.md)
+- [x] [Surface Spec 54: Migration Phase Gates and Dependency Rules (v1.0)](../specifications/surface-54-migration-phase-gates-dependency-rules-v1_0.md)
+- [x] [Surface Spec 54 Test: Migration Phase Gates and Dependency Rules](../test-specifications/surface-54-migration-phase-gates-dependency-rules-v1_0.md)
+- [x] [Surface Spec 55: Surface-Foundation to Loft-Track Handoff Gate (v1.0)](../specifications/surface-55-surface-foundation-to-loft-handoff-v1_0.md)
+- [x] [Surface Spec 55 Test: Surface-Foundation to Loft-Track Handoff Gate](../test-specifications/surface-55-surface-foundation-to-loft-handoff-v1_0.md)
+- [x] [Surface Spec 56: Surface Canonical Promotion Criteria (v1.0)](../specifications/surface-56-surface-canonical-promotion-criteria-v1_0.md)
+- [x] [Surface Spec 56 Test: Surface Canonical Promotion Criteria](../test-specifications/surface-56-surface-canonical-promotion-criteria-v1_0.md)
+- [x] [Surface Spec 57: Mesh-First Decommission and Rollback Policy (v1.0)](../specifications/surface-57-mesh-first-decommission-rollback-v1_0.md)
+- [x] [Surface Spec 57 Test: Mesh-First Decommission and Rollback Policy](../test-specifications/surface-57-mesh-first-decommission-rollback-v1_0.md)
+- [x] [Surface Spec 58: Promotion Verification Matrix and Evidence Burden (v1.0)](../specifications/surface-58-promotion-verification-matrix-v1_0.md)
+- [x] [Surface Spec 58 Test: Promotion Verification Matrix and Evidence Burden](../test-specifications/surface-58-promotion-verification-matrix-v1_0.md)
+
+### Loft Surface Refactor Track
+
+- [x] [Surface Spec 95: Loft Plan-to-Surface Executor Contract (v1.0)](../specifications/surface-95-loft-plan-to-surface-executor-contract-v1_0.md)
+- [x] [Surface Spec 95 Test: Loft Plan-to-Surface Executor Contract](../test-specifications/surface-95-loft-plan-to-surface-executor-contract-v1_0.md)
+- [x] [Surface Spec 96: Loft Surface-Native Cap Construction (v1.0)](../specifications/surface-96-loft-surface-native-cap-construction-v1_0.md)
+- [x] [Surface Spec 96 Test: Loft Surface-Native Cap Construction](../test-specifications/surface-96-loft-surface-native-cap-construction-v1_0.md)
+- [x] [Surface Spec 97: Loft Split/Merge Surface Patch Orchestration (v1.0)](../specifications/surface-97-loft-surface-patch-orchestration-v1_0.md)
+- [x] [Surface Spec 97 Test: Loft Split/Merge Surface Patch Orchestration](../test-specifications/surface-97-loft-surface-patch-orchestration-v1_0.md)
+- [x] [Surface Spec 98: Loft Surface Output Consumer Handoff (v1.0)](../specifications/surface-98-loft-surface-output-consumer-handoff-v1_0.md)
+- [x] [Surface Spec 98 Test: Loft Surface Output Consumer Handoff](../test-specifications/surface-98-loft-surface-output-consumer-handoff-v1_0.md)
+
+### Surface-First Replacement Program
+
+- [x] [Surface Spec 100: Surface-Native Drafting Replacement (v1.0)](../specifications/surface-100-surface-native-drafting-replacement-v1_0.md)
+- [x] [Surface Spec 100 Test: Surface-Native Drafting Replacement](../test-specifications/surface-100-surface-native-drafting-replacement-v1_0.md)
+- [x] [Surface Spec 101: Surface-Native Text Replacement (v1.0)](../specifications/surface-101-surface-native-text-replacement-v1_0.md)
+- [x] [Surface Spec 101 Test: Surface-Native Text Replacement](../test-specifications/surface-101-surface-native-text-replacement-v1_0.md)
+- [x] [Surface Spec 108: Surface Boolean Input Eligibility and Canonicalization (v1.0)](../specifications/surface-108-surface-boolean-input-eligibility-and-canonicalization-v1_0.md)
+- [x] [Surface Spec 108 Test: Surface Boolean Input Eligibility and Canonicalization](../test-specifications/surface-108-surface-boolean-input-eligibility-and-canonicalization-v1_0.md)
+- [x] [Surface Spec 109: Surface Boolean Result Contract and Failure Modes (v1.0)](../specifications/surface-109-surface-boolean-result-contract-and-failure-modes-v1_0.md)
+- [x] [Surface Spec 109 Test: Surface Boolean Result Contract and Failure Modes](../test-specifications/surface-109-surface-boolean-result-contract-and-failure-modes-v1_0.md)
+- [x] [Surface Spec 110: Surface Boolean Public API Migration and Reference Verification (v1.0)](../specifications/surface-110-surface-boolean-public-api-migration-and-reference-verification-v1_0.md)
+- [x] [Surface Spec 110 Test: Surface Boolean Public API Migration and Reference Verification](../test-specifications/surface-110-surface-boolean-public-api-migration-and-reference-verification-v1_0.md)
+- [x] [Surface Spec 126: Surface Boolean Exact Body-Relation Classification and No-Cut Gate (v1.0)](../specifications/surface-126-surface-boolean-exact-body-relation-classification-and-no-cut-gate-v1_0.md)
+- [x] [Surface Spec 126 Test: Surface Boolean Exact Body-Relation Classification and No-Cut Gate](../test-specifications/surface-126-surface-boolean-exact-body-relation-classification-and-no-cut-gate-v1_0.md)
+- [x] [Surface Spec 127: Surface Boolean Initial Box/Box Cut-Curve Discovery (v1.0)](../specifications/surface-127-surface-boolean-initial-box-box-cut-curve-discovery-v1_0.md)
+- [x] [Surface Spec 127 Test: Surface Boolean Initial Box/Box Cut-Curve Discovery](../test-specifications/surface-127-surface-boolean-initial-box-box-cut-curve-discovery-v1_0.md)
+- [x] [Surface Spec 128: Surface Boolean Patch-Local Trim-Fragment Mapping for Initial Box Slice (v1.0)](../specifications/surface-128-surface-boolean-patch-local-trim-fragment-mapping-for-initial-box-slice-v1_0.md)
+- [x] [Surface Spec 128 Test: Surface Boolean Patch-Local Trim-Fragment Mapping for Initial Box Slice](../test-specifications/surface-128-surface-boolean-patch-local-trim-fragment-mapping-for-initial-box-slice-v1_0.md)
+- [x] [Surface Spec 129: Surface Boolean Initial Box Slice Fragment Classification and Split Records (v1.0)](../specifications/surface-129-surface-boolean-initial-box-slice-fragment-classification-and-split-records-v1_0.md)
+- [x] [Surface Spec 129 Test: Surface Boolean Initial Box Slice Fragment Classification and Split Records](../test-specifications/surface-129-surface-boolean-initial-box-slice-fragment-classification-and-split-records-v1_0.md)
+- [x] [Surface Spec 130: Surface Boolean No-Cut and Exact-Reuse Result Reconstruction (v1.0)](../specifications/surface-130-surface-boolean-no-cut-and-exact-reuse-result-reconstruction-v1_0.md)
+- [x] [Surface Spec 130 Test: Surface Boolean No-Cut and Exact-Reuse Result Reconstruction](../test-specifications/surface-130-surface-boolean-no-cut-and-exact-reuse-result-reconstruction-v1_0.md)
+- [x] [Surface Spec 131: Surface Boolean Overlap Cut-Boundary Trim-Loop Reconstruction for Initial Box Slice (v1.0)](../specifications/surface-131-surface-boolean-overlap-cut-boundary-trim-loop-reconstruction-for-initial-box-slice-v1_0.md)
+- [x] [Surface Spec 131 Test: Surface Boolean Overlap Cut-Boundary Trim-Loop Reconstruction for Initial Box Slice](../test-specifications/surface-131-surface-boolean-overlap-cut-boundary-trim-loop-reconstruction-for-initial-box-slice-v1_0.md)
+- [x] [Surface Spec 132: Surface Boolean Overlap Shell and Seam Assembly for Initial Box Slice (v1.0)](../specifications/surface-132-surface-boolean-overlap-shell-and-seam-assembly-for-initial-box-slice-v1_0.md)
+- [x] [Surface Spec 132 Test: Surface Boolean Overlap Shell and Seam Assembly for Initial Box Slice](../test-specifications/surface-132-surface-boolean-overlap-shell-and-seam-assembly-for-initial-box-slice-v1_0.md)
+- [x] [Surface Spec 133: Surface Boolean Result Outcome Classification for the Initial Slice (v1.0)](../specifications/surface-133-surface-boolean-result-outcome-classification-for-the-initial-slice-v1_0.md)
+- [x] [Surface Spec 133 Test: Surface Boolean Result Outcome Classification for the Initial Slice](../test-specifications/surface-133-surface-boolean-result-outcome-classification-for-the-initial-slice-v1_0.md)
+- [x] [Surface Spec 134: Surface Boolean Deterministic Validity Gate and Bounded Cleanup (v1.0)](../specifications/surface-134-surface-boolean-deterministic-validity-gate-and-bounded-cleanup-v1_0.md)
+- [x] [Surface Spec 134 Test: Surface Boolean Deterministic Validity Gate and Bounded Cleanup](../test-specifications/surface-134-surface-boolean-deterministic-validity-gate-and-bounded-cleanup-v1_0.md)
+- [x] [Surface Spec 135: Surface Boolean Metadata, Provenance, and Explicit Invalid-Result Posture (v1.0)](../specifications/surface-135-surface-boolean-metadata-provenance-and-explicit-invalid-result-posture-v1_0.md)
+- [x] [Surface Spec 135 Test: Surface Boolean Metadata, Provenance, and Explicit Invalid-Result Posture](../test-specifications/surface-135-surface-boolean-metadata-provenance-and-explicit-invalid-result-posture-v1_0.md)
+- [x] [Surface Spec 136: Surface Boolean Initial Executable Scope and Unsupported-Case Matrix (v1.0)](../specifications/surface-136-surface-boolean-initial-executable-scope-and-unsupported-case-matrix-v1_0.md)
+- [x] [Surface Spec 136 Test: Surface Boolean Initial Executable Scope and Unsupported-Case Matrix](../test-specifications/surface-136-surface-boolean-initial-executable-scope-and-unsupported-case-matrix-v1_0.md)
+- [x] [Surface Spec 138: Surface Boolean Reference Fixture Composition and Slice Verification (v1.0)](../specifications/surface-138-surface-boolean-reference-fixture-composition-and-slice-verification-v1_0.md)
+- [x] [Surface Spec 138 Test: Surface Boolean Reference Fixture Composition and Slice Verification](../test-specifications/surface-138-surface-boolean-reference-fixture-composition-and-slice-verification-v1_0.md)
+- [x] [Surface Spec 137: Surface Boolean Initial Reference Fixture Matrix and Promotion Gates (v1.0)](../specifications/surface-137-surface-boolean-initial-reference-fixture-matrix-and-promotion-gates-v1_0.md)
+- [x] [Surface Spec 137 Test: Surface Boolean Initial Reference Fixture Matrix and Promotion Gates](../test-specifications/surface-137-surface-boolean-initial-reference-fixture-matrix-and-promotion-gates-v1_0.md)
+- [x] [Surface Spec 114: Traditional Hinge Surface Assembly (v1.0)](../specifications/surface-114-traditional-hinge-surface-assembly-v1_0.md)
+- [x] [Surface Spec 114 Test: Traditional Hinge Surface Assembly](../test-specifications/surface-114-traditional-hinge-surface-assembly-v1_0.md)
+- [x] [Surface Spec 115: Living and Bistable Hinge Surface Assembly (v1.0)](../specifications/surface-115-living-and-bistable-hinge-surface-assembly-v1_0.md)
+- [x] [Surface Spec 115 Test: Living and Bistable Hinge Surface Assembly](../test-specifications/surface-115-living-and-bistable-hinge-surface-assembly-v1_0.md)
+- [x] [Surface Spec 116: Hinge Public Handoff and Showcase Verification (v1.0)](../specifications/surface-116-hinge-public-handoff-and-showcase-verification-v1_0.md)
+- [x] [Surface Spec 116 Test: Hinge Public Handoff and Showcase Verification](../test-specifications/surface-116-hinge-public-handoff-and-showcase-verification-v1_0.md)
+- [x] [Surface Spec 105: Surface-Native Heightfield and Displacement Replacement (v1.0)](../specifications/surface-105-surface-native-heightfield-displacement-v1_0.md)
+- [x] [Surface Spec 105 Test: Surface-Native Heightfield and Displacement Replacement](../test-specifications/surface-105-surface-native-heightfield-displacement-v1_0.md)
+- [x] [Surface Spec 122: Mesh Capability Retention and Deletion Matrix (v1.0)](../specifications/surface-122-mesh-capability-retention-and-deletion-matrix-v1_0.md)
+- [x] [Surface Spec 122 Test: Mesh Capability Retention and Deletion Matrix](../test-specifications/surface-122-mesh-capability-retention-and-deletion-matrix-v1_0.md)
+- [x] [Surface Spec 123: Mesh Analysis Toolchain Contract (v1.0)](../specifications/surface-123-mesh-analysis-toolchain-contract-v1_0.md)
+- [x] [Surface Spec 123 Test: Mesh Analysis Toolchain Contract](../test-specifications/surface-123-mesh-analysis-toolchain-contract-v1_0.md)
+- [x] [Surface Spec 124: Mesh Repair Toolchain Contract (v1.0)](../specifications/surface-124-mesh-repair-toolchain-contract-v1_0.md)
+- [x] [Surface Spec 124 Test: Mesh Repair Toolchain Contract](../test-specifications/surface-124-mesh-repair-toolchain-contract-v1_0.md)
+- [x] [Surface Spec 125: Standalone Mesh Utility Tool Contract (v1.0)](../specifications/surface-125-standalone-mesh-utility-tool-contract-v1_0.md)
+- [x] [Surface Spec 125 Test: Standalone Mesh Utility Tool Contract](../test-specifications/surface-125-standalone-mesh-utility-tool-contract-v1_0.md)
+
+### Reference Artifacts and Documentation
+
+- [x] [Surface Spec 106: Reference Artifact Regression Suite (v1.0)](../specifications/surface-106-reference-artifact-regression-suite-v1_0.md)
+- [x] [Surface Spec 106 Test: Reference Artifact Regression Suite](../test-specifications/surface-106-reference-artifact-regression-suite-v1_0.md)
+- [x] [Surface Spec 107: Documentation-First Delivery Requirements (v1.0)](../specifications/surface-107-documentation-first-delivery-requirements-v1_0.md)
+- [x] [Surface Spec 107 Test: Documentation-First Delivery Requirements](../test-specifications/surface-107-documentation-first-delivery-requirements-v1_0.md)
+
+### Testing Architecture and Tooling
+
+#### Reference Artifact Tooling
+
+- [x] [Testing Spec 10: Reference Artifact Baseline Lifecycle and Invalidation Contract (v1.0)](../specifications/testing-10-reference-artifact-baseline-lifecycle-and-invalidation-contract-v1_0.md)
+- [x] [Testing Spec 10 Test: Reference Artifact Baseline Lifecycle and Invalidation Contract](../test-specifications/testing-10-reference-artifact-baseline-lifecycle-and-invalidation-contract-v1_0.md)
+- [x] [Testing Spec 11: Reference Artifact Grouped Model-Output Completeness and Bootstrap Rules (v1.0)](../specifications/testing-11-reference-artifact-grouped-model-output-completeness-and-bootstrap-rules-v1_0.md)
+- [x] [Testing Spec 11 Test: Reference Artifact Grouped Model-Output Completeness and Bootstrap Rules](../test-specifications/testing-11-reference-artifact-grouped-model-output-completeness-and-bootstrap-rules-v1_0.md)
+
+#### Shared CV Contracts
+
+- [x] [Testing Spec 12: Computer Vision Shared Fixture Contract and Result Taxonomy (v1.0)](../specifications/testing-12-computer-vision-shared-fixture-contract-and-result-taxonomy-v1_0.md)
+- [x] [Testing Spec 12 Test: Computer Vision Shared Fixture Contract and Result Taxonomy](../test-specifications/testing-12-computer-vision-shared-fixture-contract-and-result-taxonomy-v1_0.md)
+- [x] [Testing Spec 13: Computer Vision Shared Harness Pipeline and Artifact Bundle Integration (v1.0)](../specifications/testing-13-computer-vision-shared-harness-pipeline-and-artifact-bundle-integration-v1_0.md)
+- [x] [Testing Spec 13 Test: Computer Vision Shared Harness Pipeline and Artifact Bundle Integration](../test-specifications/testing-13-computer-vision-shared-harness-pipeline-and-artifact-bundle-integration-v1_0.md)
+
+#### Text CV Lane
+
+- [x] [Testing Spec 14: Computer Vision Text Canonical Artifact Set and Initial OCR Scope (v1.0)](../specifications/testing-14-computer-vision-text-canonical-artifact-set-and-initial-ocr-scope-v1_0.md)
+- [x] [Testing Spec 14 Test: Computer Vision Text Canonical Artifact Set and Initial OCR Scope](../test-specifications/testing-14-computer-vision-text-canonical-artifact-set-and-initial-ocr-scope-v1_0.md)
+- [x] [Testing Spec 15: Computer Vision Text Classification, Confidence, and Fallback-Glyph Policy (v1.0)](../specifications/testing-15-computer-vision-text-classification-confidence-and-fallback-glyph-policy-v1_0.md)
+- [x] [Testing Spec 15 Test: Computer Vision Text Classification, Confidence, and Fallback-Glyph Policy](../test-specifications/testing-15-computer-vision-text-classification-confidence-and-fallback-glyph-policy-v1_0.md)
+
+#### Slice CV Lane
+
+- [x] [Testing Spec 16: Computer Vision Slice Artifact Frame, Extraction, and Normalization Contract (v1.0)](../specifications/testing-16-computer-vision-slice-artifact-frame-extraction-and-normalization-contract-v1_0.md)
+- [x] [Testing Spec 16 Test: Computer Vision Slice Artifact Frame, Extraction, and Normalization Contract](../test-specifications/testing-16-computer-vision-slice-artifact-frame-extraction-and-normalization-contract-v1_0.md)
+- [x] [Testing Spec 17: Computer Vision Slice Silhouette Comparison Method and Orientation-Class Taxonomy (v1.0)](../specifications/testing-17-computer-vision-slice-silhouette-comparison-method-and-orientation-class-taxonomy-v1_0.md)
+- [x] [Testing Spec 17 Test: Computer Vision Slice Silhouette Comparison Method and Orientation-Class Taxonomy](../test-specifications/testing-17-computer-vision-slice-silhouette-comparison-method-and-orientation-class-taxonomy-v1_0.md)
+
+#### Camera Contract
+
+- [x] [Testing Spec 05: Computer Vision Camera and Framing Contract Compliance (v1.0)](../specifications/testing-05-computer-vision-camera-and-framing-contract-compliance-v1_0.md)
+- [x] [Testing Spec 05 Test: Computer Vision Camera and Framing Contract Compliance](../test-specifications/testing-05-computer-vision-camera-and-framing-contract-compliance-v1_0.md)
+
+#### Object-View CV Lane
+
+- [x] [Testing Spec 18: Computer Vision Canonical Object-View Set and Authoritative Derived Products (v1.0)](../specifications/testing-18-computer-vision-canonical-object-view-set-and-authoritative-derived-products-v1_0.md)
+- [x] [Testing Spec 18 Test: Computer Vision Canonical Object-View Set and Authoritative Derived Products](../test-specifications/testing-18-computer-vision-canonical-object-view-set-and-authoritative-derived-products-v1_0.md)
+- [x] [Testing Spec 19: Computer Vision Object-View Interpretation Semantics and Product Comparison Posture (v1.0)](../specifications/testing-19-computer-vision-object-view-interpretation-semantics-and-product-comparison-posture-v1_0.md)
+- [x] [Testing Spec 19 Test: Computer Vision Object-View Interpretation Semantics and Product Comparison Posture](../test-specifications/testing-19-computer-vision-object-view-interpretation-semantics-and-product-comparison-posture-v1_0.md)
+
+#### Handedness CV Lane
+
+- [x] [Testing Spec 20: Computer Vision Cross-Space Anchoring Contract for Handedness Verification (v1.0)](../specifications/testing-20-computer-vision-cross-space-anchoring-contract-for-handedness-verification-v1_0.md)
+- [x] [Testing Spec 20 Test: Computer Vision Cross-Space Anchoring Contract for Handedness Verification](../test-specifications/testing-20-computer-vision-cross-space-anchoring-contract-for-handedness-verification-v1_0.md)
+- [x] [Testing Spec 21: Computer Vision Handedness Witness Adequacy and Classification Taxonomy (v1.0)](../specifications/testing-21-computer-vision-handedness-witness-adequacy-and-classification-taxonomy-v1_0.md)
+- [x] [Testing Spec 21 Test: Computer Vision Handedness Witness Adequacy and Classification Taxonomy](../test-specifications/testing-21-computer-vision-handedness-witness-adequacy-and-classification-taxonomy-v1_0.md)
+
+#### Diagnostic Panels
+
+- [x] [Testing Spec 22: Computer Vision Diagnostic Panel Layout, Ordering, and Region Extraction Contract (v1.0)](../specifications/testing-22-computer-vision-diagnostic-panel-layout-ordering-and-region-extraction-contract-v1_0.md)
+- [x] [Testing Spec 22 Test: Computer Vision Diagnostic Panel Layout, Ordering, and Region Extraction Contract](../test-specifications/testing-22-computer-vision-diagnostic-panel-layout-ordering-and-region-extraction-contract-v1_0.md)
+- [x] [Testing Spec 23: Computer Vision Diagnostic Panel Honesty Boundary and Proof Delegation Rules (v1.0)](../specifications/testing-23-computer-vision-diagnostic-panel-honesty-boundary-and-proof-delegation-rules-v1_0.md)
+- [x] [Testing Spec 23 Test: Computer Vision Diagnostic Panel Honesty Boundary and Proof Delegation Rules](../test-specifications/testing-23-computer-vision-diagnostic-panel-honesty-boundary-and-proof-delegation-rules-v1_0.md)
+
+## Loft Evolution
+
+### Placed Topology Input
+
+- [x] [Loft Spec 28: Placed Topology State Object Shape (v1.0)](../specifications/loft-28-placed-topology-state-object-shape-v1_0.md)
+- [x] [Loft Spec 28 Test: Placed Topology State Object Shape](../test-specifications/loft-28-placed-topology-state-object-shape-v1_0.md)
+- [x] [Loft Spec 29: Topology State Normalization Invariants (v1.0)](../specifications/loft-29-topology-state-normalization-invariants-v1_0.md)
+- [x] [Loft Spec 29 Test: Topology State Normalization Invariants](../test-specifications/loft-29-topology-state-normalization-invariants-v1_0.md)
+- [x] [Loft Spec 30: Directional Correspondence Field Contract (v1.0)](../specifications/loft-30-directional-correspondence-field-contract-v1_0.md)
+- [x] [Loft Spec 30 Test: Directional Correspondence Field Contract](../test-specifications/loft-30-directional-correspondence-field-contract-v1_0.md)
+
+### Plan Object
+
+- [x] [Loft Spec 31: Plan Header and Sequence Metadata Contract (v1.0)](../specifications/loft-31-plan-header-and-sequence-metadata-contract-v1_0.md)
+- [x] [Loft Spec 31 Test: Plan Header and Sequence Metadata Contract](../test-specifications/loft-31-plan-header-and-sequence-metadata-contract-v1_0.md)
+- [x] [Loft Spec 32: Planned State and Interval Record Contract (v1.0)](../specifications/loft-32-planned-state-and-interval-record-contract-v1_0.md)
+- [x] [Loft Spec 32 Test: Planned State and Interval Record Contract](../test-specifications/loft-32-planned-state-and-interval-record-contract-v1_0.md)
+- [x] [Loft Spec 33: Branch and Closure Record Contract (v1.0)](../specifications/loft-33-branch-and-closure-record-contract-v1_0.md)
+- [x] [Loft Spec 33 Test: Branch and Closure Record Contract](../test-specifications/loft-33-branch-and-closure-record-contract-v1_0.md)
+- [x] [Loft Spec 34: Plan Diagnostics and Execution Eligibility Contract (v1.0)](../specifications/loft-34-plan-diagnostics-and-execution-eligibility-contract-v1_0.md)
+- [x] [Loft Spec 34 Test: Plan Diagnostics and Execution Eligibility Contract](../test-specifications/loft-34-plan-diagnostics-and-execution-eligibility-contract-v1_0.md)
+
+### Planner / Executor Boundary
+
+- [x] [Loft Spec 35: Transition Operator Family Set (v1.0)](../specifications/loft-35-transition-operator-family-set-v1_0.md)
+- [x] [Loft Spec 35 Test: Transition Operator Family Set](../test-specifications/loft-35-transition-operator-family-set-v1_0.md)
+- [x] [Loft Spec 36: Transition Operator Payload Contract (v1.0)](../specifications/loft-36-transition-operator-payload-contract-v1_0.md)
+- [x] [Loft Spec 36 Test: Transition Operator Payload Contract](../test-specifications/loft-36-transition-operator-payload-contract-v1_0.md)
+- [x] [Loft Spec 37: Planner / Executor Execution-Boundary Rules (v1.0)](../specifications/loft-37-planner-executor-execution-boundary-rules-v1_0.md)
+- [x] [Loft Spec 37 Test: Planner / Executor Execution-Boundary Rules](../test-specifications/loft-37-planner-executor-execution-boundary-rules-v1_0.md)
+
+### Ambiguity and Constraint Requests
+
+- [x] [Loft Spec 38: Ambiguity Record Minimal Locator Contract (v1.0)](../specifications/loft-38-ambiguity-record-minimal-locator-contract-v1_0.md)
+- [x] [Loft Spec 38 Test: Ambiguity Record Minimal Locator Contract](../test-specifications/loft-38-ambiguity-record-minimal-locator-contract-v1_0.md)
+- [x] [Loft Spec 39: Constraint Request Record Contract (v1.0)](../specifications/loft-39-constraint-request-record-contract-v1_0.md)
+- [x] [Loft Spec 39 Test: Constraint Request Record Contract](../test-specifications/loft-39-constraint-request-record-contract-v1_0.md)
+- [x] [Loft Spec 40: Invalid-Input Versus Underconstrained Taxonomy (v1.0)](../specifications/loft-40-invalid-input-versus-underconstrained-taxonomy-v1_0.md)
+- [x] [Loft Spec 40 Test: Invalid-Input Versus Underconstrained Taxonomy](../test-specifications/loft-40-invalid-input-versus-underconstrained-taxonomy-v1_0.md)
+
+### Tolerance and Validation
+
+- [x] [Loft Spec 41: Input-Validity Tolerance Rules (v1.0)](../specifications/loft-41-input-validity-tolerance-rules-v1_0.md)
+- [x] [Loft Spec 41 Test: Input-Validity Tolerance Rules](../test-specifications/loft-41-input-validity-tolerance-rules-v1_0.md)
+- [x] [Loft Spec 42: Structural-Classification Tolerance Rules (v1.0)](../specifications/loft-42-structural-classification-tolerance-rules-v1_0.md)
+- [x] [Loft Spec 42 Test: Structural-Classification Tolerance Rules](../test-specifications/loft-42-structural-classification-tolerance-rules-v1_0.md)
+- [x] [Loft Spec 43: Decomposition-Resolution Tolerance Rules (v1.0)](../specifications/loft-43-decomposition-resolution-tolerance-rules-v1_0.md)
+- [x] [Loft Spec 43 Test: Decomposition-Resolution Tolerance Rules](../test-specifications/loft-43-decomposition-resolution-tolerance-rules-v1_0.md)
+- [x] [Loft Spec 44: Collapse and Degeneracy Tolerance Rules (v1.0)](../specifications/loft-44-collapse-and-degeneracy-tolerance-rules-v1_0.md)
+- [x] [Loft Spec 44 Test: Collapse and Degeneracy Tolerance Rules](../test-specifications/loft-44-collapse-and-degeneracy-tolerance-rules-v1_0.md)
+- [x] [Loft Spec 45: Plan-Validation Tolerance Rules (v1.0)](../specifications/loft-45-plan-validation-tolerance-rules-v1_0.md)
+- [x] [Loft Spec 45 Test: Plan-Validation Tolerance Rules](../test-specifications/loft-45-plan-validation-tolerance-rules-v1_0.md)
+
+### Many-to-Many Decomposition
+
+- [x] [Loft Spec 46: Many-to-Many Candidate-Set Isolation Rules (v1.0)](../specifications/loft-46-many-to-many-candidate-set-isolation-rules-v1_0.md)
+- [x] [Loft Spec 46 Test: Many-to-Many Candidate-Set Isolation Rules](../test-specifications/loft-46-many-to-many-candidate-set-isolation-rules-v1_0.md)
+- [x] [Loft Spec 47: Many-to-Many Deterministic Decomposition Order (v1.0)](../specifications/loft-47-many-to-many-deterministic-decomposition-order-v1_0.md)
+- [x] [Loft Spec 47 Test: Many-to-Many Deterministic Decomposition Order](../test-specifications/loft-47-many-to-many-deterministic-decomposition-order-v1_0.md)
+- [x] [Loft Spec 48: Automatic Decomposability Gate Rules (v1.0)](../specifications/loft-48-automatic-decomposability-gate-rules-v1_0.md)
+- [x] [Loft Spec 48 Test: Automatic Decomposability Gate Rules](../test-specifications/loft-48-automatic-decomposability-gate-rules-v1_0.md)
+- [x] [Loft Spec 49: Residual Many-to-Many Constraint Escalation (v1.0)](../specifications/loft-49-residual-many-to-many-constraint-escalation-v1_0.md)
+- [x] [Loft Spec 49 Test: Residual Many-to-Many Constraint Escalation](../test-specifications/loft-49-residual-many-to-many-constraint-escalation-v1_0.md)
+- [x] [Loft Spec 50: Simple Correspondence Regression Fixtures (v1.0)](../specifications/loft-50-simple-correspondence-regression-fixtures-v1_0.md)
+- [x] [Loft Spec 50 Test: Simple Correspondence Regression Fixtures](../test-specifications/loft-50-simple-correspondence-regression-fixtures-v1_0.md)
+- [x] [Loft Spec 51: Canonical Station-Slice Silhouette Classification (v1.0)](../specifications/loft-51-canonical-station-slice-silhouette-classification-v1_0.md)
+- [x] [Loft Spec 51 Test: Canonical Station-Slice Silhouette Classification](../test-specifications/loft-51-canonical-station-slice-silhouette-classification-v1_0.md)
+
+### Topology-Owned Point Correspondence
+
+- [x] [Loft Spec 52: Topology Path Core Records (v1.0)](../specifications/loft-52-topology-path-core-records-v1_0.md)
+- [x] [Loft Spec 53: Topology Segment and Landmark Identity Records (v1.0)](../specifications/loft-53-topology-segment-landmark-identity-records-v1_0.md)
+- [x] [Loft Spec 54: Path Input Adapters to Topology Paths (v1.0)](../specifications/loft-54-path-input-adapters-to-topology-paths-v1_0.md)
+- [x] [Loft Spec 62: Topology Builder Core API (v1.0)](../specifications/loft-62-topology-builder-core-api-v1_0.md)
+- [x] [Loft Spec 63: Topology Lifecycle Builder API (v1.0)](../specifications/loft-63-topology-lifecycle-builder-api-v1_0.md)
+- [x] [Loft Spec 64: Generated Shape Default Rails (v1.0)](../specifications/loft-64-generated-shape-default-rails-v1_0.md)
+- [x] [Loft Spec 55: Authored Rail Priority and Diagnostics (v1.0)](../specifications/loft-55-authored-rail-priority-diagnostics-v1_0.md)
+- [x] [Loft Spec 56: High-Confidence Inference and Refusal Policy (v1.0)](../specifications/loft-56-high-confidence-inference-refusal-policy-v1_0.md)
+- [x] [Loft Spec 57: Point Lifecycle Event Records (v1.0)](../specifications/loft-57-point-lifecycle-event-records-v1_0.md)
+- [x] [Loft Spec 58: Birth/Death Synthetic Support Resolution (v1.0)](../specifications/loft-58-birth-death-synthetic-support-resolution-v1_0.md)
+- [x] [Loft Spec 59: Correspondence-Preserving Resampling Contract (v1.0)](../specifications/loft-59-correspondence-preserving-resampling-contract-v1_0.md)
+- [x] [Loft Spec 60: Legacy Mesh Debug Correspondence Consumption (retired canonical posture)](../specifications/loft-60-mesh-executor-correspondence-consumption-v1_0.md)
+- [x] [Loft Spec 61: Surface Executor Correspondence Consumption (v1.0)](../specifications/loft-61-surface-executor-correspondence-consumption-v1_0.md)
+
+## Polish Specifications
+
+### Advanced Loft Features
+
+- [x] [Loft Spec 18: Probabilistic Ambiguity Disambiguation (v1.0)](../specifications/loft-18-probabilistic-disambiguation-v1_0.md)
+- [x] [Loft Spec 18 Test: Probabilistic Ambiguity Disambiguation](../test-specifications/loft-18-probabilistic-disambiguation-v1_0.md)
+- [x] [Loft Spec 19: Global Fairness and Skeleton Optimization (v1.0)](../specifications/loft-19-global-fairness-skeleton-optimization-v1_0.md)
+- [x] [Loft Spec 19 Test: Global Fairness and Skeleton Optimization](../test-specifications/loft-19-global-fairness-skeleton-optimization-v1_0.md)
+- [x] [Loft Spec 20: Interactive Branch Picking API (v1.0)](../specifications/loft-20-interactive-branch-picking-v1_0.md)
+- [x] [Loft Spec 20 Test: Interactive Branch Picking API](../test-specifications/loft-20-interactive-branch-picking-v1_0.md)
+
+## Manifest-Derived Specification Work
+
+### Impress Surface Native File Format Architecture
+- [x] [Impress Spec 01: .impress Document Root And Schema Version (v1.0)](../specifications/impress-01-impress-document-root-and-schema-version-v1_0.md)
+- [x] [Impress Spec 02: .impress Units And Root Validation Policy (v1.0)](../specifications/impress-02-impress-units-and-root-validation-policy-v1_0.md)
+- [x] [Impress Spec 03: .impress SurfaceBodyStore And Identity Policy (v1.0)](../specifications/impress-03-impress-surfacebodystore-and-identity-policy-v1_0.md)
+- [x] [Impress Spec 04: .impress Body And Shell Payload Codec (v1.0)](../specifications/impress-04-impress-body-and-shell-payload-codec-v1_0.md)
+- [x] [Impress Spec 05: .impress Patch Payload Codec (v1.0)](../specifications/impress-05-impress-patch-payload-codec-v1_0.md)
+- [x] [Impress Spec 06: .impress Trim Payload Codec (v1.0)](../specifications/impress-06-impress-trim-payload-codec-v1_0.md)
+- [x] [Impress Spec 07: .impress Seam Payload Codec (v1.0)](../specifications/impress-07-impress-seam-payload-codec-v1_0.md)
+- [x] [Impress Spec 08: .impress Adjacency Payload Codec (v1.0)](../specifications/impress-08-impress-adjacency-payload-codec-v1_0.md)
+- [x] [Impress Spec 09: .impress Deterministic JSON Writer (v1.0)](../specifications/impress-09-impress-deterministic-json-writer-v1_0.md)
+- [x] [Impress Spec 10: .impress Reader And Load Result Contract (v1.0)](../specifications/impress-10-impress-reader-and-load-result-contract-v1_0.md)
+- [x] [Impress Spec 11: .impress Atomic File Write And Error Handling (v1.0)](../specifications/impress-11-impress-atomic-file-write-and-error-handling-v1_0.md)
+- [x] [Impress Spec 12: .impress Round Trip And Refusal Tests (v1.0)](../specifications/impress-12-impress-round-trip-and-refusal-tests-v1_0.md)
+- [x] [Impress Spec 13: .impress Industry Interchange Boundary (v1.0)](../specifications/impress-13-impress-industry-interchange-boundary-v1_0.md)
+
+### Full Surface Patch Family Architecture
+- [x] [Surface Spec 139: Patch Family Capability Matrix And Spec 66 Retirement (v1.0)](../specifications/surface-139-patch-family-capability-matrix-and-spec-66-retirement-v1_0.md)
+- [x] [Surface Spec 140: B-Spline Surface Patch Record And Validation (v1.0)](../specifications/surface-140-b-spline-surface-patch-record-and-validation-v1_0.md)
+- [x] [Surface Spec 141: B-Spline Surface Evaluation And Derivatives (v1.0)](../specifications/surface-141-b-spline-surface-evaluation-and-derivatives-v1_0.md)
+- [x] [Surface Spec 142: NURBS Surface Patch (v1.0)](../specifications/surface-142-nurbs-surface-patch-v1_0.md)
+- [x] [Surface Spec 143: Sweep Surface Patch Payload And Frame Policy (v1.0)](../specifications/surface-143-sweep-surface-patch-payload-and-frame-policy-v1_0.md)
+- [x] [Surface Spec 144: Sweep Surface Evaluation And Tessellation (v1.0)](../specifications/surface-144-sweep-surface-evaluation-and-tessellation-v1_0.md)
+- [x] [Surface Spec 145: Subdivision Surface Control Cage And Crease Payload (v1.0)](../specifications/surface-145-subdivision-surface-control-cage-and-crease-payload-v1_0.md)
+- [x] [Surface Spec 146: Subdivision Surface Evaluation And Tessellation (v1.0)](../specifications/surface-146-subdivision-surface-evaluation-and-tessellation-v1_0.md)
+- [x] [Surface Spec 147: Implicit Field Node Payload (v1.0)](../specifications/surface-147-implicit-field-node-payload-v1_0.md)
+- [x] [Surface Spec 148: Implicit Field Validation Security (v1.0)](../specifications/surface-148-implicit-field-validation-security-v1_0.md)
+- [x] [Surface Spec 149: Implicit Field Evaluation (v1.0)](../specifications/surface-149-implicit-field-evaluation-v1_0.md)
+- [x] [Surface Spec 150: Implicit Tessellation Bounds And Approximation Metadata (v1.0)](../specifications/surface-150-implicit-tessellation-bounds-and-approximation-metadata-v1_0.md)
+- [x] [Surface Spec 151: Cross-Family Tessellation Adapters (v1.0)](../specifications/surface-151-cross-family-tessellation-adapters-v1_0.md)
+- [x] [Surface Spec 152: Cross-Family Seam Boundary Participation (v1.0)](../specifications/surface-152-cross-family-seam-boundary-participation-v1_0.md)
+- [x] [Surface Spec 153: Family-Aware Boolean Eligibility And Diagnostics (v1.0)](../specifications/surface-153-family-aware-boolean-eligibility-and-diagnostics-v1_0.md)
+- [x] [Surface Spec 154: .impress Analytic Patch Payloads (v1.0)](../specifications/surface-154-impress-analytic-patch-payloads-v1_0.md)
+- [x] [Surface Spec 155: .impress Spline Patch Payloads (v1.0)](../specifications/surface-155-impress-spline-patch-payloads-v1_0.md)
+- [x] [Surface Spec 156: .impress Sweep Patch Payload (v1.0)](../specifications/surface-156-impress-sweep-patch-payload-v1_0.md)
+- [x] [Surface Spec 157: .impress Subdivision Patch Payload (v1.0)](../specifications/surface-157-impress-subdivision-patch-payload-v1_0.md)
+- [x] [Surface Spec 158: .impress Implicit Patch Payload Security (v1.0)](../specifications/surface-158-impress-implicit-patch-payload-security-v1_0.md)
+
+### Mesh Execution Tessellation Boundary Architecture
+- [x] [Surface Spec 159: Mesh Execution Inventory And Classification (v1.0)](../specifications/surface-159-mesh-execution-inventory-and-classification-v1_0.md)
+- [x] [Surface Spec 160: Primitive Surface Defaults: Box, Prism, Polyhedron (v1.0)](../specifications/surface-160-primitive-surface-defaults-box-prism-polyhedron-v1_0.md)
+- [x] [Surface Spec 161: Primitive Surface Defaults: Cylinder, Cone, Ngon (v1.0)](../specifications/surface-161-primitive-surface-defaults-cylinder-cone-ngon-v1_0.md)
+- [x] [Surface Spec 162: Primitive Surface Defaults: Sphere And Torus (v1.0)](../specifications/surface-162-primitive-surface-defaults-sphere-and-torus-v1_0.md)
+- [x] [Surface Spec 163: Primitive Mesh Compatibility API Names (v1.0)](../specifications/surface-163-primitive-mesh-compatibility-api-names-v1_0.md)
+- [x] [Surface Spec 164: Primitive Planar And Frustum Helper Quarantine (v1.0)](../specifications/surface-164-primitive-planar-and-frustum-helper-quarantine-v1_0.md)
+- [x] [Surface Spec 165: Primitive Curved Helper Quarantine (v1.0)](../specifications/surface-165-primitive-curved-helper-quarantine-v1_0.md)
+- [x] [Surface Spec 166: Primitive Tessellation Helper Relocation (v1.0)](../specifications/surface-166-primitive-tessellation-helper-relocation-v1_0.md)
+- [x] [Surface Spec 167: Loft Spec 60 Revision Or Retirement (v1.0)](../specifications/surface-167-loft-spec-60-revision-or-retirement-v1_0.md)
+- [x] [Surface Spec 168: Loft Mesh Emission Relocation (v1.0)](../specifications/surface-168-loft-mesh-emission-relocation-v1_0.md)
+- [x] [Surface Spec 169: Text Surface Default Public API (v1.0)](../specifications/surface-169-text-surface-default-public-api-v1_0.md)
+- [x] [Surface Spec 170: Text Mesh Compatibility And Empty Text Behavior (v1.0)](../specifications/surface-170-text-mesh-compatibility-and-empty-text-behavior-v1_0.md)
+- [x] [Surface Spec 171: Drafting Surface Defaults (v1.0)](../specifications/surface-171-drafting-surface-defaults-v1_0.md)
+- [x] [Surface Spec 172: Heightmap Sampled Surface Payload (v1.0)](../specifications/surface-172-heightmap-sampled-surface-payload-v1_0.md)
+- [x] [Surface Spec 173: Heightmap Alpha Mask And Cache Policy (v1.0)](../specifications/surface-173-heightmap-alpha-mask-and-cache-policy-v1_0.md)
+- [x] [Surface Spec 174: Heightmap Displacement Surface Contract (v1.0)](../specifications/surface-174-heightmap-displacement-surface-contract-v1_0.md)
+- [x] [Surface Spec 175: Heightmap Projection Sampling Policy (v1.0)](../specifications/surface-175-heightmap-projection-sampling-policy-v1_0.md)
+- [x] [Surface Spec 176: Heightmap Mesh Compatibility And Serialization Guard (v1.0)](../specifications/surface-176-heightmap-mesh-compatibility-and-serialization-guard-v1_0.md)
+- [x] [Surface Spec 180: Traditional Hinge Surface Lowering (v1.0)](../specifications/surface-180-traditional-hinge-surface-lowering-v1_0.md)
+- [x] [Surface Spec 181: Living And Bistable Hinge Surface Lowering (v1.0)](../specifications/surface-181-living-and-bistable-hinge-surface-lowering-v1_0.md)
+- [x] [Surface Spec 182: Surface Transform API Defaults (v1.0)](../specifications/surface-182-surface-transform-api-defaults-v1_0.md)
+- [x] [Surface Spec 183: Surface Composition Public Type (v1.0)](../specifications/surface-183-surface-composition-public-type-v1_0.md)
+- [x] [Surface Spec 184: Surface Composition Traversal And Tessellation Handoff (v1.0)](../specifications/surface-184-surface-composition-traversal-and-tessellation-handoff-v1_0.md)
+- [x] [Surface Spec 185: MeshGroup Explicit Compatibility API (v1.0)](../specifications/surface-185-meshgroup-explicit-compatibility-api-v1_0.md)
+- [x] [Surface Spec 186: MeshGroup Import Boundary Enforcement (v1.0)](../specifications/surface-186-meshgroup-import-boundary-enforcement-v1_0.md)
+- [x] [Surface Spec 187: Mesh Utility Quarantine (v1.0)](../specifications/surface-187-mesh-utility-quarantine-v1_0.md)
+- [x] [Surface Spec 188: No Hidden Mesh Fallback Enforcement (v1.0)](../specifications/surface-188-no-hidden-mesh-fallback-enforcement-v1_0.md)
+
+### Patch Family Integration Architecture
+- [x] [Surface Spec 189: Patch Family Availability Gate And Capability Matrix (v1.0)](../specifications/surface-189-patch-family-availability-gate-and-capability-matrix-v1_0.md)
+- [x] [Surface Spec 190: Patch Family Availability Promotion Pass (v1.0)](../specifications/surface-190-patch-family-availability-promotion-pass-v1_0.md)
+- [x] [Surface Spec 191: .impress Patch Codec Coverage Inventory (v1.0)](../specifications/surface-191-impress-patch-codec-coverage-inventory-v1_0.md)
+- [x] [Surface Spec 192: .impress All-Family Round-Trip Identity Coverage (v1.0)](../specifications/surface-192-impress-all-family-round-trip-identity-coverage-v1_0.md)
+- [x] [Surface Spec 193: .impress Heightmap Surface Patch Codec (v1.0)](../specifications/surface-193-impress-heightmap-surface-patch-codec-v1_0.md)
+- [x] [Surface Spec 194: .impress Displacement Surface Patch Codec (v1.0)](../specifications/surface-194-impress-displacement-surface-patch-codec-v1_0.md)
+- [x] [Surface Spec 195: SurfaceBody All-Family Store Fixture Coverage (v1.0)](../specifications/surface-195-surfacebody-all-family-store-fixture-coverage-v1_0.md)
+- [x] [Surface Spec 196: SurfaceComposition All-Family Traversal Coverage (v1.0)](../specifications/surface-196-surfacecomposition-all-family-traversal-coverage-v1_0.md)
+- [x] [Surface Spec 197: SurfaceComposition Transform And Identity Preservation Coverage (v1.0)](../specifications/surface-197-surfacecomposition-transform-and-identity-preservation-coverage-v1_0.md)
+- [x] [Surface Spec 198: Tessellation Adapter Capability Inventory And Metadata Gate (v1.0)](../specifications/surface-198-tessellation-adapter-capability-inventory-and-metadata-gate-v1_0.md)
+- [x] [Surface Spec 199: Sampled Surface Tessellation Adapters (v1.0)](../specifications/surface-199-sampled-surface-tessellation-adapters-v1_0.md)
+- [x] [Surface Spec 200: Spline Surface Tessellation Adapters (v1.0)](../specifications/surface-200-spline-surface-tessellation-adapters-v1_0.md)
+- [x] [Surface Spec 201: Subdivision Surface Tessellation Adapter (v1.0)](../specifications/surface-201-subdivision-surface-tessellation-adapter-v1_0.md)
+- [x] [Surface Spec 202: Implicit Surface Tessellation Adapter Safety And Sampling (v1.0)](../specifications/surface-202-implicit-surface-tessellation-adapter-safety-and-sampling-v1_0.md)
+- [x] [Surface Spec 203: Loft Patch Family Selection Record (v1.0)](../specifications/surface-203-loft-patch-family-selection-record-v1_0.md)
+- [x] [Surface Spec 204: Shared Spline Basis And Loft Control-Net Utilities (v1.0)](../specifications/surface-204-shared-spline-basis-and-loft-control-net-utilities-v1_0.md)
+- [x] [Surface Spec 205: Loft B-Spline Output Contract (v1.0)](../specifications/surface-205-loft-b-spline-output-contract-v1_0.md)
+- [x] [Surface Spec 206: Loft B-Spline Control-Net Producer (v1.0)](../specifications/surface-206-loft-b-spline-control-net-producer-v1_0.md)
+- [x] [Surface Spec 207: Loft NURBS Explicit Rational Intent Contract (v1.0)](../specifications/surface-207-loft-nurbs-explicit-rational-intent-contract-v1_0.md)
+- [x] [Surface Spec 208: Loft NURBS Weight-Grid Producer (v1.0)](../specifications/surface-208-loft-nurbs-weight-grid-producer-v1_0.md)
+- [x] [Surface Spec 209: Loft Sweep Surface Producer (v1.0)](../specifications/surface-209-loft-sweep-surface-producer-v1_0.md)
+- [x] [Surface Spec 210: Primitive Family Appropriateness Audit (v1.0)](../specifications/surface-210-primitive-family-appropriateness-audit-v1_0.md)
+- [x] [Surface Spec 211: Subdivision Surface Public Authoring Helper (v1.0)](../specifications/surface-211-subdivision-surface-public-authoring-helper-v1_0.md)
+- [x] [Surface Spec 212: Implicit Surface Public Authoring Helper And Safety Gate (v1.0)](../specifications/surface-212-implicit-surface-public-authoring-helper-and-safety-gate-v1_0.md)
+- [x] [Surface Spec 213: CSG Unsupported Family Diagnostics (v1.0)](../specifications/surface-213-csg-unsupported-family-diagnostics-v1_0.md)
+- [x] [Surface Spec 214: Loft Unsupported Family Diagnostics (v1.0)](../specifications/surface-214-loft-unsupported-family-diagnostics-v1_0.md)
+- [x] [Surface Spec 215: .impress Unsupported Family And Malformed Payload Diagnostics (v1.0)](../specifications/surface-215-impress-unsupported-family-and-malformed-payload-diagnostics-v1_0.md)
+- [x] [Surface Spec 216: Tessellation Unsupported Family Diagnostics (v1.0)](../specifications/surface-216-tessellation-unsupported-family-diagnostics-v1_0.md)
+- [x] [Surface Spec 217: Advanced Patch Family Public API Documentation (v1.0)](../specifications/surface-217-advanced-patch-family-public-api-documentation-v1_0.md)
+
+### Surface CSG And Mesh Boundary Completion
+- [x] [Surface Spec 224: Loft Public Surface API Default (v1.0)](../specifications/surface-224-loft-public-surface-api-default-v1_0.md)
+- [x] [Surface Spec 225: Loft Reference QA Role Boundary (v1.0)](../specifications/surface-225-loft-reference-qa-role-boundary-v1_0.md)
+- [x] [Surface Spec 218: Surface CSG Family Capability Matrix And Refusal Gate (v1.0)](../specifications/surface-218-surface-csg-family-capability-matrix-and-refusal-gate-v1_0.md)
+- [x] [Surface Spec 226: CSG Curve Primitive And Tolerance Policy (v1.0)](../specifications/surface-226-csg-curve-primitive-and-tolerance-policy-v1_0.md)
+- [x] [Surface Spec 227: CSG Patch-Local Curve Mapping (v1.0)](../specifications/surface-227-csg-patch-local-curve-mapping-v1_0.md)
+- [x] [Surface Spec 228: CSG Planar/Linear Analytic Intersections (v1.0)](../specifications/surface-228-csg-planar-linear-analytic-intersections-v1_0.md)
+- [x] [Surface Spec 229: CSG Revolution/Conic Analytic Intersections (v1.0)](../specifications/surface-229-csg-revolution-conic-analytic-intersections-v1_0.md)
+- [x] [Surface Spec 230: CSG Higher-Order Analytic Intersection Refusal Or Solver Boundary (v1.0)](../specifications/surface-230-csg-higher-order-analytic-intersection-refusal-or-solver-boundary-v1_0.md)
+- [x] [Surface Spec 231: CSG Curve Arrangement And Trim Loop Splitting (v1.0)](../specifications/surface-231-csg-curve-arrangement-and-trim-loop-splitting-v1_0.md)
+- [x] [Surface Spec 232: CSG Fragment Inside/Outside Classification Predicates (v1.0)](../specifications/surface-232-csg-fragment-inside-outside-classification-predicates-v1_0.md)
+- [x] [Surface Spec 233: CSG Operation Selection Rules (v1.0)](../specifications/surface-233-csg-operation-selection-rules-v1_0.md)
+- [x] [Surface Spec 234: CSG Shell Assembly From Fragments (v1.0)](../specifications/surface-234-csg-shell-assembly-from-fragments-v1_0.md)
+- [x] [Surface Spec 235: CSG Seam And Adjacency Rebuild (v1.0)](../specifications/surface-235-csg-seam-and-adjacency-rebuild-v1_0.md)
+- [x] [Surface Spec 236: CSG Validity, Healing, And Provenance Gate (v1.0)](../specifications/surface-236-csg-validity-healing-and-provenance-gate-v1_0.md)
+- [x] [Surface Spec 237: CSG Primitive Caller Inventory And Gate Helper (v1.0)](../specifications/surface-237-csg-primitive-caller-inventory-and-gate-helper-v1_0.md)
+- [x] [Surface Spec 238: CSG Primitive Migration (v1.0)](../specifications/surface-238-csg-primitive-migration-v1_0.md)
+- [x] [Surface Spec 239: CSG Feature Builder Boolean Migration (v1.0)](../specifications/surface-239-csg-feature-builder-boolean-migration-v1_0.md)
+
+### Additional Manifest Splits
+- [x] [Impress Spec 14: .impress Base Patch Payload Codec (v1.0)](../specifications/impress-14-impress-base-patch-payload-codec-v1_0.md)
+- [x] [Impress Spec 15: .impress Patch Family Dispatch And Validation (v1.0)](../specifications/impress-15-impress-patch-family-dispatch-and-validation-v1_0.md)
+- [x] [Loft Spec 65: Topology Point Builder API (v1.0)](../specifications/loft-65-topology-point-builder-api-v1_0.md)
+- [x] [Loft Spec 66: Topology Segment Builder API (v1.0)](../specifications/loft-66-topology-segment-builder-api-v1_0.md)
+- [x] [Surface Spec 240: .impress Implicit Patch Payload Codec (v1.0)](../specifications/surface-240-impress-implicit-patch-payload-codec-v1_0.md)
+- [x] [Surface Spec 241: .impress Implicit Payload Security Refusal Fixtures (v1.0)](../specifications/surface-241-impress-implicit-payload-security-refusal-fixtures-v1_0.md)
+
+### Surface Body Completion Architecture
+- [x] [Surface Spec 242: Surface Body Completion Capability And Evidence Gate (v1.0)](../specifications/surface-242-surface-body-completion-capability-and-evidence-gate-v1_0.md)
+- [x] [Surface Spec 243: Patch Family Promotion Readiness Audit (v1.0)](../specifications/surface-243-patch-family-promotion-readiness-audit-v1_0.md)
+- [x] [Surface Spec 244: CSG Completion Support Matrix And Refusal Records (v1.0)](../specifications/surface-244-csg-completion-support-matrix-and-refusal-records-v1_0.md)
+- [x] [Surface Spec 245: Analytic CSG Expansion For Primitive Surface Families (v1.0)](../specifications/surface-245-analytic-csg-expansion-for-primitive-surface-families-v1_0.md)
+- [x] [Surface Spec 246: Higher-Order And Sampled CSG Policy Boundary (v1.0)](../specifications/surface-246-higher-order-and-sampled-csg-policy-boundary-v1_0.md)
+- [x] [Surface Spec 247: Loft Ambiguity Accumulation And Execution Refusal Gate (v1.0)](../specifications/surface-247-loft-ambiguity-accumulation-and-execution-refusal-gate-v1_0.md)
+- [x] [Surface Spec 248: Loft Ambiguity Locator Diagnostics (v1.0)](../specifications/surface-248-loft-ambiguity-locator-diagnostics-v1_0.md)
+- [x] [Surface Spec 249: Seam Continuity Promotion And Diagnostics (v1.0)](../specifications/surface-249-seam-continuity-promotion-and-diagnostics-v1_0.md)
+- [x] [Surface Spec 250: .impress Whole-Store Fixture Coverage Gate (v1.0)](../specifications/surface-250-impress-whole-store-fixture-coverage-gate-v1_0.md)
+- [x] [Surface Spec 251: .impress Unsafe Payload Refusal And Determinism Gate (v1.0)](../specifications/surface-251-impress-unsafe-payload-refusal-and-determinism-gate-v1_0.md)
+- [x] [Surface Spec 252: Primitive Patch Producer Selection (v1.0)](../specifications/surface-252-primitive-patch-producer-selection-v1_0.md)
+- [x] [Surface Spec 253: Feature Builder Patch Producer Handoff (v1.0)](../specifications/surface-253-feature-builder-patch-producer-handoff-v1_0.md)
+- [x] [Surface Spec 254: Surface Body Completion Reference Evidence Matrix (v1.0)](../specifications/surface-254-surface-body-completion-reference-evidence-matrix-v1_0.md)
+
+### Surface Body Depth Completion Architecture
+- [x] [Surface Spec 255: Surface CSG Family Pair Solver Registry (v1.0)](../specifications/surface-255-surface-csg-family-pair-solver-registry-v1_0.md)
+- [x] [Surface Spec 256: Surface CSG Operation Planning And Executability (v1.0)](../specifications/surface-256-surface-csg-operation-planning-and-executability-v1_0.md)
+- [x] [Surface Spec 257: Surface CSG Fragment Graph Builder (v1.0)](../specifications/surface-257-surface-csg-fragment-graph-builder-v1_0.md)
+- [x] [Surface Spec 258: Surface CSG Cap Patch Family Selection (v1.0)](../specifications/surface-258-surface-csg-cap-patch-family-selection-v1_0.md)
+- [x] [Surface Spec 259: Surface CSG Cut Boundary Trim Construction (v1.0)](../specifications/surface-259-surface-csg-cut-boundary-trim-construction-v1_0.md)
+- [x] [Surface Spec 260: Surface CSG Result Shell Assembly (v1.0)](../specifications/surface-260-surface-csg-result-shell-assembly-v1_0.md)
+- [x] [Surface Spec 261: Surface CSG Result Validity Handoff (v1.0)](../specifications/surface-261-surface-csg-result-validity-handoff-v1_0.md)
+- [x] [Surface Spec 262: Surface CSG Result Provenance Mapping (v1.0)](../specifications/surface-262-surface-csg-result-provenance-mapping-v1_0.md)
+- [x] [Surface Spec 263: Seam Continuity Constraint Records (v1.0)](../specifications/surface-263-seam-continuity-constraint-records-v1_0.md)
+- [x] [Surface Spec 264: Boundary Derivative Evaluation For Continuity (v1.0)](../specifications/surface-264-boundary-derivative-evaluation-for-continuity-v1_0.md)
+- [x] [Surface Spec 265: Higher-Order Continuity Residual Validation (v1.0)](../specifications/surface-265-higher-order-continuity-residual-validation-v1_0.md)
+- [x] [Surface Spec 266: Higher-Order Continuity Violation Locators (v1.0)](../specifications/surface-266-higher-order-continuity-violation-locators-v1_0.md)
+- [x] [Surface Spec 267: Bounded Continuity Enforcement Boundary (v1.0)](../specifications/surface-267-bounded-continuity-enforcement-boundary-v1_0.md)
+- [x] [Surface Spec 268: Intersection Request And Solver Registry (v1.0)](../specifications/surface-268-intersection-request-and-solver-registry-v1_0.md)
+- [x] [Surface Spec 269: Intersection Curve Result And Degeneracy Records (v1.0)](../specifications/surface-269-intersection-curve-result-and-degeneracy-records-v1_0.md)
+- [x] [Surface Spec 270: Analytic To Spline Surface Intersection Solvers (v1.0)](../specifications/surface-270-analytic-to-spline-surface-intersection-solvers-v1_0.md)
+- [x] [Surface Spec 271: Spline To Spline Surface Intersection Solvers (v1.0)](../specifications/surface-271-spline-to-spline-surface-intersection-solvers-v1_0.md)
+- [x] [Surface Spec 272: Subdivision Surface Intersection Adapter (v1.0)](../specifications/surface-272-subdivision-surface-intersection-adapter-v1_0.md)
+- [x] [Surface Spec 273: Implicit Intersection Safety And Budget Policy (v1.0)](../specifications/surface-273-implicit-intersection-safety-and-budget-policy-v1_0.md)
+- [x] [Surface Spec 274: Bounded Implicit Contour Extraction Adapter (v1.0)](../specifications/surface-274-bounded-implicit-contour-extraction-adapter-v1_0.md)
+- [x] [Surface Spec 275: Implicit Intersection Residual And Result Classification (v1.0)](../specifications/surface-275-implicit-intersection-residual-and-result-classification-v1_0.md)
+- [x] [Surface Spec 276: Surface Reference Requirement Matrix (v1.0)](../specifications/surface-276-surface-reference-requirement-matrix-v1_0.md)
+- [x] [Surface Spec 277: Dirty Versus Promoted Reference Artifact Gate (v1.0)](../specifications/surface-277-dirty-versus-promoted-reference-artifact-gate-v1_0.md)
+- [x] [Surface Spec 278: Diagnostic Snapshot Normalization (v1.0)](../specifications/surface-278-diagnostic-snapshot-normalization-v1_0.md)
+- [x] [Surface Spec 279: Negative Diagnostic Fixture Matrix Core (v1.0)](../specifications/surface-279-negative-diagnostic-fixture-matrix-core-v1_0.md)
+- [x] [Surface Spec 280: .impress Unsafe Payload Negative Fixtures (v1.0)](../specifications/surface-280-impress-unsafe-payload-negative-fixtures-v1_0.md)
+- [x] [Surface Spec 281: Mesh Boundary Negative Fixtures (v1.0)](../specifications/surface-281-mesh-boundary-negative-fixtures-v1_0.md)
+- [x] [Surface Spec 282: CSG Negative Diagnostic Fixtures (v1.0)](../specifications/surface-282-csg-negative-diagnostic-fixtures-v1_0.md)
+- [x] [Surface Spec 283: Loft Ambiguity Negative Diagnostic Fixtures (v1.0)](../specifications/surface-283-loft-ambiguity-negative-diagnostic-fixtures-v1_0.md)
+- [x] [Surface Spec 284: Seam Continuity Negative Diagnostic Fixtures (v1.0)](../specifications/surface-284-seam-continuity-negative-diagnostic-fixtures-v1_0.md)
+- [x] [Surface Spec 285: Legacy Primitive Mesh Assumption Inventory (v1.0)](../specifications/surface-285-legacy-primitive-mesh-assumption-inventory-v1_0.md)
+- [x] [Surface Spec 286: Preview And Reference Tests Explicit Tessellation Rewrite (v1.0)](../specifications/surface-286-preview-and-reference-tests-explicit-tessellation-rewrite-v1_0.md)
+- [x] [Surface Spec 287: Mesh Compatibility API Documentation And Example Rewrite (v1.0)](../specifications/surface-287-mesh-compatibility-api-documentation-and-example-rewrite-v1_0.md)
+
+### Advanced Patch Family Implementation Completion
+- [x] [Surface Spec 288: Advanced Family Promotion Gate And Capability Matrix Update (v1.0)](../specifications/surface-288-advanced-family-promotion-gate-and-capability-matrix-update-v1_0.md)
+- [x] [Surface Spec 289: Shared Spline Basis And Knot Infrastructure (v1.0)](../specifications/surface-289-shared-spline-basis-and-knot-infrastructure-v1_0.md)
+- [x] [Surface Spec 290: B-spline Runtime Persistence And Tessellation Completion (v1.0)](../specifications/surface-290-b-spline-runtime-persistence-and-tessellation-completion-v1_0.md)
+- [x] [Surface Spec 291: NURBS Rational Evaluation And Weight Validation (v1.0)](../specifications/surface-291-nurbs-rational-evaluation-and-weight-validation-v1_0.md)
+- [x] [Surface Spec 292: NURBS Exact Conic Producer Helpers (v1.0)](../specifications/surface-292-nurbs-exact-conic-producer-helpers-v1_0.md)
+- [x] [Surface Spec 293: NURBS Runtime Persistence And Tessellation Completion (v1.0)](../specifications/surface-293-nurbs-runtime-persistence-and-tessellation-completion-v1_0.md)
+- [x] [Surface Spec 294: Shared Path Frame Transport Policy (v1.0)](../specifications/surface-294-shared-path-frame-transport-policy-v1_0.md)
+- [x] [Surface Spec 295: Sweep Runtime Persistence And Tessellation Completion (v1.0)](../specifications/surface-295-sweep-runtime-persistence-and-tessellation-completion-v1_0.md)
+- [x] [Surface Spec 296: Subdivision Scheme And Cage Evaluation (v1.0)](../specifications/surface-296-subdivision-scheme-and-cage-evaluation-v1_0.md)
+- [x] [Surface Spec 297: Subdivision Runtime Persistence Tessellation And Evidence (v1.0)](../specifications/surface-297-subdivision-runtime-persistence-tessellation-and-evidence-v1_0.md)
+- [x] [Surface Spec 298: Implicit Field Safety And Impress Payload Gate (v1.0)](../specifications/surface-298-implicit-field-safety-and-impress-payload-gate-v1_0.md)
+- [x] [Surface Spec 299: Implicit Evaluation And Extraction Adapter (v1.0)](../specifications/surface-299-implicit-evaluation-and-extraction-adapter-v1_0.md)
+- [x] [Surface Spec 300: Implicit CSG And Intersection Policy Diagnostics (v1.0)](../specifications/surface-300-implicit-csg-and-intersection-policy-diagnostics-v1_0.md)
+- [x] [Surface Spec 301: Heightmap Impress Payload And Grid Validation (v1.0)](../specifications/surface-301-heightmap-impress-payload-and-grid-validation-v1_0.md)
+- [x] [Surface Spec 302: Heightmap Evaluation And Tessellation Adapter (v1.0)](../specifications/surface-302-heightmap-evaluation-and-tessellation-adapter-v1_0.md)
+- [x] [Surface Spec 303: Heightmap Seam Approximation And Reference Evidence (v1.0)](../specifications/surface-303-heightmap-seam-approximation-and-reference-evidence-v1_0.md)
+- [x] [Surface Spec 304: Heightmap CSG Policy Diagnostics (v1.0)](../specifications/surface-304-heightmap-csg-policy-diagnostics-v1_0.md)
+- [x] [Surface Spec 305: Displacement Source Payload And Impress Identity Policy (v1.0)](../specifications/surface-305-displacement-source-payload-and-impress-identity-policy-v1_0.md)
+- [x] [Surface Spec 306: Displacement Evaluation And Tessellation Adapter (v1.0)](../specifications/surface-306-displacement-evaluation-and-tessellation-adapter-v1_0.md)
+- [x] [Surface Spec 307: Displacement Seam Approximation And Reference Evidence (v1.0)](../specifications/surface-307-displacement-seam-approximation-and-reference-evidence-v1_0.md)
+- [x] [Surface Spec 308: Displacement CSG Policy Diagnostics (v1.0)](../specifications/surface-308-displacement-csg-policy-diagnostics-v1_0.md)
+- [x] [Surface Spec 309: Advanced Family Seam And Boundary Participation Matrix (v1.0)](../specifications/surface-309-advanced-family-seam-and-boundary-participation-matrix-v1_0.md)
+- [x] [Surface Spec 310: Advanced Family CSG Support Classification Matrix (v1.0)](../specifications/surface-310-advanced-family-csg-support-classification-matrix-v1_0.md)
+- [x] [Surface Spec 311: Advanced Family CSG Refusal And No-Fallback Diagnostics (v1.0)](../specifications/surface-311-advanced-family-csg-refusal-and-no-fallback-diagnostics-v1_0.md)
+- [x] [Surface Spec 312: Advanced Family Impress Codec Coverage Gate (v1.0)](../specifications/surface-312-advanced-family-impress-codec-coverage-gate-v1_0.md)
+- [x] [Surface Spec 313: Advanced Family Impress Whole-Store Round-Trip Evidence (v1.0)](../specifications/surface-313-advanced-family-impress-whole-store-round-trip-evidence-v1_0.md)
+
+### Advanced Family Availability Producers And Operation Posture
+- [x] [Surface Spec 314: Advanced Family Availability Gate And Matrix Fields (v1.0)](../specifications/surface-314-advanced-family-availability-gate-and-matrix-fields-v1_0.md)
+- [x] [Surface Spec 315: Subdivision Native Cage Builder (v1.0)](../specifications/surface-315-subdivision-native-cage-builder-v1_0.md)
+- [x] [Surface Spec 316: Subdivision Cage Import Adapter (v1.0)](../specifications/surface-316-subdivision-cage-import-adapter-v1_0.md)
+- [x] [Surface Spec 317: Implicit Field Builder And Helper API (v1.0)](../specifications/surface-317-implicit-field-builder-and-helper-api-v1_0.md)
+- [x] [Surface Spec 318: Implicit Unsafe Authoring Diagnostics (v1.0)](../specifications/surface-318-implicit-unsafe-authoring-diagnostics-v1_0.md)
+- [x] [Surface Spec 319: Implicit Budget And Bound Diagnostics (v1.0)](../specifications/surface-319-implicit-budget-and-bound-diagnostics-v1_0.md)
+- [x] [Surface Spec 320: Heightmap Native Finite Grid Builder (v1.0)](../specifications/surface-320-heightmap-native-finite-grid-builder-v1_0.md)
+- [x] [Surface Spec 321: Heightmap Optional Import Adapter (v1.0)](../specifications/surface-321-heightmap-optional-import-adapter-v1_0.md)
+- [x] [Surface Spec 322: Displacement Source Identity Resolver (v1.0)](../specifications/surface-322-displacement-source-identity-resolver-v1_0.md)
+- [x] [Surface Spec 323: Displacement Payload Authoring Builder (v1.0)](../specifications/surface-323-displacement-payload-authoring-builder-v1_0.md)
+- [x] [Surface Spec 324: Available-Family Producer Path Operation Rows (v1.0)](../specifications/surface-324-available-family-producer-path-operation-rows-v1_0.md)
+- [x] [Surface Spec 325: Available-Family Storage And Tessellation Operation Rows (v1.0)](../specifications/surface-325-available-family-storage-and-tessellation-operation-rows-v1_0.md)
+- [x] [Surface Spec 326: Available-Family Seam And Loft Operation Rows (v1.0)](../specifications/surface-326-available-family-seam-and-loft-operation-rows-v1_0.md)
+- [x] [Surface Spec 327: Available-Family CSG Classification Row Verifier (v1.0)](../specifications/surface-327-available-family-csg-classification-row-verifier-v1_0.md)
+- [x] [Surface Spec 328: Available-Family CSG No-Mesh-Fallback Evidence (v1.0)](../specifications/surface-328-available-family-csg-no-mesh-fallback-evidence-v1_0.md)
+- [x] [Surface Spec 329: Available-Family Reference Evidence Gate (v1.0)](../specifications/surface-329-available-family-reference-evidence-gate-v1_0.md)
+- [x] [Surface Spec 330: Available-Family Completion Report Builder (v1.0)](../specifications/surface-330-available-family-completion-report-builder-v1_0.md)
+
+### Higher-Order Parametric CSG Completion
+- [x] [Surface Spec 331: Higher-Order CSG Row Taxonomy And Route Registry (v1.0)](../specifications/surface-331-higher-order-csg-row-taxonomy-and-route-registry-v1_0.md)
+- [x] [Surface Spec 332: Higher-Order CSG Residual And Degeneracy Diagnostics (v1.0)](../specifications/surface-332-higher-order-csg-residual-and-degeneracy-diagnostics-v1_0.md)
+- [x] [Surface Spec 333: CSG Patch-Local Curve And Region Mapping Completion (v1.0)](../specifications/surface-333-csg-patch-local-curve-and-region-mapping-completion-v1_0.md)
+- [x] [Surface Spec 334: CSG Trim Arrangement Graph Completion (v1.0)](../specifications/surface-334-csg-trim-arrangement-graph-completion-v1_0.md)
+- [x] [Surface Spec 335: CSG Fragment Builder And Classifier Completion (v1.0)](../specifications/surface-335-csg-fragment-builder-and-classifier-completion-v1_0.md)
+- [x] [Surface Spec 336: CSG Operation Selection And Cap Policy Completion (v1.0)](../specifications/surface-336-csg-operation-selection-and-cap-policy-completion-v1_0.md)
+- [x] [Surface Spec 337: CSG Result Shell Assembly Completion (v1.0)](../specifications/surface-337-csg-result-shell-assembly-completion-v1_0.md)
+- [x] [Surface Spec 338: CSG Seam Adjacency And Provenance Rebuild Completion (v1.0)](../specifications/surface-338-csg-seam-adjacency-and-provenance-rebuild-completion-v1_0.md)
+- [x] [Surface Spec 339: CSG Runtime Result Validity Gate (v1.0)](../specifications/surface-339-csg-runtime-result-validity-gate-v1_0.md)
+- [x] [Surface Spec 340: CSG Persistence Tessellation And Reference Evidence Gate (v1.0)](../specifications/surface-340-csg-persistence-tessellation-and-reference-evidence-gate-v1_0.md)
+- [x] [Surface Spec 341: Analytic To B-Spline CSG Intersections (v1.0)](../specifications/surface-341-analytic-to-b-spline-csg-intersections-v1_0.md)
+- [x] [Surface Spec 342: Analytic To NURBS CSG Intersections (v1.0)](../specifications/surface-342-analytic-to-nurbs-csg-intersections-v1_0.md)
+- [x] [Surface Spec 343: Spline And NURBS Pair Curve Intersections (v1.0)](../specifications/surface-343-spline-and-nurbs-pair-curve-intersections-v1_0.md)
+- [x] [Surface Spec 344: Spline And NURBS Coincident Region CSG Intersections (v1.0)](../specifications/surface-344-spline-and-nurbs-coincident-region-csg-intersections-v1_0.md)
+- [x] [Surface Spec 345: Sweep CSG Evaluator And Event Adapter (v1.0)](../specifications/surface-345-sweep-csg-evaluator-and-event-adapter-v1_0.md)
+- [x] [Surface Spec 346: Sweep Pair CSG Intersections (v1.0)](../specifications/surface-346-sweep-pair-csg-intersections-v1_0.md)
+- [x] [Surface Spec 347: Subdivision CSG Refined Chart Adapter (v1.0)](../specifications/surface-347-subdivision-csg-refined-chart-adapter-v1_0.md)
+- [x] [Surface Spec 348: Subdivision Pair CSG Intersections (v1.0)](../specifications/surface-348-subdivision-pair-csg-intersections-v1_0.md)
+- [x] [Surface Spec 349: Higher-Order CSG Pair Fixture Matrix (v1.0)](../specifications/surface-349-higher-order-csg-pair-fixture-matrix-v1_0.md)
+
+### Sampled And Implicit CSG Unsupported Row Completion
+- [x] [Surface Spec 350: Sampled Implicit Unsupported Row Tracker (v1.0)](../specifications/surface-350-sampled-implicit-unsupported-row-tracker-v1_0.md)
+- [x] [Surface Spec 351: Implicit Field Expression Graph (v1.0)](../specifications/surface-351-implicit-field-expression-graph-v1_0.md)
+- [x] [Surface Spec 352: Implicit Operand Field Adapters (v1.0)](../specifications/surface-352-implicit-operand-field-adapters-v1_0.md)
+- [x] [Surface Spec 353: Implicit Field Safety Validation (v1.0)](../specifications/surface-353-implicit-field-safety-validation-v1_0.md)
+- [x] [Surface Spec 354: Implicit Composition Operation Semantics (v1.0)](../specifications/surface-354-implicit-composition-operation-semantics-v1_0.md)
+- [x] [Surface Spec 355: Implicit CSG Impress Payload Persistence (v1.0)](../specifications/surface-355-implicit-csg-impress-payload-persistence-v1_0.md)
+- [x] [Surface Spec 356: Implicit CSG Fixture And Evidence Matrix (v1.0)](../specifications/surface-356-implicit-csg-fixture-and-evidence-matrix-v1_0.md)
+- [x] [Surface Spec 357: Heightmap Projection And Grid Alignment (v1.0)](../specifications/surface-357-heightmap-projection-and-grid-alignment-v1_0.md)
+- [x] [Surface Spec 358: Heightmap Composition Operators (v1.0)](../specifications/surface-358-heightmap-composition-operators-v1_0.md)
+- [x] [Surface Spec 359: Heightmap Representability And Refusal (v1.0)](../specifications/surface-359-heightmap-representability-and-refusal-v1_0.md)
+- [x] [Surface Spec 360: Heightmap Promotion Integration (v1.0)](../specifications/surface-360-heightmap-promotion-integration-v1_0.md)
+- [x] [Surface Spec 361: Heightmap CSG Impress Payload Persistence (v1.0)](../specifications/surface-361-heightmap-csg-impress-payload-persistence-v1_0.md)
+- [x] [Surface Spec 362: Heightmap CSG Fixture And Evidence Matrix (v1.0)](../specifications/surface-362-heightmap-csg-fixture-and-evidence-matrix-v1_0.md)
+- [x] [Surface Spec 363: Displacement Source Identity Resolution (v1.0)](../specifications/surface-363-displacement-source-identity-resolution-v1_0.md)
+- [x] [Surface Spec 364: Displacement Domain And Sample Resampling (v1.0)](../specifications/surface-364-displacement-domain-and-sample-resampling-v1_0.md)
+- [x] [Surface Spec 365: Displacement Offset Composition Operators (v1.0)](../specifications/surface-365-displacement-offset-composition-operators-v1_0.md)
+- [x] [Surface Spec 366: Displacement Source Mismatch Refusal (v1.0)](../specifications/surface-366-displacement-source-mismatch-refusal-v1_0.md)
+- [x] [Surface Spec 367: Displacement Promotion Integration (v1.0)](../specifications/surface-367-displacement-promotion-integration-v1_0.md)
+- [x] [Surface Spec 368: Displacement CSG Persistence And Fixtures (v1.0)](../specifications/surface-368-displacement-csg-persistence-and-fixtures-v1_0.md)
+- [x] [Surface Spec 369: Sampled Implicit Promotion Matrix (v1.0)](../specifications/surface-369-sampled-implicit-promotion-matrix-v1_0.md)
+- [x] [Surface Spec 370: Promotion Provenance And Lossiness Records (v1.0)](../specifications/surface-370-promotion-provenance-and-lossiness-records-v1_0.md)
+- [x] [Surface Spec 371: Promotion Target Reconstruction Criteria (v1.0)](../specifications/surface-371-promotion-target-reconstruction-criteria-v1_0.md)
+- [x] [Surface Spec 372: Promotion Persistence Coverage (v1.0)](../specifications/surface-372-promotion-persistence-coverage-v1_0.md)
+- [x] [Surface Spec 373: Promotion Fixture And No-Mesh Evidence (v1.0)](../specifications/surface-373-promotion-fixture-and-no-mesh-evidence-v1_0.md)
+- [x] [Surface Spec 374: Representation Refusal And Non-CSG Replacement Contract (v1.0)](../specifications/surface-374-representation-refusal-and-non-csg-replacement-contract-v1_0.md)
+- [x] [Surface Spec 375: Sampled Implicit CSG Codec Coverage (v1.0)](../specifications/surface-375-sampled-implicit-csg-codec-coverage-v1_0.md)
+- [x] [Surface Spec 376: Sampled Implicit Reference Fixture Promotion (v1.0)](../specifications/surface-376-sampled-implicit-reference-fixture-promotion-v1_0.md)
+- [x] [Surface Spec 377: Sampled Implicit No-Mesh-Fallback Evidence Gate (v1.0)](../specifications/surface-377-sampled-implicit-no-mesh-fallback-evidence-gate-v1_0.md)
+- [x] [Surface Spec 378: Sampled Implicit Dirty Evidence Rejection (v1.0)](../specifications/surface-378-sampled-implicit-dirty-evidence-rejection-v1_0.md)
+
+### Reference CSG Gap Closure Specifications
+- [x] [Surface Spec 379: Reference CSG Gap Audit And Fixture Gate (v1.0)](../specifications/surface-379-reference-csg-gap-audit-and-fixture-gate-v1_0.md)
+- [x] [Surface Spec 380: Coincident Contact Classifier (v1.0)](../specifications/surface-380-coincident-contact-classifier-v1_0.md)
+- [x] [Surface Spec 381: Face-Touch Union Shell Merger (v1.0)](../specifications/surface-381-face-touch-union-shell-merger-v1_0.md)
+- [x] [Surface Spec 382: Patch-Family Reference Matrix (v1.0)](../specifications/surface-382-patch-family-reference-matrix-v1_0.md)
+- [x] [Surface Spec 383: Planar And Revolution CSG Success Fixtures (v1.0)](../specifications/surface-383-planar-and-revolution-csg-success-fixtures-v1_0.md)
+- [x] [Surface Spec 402A: B-Spline/NURBS Body CSG Evidence Contract And Prerequisite Audit (v1.0)](../specifications/surface-402a-b-spline-nurbs-body-csg-evidence-contract-and-prerequisite-audit-v1_0.md)
+- [x] [Surface Spec 402B1: Analytic To B-Spline Body CSG Evidence Completion (v1.0)](../specifications/surface-402b1-analytic-to-b-spline-body-csg-evidence-completion-v1_0.md)
+- [x] [Surface Spec 402B2: Analytic To NURBS Body CSG Evidence Completion (v1.0)](../specifications/surface-402b2-analytic-to-nurbs-body-csg-evidence-completion-v1_0.md)
+- [x] [Surface Spec 402C: Spline/NURBS Pair Curve Body CSG Evidence Completion (v1.0)](../specifications/surface-402c-spline-nurbs-pair-curve-body-csg-evidence-completion-v1_0.md)
+- [x] [Surface Spec 402D: Spline/NURBS Coincident Region Body CSG Evidence Completion (v1.0)](../specifications/surface-402d-spline-nurbs-coincident-region-body-csg-evidence-completion-v1_0.md)
+- [x] [Surface Spec 402E: B-Spline/NURBS Patch Evidence Collector And Body-Route Readiness Gate (v1.0)](../specifications/surface-402e-b-spline-nurbs-patch-evidence-collector-and-body-route-readiness-gate-v1_0.md)
+- [x] [Surface Spec 401: B-Spline/NURBS Body-Level CSG Route Integration (v1.0)](../specifications/surface-401-b-spline-nurbs-body-level-csg-route-integration-v1_0.md)
+  - Complete; reachable and validated through `surface_boolean_result` with authored B-spline/NURBS closed-body operands, closed `SurfaceBody` success results, deterministic unsupported-operation refusal, provenance metadata, and no-mesh-fallback evidence.
+- [x] [Surface Spec 384: B-Spline And NURBS CSG Success Fixtures (v1.0)](../specifications/surface-384-b-spline-and-nurbs-csg-success-fixtures-v1_0.md)
+  - Complete; added analytic/B-spline, analytic/NURBS, and B-spline/NURBS public intersection dirty STL fixtures with review records, route metadata checks, generated artifacts, and no-mesh-fallback evidence.
+- [x] [Surface Spec 385: Sweep And Subdivision CSG Success Fixtures (v1.0)](../specifications/surface-385-sweep-and-subdivision-csg-success-fixtures-v1_0.md)
+  - Complete; added sweep/planar and subdivision/planar public intersection dirty STL fixtures with declared-tolerance route metadata checks, generated artifacts, and no-mesh-fallback evidence.
+- [x] [Surface Spec 386: Mixed Planar Ruled Revolution Matrix Fixtures (v1.0)](../specifications/surface-386-mixed-planar-ruled-revolution-matrix-fixtures-v1_0.md)
+  - Complete; added an explicit representative matrix coverage record/test for the existing planar/revolution, revolution/planar, and ruled/planar dirty STL fixtures.
+- [x] [Surface Spec 387: Sampled Implicit Promotion Success Fixtures (v1.0)](../specifications/surface-387-sampled-implicit-promotion-success-fixtures-v1_0.md)
+  - Complete; chose implicit, subdivision, NURBS, and B-spline promotion target expectations from the sampled/implicit promotion matrix, added dirty STL fixtures and review records, and validated target-family/no-mesh-fallback metadata before export.
+- [x] [Surface Spec 388: Unsupported-Family Refusal Fixtures (v1.0)](../specifications/surface-388-unsupported-family-refusal-fixtures-v1_0.md)
+  - Complete; added diagnostic-only RT-PATCH-CSG-013 review fixtures for non-CSG replacement, unsafe implicit, and malformed promotion refusals, with no artifact paths and no-mesh-fallback evidence checked through the sampled/implicit refusal matrix.
+- [x] [Surface Spec 389: No-Hidden-Mesh-Fallback Evidence Fixtures (v1.0)](../specifications/surface-389-no-hidden-mesh-fallback-evidence-fixtures-v1_0.md)
+  - Complete; added a bounded no-hidden-mesh-fallback audit matrix for advanced patch families plus sampled/implicit reference proofs, reusing stable CSG evidence payloads without generating new STL artifacts.
+- [x] [Surface Spec 390: Loft Self-Intersection Validity Detector (v1.0)](../specifications/surface-390-loft-self-intersection-validity-detector-v1_0.md)
+  - Complete; added planner and executed-body loft self-intersection validity reports based on stable branch-crossing metadata, exported the detector APIs, and covered clean and refusal paths without invoking mesh fallback.
+- [x] [Surface Spec 391: Loft Self-Intersection Diagnostic Reference Fixture (v1.0)](../specifications/surface-391-loft-self-intersection-diagnostic-reference-fixture-v1_0.md)
+  - Complete; added RT-LOFT-037 as a diagnostic-only review fixture backed by the loft self-intersection detector, with review context, no artifact paths, and no-mesh-fallback payload assertions.
+- [x] [Surface Spec 392: Loft CSG Eligibility Gate (v1.0)](../specifications/surface-392-loft-csg-eligibility-gate-v1_0.md)
+  - Complete; added loft-owned shell/provenance validity summaries, threaded them into CSG loft eligibility provenance, and verified eligible, branching, self-intersection, and underconstrained/no-mesh-fallback gate behavior.
+- [x] [Surface Spec 393: Loft Primitive Difference And Intersection Routes (v1.0)](../specifications/surface-393-loft-primitive-difference-and-intersection-routes-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 403-407 and 420-429 now provide eligible loft shell evidence, loft/primitive difference/intersection public routes, accepted box cut execution, structured unsupported cutter refusals, and no-hidden-mesh validation.
+- [x] [Surface Spec 394: Loft Primitive Union Route (v1.0)](../specifications/surface-394-loft-primitive-union-route-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 403-407 and 420-429 now provide eligible loft shell evidence plus exact and intersecting loft/primitive union public routes with surface-native result metadata and no-hidden-mesh validation.
+- [x] [Surface Spec 395: Loft Loft Pair Operation Routes (v1.0)](../specifications/surface-395-loft-loft-pair-operation-routes-v1_0.md)
+  - Complete; added the public `surface-csg.loft-pair` route, paired-loft operation plan metadata, exported executor, and public difference/union/intersection tests for eligible single-shell loft operands without hidden mesh fallback.
+- [x] [Surface Spec 396: Single-Shell Loft CSG Reference Fixtures (v1.0)](../specifications/surface-396-single-shell-loft-csg-reference-fixtures-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 430-431 and existing fixture-registry section bundle work now gate dirty STL and section evidence readiness on accepted public loft CSG result geometry.
+- [x] [Surface Spec 397: Branching Loft CSG Execution Policy (v1.0)](../specifications/surface-397-branching-loft-csg-execution-policy-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 408-410 provide branch graph evidence, branching policy classification, and decomposition/recomposition planning records.
+- [x] [Surface Spec 398: Underconstrained Branching Loft CSG Refusal Fixture (v1.0)](../specifications/surface-398-underconstrained-branching-loft-csg-refusal-fixture-v1_0.md)
+  - Complete; added RT-LOFT-CSG-014 as a diagnostic-only review fixture backed by the loft CSG eligibility gate, with no artifact paths and no-mesh-fallback refusal payload assertions.
+- [x] [Surface Spec 399: Loft CSG Metadata Color Propagation (v1.0)](../specifications/surface-399-loft-csg-metadata-color-propagation-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 411-412 provide fragment provenance, generated-surface style policy, and color ownership metadata on loft CSG results.
+- [x] [Surface Spec 400: Loft CSG Section Evidence Artifacts (v1.0)](../specifications/surface-400-loft-csg-section-evidence-artifacts-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 413-419 and 431 provide evidence bundle schema, registry integration, section contracts, and accepted-geometry section readiness handoff.
+
+#### ACD-Derived Loft CSG Completion Leaves
+
+- [x] [Surface Spec 403: Loft Boundary Graph And Seam Coverage Evidence (v1.0)](../specifications/surface-403-loft-boundary-graph-and-seam-coverage-evidence-v1_0.md)
+  - Complete; added loft boundary graph and seam coverage DTOs/helpers, executor-authored payloads, shell validity handoff, and public CSG eligibility coverage for complete/missing/duplicate/dangling seam diagnostics without tessellation.
+- [x] [Surface Spec 404: Loft Closure And Cap Validity Evidence (v1.0)](../specifications/surface-404-loft-closure-and-cap-validity-evidence-v1_0.md)
+  - Complete; added loft cap validity and closure evidence DTOs/helpers, executor-authored closed-valid gating, CSG consumption of closure evidence, and focused coverage for capped, uncapped, and invalid cap orientation paths.
+- [x] [Surface Spec 405: Loft CSG Operation Route Selection (v1.0)](../specifications/surface-405-loft-csg-operation-route-selection-v1_0.md)
+  - Complete; added loft CSG route selection records/helpers, executor-evidence scoping so legacy ruled-box routes stay on their existing path, public boolean API route-selection messaging, and supported/unsupported route tests without executing Surface Spec 406 geometry.
+- [x] [Surface Spec 406: Single-Shell Loft Primitive CSG Execution (v1.0)](../specifications/surface-406-single-shell-loft-primitive-csg-execution-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 420-429 now cover exact reuse, trim-fragment adaptation, kernel evidence, persistence/proof, and public cut executor integration for single-shell loft/primitive CSG.
+- [x] [Surface Spec 420: Loft Primitive Exact Reuse Execution (v1.0)](../specifications/surface-420-loft-primitive-exact-reuse-execution-v1_0.md)
+  - Complete; reachable and validated through the public `surface_boolean_result` route for exact no-cut/containment loft/primitive difference, intersection, and union cases, with loft primitive route metadata, result geometry metadata, fragment participation records, and no-hidden-mesh proof.
+- [x] [Surface Spec 421: Loft Primitive Trim-Fragment Adapter (v1.0)](../specifications/surface-421-loft-primitive-trim-fragment-adapter-v1_0.md)
+  - Complete; added exported loft primitive trim adapter and fragment classification records/helpers, wired intersecting loft/primitive public API cases to structured adapter evidence and no-hidden-mesh refusal pending Surface Spec 422 shell assembly, and validated adapter DTOs/classifications through focused public-route tests.
+- [x] [Surface Spec 422: Loft Primitive Cut Shell Assembly And Validity (v1.0)](../specifications/surface-422-loft-primitive-cut-shell-assembly-and-validity-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 423-429 split and complete source normalization, cut loops, generated caps, topology selection, shell assembly evidence, runtime validity, persistence, no-hidden-mesh proof, and public executor integration.
+- [x] [Surface Spec 423: Loft Primitive Intersection Source Normalization (v1.0)](../specifications/surface-423-loft-primitive-intersection-source-normalization-v1_0.md)
+  - Complete; added exported loft primitive source-region records/diagnostics and source normalizer, wired intersecting loft/primitive public API refusal payloads to include source-normalization evidence, and preserved no-hidden-mesh proof for box, sphere, cylinder, and unsupported-region diagnostics.
+- [x] [Surface Spec 423 Test: Loft Primitive Intersection Source Normalization](../test-specifications/surface-423-loft-primitive-intersection-source-normalization-v1_0.md)
+  - Complete; focused tests validate helper records and public Boolean route payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 424: Loft Patch-Local Cut Loop Construction (v1.0)](../specifications/surface-424-loft-patch-local-cut-loop-construction-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 424a-424c complete source-curve inversion, cut-loop closure/boundary participation, and degeneracy diagnostics.
+- [x] [Surface Spec 424a: Loft Patch-Local Source Curve Inversion (v1.0)](../specifications/surface-424a-loft-patch-local-source-curve-inversion-v1_0.md)
+  - Complete; added exported patch-local inversion records/diagnostics and inversion helper, reused validated trim-adapter patch-local curves without tessellation, and wired public loft/primitive refusal payloads to expose patch-local inversion records or deterministic no-mesh diagnostics.
+- [x] [Surface Spec 424a Test: Loft Patch-Local Source Curve Inversion](../test-specifications/surface-424a-loft-patch-local-source-curve-inversion-v1_0.md)
+  - Complete; focused tests validate box source-curve inversion, sphere missing-source-curve refusal, and public Boolean route inversion payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 424b: Loft Cut Loop Closure And Boundary Participation (v1.0)](../specifications/surface-424b-loft-cut-loop-closure-and-boundary-participation-v1_0.md)
+  - Complete; added exported cut-loop closure and boundary participation records/diagnostics, closed validated patch-local inversion extents without tessellation or shell assembly, and wired public loft/primitive refusal payloads to expose cut-loop closure evidence before generated-cap construction.
+- [x] [Surface Spec 424b Test: Loft Cut Loop Closure And Boundary Participation](../test-specifications/surface-424b-loft-cut-loop-closure-and-boundary-participation-v1_0.md)
+  - Complete; focused tests validate closed loop records, missing-inversion refusal, preserved source/cap/seam participation, and public Boolean route closure payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 424c: Loft Cut Loop Degeneracy Diagnostics (v1.0)](../specifications/surface-424c-loft-cut-loop-degeneracy-diagnostics-v1_0.md)
+  - Complete; added exported cut-loop degeneracy diagnostics/classifier, gates valid closed loops before generated-cap construction, and classifies open-loop, invalid-closure, zero-area, tangent, grazing, and duplicate-segment outcomes without tessellation.
+- [x] [Surface Spec 424c Test: Loft Cut Loop Degeneracy Diagnostics](../test-specifications/surface-424c-loft-cut-loop-degeneracy-diagnostics-v1_0.md)
+  - Complete; focused tests validate accepted loops, each degeneracy class, and public loft/primitive route refusal diagnostics with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 425: Loft Primitive Generated Cap Construction (v1.0)](../specifications/surface-425-loft-primitive-generated-cap-construction-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 425a-425c complete cap support classification, generated cap records, and cap-loop pairing diagnostics.
+- [x] [Surface Spec 425a: Loft Primitive Cap Support Classification (v1.0)](../specifications/surface-425a-loft-primitive-cap-support-classification-v1_0.md)
+  - Complete; added exported loft primitive cap support classification records/diagnostics, classifies box cut loops as planar-cap supported, and refuses missing or degenerate analytic cap paths through public loft/primitive route evidence without tessellation.
+- [x] [Surface Spec 425a Test: Loft Primitive Cap Support Classification](../test-specifications/surface-425a-loft-primitive-cap-support-classification-v1_0.md)
+  - Complete; focused tests validate supported box cap policy, unsupported sphere cap diagnostics, and public Boolean route cap-support payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 425b: Loft Primitive Generated Cap Record Construction (v1.0)](../specifications/surface-425b-loft-primitive-generated-cap-record-construction-v1_0.md)
+  - Complete; added exported generated cap records and builder, constructs source-native planar cap payloads from supported classifications, preserves source identity/provenance, and refuses missing or unsupported support classifications before construction.
+- [x] [Surface Spec 425b Test: Loft Primitive Generated Cap Record Construction](../test-specifications/surface-425b-loft-primitive-generated-cap-record-construction-v1_0.md)
+  - Complete; focused tests validate generated cap record identity/provenance, missing-support refusal, and public Boolean route generated-cap payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 425c: Loft Primitive Cap Loop Pairing And Diagnostics (v1.0)](../specifications/surface-425c-loft-primitive-cap-loop-pairing-and-diagnostics-v1_0.md)
+  - Complete; added exported cap-loop pairing records/diagnostics and exact pairing gate, pairs generated caps to their source cut loops exactly once, and refuses missing or duplicate cap-loop evidence before topology selection.
+- [x] [Surface Spec 425c Test: Loft Primitive Cap Loop Pairing And Diagnostics](../test-specifications/surface-425c-loft-primitive-cap-loop-pairing-and-diagnostics-v1_0.md)
+  - Complete; focused tests validate exact pairing, missing/duplicate pair refusals, and public Boolean route cap-loop pairing payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 426: Loft Primitive Fragment Topology And Operation Selection (v1.0)](../specifications/surface-426-loft-primitive-fragment-topology-and-operation-selection-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 426a-426c complete fragment retention, result topology classification, and topology orientation diagnostics.
+- [x] [Surface Spec 426a: Loft Primitive Operation Fragment Retention (v1.0)](../specifications/surface-426a-loft-primitive-operation-fragment-retention-v1_0.md)
+  - Complete; added exported retained-fragment records/diagnostics and operation retention helper, preserves source identity and operation provenance for union/difference/intersection, and exposes retention evidence through the public loft/primitive route before topology classification.
+- [x] [Surface Spec 426a Test: Loft Primitive Operation Fragment Retention](../test-specifications/surface-426a-loft-primitive-operation-fragment-retention-v1_0.md)
+  - Complete; focused tests validate retention for all Boolean operations, empty-classification refusal, and public Boolean route retention payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 426b: Loft Primitive Result Topology Classification (v1.0)](../specifications/surface-426b-loft-primitive-result-topology-classification-v1_0.md)
+  - Complete; added exported retained-fragment topology records/diagnostics and topology classifier, classifies empty, exterior edit, interior cavity, multi-shell, and refused topologies before shell assembly, and exposes topology evidence through the public loft/primitive route.
+- [x] [Surface Spec 426b Test: Loft Primitive Result Topology Classification](../test-specifications/surface-426b-loft-primitive-result-topology-classification-v1_0.md)
+  - Complete; focused tests validate deterministic topology classes, missing input/cap refusal, and public Boolean route topology payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 426c: Loft Primitive Topology Orientation And Refusal Diagnostics (v1.0)](../specifications/surface-426c-loft-primitive-topology-orientation-and-refusal-diagnostics-v1_0.md)
+  - Complete; added exported topology orientation readiness records/diagnostics and gate, reports ready topology handoff or precise refused-topology, ambiguous inside/outside, inverted-normal, and cap-orientation conflict diagnostics before seam/use pairing.
+- [x] [Surface Spec 426c Test: Loft Primitive Topology Orientation And Refusal Diagnostics](../test-specifications/surface-426c-loft-primitive-topology-orientation-and-refusal-diagnostics-v1_0.md)
+  - Complete; focused tests validate ready and refused orientation states plus public Boolean route orientation payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 427: Loft Primitive Seam And Shell Assembly (v1.0)](../specifications/surface-427-loft-primitive-seam-and-shell-assembly-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 427a-427c complete seam/use pairing, candidate shell assembly evidence, and adjacency rebuild diagnostics.
+- [x] [Surface Spec 427a: Loft Primitive Seam Use Pairing (v1.0)](../specifications/surface-427a-loft-primitive-seam-use-pairing-v1_0.md)
+  - Complete; added exported seam/use pairing records/diagnostics and boundary-use pairing gate, preserves source patch/cap identity, and refuses orientation-not-ready, dangling, duplicate, and one-to-many boundary uses before candidate shell assembly.
+- [x] [Surface Spec 427a Test: Loft Primitive Seam Use Pairing](../test-specifications/surface-427a-loft-primitive-seam-use-pairing-v1_0.md)
+  - Complete; focused tests validate valid seam/use pairing, invalid pairing diagnostics, and public Boolean route seam-use payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 427b: Loft Primitive Candidate Shell Assembly (v1.0)](../specifications/surface-427b-loft-primitive-candidate-shell-assembly-v1_0.md)
+  - Complete; added exported candidate shell records/diagnostics and candidate assembly helper, records retained fragments, generated caps, and seam/use pairings without runtime validity/persistence, and refuses missing orientation or seam/use evidence before body creation.
+- [x] [Surface Spec 427b Test: Loft Primitive Candidate Shell Assembly](../test-specifications/surface-427b-loft-primitive-candidate-shell-assembly-v1_0.md)
+  - Complete; focused tests validate supported candidate evidence, missing participant refusal, and public Boolean route candidate-shell payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 427c: Loft Primitive Adjacency Rebuild Diagnostics (v1.0)](../specifications/surface-427c-loft-primitive-adjacency-rebuild-diagnostics-v1_0.md)
+  - Complete; added exported adjacency rebuild records/diagnostics and readiness helper, reports complete candidate-shell adjacency or missing, duplicate, inconsistent, and candidate-not-ready diagnostics before runtime validity checks.
+- [x] [Surface Spec 427c Test: Loft Primitive Adjacency Rebuild Diagnostics](../test-specifications/surface-427c-loft-primitive-adjacency-rebuild-diagnostics-v1_0.md)
+  - Complete; focused tests validate complete adjacency, invalid link diagnostics, and public Boolean route adjacency payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 428: Loft Primitive Runtime Validity And Persistence Gate (v1.0)](../specifications/surface-428-loft-primitive-runtime-validity-and-persistence-gate-v1_0.md)
+  - Closed as superseded and covered; Surface Specs 428a-428c complete runtime validity, accepted-result persistence/tessellation readiness, and no-hidden-mesh acceptance proof.
+- [x] [Surface Spec 428a: Loft Primitive Runtime Validity Checker (v1.0)](../specifications/surface-428a-loft-primitive-runtime-validity-checker-v1_0.md)
+  - Complete; added exported runtime validity records/diagnostics and validity checker, reports valid candidate shells or open-shell, non-manifold, inconsistent-orientation, and stale-evidence diagnostics before persistence.
+- [x] [Surface Spec 428a Test: Loft Primitive Runtime Validity Checker](../test-specifications/surface-428a-loft-primitive-runtime-validity-checker-v1_0.md)
+  - Complete; focused tests validate valid and invalid runtime states plus public Boolean route validity payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 428b: Loft Primitive Persistence And Tessellation Readiness (v1.0)](../specifications/surface-428b-loft-primitive-persistence-and-tessellation-readiness-v1_0.md)
+  - Complete; added exported accepted-result persistence/readiness records/diagnostics and metadata-only persistence gate, persists runtime-valid shell evidence with tessellation readiness while refusing invalid, stale, or non-ready shells without eager mesh/STL generation.
+- [x] [Surface Spec 428b Test: Loft Primitive Persistence And Tessellation Readiness](../test-specifications/surface-428b-loft-primitive-persistence-and-tessellation-readiness-v1_0.md)
+  - Complete; focused tests validate valid persistence, stale/invalid/non-ready refusal, and public Boolean route accepted-result readiness payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 428c: Loft Primitive No Hidden Mesh Acceptance Proof (v1.0)](../specifications/surface-428c-loft-primitive-no-hidden-mesh-acceptance-proof-v1_0.md)
+  - Complete; added exported no-hidden-mesh proof records/diagnostics, proof builder, and assertion hook so persisted loft/primitive accepted results can prove they remain surface-body results without hidden mesh fallback.
+- [x] [Surface Spec 428c Test: Loft Primitive No Hidden Mesh Acceptance Proof](../test-specifications/surface-428c-loft-primitive-no-hidden-mesh-acceptance-proof-v1_0.md)
+  - Complete; focused tests validate accepted proof construction, missing/fallback refusal, and public Boolean route proof payloads with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 429: Loft Primitive Public Cut Executor Integration (v1.0)](../specifications/surface-429-loft-primitive-public-cut-executor-integration-v1_0.md)
+  - Complete; added exported public loft/primitive cut executor scope/diagnostic records and route integration so true intersecting loft/primitive box cuts return accepted `SurfaceBooleanResult` bodies with shared kernel evidence metadata while invalid cut evidence remains a structured no-mesh refusal.
+- [x] [Surface Spec 429 Test: Loft Primitive Public Cut Executor Integration](../test-specifications/surface-429-loft-primitive-public-cut-executor-integration-v1_0.md)
+  - Complete; focused route tests validate public difference, union, intersection, direct executor invocation, structured invalid refusal, and exact-reuse precedence with `.venv/bin/python -m pytest tests/test_surface_csg.py -k "loft_primitive" -q`.
+- [x] [Surface Spec 407: Loft CSG Result Geometry Reference Proof (v1.0)](../specifications/surface-407-loft-csg-result-geometry-reference-proof-v1_0.md)
+  - Closed as superseded and covered; Surface Spec 430 gates reference geometry proof on accepted public loft CSG result geometry.
+- [x] [Surface Spec 430: Loft CSG Reference Geometry Handoff Proof (v1.0)](../specifications/surface-430-loft-csg-reference-geometry-handoff-proof-v1_0.md)
+  - Complete; added loft CSG reference geometry handoff records/diagnostics and validation so dirty STL readiness is granted only to accepted public loft CSG `SurfaceBooleanResult` bodies with public executor metadata, while adapter-only, synthetic, sampled, or non-success payloads refuse before artifact writing.
+- [x] [Surface Spec 430 Test: Loft CSG Reference Geometry Handoff Proof](../test-specifications/surface-430-loft-csg-reference-geometry-handoff-proof-v1_0.md)
+  - Complete; workflow tests validate accepted handoff, refusal cases, dirty STL write smoke, and source-registry entrypoint integration with `.venv/bin/python -m pytest tests/test_reference_stl_expansion.py tests/test_reference_review_source_registry.py -q`.
+- [x] [Surface Spec 408: Loft Branch Graph Evidence (v1.0)](../specifications/surface-408-loft-branch-graph-evidence-v1_0.md)
+  - Complete; added exported loft branch graph and branch joint evidence records/builders, deterministic underconstrained branch diagnostics, and public CSG eligibility provenance coverage without tessellation.
+- [x] [Surface Spec 409: Branching Loft CSG Policy Classification (v1.0)](../specifications/surface-409-branching-loft-csg-policy-classification-v1_0.md)
+  - Complete; added exported branching loft CSG policy and diagnostic records, classified complete branch graphs as decomposition-required, refused underconstrained/self-intersecting branch graphs before execution, and wired the policy into public loft eligibility provenance.
+- [x] [Surface Spec 410: Branch Decomposition And Recomposition Records (v1.0)](../specifications/surface-410-branch-decomposition-and-recomposition-records-v1_0.md)
+  - Complete; added exported branch decomposition/sub-body/recomposition records, branch-local CSG planning from complete branch policy evidence, recomposition validation records, and eligibility provenance for decomposition-required branch routes without executing geometry prematurely.
+- [x] [Surface Spec 411: Loft CSG Fragment Provenance Map (v1.0)](../specifications/surface-411-loft-csg-fragment-provenance-map-v1_0.md)
+  - Complete; added exported loft CSG source/result fragment provenance records, deterministic missing/generated provenance handling, reusable provenance mapping, and attached provenance payloads to successful loft primitive result metadata.
+- [x] [Surface Spec 412: Loft CSG Color Ownership Resolver (v1.0)](../specifications/surface-412-loft-csg-color-ownership-resolver-v1_0.md)
+  - Complete; added exported loft CSG color ownership and generated-surface style policy records, authored/fallback color resolution from fragment provenance, successful result metadata attachment, and generated-fragment resolver tests.
+- [x] [Surface Spec 413: File Fixture Evidence Bundle Schema (v1.0)](../specifications/surface-413-file-fixture-evidence-bundle-schema-v1_0.md)
+  - Complete; added file-backed typed evidence bundle/artifact records, additive fixture parsing, required/optional artifact validation, path diagnostics, package exports, and compatibility tests preserving existing `artifact_paths`.
+- [x] [Surface Spec 414: Database Fixture Evidence Bundle Parity (v1.0)](../specifications/surface-414-database-fixture-evidence-bundle-parity-v1_0.md)
+  - Complete; added database evidence bundle load/serialize helpers, optional SQLite `evidence_bundles` hydration through the same source record shape, package exports, and DB parity tests while keeping legacy rows valid.
+- [x] [Surface Spec 415: Review UI Evidence Context Tab Display (v1.0)](../specifications/surface-415-review-ui-evidence-context-tab-display-v1_0.md)
+  - Complete; added context evidence summary display models/mapping, sanitized bundle/role summary text, selected-fixture context wiring, UI package exports, and focused view-model tests for bundled fixtures.
+- [x] [Surface Spec 416: Review UI Evidence Artifacts Tab Display (v1.0)](../specifications/surface-416-review-ui-evidence-artifacts-tab-display-v1_0.md)
+  - Complete; added artifact evidence row display models/mapping, required/optional missing status formatting, metadata-only artifacts tab wiring, UI package exports, and focused view-model tests without opening artifact payloads.
+- [x] [Surface Spec 417: Section Evidence Contract Records (v1.0)](../specifications/surface-417-section-evidence-contract-records-v1_0.md)
+  - Complete; added exported section evidence contract records and role/plane validation, parser support for section plane metadata, fixture-load diagnostics for missing expected/actual/diff roles or plane metadata, and focused loader tests.
+- [x] [Surface Spec 418: Loft CSG Section Artifact Generation (v1.0)](../specifications/surface-418-loft-csg-section-artifact-generation-v1_0.md)
+  - Closed as superseded and covered; Surface Spec 431 gates section evidence readiness on accepted public result geometry and declared section inputs.
+- [x] [Surface Spec 431: Loft CSG Section Evidence Readiness Handoff (v1.0)](../specifications/surface-431-loft-csg-section-evidence-readiness-handoff-v1_0.md)
+  - Complete; added section evidence readiness records/diagnostics and workflow validation so section bundles are ready only when backed by accepted loft CSG reference geometry handoff plus explicit section plane evidence.
+- [x] [Surface Spec 431 Test: Loft CSG Section Evidence Readiness Handoff](../test-specifications/surface-431-loft-csg-section-evidence-readiness-handoff-v1_0.md)
+  - Complete; workflow tests validate accepted readiness, missing-plane refusal, detached-evidence refusal, and source-registry entrypoint integration with `.venv/bin/python -m pytest tests/test_reference_stl_expansion.py tests/test_reference_review_source_registry.py -q`.
+- [x] [Surface Spec 419: Fixture Registry Integration For Section Bundles (v1.0)](../specifications/surface-419-fixture-registry-integration-for-section-bundles-v1_0.md)
+  - Complete; added exported dirty/gold evidence path-set and section bundle fixture-record builders, validated generated path references through standard evidence bundles, and covered fixture-loader integration for generated section bundle records.
+
+### CSG Reference Completion Ad Hoc Leaves
+- [x] [CSG Reference Spec 01: Primitive Analytic Surface Boolean Execution](../adhoc/2026-07-09-csg-reference-01-primitive-analytic-surface-boolean-execution.md)
+- [x] [CSG Reference Spec 02a: Trim Arrangement Graph Construction](../adhoc/2026-07-09-csg-reference-02a-trim-arrangement-graph-construction.md)
+- [x] [CSG Reference Spec 02b: Fragment Classification And Operation Selection](../adhoc/2026-07-09-csg-reference-02b-fragment-classification-and-operation-selection.md)
+- [x] [CSG Reference Spec 02c1: Shell And Seam Assembly](../adhoc/2026-07-09-csg-reference-02c1-shell-and-seam-assembly.md)
+- [x] [CSG Reference Spec 02c2: Cap Patch And Validity Gate](../adhoc/2026-07-09-csg-reference-02c2-cap-patch-and-validity-gate.md)
+- [x] [CSG Reference Spec 03: Multi-Operand Boolean Composition](../adhoc/2026-07-09-csg-reference-03-multi-operand-boolean-composition.md)
+- [x] [CSG Reference Spec 04a: Lofted Body Eligibility And Refusal Diagnostics](../adhoc/2026-07-09-csg-reference-04a-lofted-body-eligibility-and-refusal-diagnostics.md)
+- [x] [CSG Reference Spec 04b1: Ruled Patch Box-Cutter Execution](../adhoc/2026-07-09-csg-reference-04b1-ruled-patch-box-cutter-execution.md)
+- [x] [CSG Reference Spec 04b2: Ruled Patch Unsupported Cutter Diagnostics](../adhoc/2026-07-09-csg-reference-04b2-ruled-patch-unsupported-cutter-diagnostics.md)
+- [x] [CSG Reference Spec 04c: Loft CSG Reference Evidence](../adhoc/2026-07-09-csg-reference-04c-loft-csg-reference-evidence.md)
+- [x] [CSG Reference Spec 05a: Higher-Order Patch Family Boolean Routes](../adhoc/2026-07-09-csg-reference-05a-higher-order-patch-family-boolean-routes.md)
+- [x] [CSG Reference Spec 05b1: Implicit Field Boolean Routes](../adhoc/2026-07-09-csg-reference-05b1-implicit-field-boolean-routes.md)
+- [x] [CSG Reference Spec 05b2a: Heightmap Boolean Routes](../adhoc/2026-07-09-csg-reference-05b2a-heightmap-boolean-routes.md)
+- [x] [CSG Reference Spec 05b2b1: Displacement Source Identity And Refusal Route](../adhoc/2026-07-09-csg-reference-05b2b1-displacement-source-identity-and-refusal-route.md)
+- [x] [CSG Reference Spec 05b2b2a: Displacement Result Construction Route](../adhoc/2026-07-09-csg-reference-05b2b2a-displacement-result-construction-route.md)
+- [x] [CSG Reference Spec 05b2b2b: Displacement Payload Persistence Evidence](../adhoc/2026-07-09-csg-reference-05b2b2b-displacement-payload-persistence-evidence.md)
+- [x] [CSG Reference Spec 05c1: Supported Advanced Patch Dirty STL Evidence](../adhoc/2026-07-09-csg-reference-05c1-supported-advanced-patch-dirty-stl-evidence.md)
+- [x] [CSG Reference Spec 05c2: Unsupported Advanced Patch Diagnostic Evidence](../adhoc/2026-07-09-csg-reference-05c2-unsupported-advanced-patch-diagnostic-evidence.md)

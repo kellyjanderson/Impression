@@ -6,22 +6,41 @@ import numpy as np
 import pytest
 
 from impression.modeling import (
+    ADVANCED_PATCH_FAMILIES,
+    BSplineSurfacePatch,
+    DisplacementSurfacePatch,
+    HeightmapSurfacePatch,
+    ImplicitSurfacePatch,
+    NURBSSurfacePatch,
+    PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS,
     ParameterDomain,
+    PatchFamilyCapabilityRecord,
     PlanarSurfacePatch,
     RevolutionSurfacePatch,
     RuledSurfacePatch,
+    SubdivisionSurfacePatch,
     SurfaceAdjacencyRecord,
     SurfaceBoundaryRef,
     SurfacePatch,
     SurfaceSeam,
     SurfaceShell,
+    SweepSurfacePatch,
     TessellationRequest,
+    assert_advanced_patch_family_promotion_gate,
+    assert_patch_family_capability_matrix,
+    assert_patch_family_operation_coverage,
+    assess_patch_family_availability_promotion,
+    evaluate_advanced_patch_family_promotion_gate,
     TrimLoop,
     make_surface_body,
     make_surface_shell,
     normalize_tessellation_request,
     tessellate_surface_body,
+    run_advanced_patch_family_promotion_gate,
+    run_patch_family_availability_promotion_pass,
+    validate_patch_family_availability_gate,
 )
+from impression.modeling.path3d import Path3D
 from impression.modeling._surface_ops import (
     _as_vec3 as _ops_as_vec3,
     _attached_transform as _ops_attached_transform,
@@ -57,6 +76,7 @@ from impression.modeling.surface import (
     _signed_area_2d,
     _split_metadata,
     _transform_bounds,
+    make_implicit_field_node,
 )
 from impression.modeling.tessellation import (
     _boundary_is_collapsed,
@@ -84,6 +104,71 @@ class _DegeneratePatch(SurfacePatch):
 
     def geometry_payload(self) -> dict[str, object]:
         return {"mode": "degenerate"}
+
+
+def _all_surface_patch_family_fixtures() -> tuple[SurfacePatch, ...]:
+    control_net = np.array(
+        [
+            [[0.0, 0.0, 0.0], [0.0, 1.0, 0.2], [0.0, 2.0, 0.0]],
+            [[1.0, 0.0, 0.1], [1.0, 1.0, 0.4], [1.0, 2.0, 0.1]],
+            [[2.0, 0.0, 0.0], [2.0, 1.0, 0.2], [2.0, 2.0, 0.0]],
+        ],
+        dtype=float,
+    )
+    knots = (0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+    source = PlanarSurfacePatch(family="planar", metadata={"kernel": {"source": "displacement"}})
+    return (
+        PlanarSurfacePatch(family="planar"),
+        RuledSurfacePatch(family="ruled"),
+        RevolutionSurfacePatch(family="revolution"),
+        BSplineSurfacePatch(
+            family="bspline",
+            degree_u=2,
+            degree_v=2,
+            knots_u=knots,
+            knots_v=knots,
+            control_net=control_net,
+        ),
+        NURBSSurfacePatch(
+            family="nurbs",
+            degree_u=2,
+            degree_v=2,
+            knots_u=knots,
+            knots_v=knots,
+            control_net=control_net,
+            weights=np.ones((3, 3), dtype=float),
+        ),
+        SweepSurfacePatch(
+            family="sweep",
+            profile_points_uv=[(0.0, 0.0), (0.5, 0.25), (1.0, 0.0)],
+            path=Path3D.from_points([(0.0, 0.0, 0.0), (0.0, 0.5, 1.0), (0.0, 0.0, 2.0)]),
+            frame_policy="fixed",
+        ),
+        SubdivisionSurfacePatch(
+            family="subdivision",
+            control_points=[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.1), (0.0, 1.0, 0.0)],
+            faces=((0, 1, 2, 3),),
+            subdivision_level=1,
+        ),
+        ImplicitSurfacePatch(
+            family="implicit",
+            field=make_implicit_field_node("sphere", parameters={"center": (0.0, 0.0, 0.0), "radius": 0.75}),
+            bounds=(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0),
+        ),
+        HeightmapSurfacePatch(
+            family="heightmap",
+            height_samples=np.array([[0.0, 0.25], [0.5, 0.75]], dtype=float),
+            alpha_mask=np.array([[True, True], [False, True]], dtype=bool),
+        ),
+        DisplacementSurfacePatch(
+            family="displacement",
+            source_patch=source,
+            displacement_samples=np.array([[0.0, 0.1], [0.2, 0.3]], dtype=float),
+            alpha_mask=np.array([[True, True], [False, True]], dtype=bool),
+            direction="z",
+            projection_bounds=(-1.0, 1.0, -1.0, 1.0),
+        ),
+    )
 
 
 def test_surface_boundary_and_seam_records_validate_open_and_shared_forms() -> None:
@@ -121,6 +206,179 @@ def test_surface_boundary_and_seam_records_validate_open_and_shared_forms() -> N
 
     with pytest.raises(ValueError, match="continuity must be non-empty"):
         SurfaceSeam("bad-continuity", (open_ref,), continuity="   ")
+
+
+def test_patch_family_capability_matrix_satisfies_availability_gates() -> None:
+    gate_records = assert_patch_family_capability_matrix()
+
+    assert {record.family for record in gate_records} == {
+        "planar",
+        "ruled",
+        "revolution",
+        "bspline",
+        "nurbs",
+        "sweep",
+        "subdivision",
+        "implicit",
+        "heightmap",
+        "displacement",
+    }
+    available = {record.family for record in gate_records if record.available}
+    assert available == {record.family for record in gate_records}
+
+
+def test_patch_family_availability_gate_reports_missing_available_evidence() -> None:
+    record = PatchFamilyCapabilityRecord(
+        family="planar",
+        support_phase="available",
+        operations=("surface-store", "planar-primitives"),
+    )
+
+    gate = validate_patch_family_availability_gate("planar", record)
+
+    assert gate.available is False
+    assert {diagnostic.code for diagnostic in gate.diagnostics} == {
+        "missing-availability-operation",
+    }
+    missing_messages = " ".join(diagnostic.message for diagnostic in gate.diagnostics)
+    for operation in PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS:
+        if operation != "surface-store":
+            assert operation in missing_messages
+
+
+def test_patch_family_availability_gate_allows_planned_families_without_full_evidence() -> None:
+    record = PatchFamilyCapabilityRecord(
+        family="bspline",
+        support_phase="planned",
+        operations=("surface-record", "evaluation"),
+    )
+
+    gate = validate_patch_family_availability_gate("bspline", record)
+
+    assert gate.available is False
+    assert gate.diagnostics == ()
+
+
+def test_patch_family_availability_gate_accepts_implemented_as_non_available_phase() -> None:
+    record = PatchFamilyCapabilityRecord(
+        family="bspline",
+        support_phase="implemented",
+        operations=("surface-record", "evaluation"),
+    )
+
+    gate = validate_patch_family_availability_gate("bspline", record)
+
+    assert gate.support_phase == "implemented"
+    assert gate.available is False
+    assert gate.diagnostics == ()
+
+
+def test_patch_family_availability_promotion_pass_reports_unpromoted_families() -> None:
+    evidence = run_patch_family_availability_promotion_pass()
+
+    by_family = {record.family: record for record in evidence}
+    assert by_family["planar"].promoted_phase == "available"
+    assert by_family["implicit"].promoted_phase == "available"
+    assert by_family["implicit"].diagnostics == ()
+    assert by_family["implicit"].operation_support[0].operation == "surface-store"
+    assert by_family["implicit"].operation_support[0].supported is True
+
+
+def test_patch_family_availability_promotion_promotes_complete_evidence_record() -> None:
+    record = PatchFamilyCapabilityRecord(
+        family="bspline",
+        support_phase="planned",
+        operations=PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS + ("surface-record",),
+    )
+
+    evidence = assess_patch_family_availability_promotion("bspline", record)
+
+    assert evidence.current_phase == "planned"
+    assert evidence.promoted_phase == "available"
+    assert evidence.promoted is True
+    assert evidence.diagnostics == ()
+
+
+def test_patch_family_operation_coverage_assertion_names_missing_operations() -> None:
+    assert_patch_family_operation_coverage("planar")
+
+    with pytest.raises(ValueError, match="source-surface-reference"):
+        assert_patch_family_operation_coverage("planar", ("surface-store", "source-surface-reference"))
+
+
+def test_advanced_patch_family_promotion_gate_reports_all_planned_gaps() -> None:
+    report = run_advanced_patch_family_promotion_gate()
+
+    by_family = {record.family: record for record in report.evidence}
+    assert set(by_family) == set(ADVANCED_PATCH_FAMILIES)
+    assert report.passed is True
+    assert by_family["bspline"].promoted_phase == "available"
+    assert by_family["bspline"].diagnostics == ()
+    assert by_family["nurbs"].promoted_phase == "available"
+    assert by_family["nurbs"].diagnostics == ()
+    assert by_family["sweep"].promoted_phase == "available"
+    assert by_family["sweep"].diagnostics == ()
+    assert by_family["subdivision"].promoted_phase == "available"
+    assert by_family["subdivision"].diagnostics == ()
+    assert by_family["implicit"].promoted_phase == "available"
+    assert by_family["implicit"].diagnostics == ()
+
+
+def test_advanced_patch_family_promotion_gate_promotes_complete_evidence_to_implemented() -> None:
+    record = PatchFamilyCapabilityRecord(
+        family="bspline",
+        support_phase="planned",
+        operations=(
+            "surface-record",
+            "evaluation",
+            "tessellation",
+            ".impress",
+            "caps",
+            "loft",
+            "diagnostics",
+        ),
+    )
+
+    evidence = evaluate_advanced_patch_family_promotion_gate("bspline", record)
+
+    assert evidence.current_phase == "planned"
+    assert evidence.promoted_phase == "implemented"
+    assert evidence.promoted is True
+    assert evidence.diagnostics == ()
+    assert_advanced_patch_family_promotion_gate("bspline", record)
+
+
+def test_advanced_patch_family_promotion_gate_refuses_non_advanced_family() -> None:
+    record = PatchFamilyCapabilityRecord(
+        family="planar",
+        support_phase="available",
+        operations=PATCH_FAMILY_AVAILABILITY_REQUIRED_OPERATIONS + ("planar-primitives",),
+    )
+
+    with pytest.raises(ValueError, match="not an advanced patch family"):
+        assert_advanced_patch_family_promotion_gate("planar", record)
+
+
+def test_surface_body_store_accepts_every_patch_family_as_surface_truth() -> None:
+    patches = _all_surface_patch_family_fixtures()
+
+    body = make_surface_body([make_surface_shell(patches)])
+
+    stored_patches = body.shells[0].patches
+    assert [patch.family for patch in stored_patches] == [
+        "planar",
+        "ruled",
+        "revolution",
+        "bspline",
+        "nurbs",
+        "sweep",
+        "subdivision",
+        "implicit",
+        "heightmap",
+        "displacement",
+    ]
+    assert [patch.stable_identity for patch in stored_patches] == [patch.stable_identity for patch in patches]
+    assert body.iter_patches(world=False) == stored_patches
 
 
 def test_surface_shell_validates_duplicate_seams_and_out_of_range_patch_refs() -> None:
@@ -199,40 +457,35 @@ def test_trim_boundary_seams_validate_boundary_ids_during_tessellation() -> None
         ),
     )
 
-    invalid_index_body = make_surface_body(
-        [
-            make_surface_shell(
-                [patch_a, patch_b],
-                seams=(
-                    SurfaceSeam(
-                        "bad-inner",
-                        (SurfaceBoundaryRef(0, "trim:inner:9"), SurfaceBoundaryRef(1, "trim:outer")),
-                    ),
-                ),
-            )
-        ]
-    )
-    invalid_parse_body = make_surface_body(
-        [
-            make_surface_shell(
-                [patch_a, patch_b],
-                seams=(
-                    SurfaceSeam(
-                        "bad-parse",
-                        (SurfaceBoundaryRef(0, "trim:inner:not-an-int"), SurfaceBoundaryRef(1, "trim:outer")),
-                    ),
-                ),
-            )
-        ]
-    )
-
-    request = normalize_tessellation_request(TessellationRequest(intent="preview"))
-
     with pytest.raises(ValueError, match="out of range"):
-        tessellate_surface_body(invalid_index_body, request)
+        make_surface_body(
+            [
+                make_surface_shell(
+                    [patch_a, patch_b],
+                    seams=(
+                        SurfaceSeam(
+                            "bad-inner",
+                            (SurfaceBoundaryRef(0, "trim:inner:9"), SurfaceBoundaryRef(1, "trim:outer")),
+                        ),
+                    ),
+                )
+            ]
+        )
 
     with pytest.raises(ValueError, match="Invalid trim boundary_id"):
-        tessellate_surface_body(invalid_parse_body, request)
+        make_surface_body(
+            [
+                make_surface_shell(
+                    [patch_a, patch_b],
+                    seams=(
+                        SurfaceSeam(
+                            "bad-parse",
+                            (SurfaceBoundaryRef(0, "trim:inner:not-an-int"), SurfaceBoundaryRef(1, "trim:outer")),
+                        ),
+                    ),
+                )
+            ]
+        )
 
 
 def test_surface_helper_normalizers_and_bounds_cover_low_level_branches() -> None:

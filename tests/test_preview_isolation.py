@@ -87,11 +87,12 @@ def test_pyvista_show_after_modeling_import():
 def test_internal_mesh_show_after_modeling_import():
     code = dedent(
         """
-        from impression.modeling import make_box
+        from impression.modeling import make_box, tessellate_surface_body
         from impression.mesh import mesh_to_pyvista
         import pyvista as pv
 
-        mesh = mesh_to_pyvista(make_box())
+        body = make_box()
+        mesh = mesh_to_pyvista(tessellate_surface_body(body).mesh)
         plotter = pv.Plotter(off_screen=True)
         plotter.add_mesh(mesh)
         plotter.show(auto_close=True, interactive=False)

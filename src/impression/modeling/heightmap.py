@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Sequence
 
@@ -13,13 +14,338 @@ from impression.mesh_quality import MeshQuality, apply_lod
 from ._legacy_mesh_deprecation import warn_mesh_primary_api
 
 if TYPE_CHECKING:
-    from .surface import SurfaceBody
+    from .surface import HeightmapSurfacePatch, SurfaceBody
 
 
 ArrayLike = np.ndarray
 Backend = Literal["mesh", "surface"]
 
 _HEIGHTMAP_CACHE = LRUCache(max_size=32)
+
+
+@dataclass(frozen=True)
+class HeightmapAuthoringRequest:
+    """Validated native finite-grid heightmap authoring request."""
+
+    height_samples: np.ndarray
+    alpha_mask: np.ndarray | None = None
+    alpha_mode: Literal["mask", "ignore"] = "mask"
+    xy_scale: float | Sequence[float] = 1.0
+    center: Sequence[float] = (0.0, 0.0, 0.0)
+    height_scale: float = 1.0
+    metadata: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        samples = validate_heightmap_finite_samples(self.height_samples)
+        mask = np.ones(samples.shape, dtype=bool) if self.alpha_mask is None else np.asarray(self.alpha_mask, dtype=bool)
+        if mask.shape != samples.shape:
+            raise ValueError("HeightmapAuthoringRequest.alpha_mask must match height_samples shape.")
+        alpha_mode = str(self.alpha_mode)
+        if alpha_mode not in {"mask", "ignore"}:
+            raise ValueError("HeightmapAuthoringRequest.alpha_mode must be 'mask' or 'ignore'.")
+        height_scale = float(self.height_scale)
+        if not np.isfinite(height_scale):
+            raise ValueError("HeightmapAuthoringRequest.height_scale must be finite.")
+        object.__setattr__(self, "height_samples", samples)
+        object.__setattr__(self, "alpha_mask", mask)
+        object.__setattr__(self, "alpha_mode", alpha_mode)
+        object.__setattr__(self, "xy_scale", _as_scale(self.xy_scale))
+        object.__setattr__(self, "center", tuple(float(value) for value in np.asarray(self.center, dtype=float).reshape(3)))
+        object.__setattr__(self, "height_scale", height_scale)
+        object.__setattr__(self, "metadata", dict(self.metadata))
+
+
+@dataclass(frozen=True)
+class HeightmapSampleGridProvenanceRecord:
+    """Inspectable provenance for an embedded native heightmap sample grid."""
+
+    family: str
+    operation: str
+    sample_shape: tuple[int, int]
+    masked_sample_count: int
+    total_sample_count: int
+    authoring_boundary: str = "surface-native"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "family": self.family,
+            "operation": self.operation,
+            "sample_shape": self.sample_shape,
+            "masked_sample_count": self.masked_sample_count,
+            "total_sample_count": self.total_sample_count,
+            "authoring_boundary": self.authoring_boundary,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapNoDataDiagnostic:
+    """Diagnostic for mask/no-data behavior in a finite heightmap grid."""
+
+    code: str
+    message: str
+    valid: bool
+    masked_sample_count: int
+    total_sample_count: int
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "valid": self.valid,
+            "masked_sample_count": self.masked_sample_count,
+            "total_sample_count": self.total_sample_count,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapImportRequest:
+    """Optional image/array import request that embeds samples as surface truth."""
+
+    source: str | Path | Image.Image | ArrayLike
+    height: float = 1.0
+    xy_scale: float | Sequence[float] = 1.0
+    center: Sequence[float] = (0.0, 0.0, 0.0)
+    alpha_mode: Literal["mask", "ignore"] = "mask"
+    quality: MeshQuality | None = None
+    embed_samples: bool = True
+    max_sample_count: int = 1_000_000
+    metadata: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        max_sample_count = int(self.max_sample_count)
+        if max_sample_count <= 0:
+            raise ValueError("HeightmapImportRequest.max_sample_count must be positive.")
+        object.__setattr__(self, "max_sample_count", max_sample_count)
+        object.__setattr__(self, "embed_samples", bool(self.embed_samples))
+        object.__setattr__(self, "metadata", dict(self.metadata))
+
+
+@dataclass(frozen=True)
+class HeightmapImportDiagnostic:
+    """Diagnostic for optional heightmap import dependency and payload checks."""
+
+    code: str
+    message: str
+    supported: bool
+    source_kind: str
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "supported": self.supported,
+            "source_kind": self.source_kind,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapAlphaMaskPolicy:
+    alpha_mode: Literal["mask", "ignore"]
+    masked_sample_count: int
+    total_sample_count: int
+
+    @property
+    def has_masked_samples(self) -> bool:
+        return self.masked_sample_count > 0
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "alpha_mode": self.alpha_mode,
+            "masked_sample_count": self.masked_sample_count,
+            "total_sample_count": self.total_sample_count,
+            "has_masked_samples": self.has_masked_samples,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapCacheKeyRecord:
+    cache_key: tuple | None
+    reason: str
+
+    @property
+    def cacheable(self) -> bool:
+        return self.cache_key is not None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cache_key": self.cache_key,
+            "cacheable": self.cacheable,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapMeshCompatibilityResult:
+    mesh: Mesh
+    alpha_policy: HeightmapAlphaMaskPolicy
+    cache_policy: HeightmapCacheKeyRecord
+    boundary: Literal["explicit-mesh-compatibility"] = "explicit-mesh-compatibility"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary": self.boundary,
+            "mesh_vertices": self.mesh.n_vertices,
+            "mesh_faces": self.mesh.n_faces,
+            "alpha_policy": self.alpha_policy.canonical_payload(),
+            "cache_key_policy": self.cache_policy.canonical_payload(),
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapProjectionBoundsPolicy:
+    projection: Literal["planar"]
+    plane: Literal["xy", "xz", "yz"]
+    bounds: tuple[float, float, float, float]
+    source: Literal["explicit", "source-bounds"]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "projection": self.projection,
+            "plane": self.plane,
+            "bounds": self.bounds,
+            "source": self.source,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapSampleCoordinateRecord:
+    projection: Literal["planar"]
+    plane: Literal["xy", "xz", "yz"]
+    bounds: tuple[float, float, float, float]
+    u: np.ndarray
+    v: np.ndarray
+    u_normalized: np.ndarray
+    v_normalized: np.ndarray
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "projection": self.projection,
+            "plane": self.plane,
+            "bounds": self.bounds,
+            "sample_count": int(np.size(self.u_normalized)),
+            "u_normalized_range": (
+                float(np.min(self.u_normalized)) if self.u_normalized.size else 0.0,
+                float(np.max(self.u_normalized)) if self.u_normalized.size else 0.0,
+            ),
+            "v_normalized_range": (
+                float(np.min(self.v_normalized)) if self.v_normalized.size else 0.0,
+                float(np.max(self.v_normalized)) if self.v_normalized.size else 0.0,
+            ),
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapProjectionDomainRecord:
+    """Projected domain facts for one heightmap patch used by preserving CSG."""
+
+    patch_id: str
+    projection: Literal["planar"]
+    plane: Literal["xy", "xz", "yz"]
+    bounds: tuple[float, float, float, float]
+    sample_shape: tuple[int, int]
+    sample_spacing: tuple[float, float]
+    origin: tuple[float, float]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "patch_id": self.patch_id,
+            "projection": self.projection,
+            "plane": self.plane,
+            "bounds": self.bounds,
+            "sample_shape": self.sample_shape,
+            "sample_spacing": self.sample_spacing,
+            "origin": self.origin,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapClippingRecord:
+    """Projected overlap and sample-index clipping facts for two heightmap domains."""
+
+    overlap_bounds: tuple[float, float, float, float]
+    left_index_window: tuple[int, int, int, int]
+    right_index_window: tuple[int, int, int, int]
+
+    @property
+    def has_overlap(self) -> bool:
+        umin, umax, vmin, vmax = self.overlap_bounds
+        return umax > umin and vmax > vmin
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "overlap_bounds": self.overlap_bounds,
+            "left_index_window": self.left_index_window,
+            "right_index_window": self.right_index_window,
+            "has_overlap": self.has_overlap,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapProjectionRefusalDiagnostic:
+    """Deterministic refusal for heightmap-preserving CSG projection planning."""
+
+    code: Literal["projection-mismatch", "disjoint-domain", "invalid-heightmap-domain"]
+    message: str
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapGridAlignmentRecord:
+    """Heightmap-preserving CSG grid alignment plan."""
+
+    supported: bool
+    alignment: Literal["aligned", "resample-required", "refused"]
+    left: HeightmapProjectionDomainRecord
+    right: HeightmapProjectionDomainRecord
+    clipping: HeightmapClippingRecord | None = None
+    result_shape: tuple[int, int] | None = None
+    resample_kernel: Literal["none", "bilinear"] = "none"
+    diagnostics: tuple[HeightmapProjectionRefusalDiagnostic, ...] = ()
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "supported": self.supported,
+            "alignment": self.alignment,
+            "left": self.left.canonical_payload(),
+            "right": self.right.canonical_payload(),
+            "clipping": None if self.clipping is None else self.clipping.canonical_payload(),
+            "result_shape": self.result_shape,
+            "resample_kernel": self.resample_kernel,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
+class HeightmapEvaluationDiagnostic:
+    code: str
+    message: str
+    sample: tuple[float, float]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {"code": self.code, "message": self.message, "sample": self.sample}
+
+
+@dataclass(frozen=True)
+class HeightmapMaskTessellationRecord:
+    alpha_mode: Literal["mask", "ignore"]
+    cell_count: int
+    emitted_face_count: int
+    skipped_cell_count: int
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "alpha_mode": self.alpha_mode,
+            "cell_count": self.cell_count,
+            "emitted_face_count": self.emitted_face_count,
+            "skipped_cell_count": self.skipped_cell_count,
+        }
 
 
 def _as_scale(value: float | Sequence[float]) -> tuple[float, float]:
@@ -75,6 +401,547 @@ def _load_heightmap(image: str | Path | Image.Image | ArrayLike) -> tuple[np.nda
     if isinstance(image, np.ndarray):
         return _normalize_image_array(image)
     raise TypeError("heightmap expects a file path, PIL image, or numpy array.")
+
+
+def resolve_heightmap_alpha_mask_policy(
+    mask: np.ndarray,
+    *,
+    alpha_mode: str,
+) -> HeightmapAlphaMaskPolicy:
+    mode = str(alpha_mode).lower()
+    if mode not in {"mask", "ignore"}:
+        raise ValueError("alpha_mode must be 'mask' or 'ignore'.")
+    mask_arr = np.asarray(mask, dtype=bool)
+    return HeightmapAlphaMaskPolicy(
+        alpha_mode=mode,  # type: ignore[arg-type]
+        masked_sample_count=int(np.size(mask_arr) - np.count_nonzero(mask_arr)),
+        total_sample_count=int(np.size(mask_arr)),
+    )
+
+
+def heightmap_cache_key_record(
+    image: str | Path | Image.Image | ArrayLike,
+    height: float,
+    xy_scale: float | Sequence[float],
+    center: Sequence[float],
+    alpha_mode: str,
+    quality: MeshQuality | None,
+) -> HeightmapCacheKeyRecord:
+    cache_key = _heightmap_cache_key(image, height, xy_scale, center, alpha_mode, quality)
+    if cache_key is None:
+        reason = "uncacheable-source"
+        if isinstance(image, (str, Path)):
+            reason = "path-stat-unavailable"
+        return HeightmapCacheKeyRecord(cache_key=None, reason=reason)
+    return HeightmapCacheKeyRecord(cache_key=cache_key, reason="cache-key-valid")
+
+
+def heightmap_mesh_compatibility_result(
+    image: str | Path | Image.Image | ArrayLike,
+    *,
+    height: float = 1.0,
+    xy_scale: float | Sequence[float] = 1.0,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    alpha_mode: str = "mask",
+    quality: MeshQuality | None = None,
+) -> HeightmapMeshCompatibilityResult:
+    """Create an explicit mesh-compatibility heightmap result.
+
+    This helper keeps mesh heightfield generation visible as compatibility data
+    instead of allowing callers to mistake the mesh for authored surface truth.
+    """
+
+    _, mask = _load_heightmap(image)
+    if quality is not None:
+        quality = apply_lod(quality)
+        if quality.lod == "preview":
+            mask = mask[::2, ::2]
+    alpha_policy = resolve_heightmap_alpha_mask_policy(mask, alpha_mode=alpha_mode)
+    cache_policy = heightmap_cache_key_record(image, height, xy_scale, center, alpha_mode, quality)
+    mesh = _heightmap_mesh_impl(
+        image,
+        height=height,
+        xy_scale=xy_scale,
+        center=center,
+        alpha_mode=alpha_mode,
+        quality=quality,
+    )
+    result = HeightmapMeshCompatibilityResult(mesh=mesh, alpha_policy=alpha_policy, cache_policy=cache_policy)
+    mesh.metadata.update({"heightmap_mesh_compatibility": result.canonical_payload()})
+    return result
+
+
+def _as_planar_projection(projection: str) -> Literal["planar"]:
+    projection_name = str(projection).lower()
+    if projection_name != "planar":
+        raise ValueError("Only planar projection is supported in this build.")
+    return "planar"
+
+
+def _as_projection_plane(plane: str) -> Literal["xy", "xz", "yz"]:
+    plane_name = str(plane).lower()
+    if plane_name not in {"xy", "xz", "yz"}:
+        raise ValueError("plane must be 'xy', 'xz', or 'yz'.")
+    return plane_name  # type: ignore[return-value]
+
+
+def _project_bounds_from_source(
+    source_bounds: Sequence[float],
+    plane: Literal["xy", "xz", "yz"],
+) -> tuple[float, float, float, float]:
+    values = tuple(float(value) for value in np.asarray(source_bounds, dtype=float).ravel())
+    if len(values) == 4:
+        return values
+    if len(values) != 6:
+        raise ValueError("source_bounds must contain 4 projected values or 6 xyz bounds values.")
+    xmin, xmax, ymin, ymax, zmin, zmax = values
+    if plane == "xy":
+        return xmin, xmax, ymin, ymax
+    if plane == "xz":
+        return xmin, xmax, zmin, zmax
+    return ymin, ymax, zmin, zmax
+
+
+def resolve_heightmap_projection_bounds_policy(
+    *,
+    projection: str = "planar",
+    plane: str = "xy",
+    bounds: Sequence[float] | None = None,
+    source_bounds: Sequence[float] | None = None,
+) -> HeightmapProjectionBoundsPolicy:
+    projection_name = _as_planar_projection(projection)
+    plane_name = _as_projection_plane(plane)
+    source: Literal["explicit", "source-bounds"]
+    if bounds is None:
+        if source_bounds is None:
+            raise ValueError("projection bounds are required when source bounds are unavailable.")
+        resolved = _project_bounds_from_source(source_bounds, plane_name)
+        source = "source-bounds"
+    else:
+        resolved = tuple(float(value) for value in np.asarray(bounds, dtype=float).reshape(4))
+        source = "explicit"
+    if not np.all(np.isfinite(np.asarray(resolved, dtype=float))):
+        raise ValueError("projection bounds must be finite.")
+    umin, umax, vmin, vmax = resolved
+    if np.isclose(umax, umin) or np.isclose(vmax, vmin):
+        raise ValueError("projection bounds are degenerate.")
+    return HeightmapProjectionBoundsPolicy(projection_name, plane_name, resolved, source)
+
+
+def heightmap_sample_coordinate_record(
+    points: np.ndarray,
+    policy: HeightmapProjectionBoundsPolicy,
+) -> HeightmapSampleCoordinateRecord:
+    point_arr = np.asarray(points, dtype=float)
+    if point_arr.size == 0:
+        point_arr = point_arr.reshape(0, 3)
+    if point_arr.ndim != 2 or point_arr.shape[1] != 3:
+        raise ValueError("heightmap sample coordinates require Nx3 points.")
+    if policy.plane == "xy":
+        u = point_arr[:, 0]
+        v = point_arr[:, 1]
+    elif policy.plane == "xz":
+        u = point_arr[:, 0]
+        v = point_arr[:, 2]
+    else:
+        u = point_arr[:, 1]
+        v = point_arr[:, 2]
+    umin, umax, vmin, vmax = policy.bounds
+    u_norm = (u - umin) / (umax - umin)
+    v_norm = (v - vmin) / (vmax - vmin)
+    return HeightmapSampleCoordinateRecord(
+        projection=policy.projection,
+        plane=policy.plane,
+        bounds=policy.bounds,
+        u=u,
+        v=v,
+        u_normalized=u_norm,
+        v_normalized=v_norm,
+    )
+
+
+def heightmap_projection_domain_record(
+    patch: "HeightmapSurfacePatch",
+    *,
+    projection: str = "planar",
+    plane: str = "xy",
+) -> HeightmapProjectionDomainRecord:
+    """Return projected domain facts for a native heightmap patch."""
+
+    from .surface import HeightmapSurfacePatch
+
+    if not isinstance(patch, HeightmapSurfacePatch):
+        raise TypeError("heightmap projection planning requires a HeightmapSurfacePatch.")
+    projection_name = _as_planar_projection(projection)
+    plane_name = _as_projection_plane(plane)
+    if plane_name != "xy":
+        raise ValueError("HeightmapSurfacePatch preserves CSG only in its native xy projection plane.")
+    rows, cols = patch.height_samples.shape
+    sx, sy = patch.xy_scale
+    half_width = (cols - 1) * sx * 0.5
+    half_height = (rows - 1) * sy * 0.5
+    xmin = float(patch.center[0] - half_width)
+    xmax = float(patch.center[0] + half_width)
+    ymin = float(patch.center[1] - half_height)
+    ymax = float(patch.center[1] + half_height)
+    return HeightmapProjectionDomainRecord(
+        patch_id=patch.stable_identity,
+        projection=projection_name,
+        plane=plane_name,
+        bounds=(xmin, xmax, ymin, ymax),
+        sample_shape=(int(rows), int(cols)),
+        sample_spacing=(float(sx), float(sy)),
+        origin=(xmin, ymin),
+    )
+
+
+def _heightmap_overlap_bounds(
+    left: tuple[float, float, float, float],
+    right: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    return (max(left[0], right[0]), min(left[1], right[1]), max(left[2], right[2]), min(left[3], right[3]))
+
+
+def _heightmap_index_window(
+    domain: HeightmapProjectionDomainRecord,
+    overlap: tuple[float, float, float, float],
+    *,
+    tolerance: float,
+) -> tuple[int, int, int, int]:
+    u0, u1, v0, v1 = overlap
+    sx, sy = domain.sample_spacing
+    ox, oy = domain.origin
+    cols = domain.sample_shape[1]
+    rows = domain.sample_shape[0]
+    c0 = max(0, int(np.floor(((u0 - ox) / sx) + tolerance)))
+    c1 = min(cols - 1, int(np.ceil(((u1 - ox) / sx) - tolerance)))
+    r0 = max(0, int(np.floor(((v0 - oy) / sy) + tolerance)))
+    r1 = min(rows - 1, int(np.ceil(((v1 - oy) / sy) - tolerance)))
+    return (r0, r1, c0, c1)
+
+
+def _heightmap_grid_lines_align(
+    left: HeightmapProjectionDomainRecord,
+    right: HeightmapProjectionDomainRecord,
+    *,
+    tolerance: float,
+) -> bool:
+    if not np.allclose(left.sample_spacing, right.sample_spacing, atol=tolerance):
+        return False
+    sx, sy = left.sample_spacing
+    dx = abs((left.origin[0] - right.origin[0]) / sx)
+    dy = abs((left.origin[1] - right.origin[1]) / sy)
+    return abs(dx - round(dx)) <= tolerance and abs(dy - round(dy)) <= tolerance
+
+
+def plan_heightmap_grid_alignment(
+    left_patch: "HeightmapSurfacePatch",
+    right_patch: "HeightmapSurfacePatch",
+    *,
+    left_projection: str = "planar",
+    right_projection: str = "planar",
+    left_plane: str = "xy",
+    right_plane: str = "xy",
+    tolerance: float = 1e-9,
+) -> HeightmapGridAlignmentRecord:
+    """Plan projection agreement, XY overlap, clipping, and grid alignment for heightmap CSG."""
+
+    tol = float(tolerance)
+    if not np.isfinite(tol) or tol < 0.0:
+        raise ValueError("heightmap grid alignment tolerance must be finite and non-negative.")
+    try:
+        left = heightmap_projection_domain_record(left_patch, projection=left_projection, plane=left_plane)
+        right = heightmap_projection_domain_record(right_patch, projection=right_projection, plane=right_plane)
+    except Exception as exc:
+        fallback_left = heightmap_projection_domain_record(left_patch)
+        fallback_right = heightmap_projection_domain_record(right_patch)
+        return HeightmapGridAlignmentRecord(
+            supported=False,
+            alignment="refused",
+            left=fallback_left,
+            right=fallback_right,
+            diagnostics=(
+                HeightmapProjectionRefusalDiagnostic(
+                    code="projection-mismatch",
+                    message=f"Heightmap projection planning refused: {exc}; no mesh fallback was attempted.",
+                ),
+            ),
+        )
+    if left.projection != right.projection or left.plane != right.plane:
+        return HeightmapGridAlignmentRecord(
+            supported=False,
+            alignment="refused",
+            left=left,
+            right=right,
+            diagnostics=(
+                HeightmapProjectionRefusalDiagnostic(
+                    code="projection-mismatch",
+                    message="Heightmap projection frames do not match; no mesh fallback was attempted.",
+                ),
+            ),
+        )
+    overlap = _heightmap_overlap_bounds(left.bounds, right.bounds)
+    clipping = HeightmapClippingRecord(
+        overlap_bounds=overlap,
+        left_index_window=_heightmap_index_window(left, overlap, tolerance=tol),
+        right_index_window=_heightmap_index_window(right, overlap, tolerance=tol),
+    )
+    if not clipping.has_overlap:
+        return HeightmapGridAlignmentRecord(
+            supported=False,
+            alignment="refused",
+            left=left,
+            right=right,
+            clipping=clipping,
+            diagnostics=(
+                HeightmapProjectionRefusalDiagnostic(
+                    code="disjoint-domain",
+                    message="Heightmap projected XY domains are disjoint; no mesh fallback was attempted.",
+                ),
+            ),
+        )
+    aligned = _heightmap_grid_lines_align(left, right, tolerance=tol)
+    if aligned:
+        result_shape = (
+            max(1, clipping.left_index_window[1] - clipping.left_index_window[0] + 1),
+            max(1, clipping.left_index_window[3] - clipping.left_index_window[2] + 1),
+        )
+        return HeightmapGridAlignmentRecord(
+            supported=True,
+            alignment="aligned",
+            left=left,
+            right=right,
+            clipping=clipping,
+            result_shape=result_shape,
+            resample_kernel="none",
+        )
+    min_sx = min(left.sample_spacing[0], right.sample_spacing[0])
+    min_sy = min(left.sample_spacing[1], right.sample_spacing[1])
+    result_shape = (
+        int(np.floor((overlap[3] - overlap[2]) / min_sy + tol)) + 1,
+        int(np.floor((overlap[1] - overlap[0]) / min_sx + tol)) + 1,
+    )
+    return HeightmapGridAlignmentRecord(
+        supported=True,
+        alignment="resample-required",
+        left=left,
+        right=right,
+        clipping=clipping,
+        result_shape=(max(2, result_shape[0]), max(2, result_shape[1])),
+        resample_kernel="bilinear",
+    )
+
+
+def estimate_heightmap_normal(
+    patch: "HeightmapSurfacePatch",
+    u: float,
+    v: float,
+) -> tuple[np.ndarray, HeightmapEvaluationDiagnostic]:
+    du, dv = patch.derivatives_at(float(u), float(v))
+    normal = np.cross(du, dv)
+    norm = float(np.linalg.norm(normal))
+    if norm == 0.0:
+        diagnostic = HeightmapEvaluationDiagnostic(
+            code="degenerate-heightmap-normal",
+            message="Heightmap normal estimate has zero length at the requested sample.",
+            sample=(float(u), float(v)),
+        )
+        return np.array([0.0, 0.0, 1.0], dtype=float), diagnostic
+    return normal / norm, HeightmapEvaluationDiagnostic(
+        code="heightmap-normal-estimated",
+        message="Heightmap normal estimated from finite surface derivatives.",
+        sample=(float(u), float(v)),
+    )
+
+
+def heightmap_mask_tessellation_record(patch: "HeightmapSurfacePatch") -> HeightmapMaskTessellationRecord:
+    rows, cols = patch.height_samples.shape
+    cell_count = int(max(rows - 1, 0) * max(cols - 1, 0))
+    skipped = 0
+    if patch.alpha_mode == "mask":
+        for row in range(rows - 1):
+            for col in range(cols - 1):
+                if not (
+                    patch.alpha_mask[row, col]
+                    and patch.alpha_mask[row, col + 1]
+                    and patch.alpha_mask[row + 1, col]
+                    and patch.alpha_mask[row + 1, col + 1]
+                ):
+                    skipped += 1
+    emitted = (cell_count - skipped) * 2
+    return HeightmapMaskTessellationRecord(
+        alpha_mode=patch.alpha_mode,
+        cell_count=cell_count,
+        emitted_face_count=int(emitted),
+        skipped_cell_count=int(skipped),
+    )
+
+
+def validate_heightmap_finite_samples(samples: ArrayLike) -> np.ndarray:
+    """Normalize embedded height samples and refuse non-finite grids."""
+
+    grid = np.asarray(samples, dtype=float)
+    if grid.ndim != 2:
+        raise ValueError("Heightmap finite-grid samples must be a 2D array.")
+    if grid.shape[0] < 2 or grid.shape[1] < 2:
+        raise ValueError("Heightmap finite-grid samples must be at least 2x2.")
+    if not np.all(np.isfinite(grid)):
+        raise ValueError("Heightmap finite-grid samples must be finite.")
+    return grid
+
+
+def build_heightmap_mask_no_data_diagnostic(
+    request: HeightmapAuthoringRequest,
+) -> HeightmapNoDataDiagnostic:
+    """Return an explicit mask/no-data diagnostic for a native heightmap grid."""
+
+    mask = np.asarray(request.alpha_mask, dtype=bool)
+    total = int(mask.size)
+    masked = int(total - np.count_nonzero(mask))
+    if request.alpha_mode == "mask" and masked == total:
+        return HeightmapNoDataDiagnostic(
+            code="heightmap-all-samples-masked",
+            message="Heightmap native grid masks every sample and cannot emit visible sampled surface cells.",
+            valid=False,
+            masked_sample_count=masked,
+            total_sample_count=total,
+        )
+    return HeightmapNoDataDiagnostic(
+        code="heightmap-mask-valid",
+        message="Heightmap native grid mask is valid for finite-grid authoring.",
+        valid=True,
+        masked_sample_count=masked,
+        total_sample_count=total,
+    )
+
+
+def heightmap_sample_grid_provenance_record(
+    request: HeightmapAuthoringRequest,
+) -> HeightmapSampleGridProvenanceRecord:
+    """Return producer provenance for an embedded heightmap sample grid."""
+
+    mask = np.asarray(request.alpha_mask, dtype=bool)
+    total = int(mask.size)
+    return HeightmapSampleGridProvenanceRecord(
+        family="heightmap",
+        operation="heightmap-finite-grid-authoring",
+        sample_shape=tuple(int(value) for value in request.height_samples.shape),
+        masked_sample_count=int(total - np.count_nonzero(mask)),
+        total_sample_count=total,
+    )
+
+
+def make_heightmap_surface_from_grid(request: HeightmapAuthoringRequest) -> "SurfaceBody":
+    """Create a surface body from an embedded finite heightmap grid."""
+
+    diagnostic = build_heightmap_mask_no_data_diagnostic(request)
+    if not diagnostic.valid:
+        raise ValueError(diagnostic.message)
+    from .surface import HeightmapSurfacePatch, make_surface_body, make_surface_shell
+
+    provenance = heightmap_sample_grid_provenance_record(request).canonical_payload()
+    kernel_metadata = {
+        "producer": "heightmap",
+        "operation": "heightmap-finite-grid-authoring",
+        "sample_shape": tuple(int(value) for value in request.height_samples.shape),
+    }
+    kernel_metadata.update({"producer_provenance": provenance, **dict(request.metadata.get("kernel", {}))})
+    patch = HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=request.height_samples,
+        alpha_mask=request.alpha_mask,
+        alpha_mode=request.alpha_mode,
+        xy_scale=request.xy_scale,
+        center=request.center,
+        height_scale=request.height_scale,
+        metadata={"kernel": kernel_metadata},
+    )
+    return make_surface_body(
+        (make_surface_shell((patch,), connected=False, metadata={"kernel": {"surface_family": "heightmap", "producer_provenance": provenance}}),),
+        metadata={"kernel": {"surface_family": "heightmap", "authoring_boundary": "surface-native", "producer_provenance": provenance}},
+    )
+
+
+def heightmap_import_dependency_boundary() -> HeightmapImportDiagnostic:
+    """Report optional image import availability without making it required for native grids."""
+
+    supported = Image is not None
+    return HeightmapImportDiagnostic(
+        code="heightmap-import-dependency-available" if supported else "heightmap-import-dependency-unavailable",
+        message=(
+            "Heightmap optional import adapter can load images and arrays into embedded grids."
+            if supported
+            else "Heightmap optional import adapter is unavailable; use embedded finite grids."
+        ),
+        supported=supported,
+        source_kind="dependency",
+    )
+
+
+def build_heightmap_import_diagnostic(request: HeightmapImportRequest) -> HeightmapImportDiagnostic:
+    """Inspect a heightmap import request before producing surface truth."""
+
+    source_kind = type(request.source).__name__
+    if not request.embed_samples:
+        return HeightmapImportDiagnostic(
+            code="heightmap-import-external-reference-refused",
+            message="Heightmap imports must embed finite samples; external references are not surface truth.",
+            supported=False,
+            source_kind=source_kind,
+        )
+    dependency = heightmap_import_dependency_boundary()
+    if not dependency.supported:
+        return dependency
+    try:
+        heights, _mask = _load_heightmap(request.source)
+        sample_count = int(heights.size)
+        if sample_count > request.max_sample_count:
+            raise ValueError(
+                f"heightmap import sample count {sample_count} exceeds max_sample_count={request.max_sample_count}"
+            )
+        validate_heightmap_finite_samples(heights)
+    except Exception as exc:
+        return HeightmapImportDiagnostic(
+            code="heightmap-import-invalid-payload",
+            message=f"Heightmap import payload is invalid: {exc}",
+            supported=False,
+            source_kind=source_kind,
+        )
+    return HeightmapImportDiagnostic(
+        code="heightmap-import-supported",
+        message="Heightmap import can be normalized into an embedded finite grid.",
+        supported=True,
+        source_kind=source_kind,
+    )
+
+
+def import_heightmap_surface(request: HeightmapImportRequest) -> "SurfaceBody":
+    """Import an image or array into an embedded native heightmap surface body."""
+
+    diagnostic = build_heightmap_import_diagnostic(request)
+    if not diagnostic.supported:
+        raise ValueError(diagnostic.message)
+    heights, mask = _load_heightmap(request.source)
+    if request.quality is not None:
+        quality = apply_lod(request.quality)
+        if quality.lod == "preview":
+            heights = heights[::2, ::2]
+            mask = mask[::2, ::2]
+    metadata = dict(request.metadata)
+    kernel = dict(metadata.get("kernel", {})) if isinstance(metadata.get("kernel"), dict) else {}
+    kernel.update({"operation": "heightmap-import", "import_source_kind": diagnostic.source_kind})
+    metadata["kernel"] = kernel
+    return make_heightmap_surface_from_grid(
+        HeightmapAuthoringRequest(
+            height_samples=heights,
+            alpha_mask=mask,
+            alpha_mode=request.alpha_mode,
+            xy_scale=request.xy_scale,
+            center=request.center,
+            height_scale=request.height,
+            metadata=metadata,
+        )
+    )
 
 
 def _triangle_surface_body_from_mesh(mesh: Mesh, *, metadata: dict[str, object] | None = None) -> "SurfaceBody":
@@ -143,8 +1010,8 @@ def _heightmap_mesh_impl(
     alpha_mode: str,
     quality: MeshQuality | None,
 ) -> Mesh:
-    cache_key = _heightmap_cache_key(image, height, xy_scale, center, alpha_mode, quality)
-    cached = _HEIGHTMAP_CACHE.get(cache_key) if cache_key is not None else None
+    cache_record = heightmap_cache_key_record(image, height, xy_scale, center, alpha_mode, quality)
+    cached = _HEIGHTMAP_CACHE.get(cache_record.cache_key) if cache_record.cache_key is not None else None
     if cached is not None:
         return cached.copy()
 
@@ -190,9 +1057,56 @@ def _heightmap_mesh_impl(
 
     faces_arr = np.asarray(faces, dtype=int) if faces else np.zeros((0, 3), dtype=int)
     mesh = Mesh(vertices, faces_arr)
-    if cache_key is not None:
-        _HEIGHTMAP_CACHE.set(cache_key, mesh.copy())
+    mesh.metadata.update({"heightmap_cache_key_policy": cache_record.canonical_payload()})
+    if cache_record.cache_key is not None:
+        _HEIGHTMAP_CACHE.set(cache_record.cache_key, mesh.copy())
     return mesh
+
+
+def make_heightmap_surface_patch(
+    image: str | Path | Image.Image | ArrayLike,
+    *,
+    height: float = 1.0,
+    xy_scale: float | Sequence[float] = 1.0,
+    center: Sequence[float] = (0.0, 0.0, 0.0),
+    alpha_mode: str = "mask",
+    quality: MeshQuality | None = None,
+):
+    from .surface import HeightmapSurfacePatch
+
+    heights, mask = _load_heightmap(image)
+    if quality is not None:
+        quality = apply_lod(quality)
+        if quality.lod == "preview":
+            heights = heights[::2, ::2]
+            mask = mask[::2, ::2]
+    if heights.shape[0] < 2 or heights.shape[1] < 2:
+        raise ValueError("Heightmap surface payload requires at least a 2x2 sample grid.")
+    alpha_policy = resolve_heightmap_alpha_mask_policy(mask, alpha_mode=alpha_mode)
+    cache_record = heightmap_cache_key_record(image, height, xy_scale, center, alpha_mode, quality)
+    if alpha_mode == "ignore":
+        heights = np.where(mask, heights, 0.0)
+    elif alpha_mode == "mask":
+        heights = np.where(mask, heights, 0.0)
+    else:
+        raise ValueError("alpha_mode must be 'mask' or 'ignore'.")
+    return HeightmapSurfacePatch(
+        family="heightmap",
+        height_samples=heights,
+        alpha_mask=mask,
+        alpha_mode=alpha_policy.alpha_mode,
+        xy_scale=_as_scale(xy_scale),
+        center=np.asarray(center, dtype=float).reshape(3),
+        height_scale=float(height),
+        metadata={
+            "kernel": {
+                "producer": "heightmap",
+                "sample_shape": tuple(int(value) for value in heights.shape),
+                "alpha_policy": alpha_policy.canonical_payload(),
+                "cache_key_policy": cache_record.canonical_payload(),
+            }
+        },
+    )
 
 
 def heightmap(
@@ -202,41 +1116,26 @@ def heightmap(
     center: Sequence[float] = (0.0, 0.0, 0.0),
     alpha_mode: str = "mask",
     quality: MeshQuality | None = None,
-    backend: Backend = "mesh",
-) -> Mesh | SurfaceBody:
-    """Create a heightfield mesh from an image.
+) -> SurfaceBody:
+    """Create a heightfield surface body from an image.
 
     alpha_mode:
         - "mask": skip faces that touch fully transparent pixels (holes).
         - "ignore": treat transparent pixels as zero height (no holes).
     """
-    if backend not in {"mesh", "surface"}:
-        raise ValueError("backend must be 'mesh' or 'surface'.")
-    if backend == "surface":
-        mesh = _heightmap_mesh_impl(
-            image,
-            height=height,
-            xy_scale=xy_scale,
-            center=center,
-            alpha_mode=alpha_mode,
-            quality=quality,
-        )
-        return _triangle_surface_body_from_mesh(
-            mesh,
-            metadata={"kernel": {"producer": "heightmap"}, "consumer": {"source": "heightmap"}},
-        )
-
-    warn_mesh_primary_api(
-        "heightmap",
-        replacement="a future surface-native heightfield path",
-    )
-    return _heightmap_mesh_impl(
+    patch = make_heightmap_surface_patch(
         image,
         height=height,
         xy_scale=xy_scale,
         center=center,
         alpha_mode=alpha_mode,
         quality=quality,
+    )
+    from .surface import make_surface_body, make_surface_shell
+
+    return make_surface_body(
+        (make_surface_shell((patch,), connected=False, metadata={"kernel": {"producer": "heightmap"}}),),
+        metadata={"kernel": {"producer": "heightmap"}, "consumer": {"source": "heightmap"}},
     )
 
 
@@ -346,41 +1245,16 @@ def displace_heightmap(
     alpha_mode: str = "ignore",
     bounds: Sequence[float] | None = None,
     quality: MeshQuality | None = None,
-    backend: Backend = "mesh",
-) -> Mesh | SurfaceBody:
-    """Displace a mesh using a heightmap with planar projection.
+    ) -> SurfaceBody:
+    """Displace a surface body using a heightmap with planar projection.
 
     alpha_mode:
         - "ignore": transparent pixels cause no displacement.
         - "mask": faces touching transparent samples are removed.
     """
-    if backend not in {"mesh", "surface"}:
-        raise ValueError("backend must be 'mesh' or 'surface'.")
-    if backend == "surface":
-        from .tessellation import tessellate_surface_body
-
-        input_mesh = tessellate_surface_body(mesh).mesh if not isinstance(mesh, Mesh) else mesh
-        displaced_mesh = _displace_heightmap_mesh_impl(
-            input_mesh,
-            image=image,
-            height=height,
-            projection=projection,
-            plane=plane,
-            direction=direction,
-            alpha_mode=alpha_mode,
-            bounds=bounds,
-            quality=quality,
-        )
-        return _triangle_surface_body_from_mesh(
-            displaced_mesh,
-            metadata={"kernel": {"producer": "heightmap", "operation": "displace"}, "consumer": {"source": "heightmap"}},
-        )
-
-    warn_mesh_primary_api(
-        "displace_heightmap",
-        replacement="surface-native displacement once SurfaceBody deformation lands",
-    )
-    return _displace_heightmap_mesh_impl(
+    if isinstance(mesh, Mesh):
+        raise ValueError("Surface displacement requires a SurfaceBody input.")
+    return _displace_heightmap_surface_body(
         mesh,
         image=image,
         height=height,
@@ -390,6 +1264,111 @@ def displace_heightmap(
         alpha_mode=alpha_mode,
         bounds=bounds,
         quality=quality,
+    )
+
+
+def _displace_heightmap_surface_body(
+    body: "SurfaceBody",
+    *,
+    image: str | Path | Image.Image | ArrayLike,
+    height: float,
+    projection: str,
+    plane: str,
+    direction: str | Sequence[float],
+    alpha_mode: str,
+    bounds: Sequence[float] | None,
+    quality: MeshQuality | None,
+) -> "SurfaceBody":
+    projection_name = _as_planar_projection(projection)
+    plane_name = _as_projection_plane(plane)
+    heights, mask = _load_heightmap(image)
+    if quality is not None:
+        quality = apply_lod(quality)
+        if quality.lod == "preview":
+            heights = heights[::2, ::2]
+            mask = mask[::2, ::2]
+    if heights.shape[0] < 2 or heights.shape[1] < 2:
+        raise ValueError("Surface displacement requires at least a 2x2 heightmap sample grid.")
+    alpha_policy = resolve_heightmap_alpha_mask_policy(mask, alpha_mode=alpha_mode)
+    cache_record = heightmap_cache_key_record(image, height, 1.0, (0.0, 0.0, 0.0), alpha_mode, quality)
+    if alpha_policy.alpha_mode == "ignore":
+        heights = np.where(mask, heights, 0.0)
+    else:
+        heights = np.where(mask, heights, 0.0)
+
+    from .surface import DisplacementSurfacePatch, make_surface_body, make_surface_shell
+
+    displaced_shells = []
+    for shell in body.iter_shells(world=True):
+        patches = []
+        for patch in shell.iter_patches(world=True):
+            policy = resolve_heightmap_projection_bounds_policy(
+                projection=projection_name,
+                plane=plane_name,
+                bounds=bounds,
+                source_bounds=_surface_patch_projection_source_bounds(patch, plane_name) if bounds is None else None,
+            )
+            patches.append(
+                DisplacementSurfacePatch(
+                    family="displacement",
+                    source_patch=patch,
+                    displacement_samples=heights,
+                    alpha_mask=mask,
+                    alpha_mode=alpha_policy.alpha_mode,
+                    height_scale=float(height),
+                    direction=direction,
+                    projection=policy.projection,
+                    plane=policy.plane,
+                    projection_bounds=policy.bounds,
+                    metadata={
+                        "kernel": {
+                            "producer": "heightmap",
+                            "operation": "displace",
+                            "projection_policy": policy.canonical_payload(),
+                            "alpha_policy": alpha_policy.canonical_payload(),
+                            "cache_key_policy": cache_record.canonical_payload(),
+                        }
+                    },
+                )
+            )
+        displaced_shells.append(
+            make_surface_shell(
+                tuple(patches),
+                connected=shell.connected,
+                metadata={"kernel": {"producer": "heightmap", "operation": "displace"}},
+            )
+        )
+    return make_surface_body(
+        tuple(displaced_shells),
+        metadata={"kernel": {"producer": "heightmap", "operation": "displace"}, "consumer": {"source": "heightmap"}},
+    )
+
+
+def _surface_patch_projection_source_bounds(
+    patch: object,
+    plane: Literal["xy", "xz", "yz"],
+) -> tuple[float, float, float, float]:
+    domain = getattr(patch, "domain")
+    u0, u1 = domain.u_range
+    v0, v1 = domain.v_range
+    points = np.asarray(
+        [
+            patch.point_at(u0, v0),
+            patch.point_at(u1, v0),
+            patch.point_at(u1, v1),
+            patch.point_at(u0, v1),
+        ],
+        dtype=float,
+    )
+    coord_record = heightmap_sample_coordinate_record(
+        points,
+        HeightmapProjectionBoundsPolicy("planar", plane, (0.0, 1.0, 0.0, 1.0), "source-bounds"),
+    )
+    return (
+        float(np.min(coord_record.u)),
+        float(np.max(coord_record.u)),
+        float(np.min(coord_record.v)),
+        float(np.max(coord_record.v)),
     )
 
 
@@ -405,12 +1384,6 @@ def _displace_heightmap_mesh_impl(
     bounds: Sequence[float] | None,
     quality: MeshQuality | None,
 ) -> Mesh:
-    if projection != "planar":
-        raise ValueError("Only planar projection is supported in this build.")
-    plane = plane.lower()
-    if plane not in {"xy", "xz", "yz"}:
-        raise ValueError("plane must be 'xy', 'xz', or 'yz'.")
-
     heights, mask = _load_heightmap(image)
     if quality is not None:
         quality = apply_lod(quality)
@@ -421,33 +1394,15 @@ def _displace_heightmap_mesh_impl(
         return mesh.copy()
 
     verts = mesh.vertices.copy()
-    if plane == "xy":
-        u = verts[:, 0]
-        v = verts[:, 1]
-        if bounds is None:
-            xmin, xmax, ymin, ymax, _, _ = mesh.bounds
-            bounds = (xmin, xmax, ymin, ymax)
-    elif plane == "xz":
-        u = verts[:, 0]
-        v = verts[:, 2]
-        if bounds is None:
-            xmin, xmax, _, _, zmin, zmax = mesh.bounds
-            bounds = (xmin, xmax, zmin, zmax)
-    else:
-        u = verts[:, 1]
-        v = verts[:, 2]
-        if bounds is None:
-            _, _, ymin, ymax, zmin, zmax = mesh.bounds
-            bounds = (ymin, ymax, zmin, zmax)
+    policy = resolve_heightmap_projection_bounds_policy(
+        projection=projection,
+        plane=plane,
+        bounds=bounds,
+        source_bounds=mesh.bounds if bounds is None else None,
+    )
+    coord_record = heightmap_sample_coordinate_record(verts, policy)
 
-    umin, umax, vmin, vmax = np.asarray(bounds, dtype=float).reshape(4)
-    if np.isclose(umax, umin) or np.isclose(vmax, vmin):
-        raise ValueError("projection bounds are degenerate.")
-
-    u_norm = (u - umin) / (umax - umin)
-    v_norm = (v - vmin) / (vmax - vmin)
-
-    sampled, masked = _sample_heightmap(heights, mask, u_norm, v_norm)
+    sampled, masked = _sample_heightmap(heights, mask, coord_record.u_normalized, coord_record.v_normalized)
     if alpha_mode == "ignore":
         sampled = np.where(masked, 0.0, sampled)
     elif alpha_mode != "mask":
@@ -492,4 +1447,40 @@ def _heightmap_cache_key(
     return None
 
 
-__all__ = ["heightmap", "displace_heightmap"]
+__all__ = [
+    "HeightmapAlphaMaskPolicy",
+    "HeightmapAuthoringRequest",
+    "HeightmapCacheKeyRecord",
+    "HeightmapMeshCompatibilityResult",
+    "HeightmapEvaluationDiagnostic",
+    "HeightmapImportDiagnostic",
+    "HeightmapImportRequest",
+    "HeightmapMaskTessellationRecord",
+    "HeightmapNoDataDiagnostic",
+    "HeightmapClippingRecord",
+    "HeightmapGridAlignmentRecord",
+    "HeightmapProjectionDomainRecord",
+    "HeightmapProjectionRefusalDiagnostic",
+    "HeightmapProjectionBoundsPolicy",
+    "HeightmapSampleGridProvenanceRecord",
+    "HeightmapSampleCoordinateRecord",
+    "build_heightmap_mask_no_data_diagnostic",
+    "build_heightmap_import_diagnostic",
+    "heightmap",
+    "displace_heightmap",
+    "heightmap_cache_key_record",
+    "heightmap_import_dependency_boundary",
+    "heightmap_mesh_compatibility_result",
+    "heightmap_projection_domain_record",
+    "estimate_heightmap_normal",
+    "heightmap_mask_tessellation_record",
+    "heightmap_sample_grid_provenance_record",
+    "heightmap_sample_coordinate_record",
+    "import_heightmap_surface",
+    "make_heightmap_surface_from_grid",
+    "make_heightmap_surface_patch",
+    "plan_heightmap_grid_alignment",
+    "resolve_heightmap_projection_bounds_policy",
+    "resolve_heightmap_alpha_mask_policy",
+    "validate_heightmap_finite_samples",
+]

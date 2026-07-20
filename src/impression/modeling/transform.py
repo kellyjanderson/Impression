@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Iterable, Sequence
+from dataclasses import dataclass
+from typing import Sequence
 
 import numpy as np
 
@@ -8,29 +9,52 @@ from impression.mesh import Mesh
 from impression.modeling.group import MeshGroup
 
 
-def translate(mesh: Mesh | MeshGroup, offset: Sequence[float]) -> Mesh | MeshGroup:
-    """Translate the mesh/group in-place and return it."""
-    if isinstance(mesh, MeshGroup):
-        mesh.translate(offset)
-        return mesh
+@dataclass(frozen=True)
+class TransformMeshCompatibilityResult:
+    """Explicit record for transform operations applied to mesh compatibility data."""
+
+    target_type: str
+    operation: str
+    boundary: str = "explicit-mesh-compatibility"
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary": self.boundary,
+            "operation": self.operation,
+            "target_type": self.target_type,
+        }
+
+
+def translate(target, offset: Sequence[float]):
+    """Translate a surface body by attached transform, or mutate explicit mesh inputs."""
+    if _is_surface_body(target):
+        mat = np.eye(4, dtype=float)
+        mat[:3, 3] = np.asarray(offset, dtype=float).reshape(3)
+        return target.with_transform(mat)
+    if isinstance(target, MeshGroup):
+        target.translate(offset)
+        _mark_mesh_compatibility(target, "translate")
+        return target
     vec = np.asarray(offset, dtype=float).reshape(3)
-    mesh.translate(vec, inplace=True)
-    return mesh
+    target.translate(vec, inplace=True)
+    _mark_mesh_compatibility(target, "translate")
+    return target
 
 
 def rotate(
-    mesh: Mesh | MeshGroup,
+    target,
     axis: Sequence[float],
     angle_deg: float | None = None,
     origin: Sequence[float] = (0.0, 0.0, 0.0),
     order: str = "xyz",
-) -> Mesh:
+):
     """Rotate around an axis or Euler angles (degrees)."""
     if angle_deg is None:
-        return rotate_euler(mesh, angles_deg=axis, origin=origin, order=order)
-    if isinstance(mesh, MeshGroup):
-        mesh.rotate(axis=axis, angle_deg=angle_deg, origin=origin)
-        return mesh
+        return rotate_euler(target, angles_deg=axis, origin=origin, order=order)
+    if isinstance(target, MeshGroup):
+        target.rotate(axis=axis, angle_deg=angle_deg, origin=origin)
+        _mark_mesh_compatibility(target, "rotate")
+        return target
     axis_vec = np.asarray(axis, dtype=float).reshape(3)
     norm = np.linalg.norm(axis_vec)
     if norm == 0:
@@ -38,16 +62,20 @@ def rotate(
     axis_vec = axis_vec / norm
     center = np.asarray(origin, dtype=float).reshape(3)
 
-    mesh.rotate_vector(axis_vec, angle_deg, point=tuple(center), inplace=True)
-    return mesh
+    mat = _apply_about_origin(_axis_rotation_matrix(axis_vec, angle_deg), center)
+    if _is_surface_body(target):
+        return target.with_transform(mat)
+    target.rotate_vector(axis_vec, angle_deg, point=tuple(center), inplace=True)
+    _mark_mesh_compatibility(target, "rotate")
+    return target
 
 
 def rotate_euler(
-    mesh: Mesh | MeshGroup,
+    target,
     angles_deg: Sequence[float],
     origin: Sequence[float] = (0.0, 0.0, 0.0),
     order: str = "xyz",
-) -> Mesh | MeshGroup:
+):
     """Rotate by Euler angles in degrees (default order: X then Y then Z)."""
     angles = np.asarray(angles_deg, dtype=float).reshape(3)
     origin = np.asarray(origin, dtype=float).reshape(3)
@@ -65,14 +93,14 @@ def rotate_euler(
         mat = matrices[axis] @ mat
     mat = _apply_about_origin(mat, origin)
 
-    return multmatrix(mesh, mat)
+    return multmatrix(target, mat)
 
 
 def scale(
-    mesh: Mesh | MeshGroup,
+    target,
     factors: Sequence[float],
     origin: Sequence[float] = (0.0, 0.0, 0.0),
-) -> Mesh | MeshGroup:
+):
     """Scale the mesh/group in-place about an origin."""
     sx, sy, sz = np.asarray(factors, dtype=float).reshape(3)
     mat = np.eye(4)
@@ -80,18 +108,18 @@ def scale(
     mat[1, 1] = sy
     mat[2, 2] = sz
     mat = _apply_about_origin(mat, np.asarray(origin, dtype=float).reshape(3))
-    return multmatrix(mesh, mat)
+    return multmatrix(target, mat)
 
 
 def resize(
-    mesh: Mesh | MeshGroup,
+    target,
     size: Sequence[float],
     auto: bool | Sequence[bool] = False,
-) -> Mesh | MeshGroup:
+):
     """Resize mesh/group to the target size, preserving aspect on auto axes."""
-    target = np.asarray(size, dtype=float).reshape(3)
+    requested_size = np.asarray(size, dtype=float).reshape(3)
     auto_mask = _normalize_auto(auto)
-    bounds = _bounds(mesh)
+    bounds = _bounds(target)
     extents = np.array(
         [bounds[1] - bounds[0], bounds[3] - bounds[2], bounds[5] - bounds[4]],
         dtype=float,
@@ -99,25 +127,25 @@ def resize(
 
     scales = np.ones(3, dtype=float)
     for i in range(3):
-        if target[i] <= 0 or auto_mask[i]:
+        if requested_size[i] <= 0 or auto_mask[i]:
             continue
         if extents[i] == 0:
             raise ValueError("Cannot resize along axis with zero extent.")
-        scales[i] = target[i] / extents[i]
+        scales[i] = requested_size[i] / extents[i]
 
-    anchor = next((scales[i] for i in range(3) if not auto_mask[i] and target[i] > 0), 1.0)
+    anchor = next((scales[i] for i in range(3) if not auto_mask[i] and requested_size[i] > 0), 1.0)
     for i in range(3):
-        if target[i] <= 0 or auto_mask[i]:
+        if requested_size[i] <= 0 or auto_mask[i]:
             scales[i] = anchor
 
     center = np.array(
         [(bounds[0] + bounds[1]) / 2.0, (bounds[2] + bounds[3]) / 2.0, (bounds[4] + bounds[5]) / 2.0],
         dtype=float,
     )
-    return scale(mesh, scales, origin=center)
+    return scale(target, scales, origin=center)
 
 
-def mirror(mesh: Mesh | MeshGroup, axis: Sequence[float]) -> Mesh | MeshGroup:
+def mirror(target, axis: Sequence[float]):
     """Mirror across the plane through the origin with the given normal."""
     axis_vec = np.asarray(axis, dtype=float).reshape(3)
     norm = np.linalg.norm(axis_vec)
@@ -126,19 +154,23 @@ def mirror(mesh: Mesh | MeshGroup, axis: Sequence[float]) -> Mesh | MeshGroup:
     axis_vec = axis_vec / norm
     mat = np.eye(4)
     mat[:3, :3] -= 2.0 * np.outer(axis_vec, axis_vec)
-    return multmatrix(mesh, mat)
+    return multmatrix(target, mat)
 
 
-def multmatrix(mesh: Mesh | MeshGroup, matrix: Sequence[Sequence[float]]) -> Mesh | MeshGroup:
+def multmatrix(target, matrix: Sequence[Sequence[float]]):
     """Apply a 4x4 transform matrix."""
     mat = np.asarray(matrix, dtype=float)
     if mat.shape != (4, 4):
         raise ValueError("multmatrix requires a 4x4 matrix.")
-    if isinstance(mesh, MeshGroup):
-        mesh.multmatrix(mat)
-        return mesh
-    mesh.transform(mat, inplace=True)
-    return mesh
+    if _is_surface_body(target):
+        return target.with_transform(mat)
+    if isinstance(target, MeshGroup):
+        target.multmatrix(mat)
+        _mark_mesh_compatibility(target, "multmatrix")
+        return target
+    target.transform(mat, inplace=True)
+    _mark_mesh_compatibility(target, "multmatrix")
+    return target
 
 
 def _axis_rotation_matrix(axis: Sequence[float], angle_deg: float) -> np.ndarray:
@@ -181,10 +213,25 @@ def _normalize_auto(auto: bool | Sequence[bool]) -> np.ndarray:
     return np.array([bool(auto)] * 3, dtype=bool)
 
 
-def _bounds(mesh: Mesh | MeshGroup) -> tuple[float, float, float, float, float, float]:
-    if isinstance(mesh, Mesh):
-        return mesh.bounds
-    meshes = mesh.to_meshes()
+def _is_surface_body(target: object) -> bool:
+    from .surface import SurfaceBody
+
+    return isinstance(target, SurfaceBody)
+
+
+def _mark_mesh_compatibility(target: object, operation: str) -> None:
+    record = TransformMeshCompatibilityResult(type(target).__name__, operation).canonical_payload()
+    metadata = getattr(target, "metadata", None)
+    if isinstance(metadata, dict):
+        metadata.setdefault("transform_mesh_compatibility", []).append(record)
+
+
+def _bounds(target) -> tuple[float, float, float, float, float, float]:
+    if _is_surface_body(target):
+        return target.bounds_estimate()
+    if isinstance(target, Mesh):
+        return target.bounds
+    meshes = target.to_meshes()
     if not meshes:
         return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     mins = np.array([np.inf, np.inf, np.inf], dtype=float)

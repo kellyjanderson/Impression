@@ -38,12 +38,12 @@ To pick interactively with arrow keys:
 scripts/dev/install_impression.sh --interactive
 ```
 
-If you want to install a local wheel (to mimic a packaged release), use the helper:
+If you want to install from the local source tree instead of a tagged release, use the helper:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-scripts/dev/install_impression.sh --local
+scripts/dev/install_impression.sh --from-local
 ```
 
 The installer builds a wheel, installs it into the active venv, and forces `manifold3d` to build
@@ -61,17 +61,17 @@ source ~/.impression/env
 
 ## Your First Preview
 
-Every model is a Python module that exposes a `build()` function returning internal meshes.
-Use the primitives and helpers in `impression.modeling` (not PyVista objects).
+Every model is a Python module that exposes a `build()` function. Public
+primitives return `SurfaceBody` objects by default; preview and export
+tessellate them explicitly at the consumer boundary. Use the primitives and
+helpers in `impression.modeling` (not PyVista objects).
 
 ```python
-from impression.modeling import make_box, make_cylinder, boolean_union
+from impression.modeling import make_box
 
 
 def build():
-    body = make_box(size=(2, 2, 1))
-    post = make_cylinder(radius=0.4, height=2.0)
-    return boolean_union([body, post])
+    return make_box(size=(2, 2, 1))
 ```
 
 Preview it:
@@ -91,7 +91,7 @@ Full CLI reference: [`docs/cli.md`](docs/cli.md)
 ## Documentation Map
 
 - [`docs/index.md`](docs/index.md) - documentation portal
-- [`docs/modeling/`](docs/modeling/) - primitives, CSG, mesh analysis tools, drawing2d, paths, loft, threading, hinges, text
+- [`docs/modeling/`](docs/modeling/) - primitives, CSG, mesh analysis tools, drawing2d, paths, loft, hinges, text
 - [`docs/examples/`](docs/examples/) - runnable scripts that power the docs
 - [`docs/tutorials/`](docs/tutorials/) - guided walkthroughs for new and advanced users
 - [`docs/agents/`](docs/agents/) - agent usage guide for building with Impression
@@ -104,7 +104,7 @@ Full CLI reference: [`docs/cli.md`](docs/cli.md)
 
 - `scripts/dev/setup_dev_env.sh` - create/update the repo virtual environment, install the package,
   and append the `source ~/.impression/env` line to your shell configuration files.
-- `scripts/dev/install_impression.sh` - install the latest tagged release or the local repo into a
+- `scripts/dev/install_impression.sh` - install the latest tagged release or local source tree into a
   target virtual environment.
 - `scripts/dev/reset_impression_env.sh` - remove the auto-installed CLI (`~/.impression-cli`),
   delete `~/.impression/env`, strip the sourcing line from your shell rc files, and clear VS Code

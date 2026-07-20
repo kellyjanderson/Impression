@@ -1,0 +1,831 @@
+# Architecture Work Tracker
+
+## Overview
+
+This document tracks architecture-defined work that is not yet complete.
+
+It exists so architecture can stay useful after documents are written. When an
+architecture document creates new implementation or specification obligations,
+the obligation should appear here until it is either:
+
+- converted into final specifications and paired test specifications
+- implemented and verified
+- retired by a later architecture decision
+
+This tracker is intentionally architecture-facing. It is not a replacement for
+release progression, implementation checklists, or GitHub issues.
+
+## Audit Date
+
+2026-05-27
+
+## Audit Scope
+
+Audited architecture documents under:
+
+- `project/release-0.1.0a/architecture/`
+
+Cross-checked downstream specification coverage against:
+
+- `project/release-0.1.0a/specifications/`
+
+The audit looked for:
+
+- specification manifests that do not yet have matching final specs
+- newly-added architecture that supersedes older specs
+- explicit deferred, unsupported, or not-yet-implemented architecture
+- migration plans that still need specification or implementation follow-through
+- architecture that still allows mesh execution outside the tessellation
+  boundary
+
+## Status Legend
+
+- `Manifest Assessed`: architecture has a template-assessed specification
+  manifest in its owning architecture document; final specs may still need
+  promotion.
+- `Needs Spec Revision`: specs exist, but the architecture changed enough that
+  one or more specs must be revised, retired, or replaced.
+- `Specified, Needs Implementation`: final specs appear to exist; remaining work
+  is implementation and verification.
+- `Monitor`: architecture has downstream specs or process coverage; keep visible
+  but it is not a current manifest blocker.
+
+## Manifest Coverage Review
+
+- [x] Added the missing manifest to
+  [Surface Body Completion Architecture](surface-body-completion-architecture.md),
+  the new umbrella document that owns the newly discovered completion work.
+- [x] Reviewed existing manifests in
+  [Full Surface Patch Family Architecture](full-surface-patch-family-architecture.md),
+  [.impress Surface-Native File Format Architecture](impress-surface-native-file-format-architecture.md),
+  [Loft Topology Point Correspondence Architecture](loft-topology-point-correspondence-architecture.md),
+  [Mesh Execution To Tessellation Boundary Architecture](mesh-execution-tessellation-boundary-architecture.md),
+  and [SurfaceBody CSG Architecture](surfacebody-csg-architecture.md).
+- [x] Confirmed the reviewed manifests have no remaining candidate scored
+  `25+` after the current split pass.
+- [x] Performed an additional critical review beyond score thresholds and split
+  underdefined candidates in topology builder APIs, `.impress` patch payload
+  dispatch, implicit payload security, and primitive/feature producer selection.
+- [x] Left index, tracker, and already-covered sibling architecture documents
+  without duplicate manifests where their new work is owned by the umbrella or
+  component manifest listed above.
+
+## Deferral Signal Audit
+
+- [x] Searched architecture, specification, progression, code, and tests for
+  `deferred`, `not implemented`, `out of scope`, `excluded`, `not yet
+  supported`, `TODO`, `TBD`, and `stub` signals.
+- [x] Confirmed legacy Surface Specs 22, 66, and 67 still carry explicit
+  deferred/exclusion posture; they are tracked under Deferred Patch Family
+  Specs for replacement by the capability matrix.
+- [x] Confirmed code/test `not implemented yet` and `not-yet-implemented`
+  signals in CSG and higher-order seam continuity are covered by the
+  depth-completion architecture/specification set and are not acceptable final
+  completion states.
+- [x] Confirmed loft unsupported topology-transition diagnostics are covered by
+  authored-topology ambiguity and topology-completion work, not by mesh
+  fallback.
+- [x] Promoted NURBS exact conic producer helpers from an `out of scope` note to
+  an explicit advanced-family manifest candidate.
+- [x] Classified implicit external fields, heightmap external grids, and
+  displacement cross-body references as explicit refusal policies with embedded
+  canonical payloads, not uncaptured deferred work.
+
+## Priority 0: Surface Body Completion Architecture Needed
+
+These items capture the new surface-body completion standard. They supersede
+the assumption that a checked progression means the surface-body kernel is
+complete.
+
+### Surface Body Depth Completion Architecture
+
+- Status: `Specifications Written`
+- Architecture:
+  - [Surface CSG Executable Completion Architecture](surface-csg-executable-completion-architecture.md)
+  - [Higher-Order Parametric CSG Routes Architecture](higher-order-parametric-csg-routes-architecture.md)
+  - [Surface CSG Trim Fragment Reconstruction Architecture](surface-csg-trim-fragment-reconstruction-architecture.md)
+  - [Sampled and Implicit Surface CSG Support Architecture](sampled-implicit-surface-csg-support-architecture.md)
+  - [Sampled and Implicit CSG Unsupported Row Implementation Architecture](sampled-implicit-csg-unsupported-row-implementation-architecture.md)
+  - [Higher-Order Surface CSG Solver Architecture](higher-order-surface-csg-solver-architecture.md)
+  - [Exact Surface Intersection Kernel Architecture](exact-surface-intersection-kernel-architecture.md)
+  - [Higher-Order Seam Continuity Architecture](higher-order-seam-continuity-architecture.md)
+  - [Reference Artifact Promotion Architecture](reference-artifact-promotion-architecture.md)
+  - [Legacy Primitive Mesh Assumption Migration Architecture](legacy-primitive-mesh-assumption-migration-architecture.md)
+- [x] Architecture documents created for the missing depth areas.
+- [x] Specification manifests added using the manifest template shape and
+  scoring policy.
+- [x] Architecture index updated.
+- [x] Final implementation specifications created for all 33 reviewed manifest candidates.
+
+Architecture-defined work:
+
+- [ ] replace diagnostic-only CSG completion with an executable CSG coverage
+  gate that fails on `not-yet-implemented` and unresolved `unsupported` rows
+- [ ] convert unchecked reference-test CSG gaps into final specs from
+  [Reference CSG Gap Closure Architecture](reference-csg-gap-closure-architecture.md)
+  and its supplemental documents
+- [ ] implement face-touch coincident union support for `RT-CSG-009` from
+  [CSG Coincident Contact Architecture](csg-coincident-contact-architecture.md)
+- [ ] implement patch-family reference success, promotion, refusal, and
+  no-hidden-mesh-fallback fixture coverage from
+  [Patch-Family Reference CSG Completion Architecture](patch-family-reference-csg-completion-architecture.md)
+- [ ] implement loft self-intersection diagnostic reference coverage from
+  [Loft Self-Intersection Reference Architecture](loft-self-intersection-reference-architecture.md)
+- [ ] implement lofted-body CSG eligibility, operation routes, branching policy,
+  metadata propagation, and section evidence from
+  [Lofted Body CSG Reference Architecture](lofted-body-csg-reference-architecture.md)
+  - Status: `Architecture Change Documents Created`
+  - Active ACDs:
+    - [Loft Shell Connectivity And Closure Evidence](acd-loft-shell-connectivity-and-closure-evidence.md)
+    - [Single-Shell Loft CSG Operation Route](acd-single-shell-loft-csg-operation-route.md)
+    - [Branching Loft CSG Decomposition And Recomposition Policy](acd-branching-loft-csg-decomposition-and-recomposition-policy.md)
+    - [Loft CSG Result Provenance And Color Propagation](acd-loft-csg-result-provenance-and-color-propagation.md)
+    - [Reference Fixture Multi-Artifact Section Evidence Policy](acd-reference-fixture-multi-artifact-section-evidence-policy.md)
+  - Current implementation sequence:
+    1. loft shell connectivity and closure evidence
+    2. successful single-shell loft CSG routes
+    3. branch decomposition/recomposition policy
+    4. result provenance/color propagation
+    5. section evidence multi-artifact fixtures
+- [ ] split and implement higher-order parametric CSG routes for the 40
+  per-operation rows involving B-spline, NURBS, sweep, and subdivision
+- [ ] split and implement higher-order CSG row taxonomy, analytic/spline,
+  spline/NURBS pair, sweep, subdivision, route diagnostics, and fixture matrix
+  specs from the higher-order parametric CSG routes architecture
+- [ ] split and implement CSG patch-local mapping, trim arrangement, fragment
+  classification, operation selection, cap policy, shell assembly, seam rebuild,
+  and validity/persistence specs from the trim fragment reconstruction
+  architecture
+- [ ] split and implement sampled/implicit CSG policies for the 51 per-operation
+  rows involving implicit, heightmap, and displacement
+  - Status: `In Progress`
+  - Current architecture body of work: 153 unsupported CSG rows across
+    `union`, `difference`, and `intersection`
+  - Tracking document:
+    [Sampled and Implicit CSG Unsupported Row Implementation Architecture](sampled-implicit-csg-unsupported-row-implementation-architecture.md)
+- [ ] distinguish sampled/implicit rows that are missing solver code from rows
+  that are mathematically unrepresentable in the requested result family
+  - Status: `In Progress`
+- [ ] define result-family promotion policy for sampled CSG outputs, including
+  implicit, subdivision, NURBS/B-spline, and deliberate non-CSG replacement
+  workflows
+  - Status: `In Progress`
+- [ ] promote CSG coverage from bounded analytic cases to a family-pair solver
+  matrix covering every promoted patch-family pair
+- [ ] add CSG operation plans that accumulate unsupported/invalid diagnostics
+  and refuse non-executable plans before solver execution
+- [ ] build the surface-native fragment graph and result reconstruction path
+  for higher-order CSG outputs
+- [ ] create a shared exact/declared-tolerance surface intersection kernel used
+  by CSG, seams, trims, and loft/sweep diagnostics
+- [ ] add shared intersection request, solver registry, result, degeneracy, and
+  patch-local mapping records
+- [ ] implement analytic/spline and spline/spline intersection solvers with
+  deterministic residual and convergence diagnostics
+- [ ] define bounded subdivision and implicit intersection adapters with safety
+  budgets and refusal paths
+- [ ] promote seam continuity from C0/G0 storage/refusal to true C1/C2/G1/G2
+  validation
+- [ ] add boundary derivative evaluation for promoted patch families
+- [ ] add higher-order continuity violation locators and residual diagnostics
+- [ ] define bounded operation-owned continuity enforcement without mutating
+  authored source geometry
+- [ ] broaden reference artifact promotion so dirty artifacts do not count as
+  completion evidence
+- [ ] add negative diagnostic reference fixtures for unsupported and unsafe
+  surface states
+- [ ] inventory and rewrite tests/tools/docs that still assume public primitives
+  return meshes by default
+- [ ] update preview/reference tests to cross the tessellation boundary
+  explicitly when they need mesh
+
+Manifest notes:
+
+- [x] Promoted the reference CSG gap closure manifest set into final Surface
+  Specs 379-400. These specs are linked from the specification README and
+  progression document; implementation checkboxes are tracked in progression.
+- [x] Completed five-pass review/update/rescore for Surface Specs 379-400,
+  added Work Units and Review History sections to each spec, and confirmed no
+  spec requires splitting before implementation.
+- [x] Reviewed the B-spline/NURBS body-level CSG blocker. Existing architecture
+  covers generic executable CSG flow and patch-level B-spline/NURBS routes, so
+  the missing item was captured as Surface Spec 401 rather than a new
+  architecture document.
+- [x] Critical review, rescore, split, review, rescore pass completed across
+  the five depth-completion manifests.
+- [x] Two additional review/rescore/split cycles completed after the first
+  manifest pass.
+- [x] Reviewed manifests now contain 33 candidate specs; no candidate in this
+  reviewed set is scored `25+`.
+- [x] Hidden work was split out of CSG graph/reconstruction, analytic/spline
+  versus spline/spline intersections, subdivision versus implicit
+  intersections, continuity residual versus locator diagnostics, and negative
+  diagnostic fixtures.
+- [x] Additional hidden work was split out of cap payloads versus cut-boundary
+  trims, shell assembly versus validity/provenance, implicit safety versus
+  contour extraction/result classification, and loft versus seam negative
+  fixtures.
+- [x] Every `16-24` candidate includes a split-review cohesion reason.
+- [x] Readiness blockers are carried where downstream intersection,
+  derivative, reference-promotion, or artifact-policy work is prerequisite.
+
+### Surface Body Completion Program
+
+- Status: `Manifest Promoted`
+- Architecture: [Surface Body Completion Architecture](surface-body-completion-architecture.md)
+- [x] Specification manifest added, critically reviewed, rescored, and split.
+- [x] Final specifications created for every current manifest candidate.
+
+Architecture-defined work:
+
+- [ ] promote every authored patch family from `planned` to verified `available`
+  where it belongs in the surface-body kernel
+- [ ] make B-spline, NURBS, sweep, subdivision, implicit, heightmap, and
+  displacement first-class surface-body citizens across storage, evaluation,
+  seams, tessellation, `.impress`, and diagnostics
+- [ ] expand surface CSG from bounded planar/box execution to broad analytic and
+  higher-order surface-body boolean coverage
+- [ ] build exact or declared-tolerance CSG intersection, trim graph, fragment
+  classification, shell assembly, cap construction, seam rebuild, validity, and
+  provenance for supported family pairs
+- [ ] define remaining CSG solver boundaries as explicit refusal records, not as
+  mesh fallback or vague "not implemented" strings
+- [ ] make authored topology rails the primary loft correspondence mechanism
+- [ ] continue loft planning after ambiguities are found so all ambiguity and
+  invalid-input records are reported together
+- [ ] refuse loft execution for any plan carrying unresolved ambiguity records
+- [ ] provide exact ambiguity locators: topology, station, interval, entity,
+  relationship group, candidate lifecycle, and suggested authored rail
+- [ ] promote seam and continuity support beyond the current C0/G0 baseline with
+  structured diagnostics for unsupported continuity classes
+- [ ] complete `.impress` persistence for the full authored surface-body store,
+  including all promoted patch families, trims, seams, adjacency, metadata,
+  identities, topology rails, and operation provenance
+- [ ] ensure primitives and Impression-owned feature builders select appropriate
+  patch families and return surface truth
+- [ ] keep mesh output only at tessellation, preview, export, analysis, or explicit
+  compatibility boundaries
+- [ ] add reference artifact and round-trip evidence for every promoted
+  model-outputting capability
+
+Open architecture decisions:
+
+- [ ] what exact threshold promotes a family from `planned` to `available`
+- [ ] which CSG family pairs must be exact for the completion claim and which may
+  be declared-tolerance or explicitly unsupported
+- [ ] whether implicit, heightmap, and displacement booleans are kernel operations,
+  bounded adapters, or explicit non-CSG families
+- [ ] how `.impress` versions family payloads independently without fragmenting the
+  document root
+- [ ] how much automatic loft ambiguity resolution is permitted when authored rails
+  are missing but the deterministic answer is obvious
+
+Manifest notes:
+
+- [x] Manifest added to the owning architecture document.
+- [x] Broad completion work split into patch-family promotion, CSG completion,
+  loft ambiguity gates, seam/continuity promotion, `.impress` whole-store
+  gates, primitive/feature integration, and verification evidence.
+- [x] Manifest reviewed through repeated rescore/split passes with no remaining
+  candidate at `25+`.
+- [x] Final specification leaves added to
+  [Specifications README](../specifications/README.md) and
+  [Progression](../planning/progression.md).
+
+### Advanced Patch Family Implementation Completion
+
+- Status: `Manifest Promoted`
+- Architecture:
+  - [Advanced Patch Family Implementation Completion Architecture](advanced-patch-family-implementation-completion-architecture.md)
+- [x] Architecture document created for moving B-spline, NURBS, sweep,
+  subdivision, implicit, heightmap, and displacement from `planned` to
+  implemented with complete runtime, seam, CSG, loft, `.impress`,
+  tessellation, diagnostics, and evidence requirements.
+- [x] Specification manifest added using the project manifest shape and scoring
+  policy.
+- [x] Final specifications created for all 26 active manifest candidates.
+
+Architecture-defined work:
+
+- [ ] add an advanced-family promotion gate that separates `specified`,
+  `implemented`, and `available`
+- [ ] complete B-spline runtime, evaluation, derivatives, seams, tessellation,
+  `.impress`, CSG matrix, loft output, diagnostics, and evidence
+- [ ] complete NURBS rational evaluation, weight validation, exact conic
+  producer helpers, seams, tessellation, `.impress`, CSG matrix, loft output,
+  diagnostics, and evidence
+- [ ] complete sweep profile/path/frame evaluation, seams, tessellation,
+  `.impress`, CSG matrix, producer integration, diagnostics, and evidence
+- [ ] complete subdivision cage/crease evaluation, deterministic tessellation,
+  seam approximation, `.impress`, CSG matrix, diagnostics, and evidence
+- [ ] split and complete implicit field safety, extraction, CSG/intersection
+  policy, diagnostics, `.impress`, and evidence
+- [ ] split and complete heightmap `.impress`, seam/tessellation, CSG policy,
+  diagnostics, and evidence
+- [ ] split and complete displacement source-payload identity, evaluation,
+  tessellation, seam, CSG policy, diagnostics, `.impress`, and evidence
+- [ ] add advanced-family seam and boundary participation matrix
+- [ ] add advanced-family CSG support matrix and refusal policy
+- [ ] add advanced-family `.impress` whole-store coverage
+
+Manifest notes:
+
+- [x] Loop 1 review split the mandatory `25+` implicit, heightmap, and
+  displacement parent candidates.
+- [x] Loop 2 review split hidden shared spline basis and shared path frame
+  transport work from B-spline and sweep completion.
+- [x] Loop 3 review split advanced CSG support/refusal and advanced `.impress`
+  codec/evidence candidates despite scores below `25`.
+- [x] Loop 4 review split NURBS rational evaluation, subdivision scheme/cage
+  evaluation, heightmap evaluation/seam evidence, and displacement
+  evaluation/seam evidence despite scores below `25`.
+- [x] Deferred/not-implemented signal check promoted exact conic producer
+  helpers to their own NURBS candidate and clarified that external implicit,
+  heightmap, and displacement references are explicit refusal policies rather
+  than uncaptured deferred work.
+- [x] No active candidate remains at `25+` after the fourth critical
+  review/rescore/split loop.
+- [x] Final specification leaves added to
+  [Specifications README](../specifications/README.md) and
+  [Progression](../planning/progression.md).
+
+### Advanced Family Availability Producers And Operation Posture
+
+- Status: `Manifest Promoted`
+- Architecture:
+  - [Advanced Family Availability Producer Architecture](advanced-family-availability-producer-architecture.md)
+- [x] Architecture document created for the `implemented` to `available` gap in
+  subdivision, implicit, heightmap, and displacement families.
+- [x] Specification manifest added and split so no active candidate remains at
+  `25+`.
+- [x] Final specifications created for all 17 active manifest candidates.
+
+Architecture-defined work:
+
+- [ ] add availability-state fields separate from implementation-state fields
+- [ ] add a producer/import/payload authoring path registry
+- [ ] add subdivision native builder or cage import producer
+- [ ] add implicit declarative field builder and authoring safety diagnostics
+- [ ] add heightmap finite-grid builder and optional import adapter boundary
+- [ ] add displacement native authoring producer with source identity handling
+- [ ] add producer/storage/tessellation operation-row verification for available
+  families
+- [ ] add seam/loft and CSG operation-row verification for available families
+- [ ] add availability reference evidence gate and completion report builder
+- [ ] ensure available families cannot rely on class existence alone
+
+Manifest notes:
+
+- [x] Initial review split implicit authoring, heightmap producer, and
+  availability operation evidence candidates that scored `25+`.
+- [x] Four requested review/rescore/split loops completed:
+  subdivision native/import, implicit safety/budget diagnostics, displacement
+  source/payload authoring, and CSG classification/no-mesh-fallback evidence.
+- [x] Critical rescore split producer-path operation row verification from
+  storage/tessellation operation row verification.
+- [x] Active candidates now cover availability gates, subdivision producers,
+  implicit positive and negative authoring paths, heightmap native/import paths,
+  displacement authoring, operation rows, reference evidence, and completion
+  reporting.
+- [x] Final specification leaves added to
+  [Specifications README](../specifications/README.md) and
+  [Progression](../planning/progression.md).
+
+### Authored Loft Ambiguity Contract Refresh
+
+- Status: `Needs Spec Revision`
+- Architecture:
+  - [Surface Body Completion Architecture](surface-body-completion-architecture.md)
+  - [Loft Ambiguity and Diagnostics Architecture](loft-ambiguity-and-diagnostics.md)
+  - [Loft Plan Object Architecture](loft-plan-object-architecture.md)
+  - [Loft Topology Point Correspondence Architecture](loft-topology-point-correspondence-architecture.md)
+
+Issue:
+
+- The intended product contract is authored topology first.
+- Automatic ambiguity resolution is useful but not required for this version.
+- A plan should continue collecting all ambiguity records, but unresolved
+  ambiguity must make execution impossible.
+
+Required work:
+
+- [ ] ensure loft architecture consistently states authored rails and named
+  topology entities are primary
+- [ ] ensure ambiguity records include exact "what and where" locators
+- [ ] ensure planners accumulate all ambiguities before returning
+- [ ] ensure executors refuse unresolved ambiguity records
+- [ ] remove any implication that automatic ambiguity resolution is required for
+  completion
+
+## Priority 1: Manifest Promoted To Final Specs
+
+These items have assessed manifests in their owning architecture documents and
+now have one final specification document for each manifest candidate.
+
+### .impress Surface-Native File Format
+
+- Status: `Manifest Promoted`
+- [x] Final specifications created for every manifest candidate.
+- Architecture: [.impress Surface-Native File Format Architecture](impress-surface-native-file-format-architecture.md)
+- Current downstream specs found: none dedicated to `.impress`
+
+Architecture-defined work:
+
+- [ ] `.impress` document root and `SurfaceBodyStore` record
+- [ ] surface payload encoder for bodies, shells, patches, trims, seams, and
+  adjacency
+- [ ] surface payload decoder and constructor validation
+- [ ] deterministic JSON writer and reader API
+- [ ] round-trip identity and metadata preservation tests
+- [ ] invalid-file refusal diagnostics
+- [ ] industry interchange adapter boundary that explicitly excludes STEP/IGES from
+  V1 unless separately planned
+
+Open architecture decisions that must be resolved before final specs:
+
+- [ ] single-body versus multi-body default file semantics
+- [ ] whether stored stable identities are required or optional
+- [ ] document units policy
+- [ ] whether topology rails belong in V1 `.impress` or in a later modeling document
+  layer
+
+Manifest notes:
+
+- This should become a coherent `.impress` spec branch, not a single oversized
+  spec.
+- The file format must inherit the mesh-boundary rule: tessellated mesh may be a
+  cache or imported mesh object, not canonical surface truth.
+
+### Full Surface Patch Family Program
+
+- Status: `Manifest Promoted`
+- [x] Final specifications created for every manifest candidate.
+- Architecture: [Full Surface Patch Family Architecture](full-surface-patch-family-architecture.md)
+- Current downstream specs found: older surface patch specs exist, but they
+  include [Surface Spec 66: Deferred Patch Families and Explicit Exclusions](../specifications/surface-66-deferred-patch-families-exclusions-v1_0.md)
+  which the new architecture supersedes.
+
+Architecture-defined work:
+
+- [ ] full patch-family scope and implementation matrix
+- [ ] B-spline surface patch record and evaluation
+- [ ] NURBS surface patch record and rational evaluation
+- [ ] sweep surface patch record and frame transport
+- [ ] subdivision surface patch record and Catmull-Clark evaluation
+- [ ] implicit surface patch record and declarative field model
+- [ ] cross-family tessellation adapters
+- [ ] cross-family seam and boundary participation
+- [ ] `.impress` payload support for all patch families
+- [ ] family-aware boolean eligibility and refusal diagnostics
+- [ ] migration spec replacing deferred-family constants with a capability matrix
+
+Open architecture decisions that must be resolved before final specs:
+
+- [ ] whether B-spline and NURBS are separate classes or one shared rational-capable
+  implementation over common basis infrastructure
+- [ ] sweep payload shape: 2D topology, 3D curves, or both
+- [ ] subdivision V1 limit evaluation versus finite-level deterministic evaluation
+- [ ] allowed declarative implicit field nodes
+- [ ] exact boolean support threshold for declaring a family complete
+- [ ] whether `.impress` versions all family payloads together or independently
+
+Manifest notes:
+
+- This is the most important replacement for the old deferred-family posture.
+- Spec 66 should be retired, replaced, or explicitly downgraded to historical
+  context.
+- The manifest should avoid bundling all families into one implementation spec.
+
+### Mesh Execution To Tessellation Boundary
+
+- Status: `Manifest Promoted`
+- [x] Final specifications created for every manifest candidate.
+- Architecture: [Mesh Execution To Tessellation Boundary Architecture](mesh-execution-tessellation-boundary-architecture.md)
+- Current downstream specs found: older mesh decommission and surface-return
+  specs exist, but they do not fully cover the new boundary audit or primitive
+  excision details.
+
+Architecture-defined work:
+
+- [ ] mesh execution inventory and classification
+- [ ] loft mesh executor boundary migration
+- [ ] primitive surface defaults and primitive mesh path excision
+- [ ] text and drafting surface defaults
+- [ ] heightmap native surface representation
+- [ ] hinge surface assemblies as canonical modeled output
+- [ ] surface transform and composition layer replacing `MeshGroup` as authored
+  composition
+- [ ] mesh utility quarantine
+- [ ] no-hidden-mesh-fallback enforcement
+
+Primitive-specific work called out by architecture:
+
+- [ ] `make_box` must default to `make_surface_box`
+- [ ] `make_cylinder` must default to `make_surface_cylinder`
+- [ ] `make_ngon` must default to `make_surface_ngon`
+- [ ] `make_polyhedron` must default to `make_surface_polyhedron`
+- [ ] `make_nhedron` must remain a surface-safe compatibility alias
+- [ ] `make_sphere` must default to `make_surface_sphere`
+- [ ] `make_torus` must default to `make_surface_torus`
+- [ ] `make_cone` must default to `make_surface_cone`
+- [ ] `make_prism` must default to `make_surface_prism`
+
+Private primitive mesh helpers requiring deletion, quarantine, or tessellation
+relocation:
+
+- [ ] `_orient_mesh(...)`
+- [ ] `_box_mesh(...)`
+- [ ] `_sphere_mesh(...)`
+- [ ] `_torus_mesh(...)`
+- [ ] `_circular_frustum_mesh(...)`
+- [ ] `_rectangular_frustum_mesh(...)`
+
+Manifest notes:
+
+- This branch should explicitly reconcile older specs such as Surface Specs
+  44, 45, 50, 51, 57, 99-105, and Loft Spec 60.
+- Loft Spec 60 is now suspect as canonical architecture because mesh executor
+  correspondence consumption should move to legacy/debug/tessellation-boundary
+  language.
+- The first spec should probably be the inventory/classification spec so later
+  leaf specs can cite exact symbols and owners.
+
+## Priority 2: Spec Revision Or Reconciliation Promoted
+
+These areas had specs, but the architecture changed enough that at least one
+spec required revision, retirement, or replacement. The required reconciliation
+work now has final specification coverage.
+
+### Loft Legacy Mesh Debug Correspondence Consumption
+
+- Status: `Spec Revision Promoted`
+- [x] Replacement/reconciliation specification created.
+- Architecture:
+  - [Loft Topology Point Correspondence Architecture](loft-topology-point-correspondence-architecture.md)
+  - [Mesh Execution To Tessellation Boundary Architecture](mesh-execution-tessellation-boundary-architecture.md)
+- Current downstream spec:
+  - [Loft Spec 60: Legacy Mesh Debug Correspondence Consumption](../specifications/loft-60-mesh-executor-correspondence-consumption-v1_0.md)
+
+Issue:
+
+- The point-correspondence manifest created a mesh executor consumption spec.
+- The newer mesh-boundary architecture says mesh execution is not canonical and
+  must move behind tessellation or into explicit legacy/debug tooling.
+
+Required work:
+
+- [ ] revise or replace Loft Spec 60
+- [ ] make `LoftPlan -> SurfaceBody` the canonical executor contract
+- [ ] ensure mesh face emission is tessellation/debug/compatibility only
+- [ ] add tests proving surface loft does not fall back to mesh
+
+### Deferred Patch Family Specs
+
+- Status: `Spec Revision Promoted`
+- [x] Replacement/reconciliation specifications created.
+- Architecture: [Full Surface Patch Family Architecture](full-surface-patch-family-architecture.md)
+- Current downstream specs:
+  - [Surface Spec 65: Required V1 Patch Families](../specifications/surface-65-required-v1-patch-families-v1_0.md)
+  - [Surface Spec 66: Deferred Patch Families and Explicit Exclusions](../specifications/surface-66-deferred-patch-families-exclusions-v1_0.md)
+  - [Surface Spec 67: Patch-Family to Feature Coverage Matrix](../specifications/surface-67-patch-family-feature-coverage-v1_0.md)
+
+Issue:
+
+- The new architecture rejects deferred patch families as the target posture.
+
+Required work:
+
+- [ ] replace deferred-family language with a capability and implementation matrix
+- [ ] define every patch family as first-class, even when staged
+- [ ] require explicit unsupported-operation diagnostics without treating the family
+  as excluded
+
+### Surface API Mesh Defaults
+
+- Status: `Spec Revision Promoted`
+- [x] Replacement/reconciliation specifications created.
+- Architecture:
+  - [Mesh Execution To Tessellation Boundary Architecture](mesh-execution-tessellation-boundary-architecture.md)
+  - [Surface-Native Capability Replacement Architecture](surface-native-capability-replacement-architecture.md)
+- Current downstream specs:
+  - [Surface Spec 44: Primitive API Surface Return-Type Migration](../specifications/surface-44-primitive-api-surface-return-migration-v1_0.md)
+  - [Surface Spec 45: Modeling Operation Surface Return-Type Migration](../specifications/surface-45-modeling-op-surface-return-migration-v1_0.md)
+  - [Surface Spec 99: Surface-Native Replacement Program](../specifications/surface-99-surface-native-replacement-program-v1_0.md)
+  - [Surface Specs 100-105](../specifications/README.md)
+
+Issue:
+
+- Older specs may describe migration, but the new architecture is stricter:
+  new authored APIs should not use `backend="mesh"` defaults, and hidden mesh
+  fallback is forbidden.
+
+Required work:
+
+- [ ] audit older specs for compatibility language that still allows mesh-primary
+  authored modeling
+- [ ] add explicit no-hidden-fallback acceptance criteria
+- [ ] ensure primitive-by-primitive excision is represented in final specs
+
+## Priority 3: Specified, Needs Implementation
+
+These architecture branches already have downstream specs in the release tree.
+They still represent uncompleted work unless implementation and verification
+have landed.
+
+### SurfaceBody CSG
+
+- Status: `Specified, Needs Implementation`
+- Architecture: [SurfaceBody CSG Architecture](surfacebody-csg-architecture.md)
+- Current downstream specs:
+  - Surface Specs 108-110
+  - Surface Specs 117-120
+  - Surface Specs 126-138
+
+Remaining architecture work to implement:
+
+- [ ] canonical surface boolean operand preparation
+- [ ] intersection and classification
+- [ ] operand fragment graph
+- [ ] result topology reconstruction
+- [ ] validity and bounded healing gate
+- [ ] metadata and provenance propagation
+- [ ] explicit unsupported result behavior without mesh fallback
+
+### Surface-Native Capability Replacements
+
+- Status: `Specified, Needs Implementation`
+- Architecture: [Surface-Native Capability Replacement Architecture](surface-native-capability-replacement-architecture.md)
+- Current downstream specs:
+  - Surface Specs 99-105
+
+Remaining architecture work to implement:
+
+- [ ] surface-native drafting
+- [ ] surface-native text
+- [ ] surface-body booleans
+- [ ] surface-native hinges
+- [ ] surface-native heightfields and displacement
+
+This area overlaps with the mesh-boundary branch and should be reconciled before
+implementation sequencing is refreshed.
+
+### Mesh Analysis And Repair Toolchain
+
+- Status: `Specified, Needs Implementation`
+- Architecture: [Mesh Analysis and Repair Architecture](surface-mesh-decommission-architecture.md)
+- Current downstream specs:
+  - Surface Specs 121-125
+
+Remaining architecture work to implement:
+
+- [ ] retained mesh capability matrix
+- [ ] mesh analysis contract
+- [ ] mesh repair contract
+- [ ] standalone mesh utility contract
+- [ ] clear separation between retained mesh tools and deleted mesh modeling paths
+
+### SurfaceBody Seam And Adjacency
+
+- Status: `Specified, Needs Implementation`
+- Architecture: [SurfaceBody Seam and Adjacency Architecture](surfacebody-seam-adjacency-architecture.md)
+- Current downstream specs:
+  - Surface Specs 26-28
+  - Surface Specs 77-85
+
+Remaining architecture work to implement:
+
+- [ ] explicit seam identity
+- [ ] patch-boundary use records
+- [ ] shell adjacency view
+- [ ] seam-first tessellation for watertight output
+- [ ] transform and cache identity interactions
+
+### Testing, Reference Artifacts, And Computer Vision Verification
+
+- Status: `Specified, Needs Implementation`
+- Architecture:
+  - [Testing Architecture](testing-architecture.md)
+  - [Model Output Reference Verification](model-output-reference-verification.md)
+  - [Computer Vision Verification Architecture](computer-vision-verification-architecture.md)
+- Current downstream specs:
+  - Testing Specs 01-23
+  - Surface Specs 106-107
+
+Remaining architecture work to implement:
+
+- [ ] reference artifact baseline lifecycle
+- [ ] grouped model output completeness rules
+- [ ] deterministic render products
+- [ ] CV text, slice, object-view, handedness, and diagnostic lanes
+
+### Next-Generation Loft Architecture
+
+- Status: `Specified, Needs Implementation`
+- Architecture:
+  - [Loft Evolution System Architecture](loft-evolution-system.md)
+  - [Loft Planner / Executor Architecture](loft-planner-executor-architecture.md)
+  - [Loft Plan Object Architecture](loft-plan-object-architecture.md)
+  - [Loft Ambiguity and Diagnostics Architecture](loft-ambiguity-and-diagnostics.md)
+  - [Loft Tolerance and Degeneracy Architecture](loft-tolerance-and-degeneracy-architecture.md)
+  - [Loft N->M / M->N Decomposition Architecture](loft-nm-mn-decomposition-architecture.md)
+  - [Loft Topology Point Correspondence Architecture](loft-topology-point-correspondence-architecture.md)
+- Current downstream specs:
+  - Loft Specs 21-64
+  - Surface Specs 95-98
+
+Remaining architecture work to implement:
+
+- [ ] placed topology state and directional correspondence
+- [ ] evolution plan and transition operator family
+- [ ] ambiguity and constraint request records
+- [ ] tolerance and degeneracy policy
+- [ ] many-to-many decomposition
+- [ ] topology path, segment, landmark, and lifecycle records
+- [ ] correspondence-preserving resampling
+- [ ] generated shape default rails
+- [ ] surface executor consumption
+
+Reconciliation required:
+
+- [ ] mesh executor consumption must be revised as noted in Priority 2.
+
+## Monitor
+
+These documents are important but did not produce new manifest or spec-promotion
+blockers during this audit.
+
+### Surface-First Internal Model
+
+- Status: `Monitor`
+- Architecture: [Surface-First Internal Model Architecture](surface-first-internal-model.md)
+- Current downstream specs:
+  - Surface Specs 01-19
+
+Notes:
+
+- This is the parent architecture for much of the current release.
+- No new manifest branch is needed unless later architecture changes the core
+  `SurfaceBody` model again.
+
+### Architecture Index
+
+- Status: `Monitor`
+- Architecture: [Architecture Index](README.md)
+
+Notes:
+
+- Keep links updated as new architecture work documents are added.
+
+## Completed Spec Promotion Order
+
+1. [x] Mesh Execution Inventory And Classification
+2. [x] Mesh Execution To Tessellation Boundary leaf specs
+3. [x] Full Surface Patch Family manifest and Spec 66 replacement
+4. [x] `.impress` file format manifest
+
+Reasoning:
+
+- The mesh inventory gives immediate clarity about what current code paths must
+  move or be quarantined.
+- Patch-family completeness informs `.impress` payload shape.
+- `.impress` should not be finalized before the patch-family payload policy is
+  settled, but its document-root/store work can be drafted in parallel once the
+  payload boundary is clear.
+
+Spec-promotion note:
+
+- 2026-05-26: Completed final specification promotion for the Priority 1
+  manifests and Priority 2 reconciliation items. Remaining unchecked release
+  work belongs in progression as implementation work, not in this architecture
+  promotion tracker.
+
+## Maintenance Rule
+
+When a new architecture document is added or materially updated:
+
+1. Add or update its entry here.
+2. Mark whether it needs manifest work, spec revision, implementation, or only
+   monitoring.
+3. Link the relevant architecture and specs.
+4. Move completed entries to a release-complete archive section when the release
+   closes.
+
+## Change History
+
+- 2026-05-27: Added the Advanced Patch Family Implementation Completion
+  Architecture and tracker obligations for moving B-spline, NURBS, sweep,
+  subdivision, implicit, heightmap, and displacement from `planned` to
+  implemented.
+- 2026-05-27: Promoted the surface-body completion manifest and late split
+  candidates into final specification leaves and added them to progression.
+- 2026-05-27: Recorded the extra critical manifest review that split
+  underdefined candidates even though no candidate exceeded the mandatory split
+  threshold.
+- 2026-05-27: Marked the surface-body completion program as manifest assessed
+  after adding and splitting the owning specification manifest.
+- 2026-05-26: Moved assessed specification manifests out of this tracker and
+  into the owning architecture documents. The tracker remains an index and
+  status rollup.
+- 2026-05-26: Added tracker and initial audit of release architecture documents
+  to identify manifest/spec-promotion blockers, spec revisions, and
+  implementation follow-up work before the next specification pass.

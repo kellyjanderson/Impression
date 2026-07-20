@@ -1,0 +1,115 @@
+# Architecture Index
+
+This folder contains architecture documents for Impression.
+
+Architecture documents define:
+
+- the major parts of a system area
+- the responsibilities of those parts
+- the relationships between them
+- the high-level data flow across them
+- the cross-domain decisions that specifications must inherit
+
+## Current Documents
+
+- [Testing Architecture](testing-architecture.md)
+- [Architecture Work Tracker](architecture-work-tracker.md)
+- [Model Output Reference Verification](model-output-reference-verification.md)
+- [Computer Vision Verification Architecture](computer-vision-verification-architecture.md)
+- [Surface-First Internal Model Architecture](surface-first-internal-model.md)
+- [.impress Surface-Native File Format Architecture](impress-surface-native-file-format-architecture.md)
+- [Full Surface Patch Family Architecture](full-surface-patch-family-architecture.md)
+- [Patch Family Integration Architecture](patch-family-integration-architecture.md)
+- [Surface-Native Capability Replacement Architecture](surface-native-capability-replacement-architecture.md)
+- [Surface Body Completion Architecture](surface-body-completion-architecture.md)
+- [Advanced Patch Family Implementation Completion Architecture](advanced-patch-family-implementation-completion-architecture.md)
+- [Advanced Family Availability Producer Architecture](advanced-family-availability-producer-architecture.md)
+- [Surface CSG Executable Completion Architecture](surface-csg-executable-completion-architecture.md)
+- [Higher-Order Parametric CSG Routes Architecture](higher-order-parametric-csg-routes-architecture.md)
+- [Surface CSG Trim Fragment Reconstruction Architecture](surface-csg-trim-fragment-reconstruction-architecture.md)
+- [Sampled and Implicit Surface CSG Support Architecture](sampled-implicit-surface-csg-support-architecture.md)
+- [Sampled and Implicit CSG Unsupported Row Implementation Architecture](sampled-implicit-csg-unsupported-row-implementation-architecture.md)
+- [Higher-Order Surface CSG Solver Architecture](higher-order-surface-csg-solver-architecture.md)
+- [Exact Surface Intersection Kernel Architecture](exact-surface-intersection-kernel-architecture.md)
+- [Higher-Order Seam Continuity Architecture](higher-order-seam-continuity-architecture.md)
+- [Reference Artifact Promotion Architecture](reference-artifact-promotion-architecture.md)
+- [Legacy Primitive Mesh Assumption Migration Architecture](legacy-primitive-mesh-assumption-migration-architecture.md)
+- [Mesh Analysis and Repair Architecture](surface-mesh-decommission-architecture.md)
+- [Mesh Execution To Tessellation Boundary Architecture](mesh-execution-tessellation-boundary-architecture.md)
+- [SurfaceBody Seam and Adjacency Architecture](surfacebody-seam-adjacency-architecture.md)
+- [SurfaceBody CSG Architecture](surfacebody-csg-architecture.md)
+- [Reference CSG Gap Closure Architecture](reference-csg-gap-closure-architecture.md)
+- [CSG Coincident Contact Architecture](csg-coincident-contact-architecture.md)
+- [Patch-Family Reference CSG Completion Architecture](patch-family-reference-csg-completion-architecture.md)
+- [Loft Self-Intersection Reference Architecture](loft-self-intersection-reference-architecture.md)
+- [Lofted Body CSG Reference Architecture](lofted-body-csg-reference-architecture.md)
+- [Loft Evolution System Architecture](loft-evolution-system.md)
+- [Loft Planner / Executor Architecture](loft-planner-executor-architecture.md)
+- [Loft Ambiguity and Diagnostics Architecture](loft-ambiguity-and-diagnostics.md)
+- [Loft Plan Object Architecture](loft-plan-object-architecture.md)
+- [Loft Tolerance and Degeneracy Architecture](loft-tolerance-and-degeneracy-architecture.md)
+- [Loft N->M / M->N Decomposition Architecture](loft-nm-mn-decomposition-architecture.md)
+- [Loft Topology Point Correspondence Architecture](loft-topology-point-correspondence-architecture.md)
+
+## Reference Review Workbench Documents
+
+- [Reference Review Workbench Architecture](reference-review-workbench-architecture.md)
+- [Reference Review Fixture Source Contract](reference-review-fixture-source-contract.md)
+- [Reference Review Qt Workbench UI](reference-review-qt-workbench-ui.md)
+- [Reference Review Async Concurrency](reference-review-async-concurrency.md)
+- [Reference Review Preview Remediation Plan](reference-review-preview-remediation-plan.md)
+- [Reference Review Preview Engine Sharing Architecture](reference-review-preview-engine-sharing-architecture.md)
+- [Reference Review Preview Qt Wrapper Architecture](reference-review-preview-qt-wrapper-architecture.md)
+- [Reference Review Preview Payload Boundary Architecture](reference-review-preview-payload-boundary-architecture.md)
+- [Reference Review Promotion And Notes Lifecycle](reference-review-promotion-and-notes-lifecycle.md)
+- [Reference Review Codex Sandbox](reference-review-codex-sandbox.md)
+- [Reference Review And Impression Bench GUI Delta Review](reference-review-impression-bench-gui-delta-review.md)
+
+## Inference And Curve Fitting Documents
+
+- [B-Spline Implementation Architecture](b-spline-implementation-architecture.md)
+- [B-Spline Path And Trajectory Architecture](b-spline-path-and-trajectory-architecture.md)
+- [B-Spline Control-Station Inference Architecture](b-spline-control-station-inference-architecture.md)
+- [B-Spline Surface And Reconstruction Architecture](b-spline-surface-and-reconstruction-architecture.md)
+- [Feature 01 - B-Spline Curve Support Architecture](feature-01-b-spline-curve-support-architecture.md)
+- [Feature 02 - Explicit Fit Policy And Diagnostics Architecture](feature-02-explicit-fit-policy-and-diagnostics-architecture.md)
+- [Feature 03 - Curve Fitting From Dense Loft Evidence Architecture](feature-03-curve-fitting-from-dense-loft-evidence-architecture.md)
+- [Feature 04 - Non-User-Facing Control Stations Architecture](feature-04-non-user-facing-control-stations-architecture.md)
+- [Feature 05 - Control-Station Inference Architecture](feature-05-control-station-inference-architecture.md)
+- [Feature 06 - Curve-Intent Inference Architecture](feature-06-curve-intent-inference-architecture.md)
+- [Feature 07 - Shared Trajectory Inference And Guidance Architecture](feature-07-shared-trajectory-inference-and-guidance-architecture.md)
+- [Feature 08 - Progression Model Upgrade Architecture](feature-08-progression-model-upgrade-architecture.md)
+- [Feature 09 - Inference Diagnostics And Explainability Architecture](feature-09-inference-diagnostics-and-explainability-architecture.md)
+- [Priority 01 - B-Spline Curve Constructs Architecture](priority-01-b-spline-curve-constructs-architecture.md)
+- [Priority 02 - Parameterization, Knot, And Fit Policy Architecture](priority-02-parameterization-knot-and-fit-policy-architecture.md)
+- [Priority 03 - Path And Trajectory Integration Architecture](priority-03-path-and-trajectory-integration-architecture.md)
+- [Priority 04 - Control-Station Inference Result Architecture](priority-04-control-station-inference-result-architecture.md)
+- [Priority 05 - Spanwise Grouping And Compatibility Architecture](priority-05-spanwise-grouping-and-compatibility-architecture.md)
+- [Priority 06 - Reconstruction And Repair Intermediates Architecture](priority-06-reconstruction-and-repair-intermediates-architecture.md)
+- [Priority 07 - Surfaced B-Spline Patch Family Architecture](priority-07-surfaced-b-spline-patch-family-architecture.md)
+
+## Active Architectural Change Documents
+
+- [ACD: Loft Shell Connectivity And Closure Evidence](acd-loft-shell-connectivity-and-closure-evidence.md)
+- [ACD: Single-Shell Loft CSG Operation Route](acd-single-shell-loft-csg-operation-route.md)
+- [ACD: Loft Primitive Trim-Fragment Execution Adapter](acd-loft-primitive-trim-fragment-execution-adapter.md)
+- [ACD: Loft Primitive Cut-Shell Geometric Kernel](acd-loft-primitive-cut-shell-geometric-kernel.md)
+- [ACD: Loft Primitive Intersection And Cut-Loop Kernel](acd-loft-primitive-intersection-and-cut-loop-kernel.md)
+- [ACD: Loft Primitive Generated Cap And Topology Policy](acd-loft-primitive-generated-cap-and-topology-policy.md)
+- [ACD: Loft Primitive Seam Shell Validity Execution](acd-loft-primitive-seam-shell-validity-execution.md)
+- [ACD: Loft CSG Reference Geometry Handoff](acd-loft-csg-reference-geometry-handoff.md)
+- [ACD: Branching Loft CSG Decomposition And Recomposition Policy](acd-branching-loft-csg-decomposition-and-recomposition-policy.md)
+- [ACD: Loft CSG Result Provenance And Color Propagation](acd-loft-csg-result-provenance-and-color-propagation.md)
+- [ACD: Reference Fixture Multi-Artifact Section Evidence Policy](acd-reference-fixture-multi-artifact-section-evidence-policy.md)
+- [ACD: Reference Review Hybrid Stabilization](acd-reference-review-hybrid-stabilization.md)
+
+## Notes
+
+The loft architecture branch is being developed before the dedicated next-gen
+loft specification tree is written.
+
+That is intentional.
+
+The goal is to complete the breadth-first architectural picture first so the
+eventual loft specifications refine a coherent system instead of inventing core
+behavior piecemeal.

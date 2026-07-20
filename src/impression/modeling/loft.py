@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, Sequence
+from enum import Enum
+from typing import Iterable, Mapping, Sequence
 
 import numpy as np
 
@@ -10,9 +11,12 @@ from impression.mesh_quality import MeshQuality, apply_lod
 
 from ._color import set_mesh_color
 from .surface import (
+    BSplineSurfacePatch,
+    NURBSSurfacePatch,
     ParameterDomain,
     PlanarSurfacePatch,
     RuledSurfacePatch,
+    SweepSurfacePatch,
     SurfaceBody,
     SurfaceBoundaryRef,
     SurfaceSeam,
@@ -20,7 +24,8 @@ from .surface import (
     make_surface_body,
     make_surface_shell,
 )
-from .tessellation import SurfaceConsumerCollection, make_surface_consumer_collection
+from .surface_spline import build_loft_control_net
+from .tessellation import SurfaceConsumerCollection, make_surface_consumer_collection, validate_feature_surface_handoff
 from .topology import (
     loops_resampled as _loops_resampled,
     profile_loops as _profile_loops,
@@ -37,11 +42,651 @@ from .topology import (
     Loop,
     Section,
     Region,
+    TopologyLandmark,
+    TopologyPath,
+    TopologyPoint,
+    TopologySegment,
     as_section,
 )
 from .drawing2d import Path2D
 from .path3d import Path3D
 from .paths import Path as PolyPath
+
+
+class RailSource(str, Enum):
+    EXPLICIT_ID = "explicit_id"
+    LANDMARK_NAME = "landmark_name"
+    SEGMENT_NAME = "segment_name"
+    AUTHORED_ORDER = "authored_order"
+    GENERATED_RAIL = "generated_rail"
+
+
+@dataclass(frozen=True)
+class RailConflictDiagnostic:
+    reason: str
+    source_ref: str
+    target_ref: str
+    priority_tier: RailSource
+
+
+@dataclass(frozen=True)
+class RailResolutionResult:
+    matches: tuple[tuple[str, str], ...]
+    source_by_match: dict[tuple[str, str], RailSource]
+    conflicts: tuple[RailConflictDiagnostic, ...] = ()
+    unmatched_source: tuple[str, ...] = ()
+    unmatched_target: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class InferenceCandidateScore:
+    shift: int
+    reversed: bool
+    cost: float
+    cost_terms: dict[str, float]
+    protected_anchor_agreement: float
+    prior_interval_agreement: float = 1.0
+
+
+@dataclass(frozen=True)
+class InferenceRefusalDiagnostic:
+    reason: str
+    best_candidate: InferenceCandidateScore | None = None
+    second_best_candidate: InferenceCandidateScore | None = None
+    required_rail_hint: str | None = None
+
+
+@dataclass(frozen=True)
+class InferenceResult:
+    accepted: bool
+    matches: tuple[tuple[str, str], ...] = ()
+    candidate: InferenceCandidateScore | None = None
+    diagnostics: tuple[InferenceRefusalDiagnostic, ...] = ()
+
+
+@dataclass(frozen=True)
+class ParentSpanMatch:
+    source_track_ref: str
+    target_track_ref: str
+    span_parameter: float
+    confidence: float
+    source: str
+
+
+@dataclass(frozen=True)
+class PointLifecycleRefusalDiagnostic:
+    reason: str
+    point_ref: str
+    candidate_spans: tuple[ParentSpanMatch, ...] = ()
+    required_rail_hint: str | None = None
+
+
+@dataclass(frozen=True)
+class PointLifecycleResolution:
+    events: tuple["PointLifecycleEvent", ...] = ()
+    synthetic_supports: tuple["SyntheticSupportReference", ...] = ()
+    refusals: tuple[PointLifecycleRefusalDiagnostic, ...] = ()
+
+    @property
+    def accepted(self) -> bool:
+        return not self.refusals
+
+
+@dataclass(frozen=True)
+class SampleCorrespondenceRecord:
+    index: int
+    source_point_ref: str | None = None
+    target_point_ref: str | None = None
+    track_id: str | None = None
+    lifecycle_event_id: str | None = None
+    source_parameter: float | None = None
+    target_parameter: float | None = None
+    protected: bool = False
+
+
+@dataclass(frozen=True)
+class ResampledLoopCorrespondence:
+    source_samples: np.ndarray
+    target_samples: np.ndarray
+    sample_records: tuple[SampleCorrespondenceRecord, ...]
+    protected_indices: tuple[int, ...] = ()
+    diagnostics: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "source_samples", np.asarray(self.source_samples, dtype=float).reshape(-1, 2))
+        object.__setattr__(self, "target_samples", np.asarray(self.target_samples, dtype=float).reshape(-1, 2))
+        object.__setattr__(self, "sample_records", tuple(self.sample_records))
+        object.__setattr__(self, "protected_indices", tuple(int(index) for index in self.protected_indices))
+        object.__setattr__(self, "diagnostics", dict(self.diagnostics))
+        validate_sample_correspondence(self)
+
+
+@dataclass(frozen=True)
+class MeshSampleEmissionDiagnostic:
+    loop_pair_id: str
+    sample_index: int | None
+    track_id: str | None
+    reason: str
+
+
+@dataclass(frozen=True)
+class SurfaceSampleEmissionDiagnostic:
+    loop_pair_id: str
+    sample_index: int | None
+    track_id: str | None
+    lifecycle_event_id: str | None
+    reason: str
+
+
+@dataclass(frozen=True)
+class LoftFamilyIntentEvidence:
+    transition_interval: tuple[int, int]
+    topology_case: str
+    loop_pair_count: int
+    smooth_intent: bool = False
+    rational_intent: bool = False
+    sweep_intent: bool = False
+    requested_family: str | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "transition_interval": tuple(int(value) for value in self.transition_interval),
+            "topology_case": self.topology_case,
+            "loop_pair_count": int(self.loop_pair_count),
+            "smooth_intent": bool(self.smooth_intent),
+            "rational_intent": bool(self.rational_intent),
+            "sweep_intent": bool(self.sweep_intent),
+            "requested_family": self.requested_family,
+        }
+
+
+@dataclass(frozen=True)
+class LoftPatchFamilySelectionRecord:
+    transition_interval: tuple[int, int]
+    selected_family: str | None
+    evidence: LoftFamilyIntentEvidence
+    refusal_reason: str | None = None
+
+    @property
+    def accepted(self) -> bool:
+        return self.selected_family is not None and self.refusal_reason is None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "transition_interval": tuple(int(value) for value in self.transition_interval),
+            "selected_family": self.selected_family,
+            "accepted": self.accepted,
+            "refusal_reason": self.refusal_reason,
+            "evidence": self.evidence.canonical_payload(),
+        }
+
+
+@dataclass(frozen=True)
+class LoftRationalWeightPolicyRecord:
+    source: str
+    shape: tuple[int, int]
+    min_weight: float
+    max_weight: float
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "source": self.source,
+            "shape": self.shape,
+            "min_weight": self.min_weight,
+            "max_weight": self.max_weight,
+        }
+
+
+@dataclass(frozen=True)
+class LoftSweepFramePolicyRecord:
+    frame_policy: str
+    source: str = "explicit"
+
+    def __post_init__(self) -> None:
+        policy = str(self.frame_policy).strip()
+        if policy not in {"parallel_transport", "frenet", "fixed"}:
+            raise ValueError("Loft sweep frame_policy must be parallel_transport, frenet, or fixed.")
+        source = str(self.source).strip()
+        if not source:
+            raise ValueError("Loft sweep frame policy source must be non-empty.")
+        object.__setattr__(self, "frame_policy", policy)
+        object.__setattr__(self, "source", source)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {"frame_policy": self.frame_policy, "source": self.source}
+
+
+@dataclass(frozen=True)
+class LoftBoundaryGraph:
+    """Deterministic boundary/seam graph authored by the loft executor."""
+
+    boundary_refs: tuple[SurfaceBoundaryRef, ...]
+    seam_refs: tuple[str, ...]
+    component_edges: tuple[tuple[str, tuple[SurfaceBoundaryRef, ...]], ...]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary_refs": [boundary.canonical_payload() for boundary in self.boundary_refs],
+            "seam_refs": self.seam_refs,
+            "component_edges": [
+                {
+                    "seam_id": seam_id,
+                    "boundaries": [boundary.canonical_payload() for boundary in boundaries],
+                }
+                for seam_id, boundaries in self.component_edges
+            ],
+        }
+
+
+@dataclass(frozen=True)
+class LoftSeamCoverageRecord:
+    """Structured seam coverage diagnostics for a loft boundary graph."""
+
+    complete: bool
+    missing: tuple[SurfaceBoundaryRef, ...] = ()
+    duplicate: tuple[SurfaceBoundaryRef, ...] = ()
+    dangling: tuple[SurfaceBoundaryRef, ...] = ()
+    seam_count: int = 0
+    boundary_count: int = 0
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary_count": self.boundary_count,
+            "complete": self.complete,
+            "dangling": [boundary.canonical_payload() for boundary in self.dangling],
+            "duplicate": [boundary.canonical_payload() for boundary in self.duplicate],
+            "missing": [boundary.canonical_payload() for boundary in self.missing],
+            "seam_count": self.seam_count,
+        }
+
+
+@dataclass(frozen=True)
+class LoftCapValidityRecord:
+    """Cap presence and trim-loop validity evidence for a loft shell."""
+
+    valid: bool
+    cap_count: int
+    expected_terminal_cap_count: int
+    cap_patch_indices: tuple[int, ...] = ()
+    diagnostics: tuple[str, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cap_count": self.cap_count,
+            "cap_patch_indices": self.cap_patch_indices,
+            "diagnostics": self.diagnostics,
+            "expected_terminal_cap_count": self.expected_terminal_cap_count,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "valid": self.valid,
+        }
+
+
+@dataclass(frozen=True)
+class LoftClosureEvidenceRecord:
+    """Closed-body eligibility evidence derived from loft-owned topology facts."""
+
+    closed_valid: bool
+    seam_coverage_complete: bool
+    cap_valid: bool
+    diagnostics: tuple[str, ...] = ()
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "cap_valid": self.cap_valid,
+            "closed_valid": self.closed_valid,
+            "diagnostics": self.diagnostics,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "seam_coverage_complete": self.seam_coverage_complete,
+        }
+
+
+@dataclass(frozen=True)
+class LoftDebugMeshResult:
+    mesh: Mesh
+    boundary: str
+    plan_samples: int
+    cap_ends: bool
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "boundary": self.boundary,
+            "plan_samples": self.plan_samples,
+            "cap_ends": self.cap_ends,
+            "mesh_vertices": self.mesh.n_vertices,
+            "mesh_faces": self.mesh.n_faces,
+        }
+
+
+@dataclass(frozen=True)
+class _RailRecord:
+    ref: str
+    key: str
+    ordinal: float
+    source: RailSource
+    generated: bool = False
+
+
+def resolve_authored_rails(source_loop: TopologyPath, target_loop: TopologyPath) -> RailResolutionResult:
+    """Resolve authored topology rails before any geometric inference is considered."""
+
+    if not isinstance(source_loop, TopologyPath) or not isinstance(target_loop, TopologyPath):
+        raise TypeError("resolve_authored_rails requires TopologyPath inputs.")
+
+    conflicts: list[RailConflictDiagnostic] = []
+    matches: dict[tuple[str, str], RailSource] = {}
+    used_source: set[str] = set()
+    used_target: set[str] = set()
+
+    for tier in (
+        RailSource.EXPLICIT_ID,
+        RailSource.LANDMARK_NAME,
+        RailSource.SEGMENT_NAME,
+        RailSource.AUTHORED_ORDER,
+        RailSource.GENERATED_RAIL,
+    ):
+        source_records = _rail_records_for_tier(source_loop, tier)
+        target_records = _rail_records_for_tier(target_loop, tier)
+        tier_conflicts = _duplicate_rail_conflicts(source_records, "source", tier)
+        tier_conflicts += _duplicate_rail_conflicts(target_records, "target", tier)
+        conflicts.extend(tier_conflicts)
+        if tier_conflicts and tier == RailSource.EXPLICIT_ID:
+            continue
+        for source_record, target_record in _match_rail_records(source_records, target_records):
+            if source_record.ref in used_source or target_record.ref in used_target:
+                continue
+            pair = (source_record.ref, target_record.ref)
+            matches[pair] = tier
+            used_source.add(source_record.ref)
+            used_target.add(target_record.ref)
+
+    conflicts.extend(_crossing_explicit_rail_conflicts(source_loop, target_loop, matches))
+    source_refs = tuple(point.id for point in source_loop.points)
+    target_refs = tuple(point.id for point in target_loop.points)
+    return RailResolutionResult(
+        matches=tuple(matches.keys()),
+        source_by_match=dict(matches),
+        conflicts=tuple(conflicts),
+        unmatched_source=tuple(ref for ref in source_refs if ref not in used_source),
+        unmatched_target=tuple(ref for ref in target_refs if ref not in used_target),
+    )
+
+
+def validate_rail_priority(result: RailResolutionResult) -> None:
+    invalid_conflicts = [
+        conflict for conflict in result.conflicts if conflict.priority_tier == RailSource.EXPLICIT_ID
+    ]
+    if invalid_conflicts:
+        reasons = ", ".join(conflict.reason for conflict in invalid_conflicts)
+        raise ValueError(f"Invalid authored rail priority: {reasons}.")
+
+
+def score_correspondence_candidates(
+    source_loop: TopologyPath,
+    target_loop: TopologyPath,
+    rail_result: RailResolutionResult,
+) -> tuple[InferenceCandidateScore, ...]:
+    """Rank cyclic-shift and reversal correspondence candidates for equal-size topology paths."""
+
+    validate_rail_priority(rail_result)
+    source_points = tuple(source_loop.points)
+    target_points = tuple(target_loop.points)
+    if not source_points or len(source_points) != len(target_points):
+        return ()
+    source_coords = np.vstack([point.coordinates for point in source_points])
+    target_coords = np.vstack([point.coordinates for point in target_points])
+    scale = max(_point_cloud_span(source_coords), _point_cloud_span(target_coords), 1e-9)
+    candidates: list[InferenceCandidateScore] = []
+    for reversed_candidate in (False, True):
+        for shift in range(len(source_points)):
+            target_indices = _candidate_target_indices(len(source_points), shift, reversed_candidate)
+            distances = np.linalg.norm(source_coords - target_coords[target_indices], axis=1) / scale
+            protected_count, protected_hits = _candidate_protected_anchor_hits(
+                source_points,
+                target_points,
+                target_indices,
+                rail_result,
+            )
+            protected_agreement = 1.0 if protected_count == 0 else protected_hits / protected_count
+            candidates.append(
+                InferenceCandidateScore(
+                    shift=shift,
+                    reversed=reversed_candidate,
+                    cost=float(np.mean(distances)),
+                    cost_terms={
+                        "mean_distance": float(np.mean(distances)),
+                        "max_distance": float(np.max(distances)),
+                        "protected_anchor_count": float(protected_count),
+                    },
+                    protected_anchor_agreement=float(protected_agreement),
+                )
+            )
+    return tuple(sorted(candidates, key=lambda candidate: (candidate.cost, candidate.reversed, candidate.shift)))
+
+
+def accept_or_refuse_inferred_correspondence(
+    candidates: Sequence[InferenceCandidateScore],
+    *,
+    topology_semantics: dict[str, object] | None = None,
+) -> InferenceResult:
+    semantics = dict(topology_semantics or {})
+    ranked = tuple(sorted(candidates, key=lambda candidate: (candidate.cost, candidate.reversed, candidate.shift)))
+    if not ranked:
+        return _refused_inference("no_candidates", None, None, "Add authored topology rails or compatible point counts.")
+    best = ranked[0]
+    second_best = ranked[1] if len(ranked) > 1 else None
+    if best.reversed and not bool(semantics.get("allow_reversal", False)):
+        return _refused_inference(
+            "reversal_conflicts_with_authored_direction",
+            best,
+            second_best,
+            "Allow reversal explicitly or add direction-preserving rails.",
+        )
+    if best.protected_anchor_agreement < 1.0:
+        return _refused_inference(
+            "crossing_protected_order",
+            best,
+            second_best,
+            "Fix contradictory protected rails before inference.",
+        )
+    protected_anchor_count = int(best.cost_terms.get("protected_anchor_count", 0.0))
+    compatible_authored_starts = bool(semantics.get("compatible_authored_starts", False))
+    if protected_anchor_count < 2 and not compatible_authored_starts:
+        return _refused_inference(
+            "missing_stable_anchors",
+            best,
+            second_best,
+            "Add at least two stable correspondence rails.",
+        )
+    if best.cost > float(semantics.get("max_normalized_cost", 0.20)):
+        return _refused_inference(
+            "cost_above_threshold",
+            best,
+            second_best,
+            "Add authored rails or closer topology-compatible profiles.",
+        )
+    if second_best is not None:
+        required_separation = max(0.10, best.cost * 0.50)
+        if (second_best.cost - best.cost) < required_separation:
+            return _refused_inference(
+                "ambiguous_phase",
+                best,
+                second_best,
+                "Add a named anchor or correspondence id to break the phase tie.",
+            )
+    return InferenceResult(accepted=True, candidate=best)
+
+
+def _refused_inference(
+    reason: str,
+    best_candidate: InferenceCandidateScore | None,
+    second_best_candidate: InferenceCandidateScore | None,
+    required_rail_hint: str,
+) -> InferenceResult:
+    return InferenceResult(
+        accepted=False,
+        candidate=best_candidate,
+        diagnostics=(
+            InferenceRefusalDiagnostic(
+                reason=reason,
+                best_candidate=best_candidate,
+                second_best_candidate=second_best_candidate,
+                required_rail_hint=required_rail_hint,
+            ),
+        ),
+    )
+
+
+def _point_cloud_span(points: np.ndarray) -> float:
+    bounds_min = np.min(points, axis=0)
+    bounds_max = np.max(points, axis=0)
+    return float(np.linalg.norm(bounds_max - bounds_min))
+
+
+def _candidate_target_indices(count: int, shift: int, reversed_candidate: bool) -> np.ndarray:
+    if reversed_candidate:
+        return np.asarray([(shift - index) % count for index in range(count)], dtype=int)
+    return np.asarray([(index + shift) % count for index in range(count)], dtype=int)
+
+
+def _candidate_protected_anchor_hits(
+    source_points: Sequence[TopologyPoint],
+    target_points: Sequence[TopologyPoint],
+    target_indices: np.ndarray,
+    rail_result: RailResolutionResult,
+) -> tuple[int, int]:
+    source_index_by_id = {point.id: index for index, point in enumerate(source_points)}
+    target_index_by_id = {point.id: index for index, point in enumerate(target_points)}
+    protected_pairs = [
+        (source_ref, target_ref)
+        for source_ref, target_ref in rail_result.matches
+        if source_ref in source_index_by_id and target_ref in target_index_by_id
+    ]
+    hits = 0
+    for source_ref, target_ref in protected_pairs:
+        source_index = source_index_by_id[source_ref]
+        if int(target_indices[source_index]) == target_index_by_id[target_ref]:
+            hits += 1
+    return len(protected_pairs), hits
+
+
+def _rail_records_for_tier(path: TopologyPath, tier: RailSource) -> tuple[_RailRecord, ...]:
+    if tier == RailSource.EXPLICIT_ID:
+        return tuple(
+            _RailRecord(point.id, str(point.correspondence_id), float(point.ordinal), tier)
+            for point in path.points
+            if point.correspondence_id is not None and not _is_generated_rail(point)
+        )
+    if tier == RailSource.LANDMARK_NAME:
+        return tuple(
+            _RailRecord(_landmark_ref(landmark), str(landmark.name), float(index), tier)
+            for index, landmark in enumerate(path.landmarks)
+            if landmark.name is not None
+        )
+    if tier == RailSource.SEGMENT_NAME:
+        return tuple(
+            _RailRecord(str(segment.id), str(segment.name), float(index), tier)
+            for index, segment in enumerate(path.segments)
+            if segment.name is not None
+        )
+    if tier == RailSource.AUTHORED_ORDER:
+        if path.anchor_policy == "generated" or all(_is_generated_rail(point) for point in path.points):
+            return ()
+        return tuple(_RailRecord(point.id, str(point.ordinal), float(point.ordinal), tier) for point in path.points)
+    if tier == RailSource.GENERATED_RAIL:
+        return tuple(
+            _RailRecord(point.id, _generated_rail_key(point), float(point.ordinal), tier, generated=True)
+            for point in path.points
+            if _is_generated_rail(point)
+        )
+    return ()
+
+
+def _match_rail_records(
+    source_records: Sequence[_RailRecord],
+    target_records: Sequence[_RailRecord],
+) -> tuple[tuple[_RailRecord, _RailRecord], ...]:
+    target_by_key: dict[str, list[_RailRecord]] = {}
+    for target_record in target_records:
+        target_by_key.setdefault(target_record.key, []).append(target_record)
+    matches: list[tuple[_RailRecord, _RailRecord]] = []
+    for source_record in source_records:
+        candidates = target_by_key.get(source_record.key, [])
+        if len(candidates) == 1:
+            matches.append((source_record, candidates[0]))
+    return tuple(matches)
+
+
+def _duplicate_rail_conflicts(
+    records: Sequence[_RailRecord],
+    side: str,
+    tier: RailSource,
+) -> list[RailConflictDiagnostic]:
+    by_key: dict[str, list[_RailRecord]] = {}
+    for record in records:
+        by_key.setdefault(record.key, []).append(record)
+    conflicts: list[RailConflictDiagnostic] = []
+    for key, duplicates in by_key.items():
+        if len(duplicates) <= 1:
+            continue
+        refs = ",".join(record.ref for record in duplicates)
+        conflicts.append(
+            RailConflictDiagnostic(
+                reason=f"duplicate {tier.value} rail {key!r} on {side}",
+                source_ref=refs if side == "source" else "",
+                target_ref=refs if side == "target" else "",
+                priority_tier=tier,
+            )
+        )
+    return conflicts
+
+
+def _crossing_explicit_rail_conflicts(
+    source_loop: TopologyPath,
+    target_loop: TopologyPath,
+    matches: dict[tuple[str, str], RailSource],
+) -> list[RailConflictDiagnostic]:
+    source_ordinals = {point.id: point.ordinal for point in source_loop.points}
+    target_ordinals = {point.id: point.ordinal for point in target_loop.points}
+    explicit_pairs = [
+        (source_ref, target_ref)
+        for (source_ref, target_ref), tier in matches.items()
+        if tier == RailSource.EXPLICIT_ID and source_ref in source_ordinals and target_ref in target_ordinals
+    ]
+    conflicts: list[RailConflictDiagnostic] = []
+    for index, (source_a, target_a) in enumerate(explicit_pairs):
+        for source_b, target_b in explicit_pairs[index + 1 :]:
+            source_delta = source_ordinals[source_a] - source_ordinals[source_b]
+            target_delta = target_ordinals[target_a] - target_ordinals[target_b]
+            if source_delta * target_delta < 0:
+                conflicts.append(
+                    RailConflictDiagnostic(
+                        reason="crossing explicit correspondence rails",
+                        source_ref=f"{source_a},{source_b}",
+                        target_ref=f"{target_a},{target_b}",
+                        priority_tier=RailSource.EXPLICIT_ID,
+                    )
+                )
+    return conflicts
+
+
+def _is_generated_rail(record: TopologyPoint | TopologyLandmark | TopologySegment) -> bool:
+    return "generated_rail" in record.provenance
+
+
+def _generated_rail_key(point: TopologyPoint) -> str:
+    provenance = point.provenance.get("generated_rail")
+    source_parameter = getattr(provenance, "source_parameter", None)
+    return str(source_parameter or point.correspondence_id or point.name or point.id)
+
+
+def _landmark_ref(landmark: TopologyLandmark) -> str:
+    if landmark.id is not None:
+        return str(landmark.id)
+    if landmark.name is not None:
+        return str(landmark.name)
+    return f"landmark-{landmark.point_ordinal}-{landmark.parameter}"
 
 
 @dataclass(frozen=True)
@@ -195,6 +840,577 @@ class PlannedRegionRef:
     index: int
 
 
+class PointLifecycleState(str, Enum):
+    PRESENT = "present"
+    BIRTH = "birth"
+    DEATH = "death"
+    SYNTHETIC_BIRTH_SUPPORT = "synthetic_birth_support"
+    SYNTHETIC_DEATH_SUPPORT = "synthetic_death_support"
+    INFERRED = "inferred"
+
+
+@dataclass(frozen=True)
+class PointLifecycleEvent:
+    id: str
+    event_type: str
+    station_interval: tuple[int, int]
+    loop_ref: str
+    point_ref: str
+    correspondence_id: str
+    parent_span_ref: tuple[str, str]
+    source: str
+    interpolation_policy: str
+    diagnostics: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        validate_point_lifecycle_event(self)
+        object.__setattr__(self, "id", str(self.id))
+        object.__setattr__(self, "event_type", str(self.event_type))
+        object.__setattr__(self, "station_interval", tuple(int(index) for index in self.station_interval))
+        object.__setattr__(self, "loop_ref", str(self.loop_ref))
+        object.__setattr__(self, "point_ref", str(self.point_ref))
+        object.__setattr__(self, "correspondence_id", str(self.correspondence_id))
+        object.__setattr__(self, "parent_span_ref", tuple(str(ref) for ref in self.parent_span_ref))
+        object.__setattr__(self, "source", str(self.source))
+        object.__setattr__(self, "interpolation_policy", str(self.interpolation_policy))
+        object.__setattr__(self, "diagnostics", dict(self.diagnostics))
+
+    def lifecycle_state_for_station(self, station_index: int) -> PointLifecycleState:
+        station_index = int(station_index)
+        start, end = self.station_interval
+        if self.event_type == "point_birth":
+            if station_index < start:
+                return PointLifecycleState.INFERRED
+            if station_index == start:
+                return PointLifecycleState.SYNTHETIC_BIRTH_SUPPORT
+            if station_index == end:
+                return PointLifecycleState.BIRTH
+            return PointLifecycleState.PRESENT
+        if station_index < start:
+            return PointLifecycleState.PRESENT
+        if station_index == start:
+            return PointLifecycleState.DEATH
+        if station_index == end:
+            return PointLifecycleState.SYNTHETIC_DEATH_SUPPORT
+        return PointLifecycleState.INFERRED
+
+
+@dataclass(frozen=True)
+class SyntheticSupportReference:
+    id: str
+    source_event_id: str
+    station_index: int
+    span_ref: tuple[str, str]
+    span_parameter: float
+    coordinates: Sequence[float] | np.ndarray
+
+    def __post_init__(self) -> None:
+        if not str(self.id):
+            raise ValueError("SyntheticSupportReference id must not be empty.")
+        if not str(self.source_event_id):
+            raise ValueError("SyntheticSupportReference source_event_id must not be empty.")
+        span_ref = tuple(str(ref) for ref in self.span_ref)
+        if len(span_ref) != 2 or not all(span_ref):
+            raise ValueError("SyntheticSupportReference span_ref must contain two point refs.")
+        span_parameter = float(self.span_parameter)
+        if not np.isfinite(span_parameter) or not 0.0 <= span_parameter <= 1.0:
+            raise ValueError("SyntheticSupportReference span_parameter must be between 0 and 1.")
+        coordinates = np.asarray(self.coordinates, dtype=float).reshape(2)
+        if not np.all(np.isfinite(coordinates)):
+            raise ValueError("SyntheticSupportReference coordinates must be finite.")
+        object.__setattr__(self, "id", str(self.id))
+        object.__setattr__(self, "source_event_id", str(self.source_event_id))
+        object.__setattr__(self, "station_index", int(self.station_index))
+        object.__setattr__(self, "span_ref", span_ref)
+        object.__setattr__(self, "span_parameter", span_parameter)
+        object.__setattr__(self, "coordinates", (float(coordinates[0]), float(coordinates[1])))
+
+
+def validate_point_lifecycle_event(event: PointLifecycleEvent) -> None:
+    if not str(event.id):
+        raise ValueError("PointLifecycleEvent id must not be empty.")
+    if event.event_type not in {"point_birth", "point_death"}:
+        raise ValueError("PointLifecycleEvent event_type must be point_birth or point_death.")
+    interval = tuple(event.station_interval)
+    if len(interval) != 2 or int(interval[0]) >= int(interval[1]):
+        raise ValueError("PointLifecycleEvent station_interval must be an increasing pair.")
+    for field_name in ("loop_ref", "point_ref", "correspondence_id", "source", "interpolation_policy"):
+        if not str(getattr(event, field_name)):
+            raise ValueError(f"PointLifecycleEvent {field_name} must not be empty.")
+    parent_span_ref = tuple(str(ref) for ref in event.parent_span_ref)
+    if len(parent_span_ref) != 2 or not all(parent_span_ref):
+        raise ValueError("PointLifecycleEvent parent_span_ref must contain two point refs.")
+    if event.source not in {"authored", "generated", "inferred"}:
+        raise ValueError("PointLifecycleEvent source must be authored, generated, or inferred.")
+
+
+def validate_point_lifecycle_events(events: Iterable[PointLifecycleEvent]) -> None:
+    seen_ids: set[str] = set()
+    for event in events:
+        validate_point_lifecycle_event(event)
+        if event.id in seen_ids:
+            raise ValueError(f"Duplicate PointLifecycleEvent id {event.id!r}.")
+        seen_ids.add(event.id)
+
+
+def resolve_point_birth_death_events(
+    loop_pair: dict[str, object],
+    rail_result: RailResolutionResult,
+    tolerance_policy: dict[str, object] | None = None,
+) -> PointLifecycleResolution:
+    source_path = loop_pair.get("source")
+    target_path = loop_pair.get("target")
+    if not isinstance(source_path, TopologyPath) or not isinstance(target_path, TopologyPath):
+        raise TypeError("resolve_point_birth_death_events requires loop_pair source and target TopologyPath values.")
+    station_interval = tuple(loop_pair.get("station_interval", (0, 1)))
+    loop_ref = str(loop_pair.get("loop_ref", "loop"))
+    min_span = _min_point_correspondence_span(tolerance_policy)
+    source_by_id = {point.id: point for point in source_path.points}
+    target_by_id = {point.id: point for point in target_path.points}
+    source_to_target = {
+        source_ref: target_ref
+        for source_ref, target_ref in rail_result.matches
+        if source_ref in source_by_id and target_ref in target_by_id
+    }
+    target_to_source = {target_ref: source_ref for source_ref, target_ref in source_to_target.items()}
+    events: list[PointLifecycleEvent] = []
+    supports: list[SyntheticSupportReference] = []
+    refusals: list[PointLifecycleRefusalDiagnostic] = []
+
+    source_correspondence_ids = {point.correspondence_id for point in source_path.points if point.correspondence_id}
+    target_correspondence_ids = {point.correspondence_id for point in target_path.points if point.correspondence_id}
+
+    for target_point in target_path.points:
+        if target_point.id in target_to_source:
+            continue
+        if target_point.correspondence_id in source_correspondence_ids:
+            refusals.append(_lifecycle_refusal("explicit_correspondence_conflict", target_point.id))
+            continue
+        span = _adjacent_stable_span(target_point, target_path, target_to_source, source_by_id, source_path)
+        if span is None:
+            refusals.append(_lifecycle_refusal("missing_parent_span", target_point.id))
+            continue
+        source_start, source_end, target_start, target_end = span
+        try:
+            parameter = project_point_to_span(target_point.coordinates, (target_start.coordinates, target_end.coordinates))
+        except ValueError:
+            parent_match = ParentSpanMatch(source_start.id, source_end.id, 0.0, 0.0, "adjacent_stable_tracks")
+            refusals.append(_lifecycle_refusal("collapsed_parent_span", target_point.id, (parent_match,)))
+            continue
+        support_coordinates = _interpolate_span(source_start.coordinates, source_end.coordinates, parameter)
+        span_length = float(np.linalg.norm(source_end.coordinates - source_start.coordinates))
+        parent_match = ParentSpanMatch(source_start.id, source_end.id, parameter, 1.0, "adjacent_stable_tracks")
+        if span_length < min_span:
+            refusals.append(_lifecycle_refusal("collapsed_parent_span", target_point.id, (parent_match,)))
+            continue
+        event_id = f"birth-{target_point.id}"
+        events.append(
+            PointLifecycleEvent(
+                id=event_id,
+                event_type="point_birth",
+                station_interval=station_interval,
+                loop_ref=loop_ref,
+                point_ref=target_point.id,
+                correspondence_id=str(target_point.correspondence_id or target_point.id),
+                parent_span_ref=(source_start.id, source_end.id),
+                source="authored",
+                interpolation_policy="span_parameter",
+                diagnostics={"parent_span": parent_match},
+            )
+        )
+        supports.append(
+            SyntheticSupportReference(
+                id=f"support-{event_id}",
+                source_event_id=event_id,
+                station_index=int(station_interval[0]),
+                span_ref=(source_start.id, source_end.id),
+                span_parameter=parameter,
+                coordinates=support_coordinates,
+            )
+        )
+
+    for source_point in source_path.points:
+        if source_point.id in source_to_target:
+            continue
+        if source_point.correspondence_id in target_correspondence_ids:
+            refusals.append(_lifecycle_refusal("explicit_correspondence_conflict", source_point.id))
+            continue
+        span = _adjacent_stable_span(source_point, source_path, source_to_target, target_by_id, target_path)
+        if span is None:
+            refusals.append(_lifecycle_refusal("missing_parent_span", source_point.id))
+            continue
+        target_start, target_end, source_start, source_end = span
+        try:
+            parameter = project_point_to_span(source_point.coordinates, (source_start.coordinates, source_end.coordinates))
+        except ValueError:
+            parent_match = ParentSpanMatch(target_start.id, target_end.id, 0.0, 0.0, "adjacent_stable_tracks")
+            refusals.append(_lifecycle_refusal("collapsed_parent_span", source_point.id, (parent_match,)))
+            continue
+        support_coordinates = _interpolate_span(target_start.coordinates, target_end.coordinates, parameter)
+        span_length = float(np.linalg.norm(target_end.coordinates - target_start.coordinates))
+        parent_match = ParentSpanMatch(target_start.id, target_end.id, parameter, 1.0, "adjacent_stable_tracks")
+        if span_length < min_span:
+            refusals.append(_lifecycle_refusal("collapsed_parent_span", source_point.id, (parent_match,)))
+            continue
+        event_id = f"death-{source_point.id}"
+        events.append(
+            PointLifecycleEvent(
+                id=event_id,
+                event_type="point_death",
+                station_interval=station_interval,
+                loop_ref=loop_ref,
+                point_ref=source_point.id,
+                correspondence_id=str(source_point.correspondence_id or source_point.id),
+                parent_span_ref=(target_start.id, target_end.id),
+                source="authored",
+                interpolation_policy="span_parameter",
+                diagnostics={"parent_span": parent_match},
+            )
+        )
+        supports.append(
+            SyntheticSupportReference(
+                id=f"support-{event_id}",
+                source_event_id=event_id,
+                station_index=int(station_interval[1]),
+                span_ref=(target_start.id, target_end.id),
+                span_parameter=parameter,
+                coordinates=support_coordinates,
+            )
+        )
+    if refusals:
+        return PointLifecycleResolution(refusals=tuple(refusals))
+    validate_point_lifecycle_events(events)
+    return PointLifecycleResolution(events=tuple(events), synthetic_supports=tuple(supports))
+
+
+def locate_parent_span(point_ref: str, stable_tracks: Sequence[tuple[str, str, Sequence[float], Sequence[float], Sequence[float]]]) -> ParentSpanMatch:
+    candidates: list[ParentSpanMatch] = []
+    for source_track_ref, target_track_ref, start, end, point in stable_tracks:
+        parameter = project_point_to_span(point, (start, end))
+        if 0.0 <= parameter <= 1.0:
+            candidates.append(ParentSpanMatch(source_track_ref, target_track_ref, parameter, 1.0, "projection"))
+    if not candidates:
+        raise ValueError(f"missing_parent_span for {point_ref!r}.")
+    if len(candidates) > 1:
+        raise ValueError(f"ambiguous_parent_span for {point_ref!r}.")
+    return candidates[0]
+
+
+def project_point_to_span(point: Sequence[float], span: tuple[Sequence[float], Sequence[float]]) -> float:
+    point_vec = np.asarray(point, dtype=float).reshape(2)
+    start = np.asarray(span[0], dtype=float).reshape(2)
+    end = np.asarray(span[1], dtype=float).reshape(2)
+    delta = end - start
+    denom = float(np.dot(delta, delta))
+    if denom <= 1e-24:
+        raise ValueError("collapsed_parent_span")
+    return float(np.clip(np.dot(point_vec - start, delta) / denom, 0.0, 1.0))
+
+
+def insert_synthetic_support_reference(
+    event: PointLifecycleEvent,
+    *,
+    station_index: int,
+    span_ref: tuple[str, str],
+    span_parameter: float,
+    coordinates: Sequence[float],
+) -> SyntheticSupportReference:
+    return SyntheticSupportReference(
+        id=f"support-{event.id}",
+        source_event_id=event.id,
+        station_index=station_index,
+        span_ref=span_ref,
+        span_parameter=span_parameter,
+        coordinates=coordinates,
+    )
+
+
+def _adjacent_stable_span(
+    point: TopologyPoint,
+    point_path: TopologyPath,
+    point_to_other_ref: dict[str, str],
+    other_by_id: dict[str, TopologyPoint],
+    other_path: TopologyPath,
+) -> tuple[TopologyPoint, TopologyPoint, TopologyPoint, TopologyPoint] | None:
+    stable_points = [candidate for candidate in point_path.points if candidate.id in point_to_other_ref]
+    if len(stable_points) < 2:
+        return None
+    ordered = sorted(stable_points, key=lambda candidate: candidate.ordinal)
+    before = [candidate for candidate in ordered if candidate.ordinal < point.ordinal]
+    after = [candidate for candidate in ordered if candidate.ordinal > point.ordinal]
+    if not before or not after:
+        return None
+    start = before[-1]
+    end = after[0]
+    other_start = other_by_id[point_to_other_ref[start.id]]
+    other_end = other_by_id[point_to_other_ref[end.id]]
+    if other_start.ordinal > other_end.ordinal:
+        return None
+    return other_start, other_end, start, end
+
+
+def _interpolate_span(start: Sequence[float], end: Sequence[float], parameter: float) -> tuple[float, float]:
+    start_vec = np.asarray(start, dtype=float).reshape(2)
+    end_vec = np.asarray(end, dtype=float).reshape(2)
+    point = start_vec + (end_vec - start_vec) * float(parameter)
+    return (float(point[0]), float(point[1]))
+
+
+def _min_point_correspondence_span(tolerance_policy: dict[str, object] | None) -> float:
+    if not tolerance_policy:
+        return 1e-9
+    collapse = tolerance_policy.get("collapse_degeneracy", {})
+    if isinstance(collapse, dict) and "min_point_correspondence_span" in collapse:
+        return float(collapse["min_point_correspondence_span"])
+    if "min_point_correspondence_span" in tolerance_policy:
+        return float(tolerance_policy["min_point_correspondence_span"])
+    return 1e-9
+
+
+def _lifecycle_refusal(
+    reason: str,
+    point_ref: str,
+    candidate_spans: tuple[ParentSpanMatch, ...] = (),
+) -> PointLifecycleRefusalDiagnostic:
+    hints = {
+        "missing_parent_span": "Add stable neighboring rails or an explicit parent span.",
+        "ambiguous_parent_span": "Name the intended parent span.",
+        "collapsed_parent_span": "Increase span length or add a non-collapsed rail.",
+        "birth_death_order_inversion": "Keep lifecycle points between stable parent rails.",
+        "explicit_correspondence_conflict": "Remove the duplicate explicit correspondence id or make the lifecycle rail explicit.",
+    }
+    return PointLifecycleRefusalDiagnostic(
+        reason=reason,
+        point_ref=point_ref,
+        candidate_spans=candidate_spans,
+        required_rail_hint=hints.get(reason),
+    )
+
+
+def resample_loop_correspondence(
+    loop_pair: dict[str, object],
+    *,
+    sample_count: int | str = "auto",
+) -> ResampledLoopCorrespondence:
+    source_path = loop_pair.get("source")
+    target_path = loop_pair.get("target")
+    if not isinstance(source_path, TopologyPath) or not isinstance(target_path, TopologyPath):
+        raise TypeError("resample_loop_correspondence requires loop_pair source and target TopologyPath values.")
+    rail_result = loop_pair.get("rail_result")
+    if not isinstance(rail_result, RailResolutionResult):
+        rail_result = resolve_authored_rails(source_path, target_path)
+    lifecycle_resolution = loop_pair.get("lifecycle_resolution")
+    if lifecycle_resolution is not None and not isinstance(lifecycle_resolution, PointLifecycleResolution):
+        raise TypeError("lifecycle_resolution must be a PointLifecycleResolution.")
+
+    protected_source: list[np.ndarray] = []
+    protected_target: list[np.ndarray] = []
+    records: list[SampleCorrespondenceRecord] = []
+    source_by_id = {point.id: point for point in source_path.points}
+    target_by_id = {point.id: point for point in target_path.points}
+    for source_ref, target_ref in rail_result.matches:
+        if source_ref not in source_by_id or target_ref not in target_by_id:
+            continue
+        index = len(records)
+        protected_source.append(source_by_id[source_ref].coordinates)
+        protected_target.append(target_by_id[target_ref].coordinates)
+        records.append(
+            SampleCorrespondenceRecord(
+                index=index,
+                source_point_ref=source_ref,
+                target_point_ref=target_ref,
+                track_id=f"{source_ref}->{target_ref}",
+                source_parameter=float(source_by_id[source_ref].ordinal),
+                target_parameter=float(target_by_id[target_ref].ordinal),
+                protected=True,
+            )
+        )
+
+    if lifecycle_resolution is not None:
+        support_by_event = {support.source_event_id: support for support in lifecycle_resolution.synthetic_supports}
+        for event in lifecycle_resolution.events:
+            support = support_by_event.get(event.id)
+            if support is None:
+                raise ValueError(f"missing_lifecycle_support for event {event.id!r}.")
+            index = len(records)
+            if event.event_type == "point_birth":
+                target_point = target_by_id[event.point_ref]
+                source_sample = np.asarray(support.coordinates, dtype=float)
+                target_sample = target_point.coordinates
+                target_ref = event.point_ref
+                source_ref = None
+            else:
+                source_point = source_by_id[event.point_ref]
+                source_sample = source_point.coordinates
+                target_sample = np.asarray(support.coordinates, dtype=float)
+                source_ref = event.point_ref
+                target_ref = None
+            protected_source.append(source_sample)
+            protected_target.append(target_sample)
+            records.append(
+                SampleCorrespondenceRecord(
+                    index=index,
+                    source_point_ref=source_ref,
+                    target_point_ref=target_ref,
+                    track_id=event.correspondence_id,
+                    lifecycle_event_id=event.id,
+                    source_parameter=support.span_parameter,
+                    target_parameter=support.span_parameter,
+                    protected=True,
+                )
+            )
+
+    minimum_count = max(3, len(records))
+    if sample_count == "auto":
+        requested_count = minimum_count
+    else:
+        requested_count = int(sample_count)
+        if requested_count < minimum_count:
+            raise ValueError(f"sample_count_too_low requested={requested_count} minimum={minimum_count}")
+    remaining_count = requested_count - len(records)
+    source_samples = list(protected_source)
+    target_samples = list(protected_target)
+    if remaining_count:
+        source_fill = _resample_loop(source_path.to_section_loop().points, max(3, remaining_count))
+        target_fill = _resample_loop(target_path.to_section_loop().points, max(3, remaining_count))
+        for fill_index in range(remaining_count):
+            index = len(records)
+            source_samples.append(source_fill[fill_index % len(source_fill)])
+            target_samples.append(target_fill[fill_index % len(target_fill)])
+            records.append(SampleCorrespondenceRecord(index=index, track_id=f"sample-{index}", protected=False))
+    protected_indices = tuple(record.index for record in records if record.protected)
+    return ResampledLoopCorrespondence(
+        source_samples=np.asarray(source_samples, dtype=float),
+        target_samples=np.asarray(target_samples, dtype=float),
+        sample_records=tuple(records),
+        protected_indices=protected_indices,
+        diagnostics={"sample_count": requested_count, "minimum_count": minimum_count},
+    )
+
+
+def validate_sample_correspondence(resampled: ResampledLoopCorrespondence) -> None:
+    if len(resampled.source_samples) != len(resampled.target_samples):
+        raise ValueError("ResampledLoopCorrespondence source and target sample counts differ.")
+    if len(resampled.sample_records) != len(resampled.source_samples):
+        raise ValueError("Every emitted sample requires one SampleCorrespondenceRecord.")
+    expected_indices = tuple(range(len(resampled.sample_records)))
+    actual_indices = tuple(record.index for record in resampled.sample_records)
+    if actual_indices != expected_indices:
+        raise ValueError("SampleCorrespondenceRecord indices must align with sample arrays.")
+    for protected_index in resampled.protected_indices:
+        if protected_index < 0 or protected_index >= len(resampled.sample_records):
+            raise ValueError("protected_indices contains an out-of-range index.")
+        if not resampled.sample_records[protected_index].protected:
+            raise ValueError("protected_indices must reference protected sample records.")
+
+
+def validate_mesh_executor_correspondence_input(resampled: ResampledLoopCorrespondence) -> None:
+    loop_pair_id = str(resampled.diagnostics.get("loop_pair_id", "loop-pair"))
+    if len(resampled.source_samples) != len(resampled.target_samples):
+        diagnostic = MeshSampleEmissionDiagnostic(loop_pair_id, None, None, "sample_count_mismatch")
+        raise ValueError(f"{diagnostic.reason}: source and target sample counts differ.")
+    if not resampled.sample_records:
+        diagnostic = MeshSampleEmissionDiagnostic(loop_pair_id, None, None, "missing_sample_correspondence")
+        raise ValueError(f"{diagnostic.reason}: sample records are required.")
+    if len(resampled.sample_records) != len(resampled.source_samples):
+        diagnostic = MeshSampleEmissionDiagnostic(loop_pair_id, None, None, "missing_sample_correspondence")
+        raise ValueError(f"{diagnostic.reason}: every sample needs a correspondence record.")
+    for index, record in enumerate(resampled.sample_records):
+        if record.index != index:
+            diagnostic = MeshSampleEmissionDiagnostic(loop_pair_id, index, record.track_id, "sample_record_index_mismatch")
+            raise ValueError(f"{diagnostic.reason}: record index {record.index} does not match {index}.")
+
+
+def emit_mesh_faces_from_sample_correspondence(
+    resampled: ResampledLoopCorrespondence,
+    mesh_builder: object | None = None,
+) -> Mesh:
+    validate_mesh_executor_correspondence_input(resampled)
+    source_vertices = np.column_stack([resampled.source_samples, np.zeros(len(resampled.source_samples))])
+    target_vertices = np.column_stack([resampled.target_samples, np.ones(len(resampled.target_samples))])
+    vertices = np.vstack([source_vertices, target_vertices])
+    count = len(resampled.sample_records)
+    faces: list[tuple[int, int, int]] = []
+    for index, record in enumerate(resampled.sample_records):
+        next_index = (index + 1) % count
+        next_record = resampled.sample_records[next_index]
+        if next_record.index != next_index:
+            raise ValueError("sample_record_index_mismatch: non-contiguous sample records.")
+        faces.append((record.index, next_record.index, count + next_record.index))
+        faces.append((record.index, count + next_record.index, count + record.index))
+    mesh = Mesh(
+        vertices=vertices,
+        faces=np.asarray(faces, dtype=int),
+        metadata={
+            "executor": "debug_mesh_correspondence",
+            "loft_mesh_boundary": "debug-compatibility",
+            "canonical_executor": "surface",
+            "sample_records": resampled.sample_records,
+            "protected_indices": resampled.protected_indices,
+        },
+    )
+    if mesh_builder is not None and hasattr(mesh_builder, "append"):
+        mesh_builder.append(mesh)
+    return mesh
+
+
+def validate_surface_executor_correspondence_input(resampled: ResampledLoopCorrespondence) -> None:
+    loop_pair_id = str(resampled.diagnostics.get("loop_pair_id", "loop-pair"))
+    if len(resampled.source_samples) != len(resampled.target_samples):
+        diagnostic = SurfaceSampleEmissionDiagnostic(
+            loop_pair_id, None, None, None, "surface_boundary_sample_mismatch"
+        )
+        raise ValueError(f"{diagnostic.reason}: source and target boundary samples differ.")
+    if not resampled.sample_records or len(resampled.sample_records) != len(resampled.source_samples):
+        diagnostic = SurfaceSampleEmissionDiagnostic(loop_pair_id, None, None, None, "missing_sample_correspondence")
+        raise ValueError(f"{diagnostic.reason}: sample records are required.")
+    for index, record in enumerate(resampled.sample_records):
+        if record.index != index:
+            diagnostic = SurfaceSampleEmissionDiagnostic(
+                loop_pair_id,
+                index,
+                record.track_id,
+                record.lifecycle_event_id,
+                "surface_boundary_sample_mismatch",
+            )
+            raise ValueError(f"{diagnostic.reason}: record index {record.index} does not match {index}.")
+        if record.lifecycle_event_id and record.track_id is None:
+            diagnostic = SurfaceSampleEmissionDiagnostic(
+                loop_pair_id,
+                index,
+                None,
+                record.lifecycle_event_id,
+                "missing_lifecycle_support",
+            )
+            raise ValueError(f"{diagnostic.reason}: lifecycle sample lacks support track.")
+
+
+def emit_surface_patches_from_sample_correspondence(
+    resampled: ResampledLoopCorrespondence,
+    surface_builder: object | None = None,
+) -> SurfaceBody:
+    validate_surface_executor_correspondence_input(resampled)
+    start_curve = np.column_stack([resampled.source_samples, np.zeros(len(resampled.source_samples))])
+    end_curve = np.column_stack([resampled.target_samples, np.ones(len(resampled.target_samples))])
+    patch = RuledSurfacePatch(
+        family="ruled",
+        start_curve=start_curve,
+        end_curve=end_curve,
+        metadata={
+            "executor": "surface_correspondence",
+            "sample_records": resampled.sample_records,
+            "protected_indices": resampled.protected_indices,
+        },
+    )
+    body = make_surface_body(
+        (make_surface_shell((patch,), metadata={"executor": "surface_correspondence"}),),
+        metadata={"executor": "surface_correspondence", "sample_records": resampled.sample_records},
+    )
+    if surface_builder is not None and hasattr(surface_builder, "append"):
+        surface_builder.append(body)
+    return body
+
+
 @dataclass(frozen=True)
 class PlannedLoopPair:
     """Planner output for one loop correspondence."""
@@ -250,12 +1466,68 @@ class PlannedRegionPair:
 
 
 @dataclass(frozen=True)
+class LoftSuggestedAuthoredRail:
+    """Non-mutating advice for resolving an authored topology ambiguity."""
+
+    rail_kind: str
+    topology_ref: str
+    entity_ref: str
+    suggestion: str
+
+    def canonical_payload(self) -> dict[str, str]:
+        return {
+            "rail_kind": self.rail_kind,
+            "topology_ref": self.topology_ref,
+            "entity_ref": self.entity_ref,
+            "suggestion": self.suggestion,
+        }
+
+
+@dataclass(frozen=True)
+class LoftAmbiguityLocator:
+    """Exact authored-topology location for an unresolved loft ambiguity."""
+
+    topology_ref: str
+    station_interval: tuple[int, int]
+    station_index: int
+    entity_ref: str
+    relationship_group: str
+    candidate_lifecycle: str
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "topology_ref": self.topology_ref,
+            "station_interval": self.station_interval,
+            "station_index": self.station_index,
+            "entity_ref": self.entity_ref,
+            "relationship_group": self.relationship_group,
+            "candidate_lifecycle": self.candidate_lifecycle,
+        }
+
+
+@dataclass(frozen=True)
 class LoftAmbiguityRecord:
     interval: tuple[int, int]
     topology_state_index: int
     ambiguous_region_indices: tuple[int, ...]
     ambiguity_class: str
     relationship_group: str | None = None
+    locator: LoftAmbiguityLocator | None = None
+    suggested_rails: tuple[LoftSuggestedAuthoredRail, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "suggested_rails", tuple(self.suggested_rails))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "interval": self.interval,
+            "topology_state_index": self.topology_state_index,
+            "ambiguous_region_indices": self.ambiguous_region_indices,
+            "ambiguity_class": self.ambiguity_class,
+            "relationship_group": self.relationship_group,
+            "locator": None if self.locator is None else self.locator.canonical_payload(),
+            "suggested_rails": [rail.canonical_payload() for rail in self.suggested_rails],
+        }
 
 
 @dataclass(frozen=True)
@@ -297,6 +1569,25 @@ class LoftAmbiguityReport:
 
 
 @dataclass(frozen=True)
+class LoftPlanExecutabilityStatus:
+    """Executable/not-executable status derived from unresolved ambiguity records."""
+
+    executable: bool
+    unresolved_ambiguities: tuple[LoftAmbiguityRecord, ...] = ()
+    invalid_inputs: tuple[str, ...] = ()
+
+    @property
+    def diagnostic(self) -> str:
+        if self.executable:
+            return "Loft plan is executable."
+        return (
+            "Loft plan is not executable: "
+            f"{len(self.unresolved_ambiguities)} unresolved ambiguity record(s), "
+            f"{len(self.invalid_inputs)} invalid input record(s)."
+        )
+
+
+@dataclass(frozen=True)
 class LoftManyToManyCandidateSet:
     prev_region_indices: tuple[int, ...]
     curr_region_indices: tuple[int, ...]
@@ -325,6 +1616,132 @@ class LoftPlanningBlockedError(ValueError):
         super().__init__(message)
         self.ambiguity_record = ambiguity_record
         self.constraint_request = constraint_request
+
+
+def _fallback_ambiguity_record(index: int) -> LoftAmbiguityRecord:
+    interval = (index, index + 1)
+    return build_loft_ambiguity_record(
+        interval=interval,
+        ambiguity_class="unknown",
+        ambiguous_region_indices=(),
+        relationship_group="unknown",
+        entity_ref=f"metadata.ambiguity_failed_intervals_count[{index}]",
+        candidate_lifecycle="unresolved",
+        suggested_rail_text="Add authored topology rails for the unresolved loft ambiguity.",
+    )
+
+
+def build_loft_ambiguity_record(
+    *,
+    interval: tuple[int, int],
+    ambiguity_class: str,
+    ambiguous_region_indices: tuple[int, ...],
+    relationship_group: str | None,
+    entity_ref: str,
+    candidate_lifecycle: str,
+    topology_ref: str = "topology",
+    suggested_rail_text: str = "Add named correspondence rails for this topology relationship.",
+) -> LoftAmbiguityRecord:
+    """Build an unresolved ambiguity record with complete locator diagnostics."""
+
+    group = relationship_group or "unspecified"
+    locator = LoftAmbiguityLocator(
+        topology_ref=topology_ref,
+        station_interval=interval,
+        station_index=interval[1],
+        entity_ref=entity_ref,
+        relationship_group=group,
+        candidate_lifecycle=candidate_lifecycle,
+    )
+    suggested_rail = LoftSuggestedAuthoredRail(
+        rail_kind="correspondence",
+        topology_ref=topology_ref,
+        entity_ref=entity_ref,
+        suggestion=suggested_rail_text,
+    )
+    return LoftAmbiguityRecord(
+        interval=interval,
+        topology_state_index=interval[1],
+        ambiguous_region_indices=ambiguous_region_indices,
+        ambiguity_class=ambiguity_class,
+        relationship_group=group,
+        locator=locator,
+        suggested_rails=(suggested_rail,),
+    )
+
+
+def _coerce_loft_ambiguity_records(value: object) -> tuple[LoftAmbiguityRecord, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return ()
+    records: list[LoftAmbiguityRecord] = []
+    for item in value:
+        if isinstance(item, LoftAmbiguityRecord):
+            records.append(item)
+        elif isinstance(item, dict):
+            records.append(_decode_loft_ambiguity_record_payload(item))
+    return tuple(records)
+
+
+def _decode_loft_ambiguity_record_payload(payload: dict[str, object]) -> LoftAmbiguityRecord:
+    locator_payload = payload.get("locator")
+    locator = None
+    if isinstance(locator_payload, dict):
+        interval = tuple(locator_payload.get("station_interval", (0, 1)))  # type: ignore[arg-type]
+        locator = LoftAmbiguityLocator(
+            topology_ref=str(locator_payload.get("topology_ref", "topology")),
+            station_interval=(int(interval[0]), int(interval[1])),
+            station_index=int(locator_payload.get("station_index", interval[1])),
+            entity_ref=str(locator_payload.get("entity_ref", "unknown")),
+            relationship_group=str(locator_payload.get("relationship_group", "unspecified")),
+            candidate_lifecycle=str(locator_payload.get("candidate_lifecycle", "unresolved")),
+        )
+    rails_payload = payload.get("suggested_rails", ())
+    suggested_rails: list[LoftSuggestedAuthoredRail] = []
+    if isinstance(rails_payload, Sequence) and not isinstance(rails_payload, (str, bytes)):
+        for rail_payload in rails_payload:
+            if isinstance(rail_payload, dict):
+                suggested_rails.append(
+                    LoftSuggestedAuthoredRail(
+                        rail_kind=str(rail_payload.get("rail_kind", "correspondence")),
+                        topology_ref=str(rail_payload.get("topology_ref", "topology")),
+                        entity_ref=str(rail_payload.get("entity_ref", "unknown")),
+                        suggestion=str(rail_payload.get("suggestion", "Add authored topology rails.")),
+                    )
+                )
+    interval_payload = tuple(payload.get("interval", (0, 1)))  # type: ignore[arg-type]
+    return LoftAmbiguityRecord(
+        interval=(int(interval_payload[0]), int(interval_payload[1])),
+        topology_state_index=int(payload.get("topology_state_index", interval_payload[1])),
+        ambiguous_region_indices=tuple(int(value) for value in payload.get("ambiguous_region_indices", ())),  # type: ignore[arg-type]
+        ambiguity_class=str(payload.get("ambiguity_class", "unknown")),
+        relationship_group=None if payload.get("relationship_group") is None else str(payload.get("relationship_group")),
+        locator=locator,
+        suggested_rails=tuple(suggested_rails),
+    )
+
+
+def validate_loft_ambiguity_locators(records: Iterable[LoftAmbiguityRecord]) -> tuple[LoftAmbiguityRecord, ...]:
+    """Require every unresolved ambiguity record to carry exact locator fields."""
+
+    normalized = tuple(records)
+    for record in normalized:
+        locator = record.locator
+        if locator is None:
+            raise ValueError("Loft ambiguity diagnostic is missing locator.")
+        if not all(
+            (
+                locator.topology_ref,
+                locator.entity_ref,
+                locator.relationship_group,
+                locator.candidate_lifecycle,
+            )
+        ):
+            raise ValueError("Loft ambiguity locator fields must be non-empty.")
+        if not record.suggested_rails:
+            raise ValueError("Loft ambiguity diagnostic is missing suggested authored rails.")
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -416,6 +1833,244 @@ class PlannedTransition:
         )
 
 
+_LOFT_OUTPUT_PATCH_FAMILIES = ("ruled", "bspline", "nurbs", "sweep")
+
+
+def classify_loft_patch_family(
+    transition: PlannedTransition,
+    *,
+    requested_family: str | None = None,
+    smooth_intent: bool = False,
+    rational_intent: bool = False,
+    sweep_path: Path3D | None = None,
+) -> LoftPatchFamilySelectionRecord:
+    """Select the native patch family for a planned loft transition."""
+
+    family_request = None if requested_family is None else str(requested_family).strip().lower()
+    if family_request == "":
+        family_request = None
+    loop_pair_count = sum(len(pair.loop_pairs) for pair in transition.region_pairs)
+    evidence = LoftFamilyIntentEvidence(
+        transition_interval=transition.interval,
+        topology_case=transition.topology_case,
+        loop_pair_count=loop_pair_count,
+        smooth_intent=bool(smooth_intent),
+        rational_intent=bool(rational_intent),
+        sweep_intent=sweep_path is not None,
+        requested_family=family_request,
+    )
+    if family_request is not None and family_request not in _LOFT_OUTPUT_PATCH_FAMILIES:
+        return LoftPatchFamilySelectionRecord(
+            transition_interval=transition.interval,
+            selected_family=None,
+            evidence=evidence,
+            refusal_reason=f"unsupported_loft_patch_family:{family_request}",
+        )
+    selected = "ruled"
+    if sweep_path is not None:
+        selected = "sweep"
+    elif rational_intent:
+        selected = "nurbs"
+    elif smooth_intent:
+        selected = "bspline"
+    if family_request is not None:
+        selected = family_request
+    if selected == "nurbs" and not (rational_intent or family_request == "nurbs"):
+        return LoftPatchFamilySelectionRecord(
+            transition_interval=transition.interval,
+            selected_family=None,
+            evidence=evidence,
+            refusal_reason="nurbs_requires_explicit_rational_intent",
+        )
+    return LoftPatchFamilySelectionRecord(
+        transition_interval=transition.interval,
+        selected_family=selected,
+        evidence=evidence,
+    )
+
+
+def loft_patch_family_selection_records(
+    plan_or_transitions: "LoftPlan | Sequence[PlannedTransition]",
+    *,
+    requested_family: str | None = None,
+    smooth_intent: bool = False,
+    rational_intent: bool = False,
+    sweep_path: Path3D | None = None,
+) -> tuple[LoftPatchFamilySelectionRecord, ...]:
+    """Classify every planned transition in deterministic interval order."""
+
+    transitions = plan_or_transitions.transitions if isinstance(plan_or_transitions, LoftPlan) else tuple(plan_or_transitions)
+    return tuple(
+        classify_loft_patch_family(
+            transition,
+            requested_family=requested_family,
+            smooth_intent=smooth_intent,
+            rational_intent=rational_intent,
+            sweep_path=sweep_path,
+        )
+        for transition in transitions
+    )
+
+
+def validate_loft_bspline_intent(selection: LoftPatchFamilySelectionRecord) -> LoftPatchFamilySelectionRecord:
+    """Validate that a loft family selection can produce B-spline output."""
+
+    if selection.selected_family != "bspline" or not selection.accepted:
+        raise ValueError("B-spline loft output requires accepted B-spline smooth intent.")
+    if not (selection.evidence.smooth_intent or selection.evidence.requested_family == "bspline"):
+        raise ValueError("B-spline loft output requires explicit smooth intent or B-spline selector.")
+    return selection
+
+
+def assert_loft_bspline_output_contract(
+    patch: BSplineSurfacePatch,
+    selection: LoftPatchFamilySelectionRecord | dict[str, object],
+) -> dict[str, object]:
+    """Validate metadata carried by a loft-produced B-spline patch."""
+
+    selection_payload = selection.canonical_payload() if isinstance(selection, LoftPatchFamilySelectionRecord) else dict(selection)
+    kernel = patch.metadata.get("kernel", {})
+    if patch.family != "bspline":
+        raise ValueError("Loft B-spline output contract requires a BSplineSurfacePatch.")
+    expected = {
+        "operation": "loft",
+        "executor": "surface",
+        "selected_family": "bspline",
+        "fit_posture": "interpolation",
+        "control_net_boundary": "surface-native",
+    }
+    mismatches = {
+        key: (kernel.get(key), value)
+        for key, value in expected.items()
+        if kernel.get(key) != value
+    }
+    if mismatches:
+        raise ValueError(f"Loft B-spline output metadata mismatch: {mismatches!r}.")
+    if kernel.get("loft_family_selection") != selection_payload:
+        raise ValueError("Loft B-spline output metadata must preserve the family selection record.")
+    return dict(kernel)
+
+
+def validate_loft_nurbs_intent(
+    selection: LoftPatchFamilySelectionRecord,
+    rational_weights: object | None,
+) -> LoftPatchFamilySelectionRecord:
+    """Validate explicit rational intent before loft may emit NURBS output."""
+
+    if selection.selected_family != "nurbs" or not selection.accepted:
+        raise ValueError("NURBS loft output requires accepted NURBS rational intent.")
+    if not (selection.evidence.rational_intent or selection.evidence.requested_family == "nurbs"):
+        raise ValueError("NURBS loft output requires explicit rational intent.")
+    if rational_weights is None:
+        raise ValueError("NURBS loft output requires explicit positive finite rational weights.")
+    return selection
+
+
+def _resolve_loft_nurbs_weight_grid(
+    rational_weights: object,
+    shape: tuple[int, int],
+) -> tuple[np.ndarray, LoftRationalWeightPolicyRecord]:
+    if np.isscalar(rational_weights):
+        weight = float(rational_weights)
+        weights = np.full(shape, weight, dtype=float)
+        source = "explicit_scalar"
+    else:
+        weights = np.asarray(rational_weights, dtype=float)
+        source = "explicit_grid"
+    if weights.shape != shape:
+        raise ValueError(f"NURBS loft rational weights must have shape {shape}.")
+    if not np.all(np.isfinite(weights)) or np.any(weights <= 0.0):
+        raise ValueError("NURBS loft rational weights must be finite and positive.")
+    return weights, LoftRationalWeightPolicyRecord(
+        source=source,
+        shape=shape,
+        min_weight=float(np.min(weights)),
+        max_weight=float(np.max(weights)),
+    )
+
+
+def assert_loft_nurbs_output_contract(
+    patch: NURBSSurfacePatch,
+    selection: LoftPatchFamilySelectionRecord | dict[str, object],
+) -> dict[str, object]:
+    """Validate metadata carried by a loft-produced NURBS patch."""
+
+    selection_payload = selection.canonical_payload() if isinstance(selection, LoftPatchFamilySelectionRecord) else dict(selection)
+    kernel = patch.metadata.get("kernel", {})
+    if patch.family != "nurbs":
+        raise ValueError("Loft NURBS output contract requires a NURBSSurfacePatch.")
+    expected = {
+        "operation": "loft",
+        "executor": "surface",
+        "selected_family": "nurbs",
+        "fit_posture": "rational_interpolation",
+        "control_net_boundary": "surface-native",
+    }
+    mismatches = {
+        key: (kernel.get(key), value)
+        for key, value in expected.items()
+        if kernel.get(key) != value
+    }
+    if mismatches:
+        raise ValueError(f"Loft NURBS output metadata mismatch: {mismatches!r}.")
+    if kernel.get("loft_family_selection") != selection_payload:
+        raise ValueError("Loft NURBS output metadata must preserve the family selection record.")
+    if "rational_weight_policy" not in kernel:
+        raise ValueError("Loft NURBS output metadata must include rational_weight_policy.")
+    return dict(kernel)
+
+
+def resolve_loft_sweep_frame_policy(frame_policy: str | None = None) -> LoftSweepFramePolicyRecord:
+    """Resolve the sweep frame policy used by loft path/profile intent."""
+
+    return LoftSweepFramePolicyRecord("parallel_transport" if frame_policy is None else frame_policy)
+
+
+def validate_loft_sweep_intent(
+    selection: LoftPatchFamilySelectionRecord,
+    sweep_path: Path3D | None,
+) -> LoftPatchFamilySelectionRecord:
+    """Validate path/profile intent before loft may emit sweep output."""
+
+    if selection.selected_family != "sweep" or not selection.accepted:
+        raise ValueError("Sweep loft output requires accepted sweep path/profile intent.")
+    if sweep_path is None:
+        raise ValueError("Sweep loft output requires an explicit Path3D guide.")
+    if not isinstance(sweep_path, Path3D):
+        raise ValueError("Sweep loft output requires an explicit Path3D guide.")
+    return selection
+
+
+def assert_loft_sweep_output_contract(
+    patch: SweepSurfacePatch,
+    selection: LoftPatchFamilySelectionRecord | dict[str, object],
+) -> dict[str, object]:
+    """Validate metadata carried by a loft-produced sweep patch."""
+
+    selection_payload = selection.canonical_payload() if isinstance(selection, LoftPatchFamilySelectionRecord) else dict(selection)
+    kernel = patch.metadata.get("kernel", {})
+    if patch.family != "sweep":
+        raise ValueError("Loft sweep output contract requires a SweepSurfacePatch.")
+    expected = {
+        "operation": "loft",
+        "executor": "surface",
+        "selected_family": "sweep",
+        "profile_payload_boundary": "surface-native",
+    }
+    mismatches = {
+        key: (kernel.get(key), value)
+        for key, value in expected.items()
+        if kernel.get(key) != value
+    }
+    if mismatches:
+        raise ValueError(f"Loft sweep output metadata mismatch: {mismatches!r}.")
+    if kernel.get("loft_family_selection") != selection_payload:
+        raise ValueError("Loft sweep output metadata must preserve the family selection record.")
+    if "frame_policy" not in kernel or "path_reference" not in kernel or "profile_reference" not in kernel:
+        raise ValueError("Loft sweep output metadata must include frame, path, and profile references.")
+    return dict(kernel)
+
+
 @dataclass(frozen=True)
 class LoftPlan:
     """Deterministic planner output consumed by the loft executor."""
@@ -486,17 +2141,587 @@ class LoftPlan:
 
     @property
     def is_executable(self) -> bool:
-        return int(self.metadata.get("ambiguity_failed_intervals_count", 0)) == 0
+        return self.executability_status.executable
 
     @property
     def blocking_status(self) -> str:
         return "none" if self.is_executable else "constraint_required"
 
-    def require_executable(self) -> None:
-        if not self.is_executable:
-            raise ValueError(
-                "Loft plan is not executable: unresolved ambiguity or blocking planner state remains."
+    @property
+    def unresolved_ambiguities(self) -> tuple[LoftAmbiguityRecord, ...]:
+        return _coerce_loft_ambiguity_records(self.metadata.get("unresolved_ambiguities", ()))
+
+    @property
+    def invalid_input_records(self) -> tuple[str, ...]:
+        values = self.metadata.get("invalid_input_records", ())
+        if not isinstance(values, Sequence) or isinstance(values, (str, bytes)):
+            return ()
+        return tuple(str(value) for value in values)
+
+    @property
+    def executability_status(self) -> LoftPlanExecutabilityStatus:
+        unresolved = self.unresolved_ambiguities
+        failed_count = int(self.metadata.get("ambiguity_failed_intervals_count", 0))
+        if failed_count > len(unresolved):
+            unresolved = unresolved + tuple(
+                _fallback_ambiguity_record(index)
+                for index in range(len(unresolved), failed_count)
             )
+        invalid_inputs = self.invalid_input_records
+        return LoftPlanExecutabilityStatus(
+            executable=not unresolved and not invalid_inputs,
+            unresolved_ambiguities=unresolved,
+            invalid_inputs=invalid_inputs,
+        )
+
+    def require_executable(self) -> None:
+        status = self.executability_status
+        if not status.executable:
+            raise ValueError(status.diagnostic)
+
+
+@dataclass(frozen=True)
+class LoftSelfIntersectionDiagnostic:
+    """Deterministic loft self-intersection or invalid-metadata diagnostic."""
+
+    code: str
+    message: str
+    source: str
+    branch_crossing_count: float = 0.0
+    no_mesh_fallback: bool = True
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "branch_crossing_count": self.branch_crossing_count,
+            "code": self.code,
+            "message": self.message,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "source": self.source,
+        }
+
+
+@dataclass(frozen=True)
+class LoftSelfIntersectionValidityReport:
+    """Planner/executor visible validity signal for loft self-intersection risk."""
+
+    valid: bool
+    source: str
+    branch_crossing_count: float = 0.0
+    diagnostics: tuple[LoftSelfIntersectionDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    @property
+    def refused(self) -> bool:
+        return not self.valid
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "branch_crossing_count": self.branch_crossing_count,
+            "diagnostics": [diagnostic.canonical_payload() for diagnostic in self.diagnostics],
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "refused": self.refused,
+            "source": self.source,
+            "valid": self.valid,
+        }
+
+
+@dataclass(frozen=True)
+class LoftShellValidityRecord:
+    """Loft-owned shell/provenance facts used before CSG accepts a loft operand."""
+
+    provenance_present: bool
+    shell_count: int
+    patch_count: int
+    seam_count: int
+    connected: bool
+    branch_count: int
+    branch_crossing_count: float
+    boundary_graph: dict[str, object] | None = None
+    seam_coverage: dict[str, object] | None = None
+    cap_validity: dict[str, object] | None = None
+    closure_evidence: dict[str, object] | None = None
+    no_mesh_fallback: bool = True
+
+    @property
+    def constrained_single_shell(self) -> bool:
+        coverage_complete = True
+        if self.seam_coverage is not None:
+            coverage_complete = bool(self.seam_coverage.get("complete", False))
+        closed_valid = True
+        if self.closure_evidence is not None:
+            closed_valid = bool(self.closure_evidence.get("closed_valid", False))
+        return (
+            self.provenance_present
+            and self.shell_count == 1
+            and self.patch_count >= 2
+            and self.seam_count > 0
+            and self.connected
+            and coverage_complete
+            and closed_valid
+            and self.branch_count <= 1
+            and self.branch_crossing_count <= 0.0
+        )
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "branch_count": self.branch_count,
+            "branch_crossing_count": self.branch_crossing_count,
+            "boundary_graph": self.boundary_graph,
+            "cap_validity": self.cap_validity,
+            "closure_evidence": self.closure_evidence,
+            "connected": self.connected,
+            "constrained_single_shell": self.constrained_single_shell,
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "patch_count": self.patch_count,
+            "provenance_present": self.provenance_present,
+            "seam_coverage": self.seam_coverage,
+            "seam_count": self.seam_count,
+            "shell_count": self.shell_count,
+        }
+
+
+@dataclass(frozen=True)
+class LoftBranchJointRecord:
+    """Branch joint membership and ownership evidence for branching loft routes."""
+
+    joint_id: str
+    transition_interval: tuple[int, int]
+    branch_ids: tuple[str, ...]
+    topology_case: str
+    owner: str | None = None
+    diagnostics: tuple[str, ...] = ()
+
+    @property
+    def constrained(self) -> bool:
+        return bool(self.joint_id and self.branch_ids and self.owner) and not self.diagnostics
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "branch_ids": self.branch_ids,
+            "constrained": self.constrained,
+            "diagnostics": self.diagnostics,
+            "joint_id": self.joint_id,
+            "owner": self.owner,
+            "topology_case": self.topology_case,
+            "transition_interval": self.transition_interval,
+        }
+
+
+@dataclass(frozen=True)
+class LoftBranchGraphEvidence:
+    """Loft-owned branch graph evidence consumed by CSG policy classification."""
+
+    branch_count: int
+    transition_count: int
+    branch_ids: tuple[str, ...]
+    joints: tuple[LoftBranchJointRecord, ...] = ()
+    branch_crossing_count: float = 0.0
+    source: str = "executor"
+    no_mesh_fallback: bool = True
+
+    @property
+    def underconstrained(self) -> bool:
+        if self.branch_count <= 1:
+            return False
+        if self.branch_crossing_count > 0.0:
+            return True
+        if len(self.branch_ids) < self.branch_count:
+            return True
+        if not self.joints:
+            return True
+        return any(not joint.constrained for joint in self.joints)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "branch_count": self.branch_count,
+            "branch_crossing_count": self.branch_crossing_count,
+            "branch_ids": self.branch_ids,
+            "joints": [joint.canonical_payload() for joint in self.joints],
+            "no_mesh_fallback": self.no_mesh_fallback,
+            "source": self.source,
+            "transition_count": self.transition_count,
+            "underconstrained": self.underconstrained,
+        }
+
+
+def _coerce_branch_joint_record(payload: Mapping[str, object], index: int) -> LoftBranchJointRecord:
+    interval_payload = payload.get("transition_interval", (index, index + 1))
+    try:
+        interval_values = tuple(interval_payload)  # type: ignore[arg-type]
+        transition_interval = (int(interval_values[0]), int(interval_values[1]))
+    except (TypeError, ValueError, IndexError):
+        transition_interval = (index, index + 1)
+    branch_payload = payload.get("branch_ids", ())
+    if isinstance(branch_payload, Sequence) and not isinstance(branch_payload, (str, bytes)):
+        branch_ids = tuple(str(branch_id) for branch_id in branch_payload if str(branch_id))
+    else:
+        branch_ids = ()
+    diagnostics_payload = payload.get("diagnostics", ())
+    if isinstance(diagnostics_payload, Sequence) and not isinstance(diagnostics_payload, (str, bytes)):
+        diagnostics = tuple(str(item) for item in diagnostics_payload if str(item))
+    else:
+        diagnostics = ()
+    return LoftBranchJointRecord(
+        joint_id=str(payload.get("joint_id") or f"joint-{index}"),
+        transition_interval=transition_interval,
+        branch_ids=branch_ids,
+        topology_case=str(payload.get("topology_case") or "unknown"),
+        owner=None if payload.get("owner") is None else str(payload.get("owner")),
+        diagnostics=diagnostics,
+    )
+
+
+def build_branch_joint_diagnostic(evidence: LoftBranchGraphEvidence) -> tuple[str, ...]:
+    """Return deterministic underconstrained branch graph diagnostics."""
+
+    diagnostics: list[str] = []
+    if evidence.branch_count <= 1:
+        return ()
+    if evidence.branch_crossing_count > 0.0:
+        diagnostics.append("branch-crossing-risk")
+    if len(evidence.branch_ids) < evidence.branch_count:
+        diagnostics.append("missing-branch-membership")
+    if not evidence.joints:
+        diagnostics.append("missing-branch-joints")
+    for joint in evidence.joints:
+        if not joint.branch_ids:
+            diagnostics.append(f"{joint.joint_id}:missing-branch-membership")
+        if not joint.owner:
+            diagnostics.append(f"{joint.joint_id}:missing-owner")
+        diagnostics.extend(f"{joint.joint_id}:{diagnostic}" for diagnostic in joint.diagnostics)
+    return tuple(dict.fromkeys(diagnostics))
+
+
+def build_loft_branch_graph_evidence(body: SurfaceBody) -> LoftBranchGraphEvidence:
+    """Build branch graph evidence from loft-owned metadata without tessellation."""
+
+    kernel = _loft_kernel_metadata_from_body(body)
+    branch_count = int(kernel.get("branch_count", 0) or 0)
+    transition_count = int(kernel.get("transition_count", 0) or 0)
+    crossing_count = _loft_branch_crossing_count_from_metadata(kernel)
+    branch_graph_payload = kernel.get("loft_branch_graph")
+    branch_ids: tuple[str, ...] = ()
+    joints: tuple[LoftBranchJointRecord, ...] = ()
+    source = "executor"
+    if isinstance(branch_graph_payload, Mapping):
+        branch_payload = branch_graph_payload.get("branch_ids", ())
+        if isinstance(branch_payload, Sequence) and not isinstance(branch_payload, (str, bytes)):
+            branch_ids = tuple(str(branch_id) for branch_id in branch_payload if str(branch_id))
+        joint_payload = branch_graph_payload.get("joints", ())
+        if isinstance(joint_payload, Sequence) and not isinstance(joint_payload, (str, bytes)):
+            joints = tuple(
+                _coerce_branch_joint_record(item, index)
+                for index, item in enumerate(joint_payload)
+                if isinstance(item, Mapping)
+            )
+        source = str(branch_graph_payload.get("source") or source)
+    elif branch_count > 0:
+        branch_ids = tuple(f"branch-{index}" for index in range(branch_count if branch_count > 1 else 1))
+    return LoftBranchGraphEvidence(
+        branch_count=branch_count,
+        transition_count=transition_count,
+        branch_ids=branch_ids,
+        joints=joints,
+        branch_crossing_count=crossing_count,
+        source=source,
+    )
+
+
+def _loft_branch_crossing_count_from_metadata(metadata: dict[str, object]) -> float:
+    raw_count = metadata.get("branch_crossing_count")
+    if raw_count is None:
+        fairness = metadata.get("fairness_diagnostics", {})
+        if isinstance(fairness, dict):
+            raw_count = fairness.get("branch_crossing_count", 0.0)
+    try:
+        count = float(raw_count or 0.0)
+    except (TypeError, ValueError):
+        return -1.0
+    return count
+
+
+def _loft_kernel_metadata_from_body(body: SurfaceBody) -> dict[str, object]:
+    kernel = dict(body.kernel_metadata())
+    if kernel.get("operation") == "loft":
+        return kernel
+    if body.shell_count == 1:
+        shell_kernel = dict(body.iter_shells(world=True)[0].metadata.get("kernel", {}))
+        if shell_kernel.get("operation") == "loft":
+            return shell_kernel
+    for patch in body.iter_patches(world=True):
+        patch_kernel = patch.kernel_metadata()
+        if patch_kernel.get("operation") == "loft":
+            return dict(patch_kernel)
+    return {}
+
+
+def _loft_expected_patch_boundary_refs(patch: object, patch_index: int) -> tuple[SurfaceBoundaryRef, ...]:
+    kernel = dict(getattr(patch, "metadata", {}).get("kernel", {}))
+    surface_role = kernel.get("surface_role")
+    if surface_role in {"closure-cap", "start-cap", "end-cap"}:
+        trim_loops = tuple(getattr(patch, "trim_loops", ()) or ())
+        if not trim_loops:
+            return (SurfaceBoundaryRef(patch_index, "trim:outer"),)
+        return tuple(
+            SurfaceBoundaryRef(
+                patch_index,
+                "trim:outer" if loop_index == 0 else f"trim:inner:{loop_index - 1}",
+            )
+            for loop_index, _loop in enumerate(trim_loops)
+        )
+    return tuple(
+        SurfaceBoundaryRef(patch_index, boundary_id)
+        for boundary_id in ("left", "right", "bottom", "top")
+    )
+
+
+def build_loft_boundary_graph(
+    patches: Sequence[object],
+    seams: Sequence[SurfaceSeam],
+) -> LoftBoundaryGraph:
+    """Build loft boundary graph evidence without tessellation or global scans."""
+
+    boundary_refs = tuple(
+        boundary
+        for patch_index, patch in enumerate(patches)
+        for boundary in _loft_expected_patch_boundary_refs(patch, patch_index)
+    )
+    component_edges = tuple(
+        (seam.seam_id, tuple(seam.boundaries))
+        for seam in sorted(seams, key=lambda item: item.seam_id)
+    )
+    return LoftBoundaryGraph(
+        boundary_refs=tuple(sorted(boundary_refs, key=lambda ref: (ref.patch_index, ref.boundary_id))),
+        seam_refs=tuple(seam_id for seam_id, _boundaries in component_edges),
+        component_edges=component_edges,
+    )
+
+
+def classify_loft_seam_coverage(graph: LoftBoundaryGraph) -> LoftSeamCoverageRecord:
+    """Classify missing, duplicate, and dangling seam coverage in a loft graph."""
+
+    expected = set(graph.boundary_refs)
+    counts: dict[SurfaceBoundaryRef, int] = {boundary: 0 for boundary in graph.boundary_refs}
+    dangling: list[SurfaceBoundaryRef] = []
+    for _seam_id, boundaries in graph.component_edges:
+        for boundary in boundaries:
+            if boundary not in expected:
+                dangling.append(boundary)
+                continue
+            counts[boundary] += 1
+    missing = tuple(boundary for boundary in graph.boundary_refs if counts[boundary] == 0)
+    duplicate = tuple(boundary for boundary in graph.boundary_refs if counts[boundary] > 1)
+    unique_dangling = tuple(dict.fromkeys(dangling))
+    complete = not missing and not duplicate and not unique_dangling
+    return LoftSeamCoverageRecord(
+        complete=complete,
+        missing=missing,
+        duplicate=duplicate,
+        dangling=unique_dangling,
+        seam_count=len(graph.seam_refs),
+        boundary_count=len(graph.boundary_refs),
+    )
+
+
+def _loft_cap_patch_indices(patches: Sequence[object]) -> tuple[int, ...]:
+    return tuple(
+        patch_index
+        for patch_index, patch in enumerate(patches)
+        if dict(getattr(patch, "metadata", {}).get("kernel", {})).get("surface_role")
+        in {"closure-cap", "start-cap", "end-cap"}
+    )
+
+
+def classify_loft_cap_validity(patches: Sequence[object]) -> LoftCapValidityRecord:
+    """Classify loft cap presence and trim-loop validity without tessellation."""
+
+    cap_patch_indices = _loft_cap_patch_indices(patches)
+    terminal_roles = {
+        dict(getattr(patches[index], "metadata", {}).get("kernel", {})).get("surface_role")
+        for index in cap_patch_indices
+        if dict(getattr(patches[index], "metadata", {}).get("kernel", {})).get("surface_role")
+        in {"start-cap", "end-cap"}
+    }
+    diagnostics: list[str] = []
+    if terminal_roles != {"start-cap", "end-cap"}:
+        missing_roles = sorted({"start-cap", "end-cap"} - terminal_roles)
+        diagnostics.append(f"missing-terminal-cap:{','.join(missing_roles)}")
+    for patch_index in cap_patch_indices:
+        patch = patches[patch_index]
+        trim_loops = tuple(getattr(patch, "trim_loops", ()) or ())
+        if not trim_loops:
+            diagnostics.append(f"cap-{patch_index}:missing-trim-loop")
+            continue
+        outer_count = sum(1 for loop in trim_loops if loop.category == "outer")
+        if outer_count != 1:
+            diagnostics.append(f"cap-{patch_index}:outer-loop-count:{outer_count}")
+        for loop_index, trim_loop in enumerate(trim_loops):
+            area = float(_signed_area(trim_loop.points_uv))
+            if abs(area) <= 1e-12:
+                diagnostics.append(f"cap-{patch_index}:loop-{loop_index}:degenerate")
+            elif trim_loop.category == "outer" and area < 0.0:
+                diagnostics.append(f"cap-{patch_index}:loop-{loop_index}:outer-orientation")
+            elif trim_loop.category == "inner" and area > 0.0:
+                diagnostics.append(f"cap-{patch_index}:loop-{loop_index}:inner-orientation")
+    return LoftCapValidityRecord(
+        valid=not diagnostics,
+        cap_count=len(cap_patch_indices),
+        expected_terminal_cap_count=2,
+        cap_patch_indices=cap_patch_indices,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def build_loft_closure_evidence(
+    seam_coverage: LoftSeamCoverageRecord,
+    cap_validity: LoftCapValidityRecord,
+) -> LoftClosureEvidenceRecord:
+    """Build the closed-body eligibility decision from loft-owned evidence."""
+
+    diagnostics: list[str] = []
+    if not seam_coverage.complete:
+        diagnostics.append("incomplete-seam-coverage")
+    diagnostics.extend(cap_validity.diagnostics)
+    closed_valid = seam_coverage.complete and cap_validity.valid
+    return LoftClosureEvidenceRecord(
+        closed_valid=closed_valid,
+        seam_coverage_complete=seam_coverage.complete,
+        cap_valid=cap_validity.valid,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def summarize_loft_shell_validity(body: SurfaceBody) -> LoftShellValidityRecord:
+    """Summarize loft-owned shell/provenance facts without tessellating to mesh."""
+
+    kernel = _loft_kernel_metadata_from_body(body)
+    provenance_present = kernel.get("operation") == "loft"
+    shell = body.iter_shells(world=True)[0] if body.shell_count == 1 else None
+    graph_payload = None
+    coverage_payload = None
+    cap_payload = None
+    closure_payload = None
+    if shell is not None and provenance_present:
+        graph_payload = kernel.get("loft_boundary_graph")
+        coverage_payload = kernel.get("loft_seam_coverage")
+        cap_payload = kernel.get("loft_cap_validity")
+        closure_payload = kernel.get("loft_closure_evidence")
+        has_executor_evidence = any(
+            isinstance(payload, dict)
+            for payload in (graph_payload, coverage_payload, cap_payload, closure_payload)
+        ) or bool(_loft_cap_patch_indices(shell.patches))
+        if has_executor_evidence and (
+            not isinstance(graph_payload, dict)
+            or not isinstance(coverage_payload, dict)
+            or not isinstance(cap_payload, dict)
+            or not isinstance(closure_payload, dict)
+        ):
+            graph = build_loft_boundary_graph(shell.patches, shell.seams)
+            coverage = classify_loft_seam_coverage(graph)
+            cap_validity = classify_loft_cap_validity(shell.patches)
+            closure_evidence = build_loft_closure_evidence(coverage, cap_validity)
+            graph_payload = graph.canonical_payload()
+            coverage_payload = coverage.canonical_payload()
+            cap_payload = cap_validity.canonical_payload()
+            closure_payload = closure_evidence.canonical_payload()
+    return LoftShellValidityRecord(
+        provenance_present=provenance_present,
+        shell_count=body.shell_count,
+        patch_count=0 if shell is None else shell.patch_count,
+        seam_count=0 if shell is None else len(shell.seams),
+        connected=False if shell is None else shell.connected,
+        branch_count=int(kernel.get("branch_count", 0) or 0),
+        branch_crossing_count=_loft_branch_crossing_count_from_metadata(kernel),
+        boundary_graph=graph_payload if isinstance(graph_payload, dict) else None,
+        seam_coverage=coverage_payload if isinstance(coverage_payload, dict) else None,
+        cap_validity=cap_payload if isinstance(cap_payload, dict) else None,
+        closure_evidence=closure_payload if isinstance(closure_payload, dict) else None,
+    )
+
+
+def detect_loft_plan_self_intersections(
+    plan: LoftPlan,
+    *,
+    threshold: float = 0.0,
+) -> LoftSelfIntersectionValidityReport:
+    """Detect planner-visible loft self-intersection risk before execution/export."""
+
+    crossing_count = _loft_branch_crossing_count_from_metadata(plan.metadata)
+    if crossing_count < 0.0:
+        diagnostic = LoftSelfIntersectionDiagnostic(
+            code="invalid-metadata",
+            message="Loft plan self-intersection detector requires numeric branch_crossing_count; no mesh fallback was attempted.",
+            source="planner",
+            branch_crossing_count=crossing_count,
+        )
+        return LoftSelfIntersectionValidityReport(
+            valid=False,
+            source="planner",
+            branch_crossing_count=crossing_count,
+            diagnostics=(diagnostic,),
+        )
+    if crossing_count > threshold:
+        diagnostic = LoftSelfIntersectionDiagnostic(
+            code="planner-self-intersection-risk",
+            message="Loft planner detected branch crossing self-intersection risk; no mesh fallback was attempted.",
+            source="planner",
+            branch_crossing_count=crossing_count,
+        )
+        return LoftSelfIntersectionValidityReport(
+            valid=False,
+            source="planner",
+            branch_crossing_count=crossing_count,
+            diagnostics=(diagnostic,),
+        )
+    return LoftSelfIntersectionValidityReport(
+        valid=True,
+        source="planner",
+        branch_crossing_count=crossing_count,
+    )
+
+
+def check_executed_loft_self_intersection_validity(
+    body: SurfaceBody,
+    *,
+    threshold: float = 0.0,
+) -> LoftSelfIntersectionValidityReport:
+    """Check executed loft metadata for self-intersection risk before export."""
+
+    kernel = _loft_kernel_metadata_from_body(body)
+    if kernel.get("operation") != "loft":
+        return LoftSelfIntersectionValidityReport(valid=True, source="executor", branch_crossing_count=0.0)
+    crossing_count = _loft_branch_crossing_count_from_metadata(kernel)
+    if crossing_count < 0.0:
+        diagnostic = LoftSelfIntersectionDiagnostic(
+            code="invalid-metadata",
+            message="Executed loft validity checker requires numeric branch_crossing_count; no mesh fallback was attempted.",
+            source="executor",
+            branch_crossing_count=crossing_count,
+        )
+        return LoftSelfIntersectionValidityReport(
+            valid=False,
+            source="executor",
+            branch_crossing_count=crossing_count,
+            diagnostics=(diagnostic,),
+        )
+    if crossing_count > threshold:
+        diagnostic = LoftSelfIntersectionDiagnostic(
+            code="executed-self-intersection-risk",
+            message="Executed loft carries branch crossing self-intersection risk; no mesh fallback was attempted.",
+            source="executor",
+            branch_crossing_count=crossing_count,
+        )
+        return LoftSelfIntersectionValidityReport(
+            valid=False,
+            source="executor",
+            branch_crossing_count=crossing_count,
+            diagnostics=(diagnostic,),
+        )
+    return LoftSelfIntersectionValidityReport(
+        valid=True,
+        source="executor",
+        branch_crossing_count=crossing_count,
+    )
 
 
 def loft_profiles(
@@ -531,7 +2756,7 @@ def loft_profiles(
     fairness_weight: float = 0.2,
     skeleton_mode: str = "auto",
     fairness_iterations: int = 12,
-) -> Mesh:
+) -> SurfaceBody:
     """Loft a sequence of planar sections/profiles, optionally along a path."""
 
     if quality is not None:
@@ -569,7 +2794,7 @@ def loft_profiles(
         bezier_samples=bezier_samples,
     )
     stations = _build_profile_section_stations(loft_sections_input, positions)
-    mesh = loft_sections(
+    body = loft_sections(
         stations,
         samples=samples,
         cap_ends=cap_ends,
@@ -594,8 +2819,8 @@ def loft_profiles(
     )
     color = getattr(normalized_profiles[0], "color", None)
     if color is not None:
-        set_mesh_color(mesh, color)
-    return mesh
+        body.metadata.setdefault("consumer", {})["color"] = color
+    return body
 
 
 def loft(
@@ -630,7 +2855,7 @@ def loft(
     fairness_weight: float = 0.2,
     skeleton_mode: str = "auto",
     fairness_iterations: int = 12,
-) -> Mesh:
+) -> SurfaceBody:
     """Loft sections/profiles using the topology-aware planner/executor pipeline."""
 
     return loft_profiles(
@@ -906,8 +3131,8 @@ def loft_sections(
     fairness_weight: float = 0.2,
     skeleton_mode: str = "auto",
     fairness_iterations: int = 12,
-) -> Mesh:
-    """Loft topology-native sections using a planner/executor pipeline."""
+) -> SurfaceBody:
+    """Loft topology-native sections into the canonical surfaced body."""
 
     plan = loft_plan_sections(
         stations,
@@ -932,7 +3157,7 @@ def loft_sections(
         skeleton_mode=skeleton_mode,
         fairness_iterations=fairness_iterations,
     )
-    return loft_execute_plan(plan, cap_ends=cap_ends)
+    return _loft_execute_plan_surface(plan, cap_ends=cap_ends)
 
 
 def loft_plan_sections(
@@ -957,6 +3182,12 @@ def loft_plan_sections(
     fairness_weight: float = 0.2,
     skeleton_mode: str = "auto",
     fairness_iterations: int = 12,
+    smooth_intent: bool = False,
+    rational_intent: bool = False,
+    rational_weights: object | None = None,
+    sweep_path: Path3D | None = None,
+    sweep_frame_policy: str | None = None,
+    requested_patch_family: str | None = None,
 ) -> LoftPlan:
     """Build a deterministic loft execution plan from section stations."""
 
@@ -982,6 +3213,7 @@ def loft_plan_sections(
     _validate_fairness_weight(fairness_weight)
     _validate_skeleton_mode(skeleton_mode)
     _validate_fairness_iterations(fairness_iterations)
+    sweep_policy = resolve_loft_sweep_frame_policy(sweep_frame_policy)
     _validate_section_stations(stations)
 
     resolved_disambiguation_seed = (
@@ -1293,6 +3525,25 @@ def loft_plan_sections(
         fairness_convergence_status = (
             "max_iterations" if global_optimizer_hit_iteration_cap else "converged"
         )
+    family_selection_records = loft_patch_family_selection_records(
+        planned_transitions,
+        requested_family=requested_patch_family,
+        smooth_intent=smooth_intent,
+        rational_intent=rational_intent,
+        sweep_path=sweep_path,
+    )
+    refused_family_records = tuple(record for record in family_selection_records if not record.accepted)
+    if refused_family_records:
+        reason = refused_family_records[0].refusal_reason or "unknown"
+        raise ValueError(f"Unsupported loft patch family selection: {reason}.")
+    if any(record.selected_family == "nurbs" for record in family_selection_records) and rational_weights is None:
+        raise ValueError("NURBS loft output requires explicit positive finite rational weights.")
+    if any(record.selected_family == "sweep" for record in family_selection_records) and sweep_path is None:
+        raise ValueError("Sweep loft output requires an explicit Path3D guide.")
+    rational_weights_payload = None
+    if rational_weights is not None:
+        rational_weights_payload = float(rational_weights) if np.isscalar(rational_weights) else np.asarray(rational_weights, dtype=float).tolist()
+    sweep_path_points_payload = None if sweep_path is None else tuple(tuple(float(value) for value in point) for point in sweep_path.sample())
     plan = LoftPlan(
         samples=samples,
         stations=tuple(planned_stations),
@@ -1325,6 +3576,10 @@ def loft_plan_sections(
             "fairness_weight": float(fairness_weight),
             "fairness_iterations": int(fairness_iterations),
             "skeleton_mode": skeleton_mode,
+            "loft_family_selection_records": tuple(record.canonical_payload() for record in family_selection_records),
+            "loft_rational_weights": rational_weights_payload,
+            "loft_sweep_path_points": sweep_path_points_payload,
+            "loft_sweep_frame_policy": sweep_policy.canonical_payload(),
             "fairness_objective_pre": fairness_objective_pre,
             "fairness_objective_post": fairness_objective_post,
             "fairness_diagnostics": fairness_diagnostics,
@@ -1452,12 +3707,12 @@ def loft_plan_ambiguities(
     )
 
 
-def loft_execute_plan(
+def loft_execute_plan_debug_mesh(
     plan: LoftPlan,
     *,
     cap_ends: bool = False,
 ) -> Mesh:
-    """Execute a loft plan into a deterministic mesh."""
+    """Execute a loft plan through the explicit legacy/debug mesh boundary."""
 
     _validate_loft_plan(plan)
     plan.require_executable()
@@ -1613,7 +3868,39 @@ def loft_execute_plan(
             if base_faces_end.size:
                 faces.extend((base_faces_end[:, [0, 2, 1]] + offsets[-1][region_idx][0]).tolist())
 
-    return Mesh(np.asarray(vertices, dtype=float), np.asarray(faces, dtype=int))
+    return Mesh(
+        np.asarray(vertices, dtype=float),
+        np.asarray(faces, dtype=int),
+        metadata={
+            "loft_mesh_boundary": "debug-compatibility",
+            "canonical_executor": "surface",
+            "cap_ends": bool(cap_ends),
+        },
+    )
+
+
+def loft_execute_plan_debug_mesh_result(
+    plan: LoftPlan,
+    *,
+    cap_ends: bool = False,
+) -> LoftDebugMeshResult:
+    mesh = loft_execute_plan_debug_mesh(plan, cap_ends=cap_ends)
+    return LoftDebugMeshResult(
+        mesh=mesh,
+        boundary="debug-compatibility",
+        plan_samples=plan.samples,
+        cap_ends=cap_ends,
+    )
+
+
+def loft_execute_plan(
+    plan: LoftPlan,
+    *,
+    cap_ends: bool = False,
+) -> SurfaceBody:
+    """Execute a loft plan into the canonical surfaced body representation."""
+
+    return _loft_execute_plan_surface(plan, cap_ends=cap_ends)
 
 
 def _loft_execute_plan_surface(
@@ -1630,10 +3917,25 @@ def _loft_execute_plan_surface(
     """
 
     _validate_loft_plan(plan)
+    plan.require_executable()
 
     patches: list[object] = []
     seams: list[SurfaceSeam] = []
     seam_candidates: dict[tuple[int, str, int, str, int], list[SurfaceBoundaryRef]] = {}
+    family_selection_by_interval = {
+        tuple(record["transition_interval"]): record
+        for record in plan.metadata.get("loft_family_selection_records", ())
+        if isinstance(record, dict) and "transition_interval" in record
+    }
+    rational_weights = plan.metadata.get("loft_rational_weights")
+    sweep_path_points = plan.metadata.get("loft_sweep_path_points")
+    sweep_path = None if sweep_path_points is None else Path3D.from_points(sweep_path_points)
+    sweep_frame_policy_payload = plan.metadata.get("loft_sweep_frame_policy", {})
+    sweep_frame_policy = (
+        sweep_frame_policy_payload.get("frame_policy")
+        if isinstance(sweep_frame_policy_payload, dict)
+        else None
+    )
 
     def register_boundary(
         station_index: int,
@@ -1664,28 +3966,63 @@ def _loft_execute_plan_surface(
         prev_station = plan.stations[prev_idx]
         curr_station = plan.stations[curr_idx]
         region_pairs_by_branch = {pair.branch_id: pair for pair in transition.region_pairs}
+        family_selection = family_selection_by_interval.get(
+            transition.interval,
+            classify_loft_patch_family(transition).canonical_payload(),
+        )
+        selected_family = str(family_selection.get("selected_family", "ruled"))
         for branch_id in transition.branch_order:
             region_pair = region_pairs_by_branch[branch_id]
             for loop_index, loop_pair in enumerate(region_pair.loop_pairs):
                 patch_index = len(patches)
                 prev_curve = _station_loop_world(prev_station, loop_pair.prev_loop)
                 curr_curve = _station_loop_world(curr_station, loop_pair.curr_loop)
-                patch = RuledSurfacePatch(
-                    family="ruled",
-                    start_curve=prev_curve,
-                    end_curve=curr_curve,
-                    metadata={
-                        "kernel": {
-                            "operation": "loft",
-                            "executor": "surface",
-                            "transition_interval": transition.interval,
-                            "branch_id": branch_id,
-                            "region_action": region_pair.action,
-                            "loop_role": loop_pair.role,
-                            "loop_index": loop_index,
-                        }
-                    },
-                )
+                base_metadata = {
+                    "kernel": {
+                        "operation": "loft",
+                        "executor": "surface",
+                        "transition_interval": transition.interval,
+                        "branch_id": branch_id,
+                        "region_action": region_pair.action,
+                        "loop_role": loop_pair.role,
+                        "loop_index": loop_index,
+                        "loft_family_selection": family_selection,
+                    }
+                }
+                if selected_family == "bspline":
+                    patch = _loft_bspline_patch_from_station_curves(
+                        prev_curve,
+                        curr_curve,
+                        family_selection=family_selection,
+                        metadata=base_metadata,
+                    )
+                elif selected_family == "nurbs":
+                    patch = _loft_nurbs_patch_from_station_curves(
+                        prev_curve,
+                        curr_curve,
+                        family_selection=family_selection,
+                        rational_weights=rational_weights,
+                        metadata=base_metadata,
+                    )
+                elif selected_family == "sweep":
+                    patch = _loft_sweep_patch_from_loop_pair(
+                        loop_pair.prev_loop,
+                        family_selection=family_selection,
+                        sweep_path=sweep_path,
+                        frame_policy=sweep_frame_policy,
+                        metadata=base_metadata,
+                    )
+                elif selected_family == "ruled":
+                    patch = RuledSurfacePatch(
+                        family="ruled",
+                        start_curve=prev_curve,
+                        end_curve=curr_curve,
+                        metadata=base_metadata,
+                    )
+                else:
+                    raise ValueError(
+                        f"Unsupported loft patch family for surface executor: {selected_family!r}."
+                    )
                 patches.append(patch)
                 seams.append(
                     SurfaceSeam(
@@ -1837,13 +4174,33 @@ def _loft_execute_plan_surface(
             )
         )
 
+    boundary_graph = build_loft_boundary_graph(tuple(patches), tuple(seams))
+    seam_coverage = classify_loft_seam_coverage(boundary_graph)
+    cap_validity = classify_loft_cap_validity(tuple(patches))
+    closure_evidence = build_loft_closure_evidence(seam_coverage, cap_validity)
+    loft_metadata = {
+        "kernel": {
+            "operation": "loft",
+            "executor": "surface",
+            "split_merge_mode": plan.metadata.get("split_merge_mode"),
+            "ambiguity_mode": plan.metadata.get("ambiguity_mode"),
+            "branch_count": max((len(transition.branch_order) for transition in plan.transitions), default=0),
+            "branch_crossing_count": plan.metadata.get("fairness_diagnostics", {}).get("branch_crossing_count", 0.0),
+            "transition_count": len(plan.transitions),
+            "station_count": len(plan.stations),
+            "loft_boundary_graph": boundary_graph.canonical_payload(),
+            "loft_cap_validity": cap_validity.canonical_payload(),
+            "loft_closure_evidence": closure_evidence.canonical_payload(),
+            "loft_seam_coverage": seam_coverage.canonical_payload(),
+        }
+    }
     shell = make_surface_shell(
         tuple(patches),
-        connected=False,
+        connected=closure_evidence.closed_valid,
         seams=tuple(seams),
-        metadata={"kernel": {"operation": "loft", "executor": "surface"}},
+        metadata=loft_metadata,
     )
-    return make_surface_body((shell,), metadata={"kernel": {"operation": "loft", "executor": "surface"}})
+    return make_surface_body((shell,), metadata=loft_metadata)
 
 
 def _station_loop_world(station: PlannedStation, loop: np.ndarray) -> np.ndarray:
@@ -1869,11 +4226,13 @@ def _loft_surface_consumer_handoff(
     collection_metadata = {"producer": "loft", "executor": "surface"}
     if metadata:
         collection_metadata.update(dict(metadata))
-    return make_surface_consumer_collection(
+    collection = make_surface_consumer_collection(
         [body],
         source_prefix=source_prefix,
         metadata=collection_metadata,
     )
+    validate_feature_surface_handoff("loft.surface_consumer_handoff", collection)
+    return collection
 
 
 def _loft_planar_patch_from_station_loops(
@@ -1904,6 +4263,142 @@ def _loft_planar_patch_from_station_loops(
         v_axis=station.v,
         metadata=metadata,
     )
+
+
+def _loft_family_selection_from_payload(family_selection: dict[str, object]) -> LoftPatchFamilySelectionRecord:
+    evidence_payload = family_selection["evidence"]
+    if not isinstance(evidence_payload, dict):
+        raise ValueError("Loft family selection payload must include evidence.")
+    return LoftPatchFamilySelectionRecord(
+        transition_interval=tuple(family_selection["transition_interval"]),
+        selected_family=family_selection.get("selected_family"),
+        evidence=LoftFamilyIntentEvidence(
+            transition_interval=tuple(evidence_payload["transition_interval"]),
+            topology_case=str(evidence_payload["topology_case"]),
+            loop_pair_count=int(evidence_payload["loop_pair_count"]),
+            smooth_intent=bool(evidence_payload["smooth_intent"]),
+            rational_intent=bool(evidence_payload["rational_intent"]),
+            sweep_intent=bool(evidence_payload["sweep_intent"]),
+            requested_family=evidence_payload["requested_family"],
+        ),
+        refusal_reason=family_selection.get("refusal_reason"),
+    )
+
+
+def _loft_bspline_patch_from_station_curves(
+    prev_curve: np.ndarray,
+    curr_curve: np.ndarray,
+    *,
+    family_selection: dict[str, object],
+    metadata: dict[str, object],
+) -> BSplineSurfacePatch:
+    selection = _loft_family_selection_from_payload(family_selection)
+    validate_loft_bspline_intent(selection)
+    control = build_loft_control_net((prev_curve, curr_curve), degree_u=1)
+    patch_metadata = {
+        "kernel": {
+            **dict(metadata.get("kernel", {})),
+            "selected_family": "bspline",
+            "fit_posture": "interpolation",
+            "control_net_boundary": "surface-native",
+            "control_net_shape": tuple(int(value) for value in control.control_net.shape),
+            "degree_u": control.degree_u,
+            "degree_v": control.degree_v,
+        }
+    }
+    patch = BSplineSurfacePatch(
+        family="bspline",
+        degree_u=control.degree_u,
+        degree_v=control.degree_v,
+        knots_u=control.knots_u,
+        knots_v=control.knots_v,
+        control_net=control.control_net,
+        metadata=patch_metadata,
+    )
+    assert_loft_bspline_output_contract(patch, selection)
+    return patch
+
+
+def _loft_nurbs_patch_from_station_curves(
+    prev_curve: np.ndarray,
+    curr_curve: np.ndarray,
+    *,
+    family_selection: dict[str, object],
+    rational_weights: object | None,
+    metadata: dict[str, object],
+) -> NURBSSurfacePatch:
+    selection = _loft_family_selection_from_payload(family_selection)
+    validate_loft_nurbs_intent(selection, rational_weights)
+    control = build_loft_control_net((prev_curve, curr_curve), degree_u=1)
+    weights, weight_policy = _resolve_loft_nurbs_weight_grid(rational_weights, control.control_net.shape[:2])
+    patch_metadata = {
+        "kernel": {
+            **dict(metadata.get("kernel", {})),
+            "selected_family": "nurbs",
+            "fit_posture": "rational_interpolation",
+            "control_net_boundary": "surface-native",
+            "control_net_shape": tuple(int(value) for value in control.control_net.shape),
+            "degree_u": control.degree_u,
+            "degree_v": control.degree_v,
+            "rational_weight_policy": weight_policy.canonical_payload(),
+        }
+    }
+    patch = NURBSSurfacePatch(
+        family="nurbs",
+        degree_u=control.degree_u,
+        degree_v=control.degree_v,
+        knots_u=control.knots_u,
+        knots_v=control.knots_v,
+        control_net=control.control_net,
+        weights=weights,
+        metadata=patch_metadata,
+    )
+    assert_loft_nurbs_output_contract(patch, selection)
+    return patch
+
+
+def _loft_sweep_patch_from_loop_pair(
+    profile_loop: np.ndarray,
+    *,
+    family_selection: dict[str, object],
+    sweep_path: Path3D | None,
+    frame_policy: str | None,
+    metadata: dict[str, object],
+) -> SweepSurfacePatch:
+    selection = _loft_family_selection_from_payload(family_selection)
+    validate_loft_sweep_intent(selection, sweep_path)
+    assert sweep_path is not None
+    frame_record = resolve_loft_sweep_frame_policy(frame_policy)
+    profile = np.asarray(profile_loop, dtype=float).reshape(-1, 2)
+    profile_reference = (
+        f"loft:{selection.transition_interval[0]}->{selection.transition_interval[1]}:"
+        f"{metadata.get('kernel', {}).get('branch_id', 'branch')}:profile"
+    )
+    path_reference = (
+        f"loft:{selection.transition_interval[0]}->{selection.transition_interval[1]}:"
+        "sweep-path"
+    )
+    patch_metadata = {
+        "kernel": {
+            **dict(metadata.get("kernel", {})),
+            "selected_family": "sweep",
+            "profile_payload_boundary": "surface-native",
+            "profile_reference": profile_reference,
+            "path_reference": path_reference,
+            "frame_policy": frame_record.canonical_payload(),
+        }
+    }
+    patch = SweepSurfacePatch(
+        family="sweep",
+        profile_points_uv=profile,
+        path=sweep_path,
+        frame_policy=frame_record.frame_policy,
+        profile_reference=profile_reference,
+        path_reference=path_reference,
+        metadata=patch_metadata,
+    )
+    assert_loft_sweep_output_contract(patch, selection)
+    return patch
 
 
 def _as_planned_region_pair(
@@ -1977,12 +4472,18 @@ def _raise_structured_ambiguity_error(
     relationship_group: str | None = None,
     detail: str,
 ) -> None:
-    ambiguity_record = LoftAmbiguityRecord(
+    entity_ref = (
+        f"interval:{interval[0]}->{interval[1]}:"
+        f"regions:{','.join(str(index) for index in ambiguous_region_indices) or 'unknown'}"
+    )
+    ambiguity_record = build_loft_ambiguity_record(
         interval=interval,
-        topology_state_index=interval[1],
         ambiguous_region_indices=ambiguous_region_indices,
         ambiguity_class=ambiguity_class,
         relationship_group=relationship_group,
+        entity_ref=entity_ref,
+        candidate_lifecycle=tie_break_stage,
+        suggested_rail_text="Add predecessor/successor correspondence ids for this ambiguous topology interval.",
     )
     constraint_request = LoftConstraintRequest(
         interval=interval,
@@ -2398,6 +4899,13 @@ def _validate_loft_plan(plan: LoftPlan) -> None:
         raise ValueError(
             "Invalid loft plan metadata: ambiguity_failed_intervals_count must be >= 0."
         )
+    unresolved_records = plan.unresolved_ambiguities
+    if unresolved_records:
+        validate_loft_ambiguity_locators(unresolved_records)
+    if int(plan.metadata["ambiguity_failed_intervals_count"]) > 0 and not unresolved_records:
+        # Older plans may only carry the count. Execution still refuses through
+        # fallback records, but fresh ambiguity diagnostics must carry locators.
+        pass
     if float(plan.metadata["probabilistic_selected_confidence"]) < 0.0:
         raise ValueError(
             "Invalid loft plan metadata: probabilistic_selected_confidence must be >= 0."
@@ -5039,7 +7547,7 @@ def _expected_region_pair_action(
 def _synthetic_seed_scale(split_merge_steps: int, split_merge_bias: float) -> float:
     """Return deterministic synthetic seed scale used for birth/death decomposition.
 
-    `split_merge_steps` and `split_merge_bias` are threaded through the v1 resolve
+    `split_merge_steps` and `split_merge_bias` are passed through the v1 resolve
     path so progression stays deterministic and configurable without introducing
     random or ad-hoc seeds.
     """
@@ -5229,11 +7737,79 @@ __all__ = [
     "PlannedClosure",
     "PlannedRegionPair",
     "PlannedTransition",
+    "InferenceCandidateScore",
+    "InferenceRefusalDiagnostic",
+    "InferenceResult",
+    "MeshSampleEmissionDiagnostic",
+    "ParentSpanMatch",
+    "PointLifecycleRefusalDiagnostic",
+    "PointLifecycleResolution",
+    "ResampledLoopCorrespondence",
+    "RailConflictDiagnostic",
+    "RailResolutionResult",
+    "RailSource",
+    "PointLifecycleEvent",
+    "PointLifecycleState",
+    "LoftFamilyIntentEvidence",
+    "LoftPatchFamilySelectionRecord",
+    "LoftRationalWeightPolicyRecord",
+    "LoftSweepFramePolicyRecord",
+    "SampleCorrespondenceRecord",
+    "SurfaceSampleEmissionDiagnostic",
+    "SyntheticSupportReference",
+    "LoftAmbiguityLocator",
+    "LoftAmbiguityRecord",
+    "LoftPlanExecutabilityStatus",
+    "LoftBoundaryGraph",
+    "LoftCapValidityRecord",
+    "LoftClosureEvidenceRecord",
+    "LoftSeamCoverageRecord",
+    "LoftShellValidityRecord",
+    "LoftSelfIntersectionDiagnostic",
+    "LoftSelfIntersectionValidityReport",
+    "LoftSuggestedAuthoredRail",
     "LoftPlan",
+    "LoftDebugMeshResult",
+    "accept_or_refuse_inferred_correspondence",
+    "assert_loft_bspline_output_contract",
+    "assert_loft_nurbs_output_contract",
+    "assert_loft_sweep_output_contract",
+    "emit_mesh_faces_from_sample_correspondence",
+    "emit_surface_patches_from_sample_correspondence",
+    "insert_synthetic_support_reference",
+    "classify_loft_patch_family",
+    "build_loft_ambiguity_record",
+    "build_loft_boundary_graph",
+    "build_loft_closure_evidence",
+    "loft_patch_family_selection_records",
+    "classify_loft_cap_validity",
+    "classify_loft_seam_coverage",
+    "locate_parent_span",
+    "project_point_to_span",
+    "resolve_authored_rails",
+    "resolve_loft_sweep_frame_policy",
+    "resolve_point_birth_death_events",
+    "resample_loop_correspondence",
+    "score_correspondence_candidates",
+    "validate_point_lifecycle_event",
+    "validate_point_lifecycle_events",
+    "validate_loft_bspline_intent",
+    "validate_loft_nurbs_intent",
+    "validate_loft_sweep_intent",
+    "validate_mesh_executor_correspondence_input",
+    "validate_rail_priority",
+    "validate_loft_ambiguity_locators",
+    "validate_sample_correspondence",
+    "validate_surface_executor_correspondence_input",
+    "check_executed_loft_self_intersection_validity",
+    "detect_loft_plan_self_intersections",
+    "summarize_loft_shell_validity",
     "loft_profiles",
     "loft",
     "loft_plan_sections",
     "loft_execute_plan",
+    "loft_execute_plan_debug_mesh",
+    "loft_execute_plan_debug_mesh_result",
     "loft_sections",
     "loft_endcaps",
 ]
