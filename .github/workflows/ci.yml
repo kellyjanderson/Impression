@@ -35,8 +35,6 @@ jobs:
           python -m build
 
       - name: Run tests
-        env:
-          IMPRESSION_DISABLE_HINGES_EXTENSION: "1"
         run: |
           python -m pytest \
             tests/test_sdf.py \
