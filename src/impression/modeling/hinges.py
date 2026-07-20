@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -8,6 +9,10 @@ from types import ModuleType
 
 def _load_extension() -> ModuleType:
     package_name = "impression_hinges"
+    if os.environ.get("IMPRESSION_DISABLE_HINGES_EXTENSION") == "1":
+        raise ModuleNotFoundError(
+            "impression.modeling.hinges is disabled by IMPRESSION_DISABLE_HINGES_EXTENSION."
+        )
     try:
         return importlib.import_module(package_name)
     except ModuleNotFoundError as exc:

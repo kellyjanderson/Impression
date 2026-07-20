@@ -1105,17 +1105,41 @@ from .surface_scene import (
     tessellate_surface_composition,
     traverse_surface_composition,
 )
-from .hinges import (
-    HingeBackend,
-    HingeSurfaceAssembly,
-    HingeSurfaceComponent,
-    hinge_feature_csg_dependencies,
-    handoff_hinge_surface,
-    make_traditional_hinge_leaf,
-    make_traditional_hinge_pair,
-    make_living_hinge,
-    make_bistable_hinge,
-)
+try:
+    from .hinges import (
+        HingeBackend,
+        HingeSurfaceAssembly,
+        HingeSurfaceComponent,
+        hinge_feature_csg_dependencies,
+        handoff_hinge_surface,
+        make_traditional_hinge_leaf,
+        make_traditional_hinge_pair,
+        make_living_hinge,
+        make_bistable_hinge,
+    )
+    HINGES_EXTENSION_AVAILABLE = True
+except ModuleNotFoundError as exc:
+    _HINGES_IMPORT_ERROR = exc
+    HINGES_EXTENSION_AVAILABLE = False
+
+    class HingeBackend:  # type: ignore[no-redef]
+        pass
+
+    class HingeSurfaceAssembly:  # type: ignore[no-redef]
+        pass
+
+    class HingeSurfaceComponent:  # type: ignore[no-redef]
+        pass
+
+    def _raise_hinges_unavailable(*args, **kwargs):
+        raise ModuleNotFoundError(str(_HINGES_IMPORT_ERROR)) from _HINGES_IMPORT_ERROR
+
+    hinge_feature_csg_dependencies = _raise_hinges_unavailable
+    handoff_hinge_surface = _raise_hinges_unavailable
+    make_traditional_hinge_leaf = _raise_hinges_unavailable
+    make_traditional_hinge_pair = _raise_hinges_unavailable
+    make_living_hinge = _raise_hinges_unavailable
+    make_bistable_hinge = _raise_hinges_unavailable
 from impression.mesh_quality import MeshQuality
 
 __all__ = [
@@ -2143,6 +2167,7 @@ __all__ = [
     "HingeBackend",
     "HingeSurfaceComponent",
     "HingeSurfaceAssembly",
+    "HINGES_EXTENSION_AVAILABLE",
     "hinge_feature_csg_dependencies",
     "handoff_hinge_surface",
     "MeshQuality",

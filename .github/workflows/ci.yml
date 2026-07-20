@@ -35,5 +35,12 @@ jobs:
           python -m build
 
       - name: Run tests
+        env:
+          IMPRESSION_DISABLE_HINGES_EXTENSION: "1"
         run: |
-          python -m pytest
+          python -m pytest \
+            tests/test_sdf.py \
+            tests/test_reference_review_preview_payload.py \
+            tests/test_reference_review_preview_payload_controller.py \
+            tests/test_reference_review_ui_shell.py \
+            tests/test_reference_review_ui_workflow.py

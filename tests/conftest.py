@@ -34,6 +34,10 @@ _DEPRECATION_NODEID_SUBSTRINGS = (
     "tests/test_loft.py::test_private_surface_loft_consumer_handoff_uses_standard_surface_collection_and_tessellation",
     "tests/test_loft.py::test_private_surface_loft_consumer_handoff_supports_staged_split_merge_output",
 )
+_HINGE_EXTENSION_FILES = {
+    "test_hinges.py",
+    "test_surface_hinges.py",
+}
 
 
 def pytest_configure():
@@ -51,8 +55,12 @@ def pytest_addoption(parser) -> None:
 
 
 def pytest_collection_modifyitems(config, items) -> None:
+    from impression.modeling import HINGES_EXTENSION_AVAILABLE
+
     for item in items:
         filename = Path(str(item.fspath)).name
+        if filename in _HINGE_EXTENSION_FILES and not HINGES_EXTENSION_AVAILABLE:
+            item.add_marker(pytest.mark.skip(reason="impression-hinges extension is not installed"))
         if filename in _SURFACEBODY_FILES:
             item.add_marker(pytest.mark.surfacebody)
         if filename in _LOFT_FILES:
