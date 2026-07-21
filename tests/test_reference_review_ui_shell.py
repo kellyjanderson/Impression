@@ -1921,3 +1921,25 @@ def test_console_entrypoint_supports_help_and_check(capsys) -> None:
     check_output = capsys.readouterr().out
     assert "launch check passed" in check_output
     assert shell._ACTIVE_LAUNCH is not None
+
+
+def test_reference_review_runtime_diagnostics_blocks_old_rendering_stack() -> None:
+    versions = {
+        "PySide6": "6.10.1",
+        "shiboken6": "6.10.1",
+        "pyvista": "0.46.5",
+        "pyvistaqt": "0.11.3",
+        "vtk": "9.5.2",
+        "manifold3d": "3.3.2",
+    }
+
+    diagnostics = shell.reference_review_runtime_diagnostics(version_reader=versions.__getitem__)
+
+    assert "PySide6 6.10.1 is installed; expected >= 6.11.1." in diagnostics
+    assert "vtk 9.5.2 is installed; expected >= 9.6.2." in diagnostics
+
+
+def test_reference_review_runtime_diagnostics_accepts_current_rendering_stack() -> None:
+    diagnostics = shell.reference_review_runtime_diagnostics()
+
+    assert diagnostics == ()

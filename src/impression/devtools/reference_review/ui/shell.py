@@ -6,8 +6,11 @@ import os
 import sys
 from concurrent.futures import Future
 from dataclasses import dataclass, replace
+from importlib import metadata
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
+
+from packaging.version import Version, InvalidVersion
 
 from .bridge import BridgeRecord, BridgeRegistry
 from .packaging import qml_resource_root
@@ -64,6 +67,14 @@ options:
   -h, --help    show this help message and exit
 """
 _RENDERABLE_ARTIFACT_SUFFIXES = frozenset({".stl", ".impress"})
+_REQUIRED_RUNTIME_VERSIONS = {
+    "PySide6": "6.11.1",
+    "shiboken6": "6.11.1",
+    "pyvista": "0.48.4",
+    "pyvistaqt": "0.12.0",
+    "vtk": "9.6.2",
+    "manifold3d": "3.5.2",
+}
 
 
 @dataclass(frozen=True)
@@ -174,6 +185,49 @@ def _fixture_preview_empty_message(record: ReviewSourceModelRecord) -> str:
             "Review the Context and Artifacts tabs."
         )
     return "No STL or .impress artifact is declared for this fixture."
+
+
+def _version_satisfies(installed: str, required: str) -> bool:
+    try:
+        return Version(installed) >= Version(required)
+    except InvalidVersion:
+        return installed == required
+
+
+def reference_review_runtime_diagnostics(
+    *,
+    version_reader: Callable[[str], str] = metadata.version,
+) -> tuple[str, ...]:
+    """Return startup-blocking dependency diagnostics for the Qt review app."""
+
+    diagnostics: list[str] = []
+    for distribution_name, required_version in _REQUIRED_RUNTIME_VERSIONS.items():
+        try:
+            installed_version = version_reader(distribution_name)
+        except metadata.PackageNotFoundError:
+            diagnostics.append(
+                f"{distribution_name} is not installed; expected >= {required_version}."
+            )
+            continue
+        if not _version_satisfies(installed_version, required_version):
+            diagnostics.append(
+                f"{distribution_name} {installed_version} is installed; expected >= {required_version}."
+            )
+    return tuple(diagnostics)
+
+
+def _print_runtime_diagnostics(diagnostics: Sequence[str]) -> None:
+    print(
+        "Reference Review Workbench cannot start because the installed rendering "
+        "runtime does not match this checkout:",
+        file=sys.stderr,
+    )
+    for diagnostic in diagnostics:
+        print(f"- {diagnostic}", file=sys.stderr)
+    print(
+        "Refresh the virtual environment with: .venv/bin/python -m pip install -r requirements.txt",
+        file=sys.stderr,
+    )
 
 
 def _ensure_qt_app(argv: Sequence[str], *, offscreen: bool, widgets: bool = False) -> object:
@@ -1228,7 +1282,6 @@ def _parse_args(args: Sequence[str]) -> tuple[list[Path], list[Path], list[Path]
 def main(argv: Sequence[str] | None = None) -> int:
     global _ACTIVE_LAUNCH
 
-    configure_qt_preview_surface_format()
     argv = tuple(argv or sys.argv)
     args = argv[1:]
     if any(arg in {"-h", "--help"} for arg in args):
@@ -1239,6 +1292,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(error, file=sys.stderr)
         print(_USAGE.strip(), file=sys.stderr)
         return 2
+    runtime_diagnostics = reference_review_runtime_diagnostics()
+    if runtime_diagnostics:
+        _print_runtime_diagnostics(runtime_diagnostics)
+        return 1
+    configure_qt_preview_surface_format()
     fixture_records, fixture_diagnostics = load_fixture_records(
         fixture_files=tuple(fixture_files),
         fixture_roots=tuple(fixture_roots),
