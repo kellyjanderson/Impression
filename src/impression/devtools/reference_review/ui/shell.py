@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from concurrent.futures import Future
 from dataclasses import dataclass, replace
 from importlib import metadata
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Callable, Mapping, MutableMapping, Sequence
 
 from packaging.version import Version, InvalidVersion
 
@@ -75,6 +76,7 @@ _REQUIRED_RUNTIME_VERSIONS = {
     "vtk": "9.6.2",
     "manifold3d": "3.5.2",
 }
+_RUNTIME_REPAIR_ENV = "IMPRESSION_REFERENCE_REVIEW_RUNTIME_REPAIRED"
 
 
 @dataclass(frozen=True)
@@ -216,18 +218,89 @@ def reference_review_runtime_diagnostics(
     return tuple(diagnostics)
 
 
-def _print_runtime_diagnostics(diagnostics: Sequence[str]) -> None:
+def _find_requirements_lock(start: Path | None = None) -> Path | None:
+    """Find the checkout requirements lock used to repair stale editable envs."""
+
+    current = (start or Path(__file__)).resolve()
+    for path in (current, *current.parents):
+        requirements_path = path / "requirements.txt"
+        pyproject_path = path / "pyproject.toml"
+        if requirements_path.is_file() and pyproject_path.is_file():
+            return requirements_path
+    return None
+
+
+def _print_runtime_diagnostics(
+    diagnostics: Sequence[str],
+    *,
+    message: str,
+) -> None:
     print(
-        "Reference Review Workbench cannot start because the installed rendering "
-        "runtime does not match this checkout:",
+        message,
         file=sys.stderr,
     )
     for diagnostic in diagnostics:
         print(f"- {diagnostic}", file=sys.stderr)
-    print(
-        "Refresh the virtual environment with: .venv/bin/python -m pip install -r requirements.txt",
-        file=sys.stderr,
+
+
+def ensure_reference_review_runtime(
+    argv: Sequence[str],
+    *,
+    version_reader: Callable[[str], str] = metadata.version,
+    environ: MutableMapping[str, str] | None = None,
+    command_runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    process_replacer: Callable[[str, Sequence[str]], object] = os.execv,
+    requirements_path: Path | None = None,
+) -> bool:
+    """Repair a stale local rendering runtime and re-exec before Qt can crash."""
+
+    diagnostics = reference_review_runtime_diagnostics(version_reader=version_reader)
+    if not diagnostics:
+        return True
+
+    env = environ if environ is not None else os.environ
+    if env.get(_RUNTIME_REPAIR_ENV) == "1":
+        _print_runtime_diagnostics(
+            diagnostics,
+            message=(
+                "Reference Review Workbench still has a stale rendering runtime "
+                "after automatic repair:"
+            ),
+        )
+        return False
+
+    lock_path = requirements_path or _find_requirements_lock()
+    if lock_path is None:
+        _print_runtime_diagnostics(
+            diagnostics,
+            message=(
+                "Reference Review Workbench found a stale rendering runtime but "
+                "could not find requirements.txt for automatic repair:"
+            ),
+        )
+        return False
+
+    _print_runtime_diagnostics(
+        diagnostics,
+        message=(
+            "Reference Review Workbench found a stale rendering runtime; "
+            "refreshing dependencies before launch:"
+        ),
     )
+    repair = command_runner(
+        [sys.executable, "-m", "pip", "install", "-r", str(lock_path)],
+        text=True,
+    )
+    if repair.returncode != 0:
+        print(
+            "Reference Review Workbench dependency refresh failed; launch aborted.",
+            file=sys.stderr,
+        )
+        return False
+
+    env[_RUNTIME_REPAIR_ENV] = "1"
+    process_replacer(sys.executable, [sys.executable, *argv])
+    return False
 
 
 def _ensure_qt_app(argv: Sequence[str], *, offscreen: bool, widgets: bool = False) -> object:
@@ -1292,9 +1365,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(error, file=sys.stderr)
         print(_USAGE.strip(), file=sys.stderr)
         return 2
-    runtime_diagnostics = reference_review_runtime_diagnostics()
-    if runtime_diagnostics:
-        _print_runtime_diagnostics(runtime_diagnostics)
+    if not ensure_reference_review_runtime(argv):
         return 1
     configure_qt_preview_surface_format()
     fixture_records, fixture_diagnostics = load_fixture_records(

@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 from concurrent.futures import Future
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Sequence
 
 import pytest
 import numpy as np
@@ -1943,3 +1944,41 @@ def test_reference_review_runtime_diagnostics_accepts_current_rendering_stack() 
     diagnostics = shell.reference_review_runtime_diagnostics()
 
     assert diagnostics == ()
+
+
+def test_reference_review_runtime_repair_installs_and_reexecs_stale_runtime(tmp_path: Path) -> None:
+    versions = {
+        "PySide6": "6.10.1",
+        "shiboken6": "6.10.1",
+        "pyvista": "0.46.5",
+        "pyvistaqt": "0.11.3",
+        "vtk": "9.5.2",
+        "manifold3d": "3.3.2",
+    }
+    requirements_path = tmp_path / "requirements.txt"
+    requirements_path.write_text("PySide6==6.11.1\n")
+    calls: list[list[str]] = []
+    exec_args: list[object] = []
+    environ: dict[str, str] = {}
+
+    def command_runner(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    def process_replacer(executable: str, args: Sequence[str]) -> object:
+        exec_args.extend((executable, list(args)))
+        raise RuntimeError("reexec")
+
+    with pytest.raises(RuntimeError, match="reexec"):
+        shell.ensure_reference_review_runtime(
+            ("impression-reference-review", "--check"),
+            version_reader=versions.__getitem__,
+            environ=environ,
+            command_runner=command_runner,
+            process_replacer=process_replacer,
+            requirements_path=requirements_path,
+        )
+
+    assert calls == [[sys.executable, "-m", "pip", "install", "-r", str(requirements_path)]]
+    assert environ[shell._RUNTIME_REPAIR_ENV] == "1"
+    assert exec_args == [sys.executable, [sys.executable, "impression-reference-review", "--check"]]
