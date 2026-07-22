@@ -50,9 +50,6 @@ Current reference tests already cover several useful seeds:
 - [x] `surfacebody/csg_union_box_post`
 - [x] `surfacebody/csg_difference_slot`
 - [x] `surfacebody/csg_intersection_box_sphere`
-- [x] `surfacebody/hinge_traditional_pair`
-- [x] `surfacebody/hinge_living_panel`
-- [x] `surfacebody/hinge_bistable_blank`
 - [x] `loft/branching_manifold`
 - [x] `loft/hourglass_vessel`
 - [x] `loft/square_correspondence`
