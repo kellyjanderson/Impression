@@ -3,7 +3,6 @@
 import os
 
 os.environ.setdefault("QT_OPENGL", "desktop")
-os.environ.setdefault("QT_WIDGETS_RHI", "0")
 
 from .artifact_preview import ArtifactPreviewRecord, render_stl_preview
 from .bridge import BridgeAvailabilityDiagnostic, BridgeRecord, BridgeRegistry

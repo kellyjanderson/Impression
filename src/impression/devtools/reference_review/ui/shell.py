@@ -320,7 +320,6 @@ def _ensure_qt_app(argv: Sequence[str], *, offscreen: bool, widgets: bool = Fals
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     if widgets:
         os.environ.setdefault("QT_OPENGL", "desktop")
-        os.environ.setdefault("QT_WIDGETS_RHI", "0")
         from PySide6.QtWidgets import QApplication
 
         app = QApplication.instance()

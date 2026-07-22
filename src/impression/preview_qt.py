@@ -8,7 +8,6 @@ from dataclasses import dataclass, field, replace
 from typing import Iterable
 
 os.environ.setdefault("QT_OPENGL", "desktop")
-os.environ.setdefault("QT_WIDGETS_RHI", "0")
 
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
@@ -119,8 +118,8 @@ def configure_qt_preview_surface_format() -> None:
 
     fmt = QSurfaceFormat()
     fmt.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
-    fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CompatibilityProfile)
-    fmt.setVersion(2, 1)
+    fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
+    fmt.setVersion(4, 1)
     fmt.setDepthBufferSize(24)
     fmt.setStencilBufferSize(8)
     QSurfaceFormat.setDefaultFormat(fmt)
