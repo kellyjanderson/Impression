@@ -51,7 +51,7 @@ class QtPreviewSurfaceConfig:
             ),
             allow_offscreen=False,
             auto_update=False,
-            qvtk_base="QOpenGLWidget",
+            qvtk_base="QWidget",
         )
 
 
@@ -113,16 +113,10 @@ def configure_qvtk_backend(base: str | None) -> None:
 
 def configure_qt_preview_surface_format() -> None:
     """Configure the OpenGL surface format used by embedded preview widgets."""
-
-    from PySide6.QtGui import QSurfaceFormat
-
-    fmt = QSurfaceFormat()
-    fmt.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
-    fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
-    fmt.setVersion(4, 1)
-    fmt.setDepthBufferSize(24)
-    fmt.setStencilBufferSize(8)
-    QSurfaceFormat.setDefaultFormat(fmt)
+    # VTK/pyvistaqt select a working Metal-backed Qt surface on macOS when Qt
+    # keeps its default format. Forcing a profile/version can produce either
+    # Qt shader crashes or a live-but-black render target.
+    return None
 
 
 class QtPreviewSurface(QWidget):
