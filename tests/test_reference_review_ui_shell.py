@@ -74,6 +74,12 @@ from impression.devtools.reference_review.ui.shell import InteractiveStlPreviewL
 from impression.devtools.reference_review.ui.style import component_contracts
 
 
+def _write_empty_stl(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("solid empty\nendsolid empty\n")
+    return path
+
+
 def test_reference_review_ui_dependency_is_optional_extra() -> None:
     pyproject = tomllib.loads(Path("pyproject.toml").read_text())
     extras = pyproject["project"]["optional-dependencies"]
@@ -400,6 +406,7 @@ def test_shell_loads_fixture_file_into_selectable_queue(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     source = tmp_path / "model.py"
     source.write_text("def build():\n    return None\n")
+    artifact = _write_empty_stl(tmp_path / "reference-stl" / "dirty" / "demo" / "selectable.stl")
     fixture_file = tmp_path / "fixtures.json"
     fixture_file.write_text(
         json.dumps(
@@ -410,6 +417,7 @@ def test_shell_loads_fixture_file_into_selectable_queue(tmp_path: Path) -> None:
                         "feature_name": "demo",
                         "source_path": source.name,
                         "expected_output": "demo.png",
+                        "artifact_paths": [artifact.relative_to(tmp_path).as_posix()],
                     }
                 ]
             }
@@ -441,8 +449,7 @@ def test_shell_startup_does_not_launch_preview_controller(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    artifact = tmp_path / "part.impress"
-    artifact.write_text('{"format": "impress"}\n')
+    artifact = _write_empty_stl(tmp_path / "part.stl")
     source = tmp_path / "model.py"
     source.write_text("def build():\n    return None\n")
     record = ReviewSourceModelRecord(
@@ -481,6 +488,7 @@ def test_context_tab_shows_fixture_purpose_methodology_and_render_description(tm
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     source = tmp_path / "model.py"
     source.write_text("def build():\n    return None\n")
+    artifact = _write_empty_stl(tmp_path / "context.stl")
     record = ReviewSourceModelRecord(
         fixture_id="demo/context",
         feature_name="demo",
@@ -488,6 +496,7 @@ def test_context_tab_shows_fixture_purpose_methodology_and_render_description(tm
         purpose="Validate bevel edge visibility.",
         methodology="Render with object edges enabled and inspect the silhouette.",
         render_description="A compact orange part with four clean outer vertical edges.",
+        artifact_paths=(artifact,),
     )
 
     result = launch_workbench(fixture_records=(record,), offscreen=True)
@@ -517,24 +526,30 @@ def test_fixture_queue_hides_approved_until_checkbox_is_checked(tmp_path: Path) 
     unreviewed_source = tmp_path / "unreviewed.py"
     for source in (approved_source, declined_source, unreviewed_source):
         source.write_text("def build():\n    return None\n")
+    approved_artifact = _write_empty_stl(tmp_path / "approved.stl")
+    declined_artifact = _write_empty_stl(tmp_path / "declined.stl")
+    unreviewed_artifact = _write_empty_stl(tmp_path / "unreviewed.stl")
     records = (
         ReviewSourceModelRecord(
             fixture_id="demo/approved",
             feature_name="demo",
             source_path=approved_source,
             review_status=ReferenceReviewStatus.APPROVED,
+            artifact_paths=(approved_artifact,),
         ),
         ReviewSourceModelRecord(
             fixture_id="demo/declined",
             feature_name="demo",
             source_path=declined_source,
             review_status=ReferenceReviewStatus.DECLINED,
+            artifact_paths=(declined_artifact,),
         ),
         ReviewSourceModelRecord(
             fixture_id="demo/unreviewed",
             feature_name="demo",
             source_path=unreviewed_source,
             review_status=ReferenceReviewStatus.UNREVIEWED,
+            artifact_paths=(unreviewed_artifact,),
         ),
     )
 
@@ -623,6 +638,8 @@ def test_notes_editor_persists_to_selected_fixture_file_and_loads_on_selection(t
     second_source = tmp_path / "second.py"
     first_source.write_text("def build():\n    return None\n")
     second_source.write_text("def build():\n    return None\n")
+    first_artifact = _write_empty_stl(tmp_path / "first.stl")
+    second_artifact = _write_empty_stl(tmp_path / "second.stl")
     fixture_file = tmp_path / "fixtures.json"
     fixture_file.write_text(
         json.dumps(
@@ -633,12 +650,14 @@ def test_notes_editor_persists_to_selected_fixture_file_and_loads_on_selection(t
                         "feature_name": "demo",
                         "source_path": first_source.name,
                         "notes": "Existing first note.",
+                        "artifact_paths": [first_artifact.relative_to(tmp_path).as_posix()],
                     },
                     {
                         "fixture_id": "demo/second",
                         "feature_name": "demo",
                         "source_path": second_source.name,
                         "notes": "Existing second note.",
+                        "artifact_paths": [second_artifact.relative_to(tmp_path).as_posix()],
                     },
                 ]
             }
@@ -690,13 +709,13 @@ def test_impress_preview_edge_overlay_uses_object_edges_not_triangle_wireframe(p
     assert triangle_edges.n_cells > object_edges.n_cells
 
 
-def test_dirty_impress_fixture_launch_exposes_artifact_without_startup_render(project_root: Path) -> None:
+def test_dirty_impress_fixture_file_is_filtered_from_reference_review_queue(project_root: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     fixture_file = project_root / "tests/reference_review_fixtures/dirty-impress-fixtures.json"
     records, diagnostics = shell.load_fixture_records(fixture_files=(fixture_file,))
 
     result = launch_workbench(
-        fixture_records=records[:1],
+        fixture_records=records,
         fixture_diagnostics=diagnostics,
         offscreen=True,
     )
@@ -704,9 +723,9 @@ def test_dirty_impress_fixture_launch_exposes_artifact_without_startup_render(pr
     fixtures = root.property("reviewFixtures")
 
     assert result.launched
-    assert fixtures[0]["artifact_display_path"] == "box.impress"
-    assert fixtures[0]["artifact_preview_url"] == ""
-    assert fixtures[0]["artifact_preview_status"] == "ready"
+    assert records == ()
+    assert fixtures == []
+    assert root.property("queueStatusText") == "No fixtures shown"
 
 
 def test_diagnostic_fixture_queue_item_is_marked_non_renderable(project_root: Path) -> None:
@@ -728,10 +747,10 @@ def test_diagnostic_fixture_queue_item_is_marked_non_renderable(project_root: Pa
     assert item["artifact_display_path"] == ""
     assert item["artifact_kind_label"] == "diagnostic evidence"
     assert item["renderable_artifact"] is False
-    assert "no STL or .impress artifact to render" in item["preview_empty_message"]
+    assert "no STL artifact to review" in item["preview_empty_message"]
 
 
-def test_dirty_impress_fixture_selects_embedded_preview_surface(project_root: Path) -> None:
+def test_dirty_impress_record_is_filtered_from_reference_review_queue(project_root: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     source = project_root / "tests/reference_review_fixtures/stl_review_sources.py"
     artifact = project_root / "tests/reference_review_fixtures/reference-impress/dirty/surfacebody/box.impress"
@@ -754,15 +773,10 @@ def test_dirty_impress_fixture_selects_embedded_preview_surface(project_root: Pa
 
     assert result.launched
     assert isinstance(queue, QListWidget)
+    assert queue.count() == 0
+    assert root.property("reviewFixtures") == []
     assert root.property("selectedMessageText") == "No fixture selected."
     assert not root.property("hasFixture")
-    queue.setCurrentRow(0)
-    assert root.property("selectedMessageText") == "surfacebody/box"
-    assert root.property("hasFixture")
-    assert root.findChild(QObject, "openPreviewButton") is None
-    assert root.findChild(QObject, "embeddedPreviewSurface") is not None
-    assert root.findChild(QObject, "resetPreviewButton") is not None
-    assert root.findChild(QObject, "approveFixtureButton") is not None
     assert root.findChild(QObject, "declineFixtureButton") is not None
     assert root.findChild(QObject, "sendPromptButton") is None
     assert root.findChild(QObject, "previewDisplayControlBar") is not None
@@ -1483,8 +1497,7 @@ def test_pyvistaqt_display_options_replace_scene_once(monkeypatch: pytest.Monkey
 
 def test_window_preview_controller_launches_and_polls_payload(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    artifact = tmp_path / "part.impress"
-    artifact.write_text('{"format": "impress"}\n')
+    artifact = _write_empty_stl(tmp_path / "part.stl")
     source = tmp_path / "model.py"
     source.write_text("def build():\n    return None\n")
     record = ReviewSourceModelRecord(
@@ -1542,8 +1555,7 @@ def test_window_preview_controller_launches_and_polls_payload(tmp_path: Path) ->
 
 def test_window_preview_display_button_updates_live_surface(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    artifact = tmp_path / "part.impress"
-    artifact.write_text('{"format": "impress"}\n')
+    artifact = _write_empty_stl(tmp_path / "part.stl")
     source = tmp_path / "model.py"
     source.write_text("def build():\n    return None\n")
     record = ReviewSourceModelRecord(
@@ -1614,8 +1626,7 @@ def test_window_preview_display_button_updates_live_surface(tmp_path: Path) -> N
 
 def test_window_preview_controller_uses_thread_dispatcher_not_process_pool(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    artifact = tmp_path / "part.impress"
-    artifact.write_text('{"format": "impress"}\n')
+    artifact = _write_empty_stl(tmp_path / "part.stl")
     source = tmp_path / "model.py"
     source.write_text("def build():\n    return None\n")
     record = ReviewSourceModelRecord(
@@ -1635,8 +1646,7 @@ def test_window_preview_controller_uses_thread_dispatcher_not_process_pool(tmp_p
 
 def test_window_preview_ignores_stale_future_exception(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    artifact = tmp_path / "part.impress"
-    artifact.write_text('{"format": "impress"}\n')
+    artifact = _write_empty_stl(tmp_path / "part.stl")
     source = tmp_path / "model.py"
     source.write_text("def build():\n    return None\n")
     record = ReviewSourceModelRecord(
@@ -1703,8 +1713,7 @@ def test_window_preview_ignores_stale_future_exception(tmp_path: Path) -> None:
 
 def test_window_preview_retries_latest_coalesced_request(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    artifact = tmp_path / "part.impress"
-    artifact.write_text('{"format": "impress"}\n')
+    artifact = _write_empty_stl(tmp_path / "part.stl")
     source = tmp_path / "model.py"
     source.write_text("def build():\n    return None\n")
     record = ReviewSourceModelRecord(
@@ -1852,8 +1861,7 @@ def test_live_preview_legacy_build_result_applies_to_existing_surface(project_ro
 
 def test_window_defers_preview_load_and_ignores_stale_loads(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    artifact = tmp_path / "part.impress"
-    artifact.write_text('{"format": "impress"}\n')
+    artifact = _write_empty_stl(tmp_path / "part.stl")
     record = ReviewSourceModelRecord(
         "demo/part",
         "demo",
@@ -1881,9 +1889,21 @@ def test_window_defers_preview_load_and_ignores_stale_loads(tmp_path: Path) -> N
 
 def test_shell_next_button_selects_fixture_record(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    first_artifact = _write_empty_stl(tmp_path / "first.stl")
+    second_artifact = _write_empty_stl(tmp_path / "second.stl")
     records = (
-        ReviewSourceModelRecord("demo/first", "demo", tmp_path / "first.py"),
-        ReviewSourceModelRecord("demo/second", "demo", tmp_path / "second.py"),
+        ReviewSourceModelRecord(
+            "demo/first",
+            "demo",
+            tmp_path / "first.py",
+            artifact_paths=(first_artifact,),
+        ),
+        ReviewSourceModelRecord(
+            "demo/second",
+            "demo",
+            tmp_path / "second.py",
+            artifact_paths=(second_artifact,),
+        ),
     )
     for record in records:
         record.source_path.write_text("def build():\n    return None\n")

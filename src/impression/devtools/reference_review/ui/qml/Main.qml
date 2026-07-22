@@ -244,7 +244,7 @@ ApplicationWindow {
                         anchors.centerIn: parent
                         width: Math.min(parent.width - 48, 520)
                         text: root.hasFixture && root.currentFixture().artifact_preview_url === ""
-                            ? (root.currentFixture().preview_empty_message || "No STL or .impress preview is available.")
+                            ? (root.currentFixture().preview_empty_message || "No STL preview is available.")
                             : root.selectedMessageText
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.WordWrap

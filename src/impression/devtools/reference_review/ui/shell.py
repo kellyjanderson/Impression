@@ -67,7 +67,7 @@ options:
   --offscreen   use Qt's offscreen platform plugin
   -h, --help    show this help message and exit
 """
-_RENDERABLE_ARTIFACT_SUFFIXES = frozenset({".stl", ".impress"})
+_REFERENCE_REVIEW_ARTIFACT_SUFFIXES = frozenset({".stl"})
 _REQUIRED_RUNTIME_VERSIONS = {
     "PySide6": "6.11.1",
     "shiboken6": "6.11.1",
@@ -153,40 +153,52 @@ def map_artifact_evidence_rows(record: ReviewSourceModelRecord) -> tuple[Artifac
     return tuple(rows)
 
 
-def _renderable_artifact_paths(record: ReviewSourceModelRecord) -> tuple[Path, ...]:
+def _reference_review_artifact_paths(record: ReviewSourceModelRecord) -> tuple[Path, ...]:
     return tuple(
-        path for path in record.artifact_paths if path.suffix.lower() in _RENDERABLE_ARTIFACT_SUFFIXES
+        path
+        for path in record.artifact_paths
+        if path.suffix.lower() in _REFERENCE_REVIEW_ARTIFACT_SUFFIXES
     )
 
 
+def _is_reference_review_record(record: ReviewSourceModelRecord) -> bool:
+    return bool(_reference_review_artifact_paths(record))
+
+
+def _filter_reference_review_records(
+    records: Sequence[ReviewSourceModelRecord],
+) -> tuple[ReviewSourceModelRecord, ...]:
+    return tuple(record for record in records if _is_reference_review_record(record))
+
+
 def _fixture_artifact_kind_label(record: ReviewSourceModelRecord) -> str:
-    renderable_paths = _renderable_artifact_paths(record)
-    if renderable_paths:
-        return renderable_paths[0].name
+    reference_paths = _reference_review_artifact_paths(record)
+    if reference_paths:
+        return reference_paths[0].name
     expected = (record.expected_output or "").lower()
     if "diagnostic" in expected:
         return "diagnostic evidence"
     if "evidence" in expected:
         return "evidence payload"
     if not record.artifact_paths:
-        return "no renderable artifact"
-    return "non-renderable artifact"
+        return "no STL artifact"
+    return "non-STL artifact"
 
 
 def _fixture_preview_empty_message(record: ReviewSourceModelRecord) -> str:
-    renderable_paths = _renderable_artifact_paths(record)
-    if renderable_paths:
-        path = renderable_paths[0]
+    reference_paths = _reference_review_artifact_paths(record)
+    if reference_paths:
+        path = reference_paths[0]
         if path.is_file():
             return ""
-        return f"Renderable artifact missing: {path.name}"
+        return f"STL artifact missing: {path.name}"
     expected = (record.expected_output or "").lower()
     if "diagnostic" in expected or "evidence" in expected:
         return (
-            "Diagnostic/evidence fixture: no STL or .impress artifact to render. "
+            "Diagnostic/evidence fixture: no STL artifact to review. "
             "Review the Context and Artifacts tabs."
         )
-    return "No STL or .impress artifact is declared for this fixture."
+    return "No STL artifact is declared for this fixture."
 
 
 def _version_satisfies(installed: str, required: str) -> bool:
@@ -344,6 +356,7 @@ def launch_workbench(
     offscreen: bool = False,
 ) -> WorkbenchLaunchResult:
     argv = argv or ("impression-reference-review",)
+    fixture_records = _filter_reference_review_records(fixture_records)
     bridges = bridges or default_bridge_registry(fixture_records)
     diagnostics = [item.code for item in bridges.diagnostics()]
     if qml_path is not None:
@@ -394,6 +407,7 @@ def _launch_qml_workbench(
     offscreen: bool,
     diagnostics: list[str],
 ) -> WorkbenchLaunchResult:
+    fixture_records = _filter_reference_review_records(fixture_records)
     try:
         _ensure_qt_app(argv, offscreen=offscreen)
         from PySide6.QtCore import QUrl
@@ -990,8 +1004,8 @@ class ReferenceReviewWindow(QWidget):
             )
             return
         record = self.queue.records[record_index]
-        renderable_paths = _renderable_artifact_paths(record)
-        artifact_path = renderable_paths[0] if renderable_paths else None
+        reference_paths = _reference_review_artifact_paths(record)
+        artifact_path = reference_paths[0] if reference_paths else None
         live_artifact = artifact_path if artifact_path and artifact_path.is_file() else None
         self._preview_load_generation += 1
         self.artifact_thumb.setText(str(item.get("artifact_kind_label", "")))
@@ -1244,7 +1258,7 @@ def load_fixture_records(
         diagnostics.extend(diagnostic.code for diagnostic in summary.diagnostics)
         for item in summary.items:
             diagnostics.extend(diagnostic.code for diagnostic in item.validation.diagnostics)
-    return tuple(records), tuple(diagnostics)
+    return _filter_reference_review_records(records), tuple(diagnostics)
 
 
 def _fixture_items_for_qml(
@@ -1268,7 +1282,7 @@ def _fixture_items_for_qml(
                 "render_description": item.render_description or "",
                 "artifact_display_path": item.artifact_display_path or "",
                 "artifact_kind_label": _fixture_artifact_kind_label(record),
-                "renderable_artifact": bool(_renderable_artifact_paths(record)),
+                "renderable_artifact": bool(_reference_review_artifact_paths(record)),
                 "preview_empty_message": _fixture_preview_empty_message(record),
                 "artifact_preview_url": getattr(preview, "preview_url", "") if preview is not None else "",
                 "artifact_preview_status": getattr(preview, "diagnostic", None)
