@@ -82,6 +82,7 @@ dmypy.json
 node_modules/
 
 # Project-specific
+.codex/
 dist/preview-tests/
 .impression-preview
 docs/examples/loft/.loft-showcase
