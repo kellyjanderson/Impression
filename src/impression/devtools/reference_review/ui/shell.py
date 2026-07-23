@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from concurrent.futures import Future
 from dataclasses import dataclass, replace
+from importlib import metadata
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Mapping, MutableMapping, Sequence
+
+from packaging.version import Version, InvalidVersion
 
 from .bridge import BridgeRecord, BridgeRegistry
 from .packaging import qml_resource_root
@@ -63,7 +67,16 @@ options:
   --offscreen   use Qt's offscreen platform plugin
   -h, --help    show this help message and exit
 """
-_RENDERABLE_ARTIFACT_SUFFIXES = frozenset({".stl", ".impress"})
+_REFERENCE_REVIEW_ARTIFACT_SUFFIXES = frozenset({".stl"})
+_REQUIRED_RUNTIME_VERSIONS = {
+    "PySide6": "6.11.1",
+    "shiboken6": "6.11.1",
+    "pyvista": "0.48.4",
+    "pyvistaqt": "0.12.0",
+    "vtk": "9.6.2",
+    "manifold3d": "3.5.2",
+}
+_RUNTIME_REPAIR_ENV = "IMPRESSION_REFERENCE_REVIEW_RUNTIME_REPAIRED"
 
 
 @dataclass(frozen=True)
@@ -140,40 +153,166 @@ def map_artifact_evidence_rows(record: ReviewSourceModelRecord) -> tuple[Artifac
     return tuple(rows)
 
 
-def _renderable_artifact_paths(record: ReviewSourceModelRecord) -> tuple[Path, ...]:
+def _reference_review_artifact_paths(record: ReviewSourceModelRecord) -> tuple[Path, ...]:
     return tuple(
-        path for path in record.artifact_paths if path.suffix.lower() in _RENDERABLE_ARTIFACT_SUFFIXES
+        path
+        for path in record.artifact_paths
+        if path.suffix.lower() in _REFERENCE_REVIEW_ARTIFACT_SUFFIXES
     )
 
 
+def _is_reference_review_record(record: ReviewSourceModelRecord) -> bool:
+    return bool(_reference_review_artifact_paths(record))
+
+
+def _filter_reference_review_records(
+    records: Sequence[ReviewSourceModelRecord],
+) -> tuple[ReviewSourceModelRecord, ...]:
+    return tuple(record for record in records if _is_reference_review_record(record))
+
+
 def _fixture_artifact_kind_label(record: ReviewSourceModelRecord) -> str:
-    renderable_paths = _renderable_artifact_paths(record)
-    if renderable_paths:
-        return renderable_paths[0].name
+    reference_paths = _reference_review_artifact_paths(record)
+    if reference_paths:
+        return reference_paths[0].name
     expected = (record.expected_output or "").lower()
     if "diagnostic" in expected:
         return "diagnostic evidence"
     if "evidence" in expected:
         return "evidence payload"
     if not record.artifact_paths:
-        return "no renderable artifact"
-    return "non-renderable artifact"
+        return "no STL artifact"
+    return "non-STL artifact"
 
 
 def _fixture_preview_empty_message(record: ReviewSourceModelRecord) -> str:
-    renderable_paths = _renderable_artifact_paths(record)
-    if renderable_paths:
-        path = renderable_paths[0]
+    reference_paths = _reference_review_artifact_paths(record)
+    if reference_paths:
+        path = reference_paths[0]
         if path.is_file():
             return ""
-        return f"Renderable artifact missing: {path.name}"
+        return f"STL artifact missing: {path.name}"
     expected = (record.expected_output or "").lower()
     if "diagnostic" in expected or "evidence" in expected:
         return (
-            "Diagnostic/evidence fixture: no STL or .impress artifact to render. "
+            "Diagnostic/evidence fixture: no STL artifact to review. "
             "Review the Context and Artifacts tabs."
         )
-    return "No STL or .impress artifact is declared for this fixture."
+    return "No STL artifact is declared for this fixture."
+
+
+def _version_satisfies(installed: str, required: str) -> bool:
+    try:
+        return Version(installed) >= Version(required)
+    except InvalidVersion:
+        return installed == required
+
+
+def reference_review_runtime_diagnostics(
+    *,
+    version_reader: Callable[[str], str] = metadata.version,
+) -> tuple[str, ...]:
+    """Return startup-blocking dependency diagnostics for the Qt review app."""
+
+    diagnostics: list[str] = []
+    for distribution_name, required_version in _REQUIRED_RUNTIME_VERSIONS.items():
+        try:
+            installed_version = version_reader(distribution_name)
+        except metadata.PackageNotFoundError:
+            diagnostics.append(
+                f"{distribution_name} is not installed; expected >= {required_version}."
+            )
+            continue
+        if not _version_satisfies(installed_version, required_version):
+            diagnostics.append(
+                f"{distribution_name} {installed_version} is installed; expected >= {required_version}."
+            )
+    return tuple(diagnostics)
+
+
+def _find_requirements_lock(start: Path | None = None) -> Path | None:
+    """Find the checkout requirements lock used to repair stale editable envs."""
+
+    current = (start or Path(__file__)).resolve()
+    for path in (current, *current.parents):
+        requirements_path = path / "requirements.txt"
+        pyproject_path = path / "pyproject.toml"
+        if requirements_path.is_file() and pyproject_path.is_file():
+            return requirements_path
+    return None
+
+
+def _print_runtime_diagnostics(
+    diagnostics: Sequence[str],
+    *,
+    message: str,
+) -> None:
+    print(
+        message,
+        file=sys.stderr,
+    )
+    for diagnostic in diagnostics:
+        print(f"- {diagnostic}", file=sys.stderr)
+
+
+def ensure_reference_review_runtime(
+    argv: Sequence[str],
+    *,
+    version_reader: Callable[[str], str] = metadata.version,
+    environ: MutableMapping[str, str] | None = None,
+    command_runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    process_replacer: Callable[[str, Sequence[str]], object] = os.execv,
+    requirements_path: Path | None = None,
+) -> bool:
+    """Repair a stale local rendering runtime and re-exec before Qt can crash."""
+
+    diagnostics = reference_review_runtime_diagnostics(version_reader=version_reader)
+    if not diagnostics:
+        return True
+
+    env = environ if environ is not None else os.environ
+    if env.get(_RUNTIME_REPAIR_ENV) == "1":
+        _print_runtime_diagnostics(
+            diagnostics,
+            message=(
+                "Reference Review Workbench still has a stale rendering runtime "
+                "after automatic repair:"
+            ),
+        )
+        return False
+
+    lock_path = requirements_path or _find_requirements_lock()
+    if lock_path is None:
+        _print_runtime_diagnostics(
+            diagnostics,
+            message=(
+                "Reference Review Workbench found a stale rendering runtime but "
+                "could not find requirements.txt for automatic repair:"
+            ),
+        )
+        return False
+
+    _print_runtime_diagnostics(
+        diagnostics,
+        message=(
+            "Reference Review Workbench found a stale rendering runtime; "
+            "refreshing dependencies before launch:"
+        ),
+    )
+    repair = command_runner(
+        [sys.executable, "-m", "pip", "install", "-r", str(lock_path)],
+        text=True,
+    )
+    if repair.returncode != 0:
+        print(
+            "Reference Review Workbench dependency refresh failed; launch aborted.",
+            file=sys.stderr,
+        )
+        return False
+
+    env[_RUNTIME_REPAIR_ENV] = "1"
+    process_replacer(sys.executable, [sys.executable, *argv])
+    return False
 
 
 def _ensure_qt_app(argv: Sequence[str], *, offscreen: bool, widgets: bool = False) -> object:
@@ -181,7 +320,6 @@ def _ensure_qt_app(argv: Sequence[str], *, offscreen: bool, widgets: bool = Fals
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     if widgets:
         os.environ.setdefault("QT_OPENGL", "desktop")
-        os.environ.setdefault("QT_WIDGETS_RHI", "0")
         from PySide6.QtWidgets import QApplication
 
         app = QApplication.instance()
@@ -217,6 +355,7 @@ def launch_workbench(
     offscreen: bool = False,
 ) -> WorkbenchLaunchResult:
     argv = argv or ("impression-reference-review",)
+    fixture_records = _filter_reference_review_records(fixture_records)
     bridges = bridges or default_bridge_registry(fixture_records)
     diagnostics = [item.code for item in bridges.diagnostics()]
     if qml_path is not None:
@@ -267,6 +406,7 @@ def _launch_qml_workbench(
     offscreen: bool,
     diagnostics: list[str],
 ) -> WorkbenchLaunchResult:
+    fixture_records = _filter_reference_review_records(fixture_records)
     try:
         _ensure_qt_app(argv, offscreen=offscreen)
         from PySide6.QtCore import QUrl
@@ -863,8 +1003,8 @@ class ReferenceReviewWindow(QWidget):
             )
             return
         record = self.queue.records[record_index]
-        renderable_paths = _renderable_artifact_paths(record)
-        artifact_path = renderable_paths[0] if renderable_paths else None
+        reference_paths = _reference_review_artifact_paths(record)
+        artifact_path = reference_paths[0] if reference_paths else None
         live_artifact = artifact_path if artifact_path and artifact_path.is_file() else None
         self._preview_load_generation += 1
         self.artifact_thumb.setText(str(item.get("artifact_kind_label", "")))
@@ -1117,7 +1257,7 @@ def load_fixture_records(
         diagnostics.extend(diagnostic.code for diagnostic in summary.diagnostics)
         for item in summary.items:
             diagnostics.extend(diagnostic.code for diagnostic in item.validation.diagnostics)
-    return tuple(records), tuple(diagnostics)
+    return _filter_reference_review_records(records), tuple(diagnostics)
 
 
 def _fixture_items_for_qml(
@@ -1141,7 +1281,7 @@ def _fixture_items_for_qml(
                 "render_description": item.render_description or "",
                 "artifact_display_path": item.artifact_display_path or "",
                 "artifact_kind_label": _fixture_artifact_kind_label(record),
-                "renderable_artifact": bool(_renderable_artifact_paths(record)),
+                "renderable_artifact": bool(_reference_review_artifact_paths(record)),
                 "preview_empty_message": _fixture_preview_empty_message(record),
                 "artifact_preview_url": getattr(preview, "preview_url", "") if preview is not None else "",
                 "artifact_preview_status": getattr(preview, "diagnostic", None)
@@ -1228,7 +1368,6 @@ def _parse_args(args: Sequence[str]) -> tuple[list[Path], list[Path], list[Path]
 def main(argv: Sequence[str] | None = None) -> int:
     global _ACTIVE_LAUNCH
 
-    configure_qt_preview_surface_format()
     argv = tuple(argv or sys.argv)
     args = argv[1:]
     if any(arg in {"-h", "--help"} for arg in args):
@@ -1239,6 +1378,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(error, file=sys.stderr)
         print(_USAGE.strip(), file=sys.stderr)
         return 2
+    if not ensure_reference_review_runtime(argv):
+        return 1
+    configure_qt_preview_surface_format()
     fixture_records, fixture_diagnostics = load_fixture_records(
         fixture_files=tuple(fixture_files),
         fixture_roots=tuple(fixture_roots),

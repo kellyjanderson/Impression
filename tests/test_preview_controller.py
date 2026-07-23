@@ -601,7 +601,7 @@ def test_qt_preview_surface_config_has_workbench_defaults() -> None:
     assert config.apply_options.show_axes is False
     assert config.apply_options.align_camera is True
     assert config.auto_update is False
-    assert config.qvtk_base == "QOpenGLWidget"
+    assert config.qvtk_base == "QWidget"
 
 
 def test_qt_preview_configures_selected_backend_before_pyvistaqt_import() -> None:
@@ -620,26 +620,29 @@ def test_qt_preview_configures_selected_backend_before_pyvistaqt_import() -> Non
             vtkmodules.qt.QVTKRWIBase = original_base
 
 
-def test_qt_preview_configures_opengl_compatibility_surface_format() -> None:
+def test_qt_preview_keeps_default_surface_format_for_vtk_qwidget() -> None:
     from PySide6.QtGui import QSurfaceFormat
 
+    original = QSurfaceFormat.defaultFormat()
     configure_qt_preview_surface_format()
 
     fmt = QSurfaceFormat.defaultFormat()
-    assert fmt.renderableType() == QSurfaceFormat.RenderableType.OpenGL
-    assert fmt.profile() == QSurfaceFormat.OpenGLContextProfile.CompatibilityProfile
-    assert fmt.majorVersion() == 2
-    assert fmt.minorVersion() == 1
-    assert fmt.depthBufferSize() == 24
-    assert fmt.stencilBufferSize() == 8
+    assert fmt.renderableType() == original.renderableType()
+    assert fmt.profile() == original.profile()
+    assert fmt.majorVersion() == original.majorVersion()
+    assert fmt.minorVersion() == original.minorVersion()
+    assert fmt.depthBufferSize() == original.depthBufferSize()
+    assert fmt.stencilBufferSize() == original.stencilBufferSize()
 
 
-def test_qt_preview_defaults_disable_widgets_rhi_compositor() -> None:
+def test_qt_preview_does_not_force_widgets_rhi_compositor_off(monkeypatch) -> None:
     import os
+
+    monkeypatch.delenv("QT_WIDGETS_RHI", raising=False)
     import impression.preview_qt  # noqa: F401
 
     assert os.environ["QT_OPENGL"] == "desktop"
-    assert os.environ["QT_WIDGETS_RHI"] == "0"
+    assert "QT_WIDGETS_RHI" not in os.environ
 
 
 def test_qt_preview_supported_environment_rejects_offscreen_by_default(monkeypatch) -> None:

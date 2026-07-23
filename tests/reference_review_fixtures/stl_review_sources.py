@@ -32,17 +32,13 @@ from impression.modeling import (
     compose_displacement_csg_result,
     compose_heightmap_csg_result,
     compose_implicit_field_csg_result,
-    handoff_hinge_surface,
-    make_bistable_hinge,
     make_box,
     make_cone,
     make_cylinder,
-    make_living_hinge,
     make_ngon,
     make_prism,
     make_surface_body,
     make_surface_shell,
-    make_traditional_hinge_pair,
     make_sphere,
     make_torus,
     loft,
@@ -1909,22 +1905,6 @@ def build_surfacebody_heightmap_surface():
         height=0.6,
         xy_scale=0.3,
         alpha_mode="ignore",
-    )
-
-
-def build_surfacebody_hinge_bistable_blank():
-    return handoff_hinge_surface(make_bistable_hinge(width=40.0, preload_offset=2.0))
-
-
-def build_surfacebody_hinge_living_panel():
-    return handoff_hinge_surface(
-        make_living_hinge(width=48.0, height=20.0, hinge_band_width=12.0, slit_pitch=1.8)
-    )
-
-
-def build_surfacebody_hinge_traditional_pair():
-    return handoff_hinge_surface(
-        make_traditional_hinge_pair(width=24.0, knuckle_count=5, opened_angle_deg=32.0)
     )
 
 

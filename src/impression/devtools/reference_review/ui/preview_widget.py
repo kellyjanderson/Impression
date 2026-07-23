@@ -10,7 +10,6 @@ from types import MappingProxyType
 from typing import Any, Callable, Mapping
 
 os.environ.setdefault("QT_OPENGL", "desktop")
-os.environ.setdefault("QT_WIDGETS_RHI", "0")
 
 import numpy as np
 from PySide6.QtCore import Qt, QTimer, Signal

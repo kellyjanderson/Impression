@@ -1137,45 +1137,6 @@
       "review_status": "approved"
     },
     {
-      "fixture_id": "surfacebody/hinge_bistable_blank",
-      "feature_name": "surfacebody",
-      "source_path": "stl_review_sources.py",
-      "entrypoint": "build_surfacebody_hinge_bistable_blank",
-      "expected_output": "dirty STL",
-      "purpose": "Validate the surface handoff for a bistable hinge blank.",
-      "methodology": "Build the bistable hinge with preload offset, hand it off through the surface path, and inspect the STL for the expected hinge blank shape and flexure geometry.",
-      "render_description": "The rendered model should show a long hinge blank with recognizable bistable flexure structure, clean panel regions, and no broken or overlapping hinge surfaces.",
-      "artifact_paths": [
-        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/hinge_bistable_blank.stl"
-      ]
-    },
-    {
-      "fixture_id": "surfacebody/hinge_living_panel",
-      "feature_name": "surfacebody",
-      "source_path": "stl_review_sources.py",
-      "entrypoint": "build_surfacebody_hinge_living_panel",
-      "expected_output": "dirty STL",
-      "purpose": "Validate the surface handoff for a living-hinge panel with repeated slit detail.",
-      "methodology": "Build the living hinge panel with a fixed hinge band and slit pitch, then inspect the STL for evenly spaced hinge cuts and clean panel boundaries.",
-      "render_description": "The rendered model should look like a rectangular panel with a central living-hinge band, regular slit patterning, and intact surrounding panel surfaces.",
-      "artifact_paths": [
-        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/hinge_living_panel.stl"
-      ]
-    },
-    {
-      "fixture_id": "surfacebody/hinge_traditional_pair",
-      "feature_name": "surfacebody",
-      "source_path": "stl_review_sources.py",
-      "entrypoint": "build_surfacebody_hinge_traditional_pair",
-      "expected_output": "dirty STL",
-      "purpose": "Validate the surface handoff for a traditional hinge pair with knuckles.",
-      "methodology": "Build the traditional hinge pair with five knuckles and a partially opened angle, then inspect the STL for paired hinge leaves and coherent knuckle geometry.",
-      "render_description": "The rendered model should show two hinge leaves at an open angle with alternating cylindrical knuckles, clean pin-axis alignment, and no fused or missing knuckle segments.",
-      "artifact_paths": [
-        "../../project/release-0.1.0a/reference-stl/dirty/surfacebody/hinge_traditional_pair.stl"
-      ]
-    },
-    {
       "fixture_id": "surfacebody/primitives/authored_color_smoke",
       "feature_name": "surfacebody",
       "source_path": "stl_review_sources.py",
