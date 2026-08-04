@@ -1,7 +1,7 @@
 # v1.0.0a3 Fix Release Progression
 
 Date: 2026-08-04
-Status: In Progress
+Status: Complete
 
 Only canonical implementation leaves that passed the current Review Score and
 their paired verification leaves appear here. A feature and its test leaf have
@@ -74,16 +74,26 @@ separate completion state.
 
 - [x] Hydrate Git LFS reference artifacts in every release job checkout.
   - Specification: [Fix 13A](../specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
-- [x] Install the Linux font used by text and loft qualification tests and provide the default Arial-compatible fallback.
+- [x] Provide the default Arial-compatible fallback and verify Linux text/loft behavior with DejaVu Sans.
   - Specification: [Fix 13A](../specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
 - [x] Make the preview PNG help assertion independent of CI terminal width and ANSI rendering.
   - Test specification: [Fix 13A Test](../test-specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
 - [x] Run exact serialized-reference comparisons on macOS while retaining Linux build and integration CI.
   - Specification: [Fix 13A](../specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
-- [ ] Pass the complete tag-triggered test and artifact-qualification jobs.
+- [x] Pass the complete tag-triggered test and artifact-qualification jobs.
   - Test specification: [Fix 13A Test](../test-specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
-- [ ] [Fix 13B: Qualified Prerelease Publication](../specifications/fix-13b-qualified-prerelease-publication-v1_0.md)
-- [ ] [Fix 13B Test](../test-specifications/fix-13b-qualified-prerelease-publication-v1_0.md)
+- [x] [Fix 13B: Qualified Prerelease Publication](../specifications/fix-13b-qualified-prerelease-publication-v1_0.md)
+- [x] [Fix 13B Test](../test-specifications/fix-13b-qualified-prerelease-publication-v1_0.md)
+
+## Release Evidence
+
+- Release: [v1.0.0a3](https://github.com/kellyjanderson/Impression/releases/tag/v1.0.0a3)
+- Candidate commit: `fbc639fc368498d08f5777d34ab1413f2d8f691d`
+- Qualification run: [30933184295](https://github.com/kellyjanderson/Impression/actions/runs/30933184295) - test, qualify, publish, and published-metadata verification passed.
+- Published assets:
+  - `impression-1.0.0a3-py3-none-any.whl` - SHA-256 `6ec176d11ecb6176fd56e53f954ca71afd2f98ecd3975545da13c638113db950`
+  - `impression-1.0.0a3.tar.gz` - SHA-256 `caaea005362f4c034388f9629367a002a69038e2afcd31cece198869948b004b`
+  - `impression-docs-v1.0.0a3.zip` - SHA-256 `8e3d823139663f2b40a36c71cb92fb430b982973650ecc3744255aa12fa26468`
 
 ## Review Score Summary
 
