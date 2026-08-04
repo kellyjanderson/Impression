@@ -1268,7 +1268,67 @@ def triangulate_loops(loops: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
         jittered_vertices = _jitter_vertices_for_triangulation(normalized_loops)
         indices = earcut.triangulate_float32(jittered_vertices, ring_end_indices)
         faces = np.asarray(indices, dtype=np.int64).reshape(-1, 3)
+    faces = _repair_collinear_boundary_triangulation(vertices.astype(float), faces)
     return vertices.astype(float), faces
+
+
+def _repair_collinear_boundary_triangulation(vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:
+    """Split an adjacent triangle through collinear boundary vertices."""
+
+    repaired = [tuple(int(value) for value in face) for face in np.asarray(faces, dtype=int)]
+    removed: set[int] = set()
+    replacements: dict[int, tuple[tuple[int, int, int], tuple[int, int, int]]] = {}
+    span = np.ptp(np.asarray(vertices, dtype=float), axis=0)
+    area_epsilon = max(float(np.max(span)) ** 2 * 1e-9, 1e-12)
+
+    def signed_area(face: tuple[int, int, int]) -> float:
+        a, b, c = (vertices[index] for index in face)
+        ab = b - a
+        ac = c - a
+        return float(ab[0] * ac[1] - ab[1] * ac[0])
+
+    for face_index, face in enumerate(repaired):
+        if face_index in removed or abs(signed_area(face)) > area_epsilon:
+            continue
+        pairs = ((face[0], face[1], face[2]), (face[0], face[2], face[1]), (face[1], face[2], face[0]))
+        endpoint_a, endpoint_b, middle = max(
+            pairs,
+            key=lambda item: float(np.linalg.norm(vertices[item[1]] - vertices[item[0]])),
+        )
+        adjacent_index = next(
+            (
+                index
+                for index, candidate in enumerate(repaired)
+                if index != face_index
+                and index not in removed
+                and endpoint_a in candidate
+                and endpoint_b in candidate
+                and abs(signed_area(candidate)) > area_epsilon
+            ),
+            None,
+        )
+        if adjacent_index is None:
+            continue
+        adjacent = repaired[adjacent_index]
+        opposite = next(index for index in adjacent if index not in {endpoint_a, endpoint_b})
+        orientation = np.sign(signed_area(adjacent))
+        first = (endpoint_a, middle, opposite)
+        second = (middle, endpoint_b, opposite)
+        if np.sign(signed_area(first)) != orientation:
+            first = (middle, endpoint_a, opposite)
+        if np.sign(signed_area(second)) != orientation:
+            second = (endpoint_b, middle, opposite)
+        removed.add(face_index)
+        removed.add(adjacent_index)
+        replacements[adjacent_index] = (first, second)
+
+    output: list[tuple[int, int, int]] = []
+    for index, face in enumerate(repaired):
+        if index in replacements:
+            output.extend(replacements[index])
+        elif index not in removed:
+            output.append(face)
+    return np.asarray(output, dtype=np.int64).reshape(-1, 3)
 
 
 def _triangulation_covers_loop_boundaries(

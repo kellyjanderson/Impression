@@ -237,8 +237,6 @@ def _shell_grid_counts_for_patch(
     if _patch_requires_shell_grid_tessellation(shell, patch_index, patch) and isinstance(patch, RuledSurfacePatch):
         u_count, _v_count = _rectangular_grid_counts(request)
         curve_count = int(patch.start_curve.shape[0])
-        if curve_count >= 2 and np.allclose(patch.start_curve[0], patch.start_curve[-1]):
-            curve_count -= 1
         return (u_count, max(2, curve_count))
     if _patch_requires_shell_grid_tessellation(shell, patch_index, patch):
         return _rectangular_grid_counts(request)
@@ -343,9 +341,6 @@ def _seam_vertex_assignments(
         peer_uv = patch_uv_vertices[peer_ref.patch_index]
         owner_indices = _rectangular_boundary_indices(owner_patch, owner_uv, owner_ref.boundary_id)
         peer_indices = _rectangular_boundary_indices(peer_patch, peer_uv, peer_ref.boundary_id)
-        if len(owner_indices) != len(peer_indices):
-            raise ValueError(f"Seam {seam.seam_id!r} boundary sample counts do not match.")
-
         owner_points = np.asarray(
             [
                 owner_patch.point_at(
@@ -364,10 +359,44 @@ def _seam_vertex_assignments(
             ],
             dtype=float,
         )
-        forward_cost = float(np.linalg.norm(owner_points - peer_points, axis=1).sum())
-        reversed_cost = float(np.linalg.norm(owner_points - peer_points[::-1], axis=1).sum())
-        if reversed_cost < forward_cost:
-            peer_indices = tuple(reversed(peer_indices))
+        if len(owner_indices) != len(peer_indices):
+            if len(owner_indices) == len(peer_indices) + 1 and np.allclose(owner_points[0], owner_points[-1]):
+                owner_indices = owner_indices[:-1]
+                owner_points = owner_points[:-1]
+            elif len(peer_indices) == len(owner_indices) + 1 and np.allclose(peer_points[0], peer_points[-1]):
+                peer_indices = peer_indices[:-1]
+                peer_points = peer_points[:-1]
+        if len(owner_indices) != len(peer_indices):
+            raise ValueError(f"Seam {seam.seam_id!r} boundary sample counts do not match.")
+        if len(peer_indices) > 2:
+            best_cost = float("inf")
+            best_indices = peer_indices
+            for candidate_indices in (peer_indices, tuple(reversed(peer_indices))):
+                candidate_points = np.asarray(
+                    [
+                        peer_patch.point_at(
+                            *_clamp_patch_parameters(
+                                peer_patch,
+                                float(peer_uv[index, 0]),
+                                float(peer_uv[index, 1]),
+                            )
+                        )
+                        for index in candidate_indices
+                    ],
+                    dtype=float,
+                )
+                for offset in range(len(candidate_indices)):
+                    shifted_points = np.roll(candidate_points, -offset, axis=0)
+                    cost = float(np.linalg.norm(owner_points - shifted_points, axis=1).sum())
+                    if cost < best_cost:
+                        best_cost = cost
+                        best_indices = candidate_indices[offset:] + candidate_indices[:offset]
+            peer_indices = best_indices
+        else:
+            forward_cost = float(np.linalg.norm(owner_points - peer_points, axis=1).sum())
+            reversed_cost = float(np.linalg.norm(owner_points - peer_points[::-1], axis=1).sum())
+            if reversed_cost < forward_cost:
+                peer_indices = tuple(reversed(peer_indices))
 
         for sample_index, vertex_index in enumerate(owner_indices):
             assignments[(owner_ref.patch_index, vertex_index)] = (seam.seam_id, sample_index, owner_points[sample_index])

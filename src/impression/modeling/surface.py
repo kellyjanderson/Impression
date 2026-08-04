@@ -2783,6 +2783,18 @@ def _polyline_point_at(points: np.ndarray, t: float) -> np.ndarray:
     return pts[-1].copy()
 
 
+def _indexed_polyline_point_at(points: np.ndarray, t: float) -> np.ndarray:
+    """Interpolate a correspondence-sampled polyline by authored sample index."""
+
+    pts = np.asarray(points, dtype=float).reshape(-1, 3)
+    if pts.shape[0] == 1:
+        return pts[0].copy()
+    position = float(np.clip(t, 0.0, 1.0)) * (pts.shape[0] - 1)
+    lower = min(int(np.floor(position)), pts.shape[0] - 2)
+    fraction = position - lower
+    return pts[lower] + ((pts[lower + 1] - pts[lower]) * fraction)
+
+
 def _polyline_point_at_2d(points: np.ndarray, t: float) -> np.ndarray:
     pts = np.asarray(points, dtype=float).reshape(-1, 2)
     if pts.shape[0] == 2:
@@ -3814,8 +3826,8 @@ class RuledSurfacePatch(SurfacePatch):
 
     def _edge_points(self, v_norm: float) -> tuple[np.ndarray, np.ndarray]:
         return (
-            _polyline_point_at(self.start_curve, v_norm),
-            _polyline_point_at(self.end_curve, v_norm),
+            _indexed_polyline_point_at(self.start_curve, v_norm),
+            _indexed_polyline_point_at(self.end_curve, v_norm),
         )
 
     def point_at(self, u: float, v: float) -> np.ndarray:

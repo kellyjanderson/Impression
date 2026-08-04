@@ -31,8 +31,8 @@ separate completion state.
 
 - [x] [Fix 01: TopologyPath Loft Input Preservation](../specifications/fix-01-topology-path-loft-input-preservation-v1_0.md)
 - [x] [Fix 01 Test](../test-specifications/fix-01-topology-path-loft-input-preservation-v1_0.md)
-- [ ] [Fix 02: Protected Loft Corner Tessellation](../specifications/fix-02-protected-loft-corner-tessellation-v1_0.md)
-- [ ] [Fix 02 Test](../test-specifications/fix-02-protected-loft-corner-tessellation-v1_0.md)
+- [x] [Fix 02: Protected Loft Corner Tessellation](../specifications/fix-02-protected-loft-corner-tessellation-v1_0.md)
+- [x] [Fix 02 Test](../test-specifications/fix-02-protected-loft-corner-tessellation-v1_0.md)
 - [ ] [Fix 03: Identity-First Stable Region Pairing](../specifications/fix-03-identity-first-stable-region-pairing-v1_0.md)
 - [ ] [Fix 03 Test](../test-specifications/fix-03-identity-first-stable-region-pairing-v1_0.md)
 - [ ] [Fix 05: Multi-Opening Loft Wall Integrity](../specifications/fix-05-multi-opening-loft-wall-integrity-v1_0.md)

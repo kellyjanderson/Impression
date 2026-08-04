@@ -59,7 +59,7 @@ def test_public_loft_accepts_topology_path_and_retains_planner_identity() -> Non
     )
 
     assert isinstance(body, SurfaceBody)
-    retained = body.metadata["source_topology_paths"]
+    retained = body.kernel_metadata()["source_topology_paths"]
     assert retained == ((path,), (path,))
     assert retained[0][0].points[0].correspondence_id == "diagonal-negative-corner"
     assert retained[0][0].points[0].protection_policy == "protected"

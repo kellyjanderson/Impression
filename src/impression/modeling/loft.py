@@ -32,6 +32,7 @@ from .topology import (
     resample_loop as _resample_loop,
     triangulate_loops as _triangulate_loops,
     anchor_loop as _anchor_loop,
+    ensure_winding,
     inset_profile_loops as _inset_profile_loops,
     classify_loops as _classify_loops,
     signed_area as _signed_area,
@@ -3993,6 +3994,8 @@ def _loft_execute_plan_surface(
                         "loop_role": loop_pair.role,
                         "loop_index": loop_index,
                         "loft_family_selection": family_selection,
+                        "protected_start_points": _protected_station_world_points(plan, prev_idx),
+                        "protected_end_points": _protected_station_world_points(plan, curr_idx),
                     }
                 }
                 if selected_family == "bspline":
@@ -4198,8 +4201,8 @@ def _loft_execute_plan_surface(
             "loft_cap_validity": cap_validity.canonical_payload(),
             "loft_closure_evidence": closure_evidence.canonical_payload(),
             "loft_seam_coverage": seam_coverage.canonical_payload(),
+            "source_topology_paths": plan.metadata.get("source_topology_paths", ()),
         },
-        "source_topology_paths": plan.metadata.get("source_topology_paths", ()),
     }
     shell = make_surface_shell(
         tuple(patches),
@@ -4218,6 +4221,24 @@ def _station_loop_world(station: PlannedStation, loop: np.ndarray) -> np.ndarray
     if not np.allclose(pts3[0], pts3[-1]):
         pts3 = np.vstack([pts3, pts3[0]])
     return pts3
+
+
+def _protected_station_world_points(plan: LoftPlan, station_index: int) -> tuple[tuple[float, float, float], ...]:
+    station_paths = tuple(plan.metadata.get("source_topology_paths", ()))
+    if station_index >= len(station_paths):
+        return ()
+    station = plan.stations[station_index]
+    points: list[tuple[float, float, float]] = []
+    for path in station_paths[station_index]:
+        if not isinstance(path, TopologyPath):
+            continue
+        for point in path.points:
+            if point.protection_policy != "protected":
+                continue
+            local = np.asarray(point.coordinates, dtype=float)
+            world = station.origin + local[0] * station.u + local[1] * station.v
+            points.append(tuple(float(value) for value in world))
+    return tuple(points)
 
 
 def _loft_surface_consumer_handoff(
@@ -5766,11 +5787,47 @@ def _align_loops_for_loft(loops_per_profile: list[list[np.ndarray]]) -> list[lis
 
 def _section_to_region_loops(section: Section, *, samples: int) -> list[list[np.ndarray]]:
     normalized = _canonicalize_section_for_loft(section)
+    topology_paths = tuple(normalized.metadata.get("topology_paths", ()))
     regions: list[list[np.ndarray]] = []
-    for region in normalized.regions:
+    for region_index, region in enumerate(normalized.regions):
         loops = [region.outer.points, *(hole.points for hole in region.holes)]
-        regions.append([_resample_loop(loop, samples) for loop in loops])
+        if region_index < len(topology_paths) and isinstance(topology_paths[region_index], TopologyPath):
+            topology_path = topology_paths[region_index]
+            outer = _resample_loop_preserving_authored_points(topology_path, samples)
+            regions.append([outer, *(_resample_loop(loop, samples) for loop in loops[1:])])
+        else:
+            regions.append([_resample_loop(loop, samples) for loop in loops])
     return regions
+
+
+def _resample_loop_preserving_authored_points(path: TopologyPath, samples: int) -> np.ndarray:
+    """Distribute samples by span while retaining authored path points exactly."""
+
+    authored = np.asarray(path.to_section_loop().points, dtype=float).reshape(-1, 2)
+    authored = ensure_winding(authored, clockwise=False)
+    authored = _anchor_loop(authored)
+    point_count = len(authored)
+    if point_count < 3:
+        raise ValueError("Closed TopologyPath must provide at least three authored points.")
+    target_count = max(int(samples), point_count)
+    closed = np.vstack([authored, authored[0]])
+    lengths = np.linalg.norm(np.diff(closed, axis=0), axis=1)
+    total = float(lengths.sum())
+    if total <= 0.0:
+        raise ValueError("Closed TopologyPath must have non-degenerate authored spans.")
+
+    extra_count = target_count - point_count
+    exact_extra = extra_count * lengths / total
+    span_extra = np.floor(exact_extra).astype(int)
+    for index in np.argsort(-(exact_extra - span_extra), kind="stable")[: extra_count - int(span_extra.sum())]:
+        span_extra[int(index)] += 1
+
+    emitted: list[np.ndarray] = []
+    for index, start in enumerate(authored):
+        end = authored[(index + 1) % point_count]
+        span_count = 1 + int(span_extra[index])
+        emitted.extend(start + (end - start) * (offset / span_count) for offset in range(span_count))
+    return np.asarray(emitted, dtype=float)
 
 
 def _normalize_directional_id_sets(
