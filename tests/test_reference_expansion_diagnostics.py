@@ -122,7 +122,7 @@ def test_reference_expansion_loft_section_bundle_carries_expected_actual_and_dif
     assert image_signal_stats(diff_path, background_threshold=5)["occupancy"] > 0.002
 
 
-def test_reference_expansion_lofted_body_csg_refuses_without_fallback() -> None:
+def test_reference_expansion_lofted_body_csg_succeeds_without_fallback() -> None:
     body = loft(
         [make_circle(radius=0.4), make_circle(radius=0.52), make_circle(radius=0.34)],
         path=[(0.0, 0.0, 0.0), (0.08, 0.02, 0.75), (0.12, -0.02, 1.5)],
@@ -133,10 +133,13 @@ def test_reference_expansion_lofted_body_csg_refuses_without_fallback() -> None:
 
     result = boolean_difference(body, [cutter])
 
-    assert result.status == "unsupported"
-    assert result.body is None
-    assert "Loft CSG eligibility" in str(result.failure_reason)
-    assert "no mesh fallback" in str(result.failure_reason)
+    assert result.status == "succeeded"
+    assert result.classification == "closed"
+    assert result.body is not None
+    assert result.body.stable_identity != body.stable_identity
+    metadata = result.body.kernel_metadata()
+    assert metadata["boolean_surface_route"] == "surface-csg.loft-primitive"
+    assert metadata["loft_primitive_csg"]["no_hidden_mesh_proof"]["mesh_fallback_invoked"] is False
 
 
 def test_reference_expansion_approval_moves_dirty_stl_to_gold_and_persists_status(tmp_path: Path) -> None:

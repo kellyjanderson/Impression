@@ -639,9 +639,10 @@ def test_qt_preview_does_not_force_widgets_rhi_compositor_off(monkeypatch) -> No
     import os
 
     monkeypatch.delenv("QT_WIDGETS_RHI", raising=False)
+    configured_qt_opengl = os.environ.get("QT_OPENGL")
     import impression.preview_qt  # noqa: F401
 
-    assert os.environ["QT_OPENGL"] == "desktop"
+    assert os.environ["QT_OPENGL"] == (configured_qt_opengl or "desktop")
     assert "QT_WIDGETS_RHI" not in os.environ
 
 
