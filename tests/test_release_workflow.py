@@ -190,3 +190,10 @@ def test_release_workflow_gates_build_qualification_and_publication(project_root
     assert "prerelease: ${{ steps.verify.outputs.prerelease }}" in workflow
     assert "files: ${{ steps.verify.outputs.files }}" in workflow
     assert "Verify published release metadata" in workflow
+
+
+def test_installed_candidate_smoke_invokes_the_real_cli_app(project_root: Path) -> None:
+    smoke = (project_root / "scripts" / "release" / "smoke_installed_candidate.py").read_text()
+
+    assert '"from impression.cli import app; app()"' in smoke
+    assert '"-m",\n                "impression.cli"' not in smoke

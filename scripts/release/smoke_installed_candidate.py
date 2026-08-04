@@ -48,8 +48,8 @@ def main() -> int:
         subprocess.run(
             (
                 sys.executable,
-                "-m",
-                "impression.cli",
+                "-c",
+                "from impression.cli import app; app()",
                 "export",
                 str(model),
                 "--output",
