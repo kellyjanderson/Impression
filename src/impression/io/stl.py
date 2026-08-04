@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import struct
+import tempfile
 
 import numpy as np
 
@@ -75,3 +77,22 @@ def write_stl(mesh: Mesh, path: Path, ascii: bool = False) -> None:
                     0,
                 )
             )
+
+
+def write_stl_atomically(mesh: Mesh, path: Path, ascii: bool = False) -> None:
+    """Serialize an STL beside its destination and replace only after success."""
+
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, staged_name = tempfile.mkstemp(
+        dir=destination.parent,
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+    )
+    os.close(descriptor)
+    staged = Path(staged_name)
+    try:
+        write_stl(mesh, staged, ascii=ascii)
+        os.replace(staged, destination)
+    finally:
+        staged.unlink(missing_ok=True)

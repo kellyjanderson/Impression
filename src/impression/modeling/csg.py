@@ -11727,6 +11727,61 @@ def _apply_face_colors(result: Mesh, face_ids: np.ndarray, color_map: dict[int, 
     result.face_colors = face_colors
 
 
+def _weld_boolean_result_degenerate_vertices(mesh: Mesh) -> Mesh:
+    """Remove manifold-output zero edges when exact duplicate vertices are safe to weld."""
+
+    original_analysis = analyze_mesh(mesh)
+    if original_analysis.degenerate_faces == 0:
+        return mesh
+    triangles = mesh.vertices[mesh.faces]
+    areas = np.linalg.norm(
+        np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]),
+        axis=1,
+    ) * 0.5
+    parent = np.arange(mesh.n_vertices, dtype=int)
+
+    def root(vertex_index: int) -> int:
+        while parent[vertex_index] != vertex_index:
+            parent[vertex_index] = parent[parent[vertex_index]]
+            vertex_index = int(parent[vertex_index])
+        return vertex_index
+
+    merged = False
+    for face in mesh.faces[areas <= 1e-12]:
+        for first, second in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
+            if np.array_equal(mesh.vertices[first], mesh.vertices[second]):
+                first_root = root(int(first))
+                second_root = root(int(second))
+                if first_root != second_root:
+                    parent[max(first_root, second_root)] = min(first_root, second_root)
+                    merged = True
+    if not merged:
+        return mesh
+    inverse = np.asarray([root(index) for index in range(mesh.n_vertices)], dtype=int)
+    remapped_faces = inverse[mesh.faces]
+    keep_faces = np.asarray([len(set(face)) == 3 for face in remapped_faces], dtype=bool)
+    remapped_faces = remapped_faces[keep_faces]
+    referenced = np.unique(remapped_faces.reshape(-1))
+    compact_remap = np.full(mesh.n_vertices, -1, dtype=int)
+    compact_remap[referenced] = np.arange(len(referenced), dtype=int)
+    candidate = Mesh(
+        vertices=mesh.vertices[referenced],
+        faces=compact_remap[remapped_faces],
+        color=mesh.color,
+        metadata=dict(mesh.metadata),
+    )
+    if mesh.face_colors is not None and len(mesh.face_colors) == mesh.n_faces:
+        candidate.face_colors = mesh.face_colors[keep_faces]
+    candidate_analysis = analyze_mesh(candidate)
+    if (
+        candidate_analysis.degenerate_faces == 0
+        and candidate_analysis.boundary_edges == original_analysis.boundary_edges
+        and candidate_analysis.nonmanifold_edges == original_analysis.nonmanifold_edges
+    ):
+        return candidate
+    return mesh
+
+
 def _apply_boolean(
     meshes: Iterable[Mesh],
     operation: str,
@@ -11781,7 +11836,7 @@ def _apply_boolean(
         _combine_color(result, meshes_list)
     else:
         _combine_color(result, meshes_list)
-    return result
+    return _weld_boolean_result_degenerate_vertices(result)
 
 
 def _classify_surface_body(body: SurfaceBody) -> Literal["open", "closed"]:
@@ -12426,15 +12481,6 @@ SURFACE_CSG_CALLER_INVENTORY: tuple[SurfaceCSGCallerInventoryRecord, ...] = (
         operation="intersection",
         surface_route="surface_boolean_result",
         mesh_route="_apply_boolean",
-        explicit_mesh_route=True,
-    ),
-    SurfaceCSGCallerInventoryRecord(
-        caller_id="hinges.make_traditional_hinge_pair",
-        module="impression.modeling.hinges",
-        category="feature",
-        operation="union",
-        surface_route="make_traditional_hinge_pair",
-        mesh_route="_call_with_legacy_mesh_primitives",
         explicit_mesh_route=True,
     ),
     SurfaceCSGCallerInventoryRecord(
@@ -18618,6 +18664,114 @@ def _surface_boolean_result_after_family_gate(
     )
 
 
+def _surface_union_has_loft_contact(
+    operands: SurfaceBooleanOperands,
+    *,
+    tolerance: float,
+) -> bool:
+    policy = normalize_surface_csg_tolerance_policy(
+        {
+            "equality_tolerance": tolerance,
+            "domain_tolerance": min(tolerance, DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.domain_tolerance),
+        }
+    )
+    for first_index, first_body in enumerate(operands.bodies):
+        for second_body in operands.bodies[first_index + 1 :]:
+            if (
+                _surface_body_loft_provenance(first_body) is not None
+                or _surface_body_loft_provenance(second_body) is not None
+            ) and _surface_boolean_body_relation(
+                first_body.bounds_estimate(),
+                second_body.bounds_estimate(),
+            ) != "disjoint":
+                return True
+            for first_patch in first_body.iter_patches(world=True):
+                for second_patch in second_body.iter_patches(world=True):
+                    if _surface_csg_rectangular_overlap_evidence(first_patch, second_patch, policy=policy) is not None:
+                        return True
+    return False
+
+
+def _validate_public_surface_union_result(
+    result: SurfaceBooleanResult,
+    *,
+    tolerance: float,
+) -> SurfaceBooleanResult:
+    """Reject incomplete union results before they cross the public boundary."""
+
+    operands = result.operands
+    if any(not isinstance(body, SurfaceBody) for body in operands.bodies):
+        return result
+    loft_operands = tuple(_surface_body_loft_provenance(body) is not None for body in operands.bodies)
+    coplanar_loft_overlap = bool(
+        any(loft_operands)
+        and _surface_union_has_loft_contact(operands, tolerance=tolerance)
+    )
+    if result.status != "succeeded":
+        if coplanar_loft_overlap:
+            return SurfaceBooleanResult(
+                operation="union",
+                operands=operands,
+                status="unsupported",
+                failure_reason=(
+                    "Coplanar loft-body union is unsupported by the selected surface CSG route; "
+                    "coplanar-unsupported classification; no partial result was returned."
+                ),
+            )
+        return result
+    if result.body is None or result.classification != "closed":
+        return SurfaceBooleanResult(
+            operation="union",
+            operands=operands,
+            status="invalid",
+            failure_reason="Surface union invalid-result classification: a non-empty closed body was required.",
+        )
+
+    expected_bounds = _surface_boolean_result_bounds(operands)
+    actual_bounds = result.body.bounds_estimate()
+    if expected_bounds is None or not np.allclose(actual_bounds, expected_bounds, atol=tolerance, rtol=0.0):
+        return SurfaceBooleanResult(
+            operation="union",
+            operands=operands,
+            status="invalid",
+            failure_reason=(
+                "Surface union invalid-result classification: operand-witness bounds were not retained; "
+                "no partial result was returned."
+            ),
+        )
+
+    gate = finalize_surface_csg_validity_gate("union", operands, result.body)
+    if not gate.accepted or gate.body is None:
+        detail = "; ".join(diagnostic.message for diagnostic in gate.diagnostics)
+        return SurfaceBooleanResult(
+            operation="union",
+            operands=operands,
+            status="invalid",
+            failure_reason=(
+                "Surface union invalid-result classification: result validity failed; "
+                f"{detail or 'no valid body was produced.'}"
+            ),
+        )
+
+    if coplanar_loft_overlap and gate.body.shell_count != 1:
+        return SurfaceBooleanResult(
+            operation="union",
+            operands=operands,
+            status="invalid",
+            failure_reason=(
+                "Coplanar loft-body union invalid-result classification: the selected route retained "
+                "overlapping operand shells instead of one fused shell; no partial result was returned."
+            ),
+        )
+    return SurfaceBooleanResult(
+        operation="union",
+        operands=operands,
+        status="succeeded",
+        body=gate.body,
+        classification="closed",
+    )
+
+
 def boolean_union(
     meshes: Iterable[Mesh | MeshGroup | SurfaceBody],
     tolerance: float = 1e-4,
@@ -18627,12 +18781,15 @@ def boolean_union(
     bodies = tuple(meshes)
     gated = _surface_boolean_result_after_family_gate("union", bodies, caller_id="csg.boolean_union")  # type: ignore[arg-type]
     if gated is not None:
-        return gated
+        return _validate_public_surface_union_result(gated, tolerance=tolerance)
     operands = prepare_surface_boolean_operands("union", bodies)  # type: ignore[arg-type]
-    return assert_no_hidden_surface_csg_mesh_fallback(
+    raw_result = assert_no_hidden_surface_csg_mesh_fallback(
         "csg.boolean_union",
         surface_boolean_result("union", operands),
     )
+    if not isinstance(raw_result, SurfaceBooleanResult):
+        raise BooleanOperationError("csg.boolean_union did not return a structured SurfaceBooleanResult.")
+    return _validate_public_surface_union_result(raw_result, tolerance=tolerance)
 
 
 def boolean_difference(

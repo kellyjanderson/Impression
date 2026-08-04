@@ -79,7 +79,7 @@ from .impress import (
     save_impress,
     write_impress_json,
 )
-from .stl import write_stl
+from .stl import write_stl, write_stl_atomically
 
 __all__ = [
     "CURRENT_IMPRESS_SCHEMA_VERSION",
@@ -160,4 +160,5 @@ __all__ = [
     "save_impress",
     "write_impress_json",
     "write_stl",
+    "write_stl_atomically",
 ]

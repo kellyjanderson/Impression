@@ -32,6 +32,7 @@ from .topology import (
     resample_loop as _resample_loop,
     triangulate_loops as _triangulate_loops,
     anchor_loop as _anchor_loop,
+    ensure_winding,
     inset_profile_loops as _inset_profile_loops,
     classify_loops as _classify_loops,
     signed_area as _signed_area,
@@ -3215,6 +3216,7 @@ def loft_plan_sections(
     _validate_fairness_iterations(fairness_iterations)
     sweep_policy = resolve_loft_sweep_frame_policy(sweep_frame_policy)
     _validate_section_stations(stations)
+    _validate_station_hole_topology(stations)
 
     resolved_disambiguation_seed = (
         _derive_disambiguation_seed(stations, samples)
@@ -3270,6 +3272,8 @@ def loft_plan_sections(
     probabilistic_selected_confidence = 1.0
     probabilistic_candidate_count = 0
     probabilistic_selected_candidate_ids: dict[str, str] = {}
+    identity_resolved_pair_count = 0
+    identity_residual_region_count = 0
     previous_interval_vectors: dict[int, np.ndarray] | None = None
     for idx in range(len(planned_stations) - 1):
         prev_station = planned_stations[idx]
@@ -3280,14 +3284,47 @@ def loft_plan_sections(
             len(prev_regions),
             len(curr_regions),
         )
-        ambiguity_class = _classify_region_transition_ambiguity(
-            prev_regions=[region[0] for region in prev_regions],
-            curr_regions=[region[0] for region in curr_regions],
-            ambiguity_max_branches=int(ambiguity_max_branches),
-            ambiguity_cost_profile=ambiguity_cost_profile,
-        )
         interval = (idx, idx + 1)
-        selected_region_assignment: tuple[int, ...] | None = None
+        try:
+            (
+                identity_assignment,
+                interval_identity_pairs,
+                interval_identity_residue,
+            ) = _identity_first_region_assignment(
+                prev_station=effective_stations[idx],
+                curr_station=effective_stations[idx + 1],
+                prev_regions=prev_regions,
+                curr_regions=curr_regions,
+                ambiguity_cost_profile=ambiguity_cost_profile,
+                ambiguity_max_branches=int(ambiguity_max_branches),
+                fairness_mode=fairness_mode,
+                fairness_weight=fairness_weight,
+                fairness_iterations=fairness_iterations,
+            )
+        except ValueError as exc:
+            if "invalid_region_identity" in str(exc):
+                raise
+            _raise_structured_ambiguity_error(
+                interval=interval,
+                ambiguity_class="identity-residue",
+                tie_break_stage=_ambiguity_failure_stage(str(exc)),
+                candidate_count_after_pruning=_ambiguity_failure_candidate_count(str(exc)),
+                ambiguous_region_indices=tuple(range(len(curr_regions))),
+                relationship_group="identity_residue",
+                detail=str(exc),
+            )
+        identity_resolved_pair_count += interval_identity_pairs
+        identity_residual_region_count += interval_identity_residue
+        if identity_assignment is not None:
+            ambiguity_class = "none"
+        else:
+            ambiguity_class = _classify_region_transition_ambiguity(
+                prev_regions=[region[0] for region in prev_regions],
+                curr_regions=[region[0] for region in curr_regions],
+                ambiguity_max_branches=int(ambiguity_max_branches),
+                ambiguity_cost_profile=ambiguity_cost_profile,
+            )
+        selected_region_assignment: tuple[int, ...] | None = identity_assignment
         selected_hole_assignments: dict[tuple[str, int, str, int], tuple[int, ...]] = {}
         ambiguity_candidates = _enumerate_region_ambiguity_candidates(
             prev_regions=prev_regions,
@@ -3353,7 +3390,7 @@ def loft_plan_sections(
             ambiguity_class_counts[ambiguity_class] = ambiguity_class_counts.get(ambiguity_class, 0) + 1
             ambiguity_resolved_intervals_count += 1
         region_order_override: tuple[int, ...] | None = None
-        if fairness_mode == "global" and topology_case == "one_to_one":
+        if fairness_mode == "global" and topology_case == "one_to_one" and identity_assignment is None:
             (
                 region_order_override,
                 interval_optimizer_ran,
@@ -3544,6 +3581,11 @@ def loft_plan_sections(
     if rational_weights is not None:
         rational_weights_payload = float(rational_weights) if np.isscalar(rational_weights) else np.asarray(rational_weights, dtype=float).tolist()
     sweep_path_points_payload = None if sweep_path is None else tuple(tuple(float(value) for value in point) for point in sweep_path.sample())
+    source_topology_paths = tuple(
+        tuple(station.section.metadata.get("topology_paths", ()))
+        for station in effective_stations
+        if station.section is not None
+    )
     plan = LoftPlan(
         samples=samples,
         stations=tuple(planned_stations),
@@ -3570,6 +3612,8 @@ def loft_plan_sections(
             "probabilistic_selected_confidence": float(probabilistic_selected_confidence),
             "probabilistic_candidate_count": int(probabilistic_candidate_count),
             "probabilistic_selected_candidate_ids": dict(probabilistic_selected_candidate_ids),
+            "identity_resolved_pair_count": int(identity_resolved_pair_count),
+            "identity_residual_region_count": int(identity_residual_region_count),
             "region_topology_case_counts": _count_region_topology_cases(planned_transitions),
             "region_action_counts": _count_region_actions(planned_transitions),
             "fairness_mode": fairness_mode,
@@ -3584,6 +3628,7 @@ def loft_plan_sections(
             "fairness_objective_post": fairness_objective_post,
             "fairness_diagnostics": fairness_diagnostics,
             "fairness_optimization_convergence_status": fairness_convergence_status,
+            "source_topology_paths": source_topology_paths,
         },
     )
     _validate_loft_plan(plan)
@@ -3614,6 +3659,7 @@ def loft_plan_ambiguities(
     _validate_ambiguity_cost_profile(ambiguity_cost_profile)
     _validate_ambiguity_max_branches(ambiguity_max_branches)
     _validate_section_stations(stations)
+    _validate_station_hole_topology(stations)
 
     effective_stations = list(stations)
     if split_merge_mode == "resolve":
@@ -3987,6 +4033,8 @@ def _loft_execute_plan_surface(
                         "loop_role": loop_pair.role,
                         "loop_index": loop_index,
                         "loft_family_selection": family_selection,
+                        "protected_start_points": _protected_station_world_points(plan, prev_idx),
+                        "protected_end_points": _protected_station_world_points(plan, curr_idx),
                     }
                 }
                 if selected_family == "bspline":
@@ -4188,11 +4236,14 @@ def _loft_execute_plan_surface(
             "branch_crossing_count": plan.metadata.get("fairness_diagnostics", {}).get("branch_crossing_count", 0.0),
             "transition_count": len(plan.transitions),
             "station_count": len(plan.stations),
+            "identity_resolved_pair_count": plan.metadata.get("identity_resolved_pair_count", 0),
+            "identity_residual_region_count": plan.metadata.get("identity_residual_region_count", 0),
             "loft_boundary_graph": boundary_graph.canonical_payload(),
             "loft_cap_validity": cap_validity.canonical_payload(),
             "loft_closure_evidence": closure_evidence.canonical_payload(),
             "loft_seam_coverage": seam_coverage.canonical_payload(),
-        }
+            "source_topology_paths": plan.metadata.get("source_topology_paths", ()),
+        },
     }
     shell = make_surface_shell(
         tuple(patches),
@@ -4211,6 +4262,24 @@ def _station_loop_world(station: PlannedStation, loop: np.ndarray) -> np.ndarray
     if not np.allclose(pts3[0], pts3[-1]):
         pts3 = np.vstack([pts3, pts3[0]])
     return pts3
+
+
+def _protected_station_world_points(plan: LoftPlan, station_index: int) -> tuple[tuple[float, float, float], ...]:
+    station_paths = tuple(plan.metadata.get("source_topology_paths", ()))
+    if station_index >= len(station_paths):
+        return ()
+    station = plan.stations[station_index]
+    points: list[tuple[float, float, float]] = []
+    for path in station_paths[station_index]:
+        if not isinstance(path, TopologyPath):
+            continue
+        for point in path.points:
+            if point.protection_policy != "protected":
+                continue
+            local = np.asarray(point.coordinates, dtype=float)
+            world = station.origin + local[0] * station.u + local[1] * station.v
+            points.append(tuple(float(value) for value in world))
+    return tuple(points)
 
 
 def _loft_surface_consumer_handoff(
@@ -5534,7 +5603,7 @@ def _validate_profile_topology_input(
         except ValueError as exc:
             raise ValueError(
                 "Unsupported topology transition: region split/merge or invalid "
-                f"hole containment in {fn_name} (profile index {idx})."
+                f"hole containment in {fn_name} (profile index {idx}): {exc}"
             ) from exc
 
 
@@ -5549,6 +5618,24 @@ def _validate_section_stations(stations: Sequence[Station]) -> None:
         if prev_t is not None and station.t <= prev_t:
             raise ValueError("Stations must be strictly ordered by t.")
         prev_t = station.t
+
+
+def _validate_station_hole_topology(stations: Sequence[Station]) -> None:
+    """Reject invalid authored holes before split/merge staging emits geometry."""
+
+    for station_index, station in enumerate(stations):
+        if station.section is None:
+            continue
+        normalized = _canonicalize_section_for_loft(station.section)
+        for region_index, region in enumerate(normalized.regions):
+            loops = [region.outer.points, *(hole.points for hole in region.holes)]
+            try:
+                _classify_loops(loops, expected_holes=len(region.holes))
+            except ValueError as exc:
+                raise ValueError(
+                    "hole split/merge ambiguity: invalid authored hole topology "
+                    f"at station {station_index}, region {region_index}: {exc}"
+                ) from exc
 
 
 def _validate_station_frame(station: Station, idx: int, tol: float = 1e-6) -> None:
@@ -5759,11 +5846,53 @@ def _align_loops_for_loft(loops_per_profile: list[list[np.ndarray]]) -> list[lis
 
 def _section_to_region_loops(section: Section, *, samples: int) -> list[list[np.ndarray]]:
     normalized = _canonicalize_section_for_loft(section)
+    topology_paths = tuple(normalized.metadata.get("topology_paths", ()))
     regions: list[list[np.ndarray]] = []
-    for region in normalized.regions:
+    for region_index, region in enumerate(normalized.regions):
         loops = [region.outer.points, *(hole.points for hole in region.holes)]
-        regions.append([_resample_loop(loop, samples) for loop in loops])
+        if region_index < len(topology_paths) and isinstance(topology_paths[region_index], TopologyPath):
+            topology_path = topology_paths[region_index]
+            outer = _resample_loop_preserving_authored_points(topology_path, samples)
+            regions.append([outer, *(_resample_loop_preserving_vertices(loop, samples) for loop in loops[1:])])
+        else:
+            regions.append([_resample_loop_preserving_vertices(loop, samples) for loop in loops])
     return regions
+
+
+def _resample_loop_preserving_authored_points(path: TopologyPath, samples: int) -> np.ndarray:
+    """Distribute samples by span while retaining authored path points exactly."""
+
+    authored = ensure_winding(path.to_section_loop().points, clockwise=False)
+    return _resample_loop_preserving_vertices(authored, samples)
+
+
+def _resample_loop_preserving_vertices(points: np.ndarray, samples: int) -> np.ndarray:
+    authored = np.asarray(points, dtype=float).reshape(-1, 2)
+    authored = _anchor_loop(authored)
+    point_count = len(authored)
+    if point_count < 3:
+        raise ValueError("Closed TopologyPath must provide at least three authored points.")
+    if point_count > int(samples):
+        return _resample_loop(authored, int(samples))
+    target_count = max(int(samples), point_count)
+    closed = np.vstack([authored, authored[0]])
+    lengths = np.linalg.norm(np.diff(closed, axis=0), axis=1)
+    total = float(lengths.sum())
+    if total <= 0.0:
+        raise ValueError("Closed TopologyPath must have non-degenerate authored spans.")
+
+    extra_count = target_count - point_count
+    exact_extra = extra_count * lengths / total
+    span_extra = np.floor(exact_extra).astype(int)
+    for index in np.argsort(-(exact_extra - span_extra), kind="stable")[: extra_count - int(span_extra.sum())]:
+        span_extra[int(index)] += 1
+
+    emitted: list[np.ndarray] = []
+    for index, start in enumerate(authored):
+        end = authored[(index + 1) % point_count]
+        span_count = 1 + int(span_extra[index])
+        emitted.extend(start + (end - start) * (offset / span_count) for offset in range(span_count))
+    return np.asarray(emitted, dtype=float)
 
 
 def _normalize_directional_id_sets(
@@ -5818,7 +5947,11 @@ def _canonicalize_section_for_loft(
             ).normalized()
         )
         region_order.append(original_index)
-    canonical = Section(tuple(ordered_regions), color=normalized.color).normalized()
+    canonical = Section(
+        tuple(ordered_regions),
+        color=normalized.color,
+        metadata=dict(normalized.metadata),
+    ).normalized()
     if return_region_order:
         return canonical, tuple(region_order)
     return canonical
@@ -5937,6 +6070,95 @@ def _loop_sort_key(loop: np.ndarray) -> tuple[float, ...]:
     # Rounded coordinates keep deterministic ordering while avoiding noise-level drift.
     signature = tuple(np.round(anchor.reshape(-1), decimals=9).tolist())
     return (float(centroid[0]), float(centroid[1]), area, perimeter, *signature)
+
+
+def _identity_first_region_assignment(
+    *,
+    prev_station: Station,
+    curr_station: Station,
+    prev_regions: list[list[np.ndarray]],
+    curr_regions: list[list[np.ndarray]],
+    ambiguity_cost_profile: str,
+    ambiguity_max_branches: int,
+    fairness_mode: str,
+    fairness_weight: float,
+    fairness_iterations: int,
+) -> tuple[tuple[int, ...] | None, int, int]:
+    """Resolve explicit directional region IDs before bounded geometric search."""
+
+    if len(prev_regions) <= len(curr_regions):
+        source_regions = prev_regions
+        target_regions = curr_regions
+        source_groups = prev_station.successor_ids
+        target_groups = curr_station.predecessor_ids
+    else:
+        source_regions = curr_regions
+        target_regions = prev_regions
+        source_groups = curr_station.predecessor_ids
+        target_groups = prev_station.successor_ids
+
+    def identity_map(groups: tuple[frozenset[str], ...], side: str) -> dict[str, int]:
+        result: dict[str, int] = {}
+        for region_index, identities in enumerate(groups):
+            if len(identities) > 1:
+                values = ",".join(sorted(identities))
+                raise ValueError(
+                    "invalid_region_identity contradictory "
+                    f"{side} region {region_index} declares multiple exact ids: {values}"
+                )
+            if not identities:
+                continue
+            identity = next(iter(identities))
+            if identity in result:
+                raise ValueError(
+                    "invalid_region_identity duplicate "
+                    f"{side} id {identity!r} on regions {result[identity]} and {region_index}"
+                )
+            result[identity] = region_index
+        return result
+
+    source_by_id = identity_map(source_groups, "source")
+    target_by_id = identity_map(target_groups, "target")
+    if not source_by_id and not target_by_id:
+        return None, 0, min(len(source_regions), len(target_regions))
+    if len(source_regions) == len(target_regions) and set(source_by_id) != set(target_by_id):
+        missing_source = sorted(set(target_by_id) - set(source_by_id))
+        missing_target = sorted(set(source_by_id) - set(target_by_id))
+        raise ValueError(
+            "invalid_region_identity contradictory exact id sets "
+            f"missing_source={missing_source} missing_target={missing_target}"
+        )
+
+    matched_ids = tuple(identity for identity in source_by_id if identity in target_by_id)
+    if not matched_ids:
+        raise ValueError(
+            "invalid_region_identity contradictory exact ids have no source/target matches "
+            f"source={sorted(source_by_id)} target={sorted(target_by_id)}"
+        )
+    assignment: list[int | None] = [None] * len(source_regions)
+    for identity in matched_ids:
+        assignment[source_by_id[identity]] = target_by_id[identity]
+
+    used_targets = {index for index in assignment if index is not None}
+    residual_source = [index for index, target_index in enumerate(assignment) if target_index is None]
+    residual_target = [index for index in range(len(target_regions)) if index not in used_targets]
+    if residual_source:
+        residual_assignment = _minimum_cost_subset_assignment(
+            [source_regions[index][0] for index in residual_source],
+            [target_regions[index][0] for index in residual_target],
+            entity="region",
+            ambiguity_cost_profile=ambiguity_cost_profile,
+            ambiguity_max_branches=ambiguity_max_branches,
+            fairness_mode=fairness_mode,
+            fairness_weight=fairness_weight,
+            fairness_iterations=fairness_iterations,
+        )
+        for source_offset, target_offset in enumerate(residual_assignment):
+            assignment[residual_source[source_offset]] = residual_target[target_offset]
+
+    if any(index is None for index in assignment):
+        raise ValueError("invalid_region_identity unresolved source region after identity reduction")
+    return tuple(int(index) for index in assignment), len(matched_ids), len(residual_source)
 
 
 def _pair_sections_for_transition(

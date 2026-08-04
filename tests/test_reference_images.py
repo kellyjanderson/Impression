@@ -11,12 +11,8 @@ from impression.mesh import section_mesh_with_plane
 from impression.modeling import (
     Loft,
     as_section,
-    handoff_hinge_surface,
     inventory_legacy_primitive_mesh_assumptions,
-    make_bistable_hinge,
     make_box,
-    make_living_hinge,
-    make_traditional_hinge_pair,
     tessellate_surface_body,
 )
 from impression.modeling.drafting import make_arrow
@@ -1756,92 +1752,5 @@ def test_surface_csg_reference_images(
         bundle=bundle,
         reference_root=reference_image_root,
         bundle_name=f"surfacebody_sections/{slice_basename}",
-        update_dirty_reference_images=update_dirty_reference_images,
-    )
-
-
-@pytest.mark.surfacebody
-@pytest.mark.reference_image
-def test_surface_traditional_hinge_reference_image(
-    reference_image_root: Path,
-    reference_stl_root: Path,
-    tmp_path: Path,
-    update_dirty_reference_images: bool,
-) -> None:
-    collection = handoff_hinge_surface(
-        make_traditional_hinge_pair(width=24.0, knuckle_count=5, opened_angle_deg=32.0)
-    )
-    render_path = tmp_path / "surface-hinge-traditional.png"
-    stl_path = tmp_path / "surface-hinge-traditional.stl"
-    render_surface_consumer_collection_image(collection, render_path)
-    write_surface_consumer_collection_stl(collection, stl_path)
-    stats = image_signal_stats(render_path)
-    stl_stats = stl_signal_stats(stl_path)
-    assert stats["occupancy"] > 0.01
-    assert stl_stats["facet_count"] > 100
-    _ensure_model_reference_fixture(
-        render_path=render_path,
-        stl_path=stl_path,
-        reference_image_root=reference_image_root,
-        reference_stl_root=reference_stl_root,
-        name="surfacebody/hinge_traditional_pair",
-        update_dirty_reference_images=update_dirty_reference_images,
-    )
-
-
-@pytest.mark.surfacebody
-@pytest.mark.reference_image
-def test_surface_living_hinge_reference_image(
-    reference_image_root: Path,
-    reference_stl_root: Path,
-    tmp_path: Path,
-    update_dirty_reference_images: bool,
-) -> None:
-    collection = handoff_hinge_surface(
-        make_living_hinge(width=48.0, height=20.0, hinge_band_width=12.0, slit_pitch=1.8)
-    )
-    render_path = tmp_path / "surface-hinge-living.png"
-    stl_path = tmp_path / "surface-hinge-living.stl"
-    render_surface_consumer_collection_image(collection, render_path)
-    write_surface_consumer_collection_stl(collection, stl_path)
-    stats = image_signal_stats(render_path)
-    stl_stats = stl_signal_stats(stl_path)
-    assert stats["occupancy"] > 0.01
-    assert stl_stats["facet_count"] > 100
-    _ensure_model_reference_fixture(
-        render_path=render_path,
-        stl_path=stl_path,
-        reference_image_root=reference_image_root,
-        reference_stl_root=reference_stl_root,
-        name="surfacebody/hinge_living_panel",
-        update_dirty_reference_images=update_dirty_reference_images,
-    )
-
-
-@pytest.mark.surfacebody
-@pytest.mark.reference_image
-def test_surface_bistable_hinge_reference_image(
-    reference_image_root: Path,
-    reference_stl_root: Path,
-    tmp_path: Path,
-    update_dirty_reference_images: bool,
-) -> None:
-    collection = handoff_hinge_surface(
-        make_bistable_hinge(width=40.0, preload_offset=2.0)
-    )
-    render_path = tmp_path / "surface-hinge-bistable.png"
-    stl_path = tmp_path / "surface-hinge-bistable.stl"
-    render_surface_consumer_collection_image(collection, render_path)
-    write_surface_consumer_collection_stl(collection, stl_path)
-    stats = image_signal_stats(render_path)
-    stl_stats = stl_signal_stats(stl_path)
-    assert stats["occupancy"] > 0.01
-    assert stl_stats["facet_count"] > 80
-    _ensure_model_reference_fixture(
-        render_path=render_path,
-        stl_path=stl_path,
-        reference_image_root=reference_image_root,
-        reference_stl_root=reference_stl_root,
-        name="surfacebody/hinge_bistable_blank",
         update_dirty_reference_images=update_dirty_reference_images,
     )

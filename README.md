@@ -91,7 +91,7 @@ Full CLI reference: [`docs/cli.md`](docs/cli.md)
 ## Documentation Map
 
 - [`docs/index.md`](docs/index.md) - documentation portal
-- [`docs/modeling/`](docs/modeling/) - primitives, CSG, mesh analysis tools, drawing2d, paths, loft, hinges, text
+- [`docs/modeling/`](docs/modeling/) - primitives, CSG, mesh analysis tools, drawing2d, paths, loft, and text
 - [`docs/examples/`](docs/examples/) - runnable scripts that power the docs
 - [`docs/tutorials/`](docs/tutorials/) - guided walkthroughs for new and advanced users
 - [`docs/agents/`](docs/agents/) - agent usage guide for building with Impression
@@ -147,11 +147,11 @@ Overrides:
 - `IMPRESSION_RECREATE_VENV=1` to delete/recreate the venv if the version mismatches.
 - `IMPRESSION_MANIFOLD_MODE=auto|source|skip` to control manifold install behavior (`auto` prefers wheels, then falls back to source).
 
-CAD-backed modeling experiments are available under `examples/`, including:
+Modeling examples are available under `examples/`, including:
 
 ```bash
-impression preview examples/half_pipe.py
-impression export examples/half_pipe.py --output artifacts/half_pipe.stl --overwrite
+impression preview examples/hello_cube.py
+impression export examples/hello_cube.py --output artifacts/hello_cube.stl --overwrite
 ```
 
 ## Contributing

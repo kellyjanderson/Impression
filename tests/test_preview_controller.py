@@ -316,6 +316,8 @@ def test_preview_scene_controller_applies_mesh_scene_and_feature_edges(monkeypat
         "color": "#6ab0ff",
         "opacity": 1.0,
         "smooth_shading": True,
+        "split_sharp_edges": True,
+        "feature_angle": 60.0,
         "lighting": True,
         "specular": 0.2,
     }
@@ -413,6 +415,8 @@ def test_preview_scene_controller_resets_persistent_axes_and_bounds(monkeypatch)
     assert plotter.axes_calls == []
     assert plotter.bounds_calls == []
     assert plotter.actors[0].property.calls == ["LightingOn", "SetInterpolationToFlat"]
+    assert plotter.mesh_calls[0]["split_sharp_edges"] is False
+    assert plotter.mesh_calls[0]["feature_angle"] == 60.0
 
 
 def test_preview_scene_controller_camera_lighting_uses_smooth_actor_interpolation(monkeypatch) -> None:
@@ -439,6 +443,27 @@ def test_preview_scene_controller_camera_lighting_uses_smooth_actor_interpolatio
     )
 
     assert plotter.actors[0].property.calls == ["LightingOn", "SetInterpolationToPhong"]
+    assert plotter.mesh_calls[0]["split_sharp_edges"] is True
+    assert plotter.mesh_calls[0]["feature_angle"] == 60.0
+
+
+def test_preview_scene_controller_splits_sharp_edges_for_face_colored_mesh(monkeypatch) -> None:
+    import impression.preview as preview_module
+
+    plotter = FakePlotter()
+    pv_mesh = FakePvMesh()
+    monkeypatch.setattr(preview_module, "mesh_to_pyvista", lambda mesh: pv_mesh)
+    controller = PreviewSceneController(unit_settings=UnitSettings("millimeters", "mm", 1.0))
+    mesh = Mesh(
+        vertices=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]]),
+        faces=np.array([[0, 1, 2]]),
+        face_colors=np.array([[0.2, 0.4, 0.8, 1.0]]),
+    )
+
+    controller.apply_scene(plotter, [mesh], show_bounds=False, show_axes=False)
+
+    assert plotter.mesh_calls[0]["split_sharp_edges"] is True
+    assert plotter.mesh_calls[0]["feature_angle"] == 60.0
 
 
 def test_preview_scene_controller_reuses_predefined_light_presets(monkeypatch) -> None:
@@ -639,9 +664,10 @@ def test_qt_preview_does_not_force_widgets_rhi_compositor_off(monkeypatch) -> No
     import os
 
     monkeypatch.delenv("QT_WIDGETS_RHI", raising=False)
+    configured_qt_opengl = os.environ.get("QT_OPENGL")
     import impression.preview_qt  # noqa: F401
 
-    assert os.environ["QT_OPENGL"] == "desktop"
+    assert os.environ["QT_OPENGL"] == (configured_qt_opengl or "desktop")
     assert "QT_WIDGETS_RHI" not in os.environ
 
 
