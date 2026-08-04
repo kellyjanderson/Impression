@@ -134,7 +134,7 @@ def test_preview_payload_controller_dispatcher_route_builds_payload(tmp_path: Pa
     assert envelope.result.payload.payload_path.exists()
 
 
-def test_preview_payload_controller_closes_owned_dispatcher_without_waiting() -> None:
+def test_preview_payload_controller_drains_owned_dispatcher_before_returning() -> None:
     calls = []
 
     class RecordingDispatcher:
@@ -151,7 +151,7 @@ def test_preview_payload_controller_closes_owned_dispatcher_without_waiting() ->
 
     controller.close()
 
-    assert calls == [(False, True)]
+    assert calls == [(True, True)]
 
 
 def test_preview_payload_process_launch_does_not_block_on_process_submit(tmp_path: Path) -> None:

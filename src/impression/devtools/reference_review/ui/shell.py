@@ -13,6 +13,20 @@ from typing import Callable, Mapping, MutableMapping, Sequence
 
 from packaging.version import Version, InvalidVersion
 
+
+def _configure_reference_review_platform(argv: Sequence[str]) -> None:
+    """Configure the supported headless graphics lane before Qt/VTK imports."""
+
+    if "--offscreen" not in argv:
+        return
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    os.environ.setdefault("QT_OPENGL", "software")
+    os.environ.setdefault("LIBGL_ALWAYS_SOFTWARE", "1")
+    os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
+
+
+_configure_reference_review_platform(tuple(sys.argv))
+
 from .bridge import BridgeRecord, BridgeRegistry
 from .packaging import qml_resource_root
 from .preview_controls import (
@@ -55,6 +69,7 @@ from ..async_core import ReviewTaskKind, TaskDispatcher, WorkerPolicy
 from impression.preview_qt import configure_qt_preview_surface_format
 
 _ACTIVE_LAUNCH: "WorkbenchLaunchResult | None" = None
+_LIVE_LAUNCHES: list["WorkbenchLaunchResult"] = []
 _USAGE = """usage: impression-reference-review [--fixture-file PATH] [--fixture-root PATH] [--fixture-db PATH] [--check] [--offscreen]
 
 Launch the Impression Reference Review Workbench.
@@ -84,6 +99,23 @@ class WorkbenchLaunchResult:
     launched: bool
     diagnostics: tuple[str, ...] = ()
     engine: object | None = None
+
+    def close(self) -> None:
+        close = getattr(self.engine, "close", None)
+        if callable(close):
+            close()
+        _LIVE_LAUNCHES[:] = [result for result in _LIVE_LAUNCHES if result is not self]
+
+
+def _retain_launch(result: WorkbenchLaunchResult) -> WorkbenchLaunchResult:
+    if result.launched:
+        _LIVE_LAUNCHES.append(result)
+    return result
+
+
+def _close_live_launches() -> None:
+    for result in tuple(_LIVE_LAUNCHES):
+        result.close()
 
 
 @dataclass(frozen=True)
@@ -317,7 +349,7 @@ def ensure_reference_review_runtime(
 
 def _ensure_qt_app(argv: Sequence[str], *, offscreen: bool, widgets: bool = False) -> object:
     if offscreen:
-        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        _configure_reference_review_platform((*argv, "--offscreen"))
     if widgets:
         os.environ.setdefault("QT_OPENGL", "desktop")
         from PySide6.QtWidgets import QApplication
@@ -338,9 +370,27 @@ def _ensure_qt_app(argv: Sequence[str], *, offscreen: bool, widgets: bool = Fals
 class _RootObjectAdapter:
     def __init__(self, root: object) -> None:
         self._root = root
+        self._closed = False
 
     def rootObjects(self) -> list[object]:
         return [self._root]
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        close = getattr(self._root, "close", None)
+        if callable(close):
+            close()
+        delete_later = getattr(self._root, "deleteLater", None)
+        if callable(delete_later):
+            delete_later()
+        from PySide6.QtCore import QCoreApplication, QEvent
+
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            app.processEvents()
 
 
 def launch_workbench(
@@ -359,16 +409,18 @@ def launch_workbench(
     bridges = bridges or default_bridge_registry(fixture_records)
     diagnostics = [item.code for item in bridges.diagnostics()]
     if qml_path is not None:
-        return _launch_qml_workbench(
-            argv,
-            bridges=bridges,
-            fixture_records=fixture_records,
-            fixture_diagnostics=fixture_diagnostics,
-            fixture_files=fixture_files,
-            fixture_databases=fixture_databases,
-            qml_path=qml_path,
-            offscreen=offscreen,
-            diagnostics=diagnostics,
+        return _retain_launch(
+            _launch_qml_workbench(
+                argv,
+                bridges=bridges,
+                fixture_records=fixture_records,
+                fixture_diagnostics=fixture_diagnostics,
+                fixture_files=fixture_files,
+                fixture_databases=fixture_databases,
+                qml_path=qml_path,
+                offscreen=offscreen,
+                diagnostics=diagnostics,
+            )
         )
     try:
         _ensure_qt_app(argv, offscreen=offscreen, widgets=True)
@@ -391,7 +443,9 @@ def launch_workbench(
         )
     except Exception as exc:
         return WorkbenchLaunchResult(False, (f"shell-unavailable:{exc}",))
-    return WorkbenchLaunchResult(True, tuple(diagnostics), _RootObjectAdapter(window))
+    return _retain_launch(
+        WorkbenchLaunchResult(True, tuple(diagnostics), _RootObjectAdapter(window))
+    )
 
 
 def _launch_qml_workbench(
@@ -572,6 +626,7 @@ class ReferenceReviewWindow(QWidget):
         self._fixture_files = fixture_files
         self._fixture_databases = fixture_databases
         self._offscreen = offscreen
+        self._lifecycle_closed = False
         self._interactive_preview_ready = True
         self._selected_index = -1
         self._all_fixture_items = _fixture_items_for_qml(queue, artifact_previews)
@@ -1216,15 +1271,23 @@ class ReferenceReviewWindow(QWidget):
         self.review_status_badge.setText(label)
         self.review_status_badge.setStyleSheet(stylesheet)
 
-    def closeEvent(self, event) -> None:
+    def shutdown(self) -> None:
+        """Drain work before renderer and widget destruction; safe to call repeatedly."""
+
+        if self._lifecycle_closed:
+            return
+        self._lifecycle_closed = True
         self._preview_poll_timer.stop()
         for future in self._preview_futures:
             future.cancel()
         self._preview_futures = []
         self._preview_future_identities = {}
         self._pending_preview_record = None
-        self._preview_controller.close()
+        self._preview_controller.close(wait=True)
         self.preview_surface.shutdown()
+
+    def closeEvent(self, event) -> None:
+        self.shutdown()
         super().closeEvent(event)
 
 
@@ -1400,12 +1463,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(diagnostic, file=sys.stderr)
         return 1
     _ACTIVE_LAUNCH = result
-    if "--check" in flags:
-        print("Reference Review Workbench launch check passed")
-        return 0
-    from PySide6.QtWidgets import QApplication
+    try:
+        if "--check" in flags:
+            print("Reference Review Workbench launch check passed")
+            return 0
+        from PySide6.QtWidgets import QApplication
 
-    return QApplication.instance().exec()
+        return QApplication.instance().exec()
+    finally:
+        result.close()
+        _ACTIVE_LAUNCH = None
 
 
 if __name__ == "__main__":

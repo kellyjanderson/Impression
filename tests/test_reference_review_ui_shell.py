@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import os
 import json
 import subprocess
@@ -13,7 +14,7 @@ from typing import Sequence
 
 import pytest
 import numpy as np
-from PySide6.QtCore import QObject, QSize, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QSize, Qt
 from PySide6.QtGui import QIcon, QImage
 from PySide6.QtWidgets import QApplication, QCheckBox, QLabel, QListWidget, QPushButton, QTabWidget, QTextEdit, QToolButton, QWidget
 
@@ -72,6 +73,24 @@ from impression.devtools.reference_review.ui.preview_widget import (
 from impression.devtools.reference_review.ui import shell
 from impression.devtools.reference_review.ui.shell import InteractiveStlPreviewLabel
 from impression.devtools.reference_review.ui.style import component_contracts
+
+
+@pytest.fixture(autouse=True)
+def _close_qt_resources_after_each_test():
+    """Keep native Qt/VTK ownership inside each test instead of interpreter exit."""
+
+    yield
+    app = QApplication.instance()
+    if app is None:
+        return
+    shell._close_live_launches()
+    for widget in tuple(app.topLevelWidgets()):
+        widget.close()
+        widget.deleteLater()
+    app.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+    gc.collect()
 
 
 def _write_empty_stl(path: Path) -> Path:
@@ -181,6 +200,94 @@ def test_live_shell_does_not_force_pyvista_offscreen_mode() -> None:
     )
 
     assert result.stdout.strip() == "None"
+
+
+@pytest.mark.parametrize("attempt", range(2))
+def test_offscreen_launch_check_closes_resources_and_exits_cleanly(
+    project_root: Path,
+    attempt: int,
+) -> None:
+    env = dict(os.environ)
+    env.update(
+        {
+            "LIBGL_ALWAYS_SOFTWARE": "1",
+            "PYTHONFAULTHANDLER": "1",
+            "PYVISTA_OFF_SCREEN": "true",
+            "QT_OPENGL": "software",
+            "QT_QPA_PLATFORM": "offscreen",
+        }
+    )
+
+    result = subprocess.run(
+        (
+            sys.executable,
+            "-X",
+            "faulthandler",
+            "-m",
+            "impression.devtools.reference_review.ui.shell",
+            "--check",
+            "--offscreen",
+        ),
+        cwd=project_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, (attempt, result.stderr)
+    assert "launch check passed" in result.stdout
+    assert "Fatal Python error" not in result.stderr
+
+
+def test_shell_construction_failure_leaves_no_owned_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication([])
+    before = set(app.topLevelWidgets())
+
+    class ConstructionFailure:
+        def __init__(self, *args, **kwargs) -> None:
+            raise RuntimeError("controlled-construction-failure")
+
+    monkeypatch.setattr(shell, "ReferenceReviewWindow", ConstructionFailure)
+
+    result = launch_workbench(offscreen=True)
+    app.processEvents()
+
+    assert not result.launched
+    assert result.diagnostics == ("shell-unavailable:controlled-construction-failure",)
+    assert set(app.topLevelWidgets()) == before
+
+
+def test_window_close_cancels_pending_work_before_renderer_shutdown(tmp_path: Path) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    artifact = _write_empty_stl(tmp_path / "part.stl")
+    record = ReviewSourceModelRecord(
+        "demo/pending-close",
+        "demo",
+        tmp_path / "model.py",
+        artifact_paths=(artifact,),
+    )
+    result = launch_workbench(fixture_records=(record,), offscreen=True)
+    window = result.engine.rootObjects()[0]
+    window._preview_controller.close()
+    pending: Future = Future()
+    events = []
+
+    class ControlledController:
+        def close(self, *, wait=True) -> None:
+            events.append(("controller", wait, pending.cancelled()))
+
+    window._preview_controller = ControlledController()
+    window._preview_futures = [pending]
+    window.preview_surface.shutdown = lambda: events.append(("renderer",))
+
+    result.close()
+
+    assert pending.cancelled()
+    assert events == [("controller", True, True), ("renderer",)]
 
 
 def test_qml_resource_layout_contains_shell_and_component_files() -> None:
@@ -470,7 +577,7 @@ def test_shell_startup_does_not_launch_preview_controller(
             launches.append(record)
             return SimpleNamespace(accepted=False, future=None, diagnostic="unexpected-launch")
 
-        def close(self) -> None:
+        def close(self, *, wait=True) -> None:
             pass
 
     monkeypatch.setattr(shell, "PreviewPayloadProcessController", StartupProbePreviewController)
@@ -1531,7 +1638,7 @@ def test_window_preview_controller_launches_and_polls_payload(tmp_path: Path) ->
         def cleanup_payload(self, payload, *, reason: str):
             cleaned.append((payload, reason))
 
-        def close(self):
+        def close(self, *, wait=True):
             pass
 
     window._preview_controller.close()
@@ -1588,7 +1695,7 @@ def test_window_preview_display_button_updates_live_surface(tmp_path: Path) -> N
         def cleanup_payload(self, payload, *, reason: str):
             return None
 
-        def close(self):
+        def close(self, *, wait=True):
             pass
 
     window._preview_controller.close()
@@ -1692,7 +1799,7 @@ def test_window_preview_ignores_stale_future_exception(tmp_path: Path) -> None:
         def handle_completion(self, envelope, handoff, diagnostic_handoff=None):
             raise AssertionError("stale exception should not reach completion handling")
 
-        def close(self):
+        def close(self, *, wait=True):
             pass
 
     window._preview_controller.close()
@@ -1772,7 +1879,7 @@ def test_window_preview_retries_latest_coalesced_request(tmp_path: Path) -> None
         def handle_completion(self, envelope, handoff, diagnostic_handoff=None):
             return None
 
-        def close(self):
+        def close(self, *, wait=True):
             pass
 
     window._preview_controller.close()
@@ -1941,7 +2048,7 @@ def test_console_entrypoint_supports_help_and_check(capsys) -> None:
     assert shell.main(("impression-reference-review", "--check", "--offscreen")) == 0
     check_output = capsys.readouterr().out
     assert "launch check passed" in check_output
-    assert shell._ACTIVE_LAUNCH is not None
+    assert shell._ACTIVE_LAUNCH is None
 
 
 def test_reference_review_runtime_diagnostics_blocks_old_rendering_stack() -> None:

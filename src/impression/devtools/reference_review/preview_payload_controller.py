@@ -158,6 +158,7 @@ class PreviewPayloadProcessController:
         self._active_identity: tuple[str, int, str, int] | None = None
         self._diagnostics: list[PreviewPayloadControllerDiagnostic] = []
         self._owned_payload_paths: dict[tuple[str, int, str, int], Path] = {}
+        self._closed = False
 
     @property
     def active_identity(self) -> tuple[str, int, str, int] | None:
@@ -174,20 +175,23 @@ class PreviewPayloadProcessController:
     def diagnostics(self) -> tuple[PreviewPayloadControllerDiagnostic, ...]:
         return tuple(self._diagnostics)
 
-    def close(self) -> None:
+    def close(self, *, wait: bool = True) -> None:
+        if self._closed:
+            return
+        self._closed = True
         for future in self._process_futures:
             future.cancel()
         self._process_futures = []
         if self._launch_executor is not None:
-            self._launch_executor.shutdown(wait=False, cancel_futures=True)
+            self._launch_executor.shutdown(wait=wait, cancel_futures=True)
             self._launch_executor = None
         if self._process_executor is not None:
             with self._process_lock:
                 process_executor = self._process_executor
                 self._process_executor = None
-            process_executor.shutdown(wait=False, cancel_futures=True)
+            process_executor.shutdown(wait=wait, cancel_futures=True)
         if self._dispatcher is not None and self._owns_dispatcher:
-            self._dispatcher.close(wait=False, cancel_futures=True)
+            self._dispatcher.close(wait=wait, cancel_futures=True)
 
     def adopt_payload(self, payload: PreviewPayload) -> None:
         if payload.payload_path is None:
@@ -342,6 +346,8 @@ class PreviewPayloadProcessController:
             fixture_id=record.fixture_id,
             payload={"generation": generation},
         )
+        if self._closed:
+            return DispatchResult(False, message, diagnostic="preview_executor_closed")
         self._active_identity = (
             self._owner,
             request_id,
