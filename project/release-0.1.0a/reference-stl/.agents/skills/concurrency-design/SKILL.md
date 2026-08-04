@@ -111,5 +111,33 @@ When reviewing specs, architecture, or code that mentions concurrency:
 - Include resource lifetime and cleanup.
 - Include backpressure limits.
 - Include at least one integration validation scenario that runs adjacent concurrent paths.
+- When code contains a concurrency hazard that is too broad to fix in the
+  current task, document it as a `codeimprovement` issue using the `coding`
+  skill's Code Improvement Issues process, including line-number blocks for
+  the affected producers, consumers, state owners, or resource lifetimes.
 
 For deeper examples, read `references/concurrency-patterns.md`.
+
+## SkillsKeeper Directives
+
+<!-- skillskeeper-directive: gui-async-completion-rules -->
+### GUI Async Completion Rules
+
+## GUI Async Completion Rules
+
+GUI apps are concurrent systems by default. The UI event loop, timers, signals, file watchers, renderers, subprocesses, background jobs, and user interactions are concurrent producers even before explicit worker threads are introduced.
+
+A non-trivial GUI design is incomplete without task lanes or message queues, backpressure, cancellation or replacement behavior, stale-result rejection, failure routing, and explicit UI-thread handoff. Blocking the UI thread is suspect by default.
+
+For workbench-scale apps, identify at least the relevant lanes before approving the design: UI, render, preview/build, file/index, agent/subprocess, durable write, export/snapshot, and telemetry/audit. Keep detailed lane inventories in `gui-async-application-architecture` references rather than duplicating them here.
+
+When a GUI app executes user-authored, generated, plugin, model, or active-work code, discuss process isolation. Threads are not sufficient protection from `BaseException`, `SystemExit`, native crashes, memory blowups, infinite loops, import-cache poisoning, or host-process exit.
+
+Stale failure handling must be symmetric with stale success handling: stale successes cannot overwrite current state, stale failures cannot clear current state, and stale cancellations cannot destroy current live state.
+<!-- /skillskeeper-directive: gui-async-completion-rules -->
+
+<!-- skillskeeper-directive: deferred-concurrency-code-improvements -->
+### Deferred Concurrency Code Improvements
+
+When implementation or review finds a concurrency defect that cannot be fixed within the current task, create or update a `codeimprovement` issue using the `coding` skill's Code Improvement Issues process. The issue must include `code-location` blocks for the relevant file and line ranges, name the ownership, ordering, stale-result, thread-affinity, lifetime, cancellation, backpressure, or failure-routing problem, and describe the validation needed to close it.
+<!-- /skillskeeper-directive: deferred-concurrency-code-improvements -->

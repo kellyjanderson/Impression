@@ -54,3 +54,22 @@ A feature or system area is not fully complete when:
 * durable documentation is still missing or stale
 
 Documentation completion is part of delivery, not optional polish.
+
+## SkillsKeeper Directives
+
+<!-- skillskeeper-directive: honest-completion-language -->
+### Honest Completion Language
+
+## Honest Completion Language
+
+Durable documentation must distinguish product reality from implementation artifacts. Prefer explicit states when describing feature status:
+
+- `Designed`: architecture or spec exists, but implementation is not complete.
+- `Implemented in isolation`: code or focused tests exist, but the app does not call it.
+- `Wired`: the app route calls it, but integrated behavior has not been validated.
+- `Integrated`: the intended route works and validation passes.
+- `User-accessible`: a user can discover and use it through the product surface.
+- `Complete`: user-accessible, validated, documented, and progression/spec state updated honestly.
+
+Docs must not imply a feature is complete when it is only implemented as unreachable code or validated only through helper-level tests.
+<!-- /skillskeeper-directive: honest-completion-language -->

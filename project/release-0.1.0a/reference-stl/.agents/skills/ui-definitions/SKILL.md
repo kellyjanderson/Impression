@@ -52,3 +52,20 @@ Architecture defines invisible system structure.
 UI definitions define visible interaction structure.
 
 Both should stabilize before detailed implementation work begins in their area.
+
+## SkillsKeeper Directives
+
+<!-- skillskeeper-directive: ui-reachability-inventory -->
+### UI Reachability Inventory
+
+## UI Reachability Inventory
+
+UI definitions for user-facing features must name how the feature is reached and what the user sees around the route:
+
+- where the user accesses it, such as panel, toolbar, menu, button, tab, file activation, keyboard command, or automatic event;
+- what event, command, selection, watcher, or background trigger invokes it;
+- visible idle, loading, stale, error, disabled, success, and cancellation states;
+- whether it can run while other panels are active.
+
+For multi-panel workbenches, define concurrent visible states, not only one happy path: file scan while preview builds, agent task while code is edited, stale preview while last good render remains visible, or save conflict while context is assembled.
+<!-- /skillskeeper-directive: ui-reachability-inventory -->

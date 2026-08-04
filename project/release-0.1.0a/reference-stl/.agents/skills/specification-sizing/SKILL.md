@@ -1,85 +1,103 @@
 ---
 name: specification-sizing
-description: Apply Implementation Work Units to judge whether a specification leaf is still too large or bundled to be marked final.
+description: Apply specification cohesion, split-coverage, canonicalization, and readiness checks when review-specs judges whether a specification leaf is too broad, when parent specs must split into child specs, and when canonical child specs can replace fully covered parent specs. This is a low-level structural rule skill; use review-specs for independent spec review actions.
 ---
 
 # Specification Sizing
 
-Use this Skill when deciding whether a specification is final or still needs child specifications.
+Use this skill from `review-specs` when deciding whether a specification is a
+cohesive independently deliverable leaf, whether it needs child specifications,
+and whether children fully cover a split parent.
 
-## Purpose
+The numeric `Review Score` defined by the shared scoring policy is the sole
+score. It is valid only when the current implementation-spec template was loaded
+through the selected process registry, its total appears in the front matter,
+and every category in its complete final `## Review Score Calculation` section
+was evaluated. The two totals must match exactly.
 
-Implementation Work Units (IWU) are a structural sizing tool.
+## Cohesive Leaf Rule
 
-IWU does not estimate hours.
-It answers:
-
-* does this specification still bundle too many concerns?
-* is this realistically one clean implementation round?
-* should this be refined further before implementation?
-
-## Unit Definition
-
-One IWU is one independently deliverable, reviewable change set with its own verification surface.
-
-The unit is intentionally abstract so it can size software, documentation, tooling, service, research, design, and process projects consistently.
-
-## Counting Rule
-
-Count only concerns explicitly present in the specification text.
-Do not score imagined future work that is not written.
-
-Count 1 IWU when the work has:
+A final implementation leaf must describe one independently deliverable,
+reviewable change boundary with:
 
 * one primary outcome
 * one coherent responsibility boundary
 * one reviewable artifact or change set
-* one explicit verification method
+* explicit verification
 * declared inputs and outputs
-* explicitly named unresolved assumptions or decisions
+* resolved or explicitly named assumptions and decisions
 
-Increase the IWU count, or refine into child specifications, when any measure becomes plural, ambiguous, or unnamed.
+These are qualitative readiness requirements, not a second score. Split or
+revise a specification when the boundary is plural, ambiguous, unnamed, or can
+fail and be delivered independently.
 
-## Evaluate At Least These Areas
+The shared Review Score thresholds remain authoritative:
 
-When sizing a specification, count and discuss:
+* `25+`: split required before implementation
+* `16-24`: explicit split review and a strong cohesion reason required
+* `0-15`: may remain whole when the cohesive leaf rule and readiness fields are
+  satisfied
 
-* distinct implementation concerns
-* new or changed durable contracts
-* major workflow or UI surfaces touched
-* cross-domain coupling
-* migration or compatibility burden
-* testing and verification shape
+The shared scoring policy's unresolved deferral/gap marker tripwire is also
+authoritative. Any unresolved reference to future specs, blockers, `to be
+defined`/TBD/TBA, not-done work, incomplete work, unfinished work, deferred
+work, or later work is a 100-point scoring event and prevents final status until
+resolved.
 
-## Annotation Rule
+## Split Coverage Rule
 
-Every specification document should include a `## Work Units` section near the top of the document, immediately after the title/date block when present.
+When a parent spec is split, the split is not complete until child specs cover
+100% of parent responsibilities. Do not leave uncovered responsibilities parked
+only in the parent. Move each uncovered responsibility into an existing child
+or create a new child, then verify coverage again.
 
-Use this format:
+During an incomplete split, child specs must keep the parent spec as primary
+ancestor. After coverage reaches 100%, children become canonical specs with the
+architecture document or ACD as primary ancestor and the parent as split
+provenance.
 
-```markdown
-## Work Units
+Use a coverage matrix with these statuses:
 
-Unit: Implementation Work Unit (IWU).
-Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
-Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
-Count: N IWU.
-Basis: short reason for the count.
-```
+* `Covered`: a child fully owns the parent responsibility.
+* `Moved this pass`: a child was updated and needs verification.
+* `Partial`: invalid as a stopping state.
+* `Missing`: invalid as a stopping state.
+* `Parent-only`: invalid as a stopping state.
 
-## Decision Rule
+Do not archive or demote a parent until the child re-review loop has completed
+and every parent responsibility is `Covered` by children.
 
-If an intended final leaf scores above 1 IWU, refine it into child specifications before marking it final.
+## Fixed-Point Refinement Rule
 
-If an intended final leaf scores 1 IWU and the qualitative review still shows one cohesive implementation round, it may remain final.
+Do not rely on a fixed pass count. Continue until a complete review of the
+active specs produces:
 
-Branch and parent specifications may score above 1 IWU, but their count is a rollup over descendant implementation leaves and must not be added to descendant counts when reporting totals.
+* no new child specs
+* no Review Score at or above the forced-split threshold for an intended final
+  leaf
+* no unresolved split coverage gaps
+* no failed cohesive leaf rule
+* no missing template or readiness fields that would force implementation
+  guessing
+
+Each review iteration must independently recalculate the Review Score from the
+current spec using the current implementation-spec template. Prior scores are
+claims to disprove, not baselines.
+
+The review ledger is controlled by `review-specs`. Do not write ledger entries
+for score changes, split creation, child writes, parent archival, coverage
+updates, or readiness changes. A request-round ledger entry whose new leaf list
+is `none` is the terminal fixed-point signal.
 
 ## Reporting Rule
 
-At the end of a refinement pass, report:
+At the end of a structural sizing check, report:
 
-* total IWU for implementation leaves
-* total IWU for verification or test-specification leaves
-* branch rollups separately from leaf totals to avoid double counting
-* how many branches still need another refinement round
+* the implementation-spec template source used for scoring
+* final Review Scores and split decisions
+* cohesion decisions for `16-24` leaves
+* specs still requiring splits
+* unresolved parent coverage
+* parents fully covered and ready to archive
+* remaining readiness blockers
+* the request-specific review ledger path and terminal new-leaf entry

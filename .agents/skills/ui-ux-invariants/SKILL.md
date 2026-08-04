@@ -46,3 +46,15 @@ When generating UI code:
 * prefer in-place placeholders and empty states
 * keep core control regions in stable positions
 * do not optimize for compactness at the expense of stability
+
+## SkillsKeeper Directives
+
+<!-- skillskeeper-directive: non-blocking-interaction-invariant -->
+### Non-Blocking Interaction Invariant
+
+## Non-Blocking Interaction Invariant
+
+UI review must treat blocking background work as an invariant failure. Typing, scrolling, resizing, closing, panel switching, and other ordinary interactions must stay responsive while background work runs.
+
+Background work needs visible pending, progress, stale, cancellation, or failure state when it affects user expectations. Controls should not appear available while silently depending on unresolved background state unless the system can resolve that state automatically and promptly.
+<!-- /skillskeeper-directive: non-blocking-interaction-invariant -->

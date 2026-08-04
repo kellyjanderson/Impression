@@ -1,6 +1,6 @@
 ---
 name: workflow-core
-description: Follow the shared workflow from exploration through stabilization into specification refinement and implementation, with research, release definitions, and test specifications as durable support layers.
+description: Follow the shared workflow from exploration through stabilization into spec-first discovery and implementation, with research, release definitions, and test specifications as durable support layers.
 ---
 
 # Workflow Core
@@ -13,11 +13,13 @@ Work progresses through three phases:
 
 1. exploration
 2. stabilization
-3. specification refinement and implementation
+3. spec-first discovery and implementation
 
 Research supports all phases.
 Release definitions provide version-level cohesion.
 Test specifications provide durable verification contracts.
+Architectural Change Documents (ACDs) provide temporary transition management
+when desired architecture is not yet true in code.
 
 ## Exploration Loops
 
@@ -41,27 +43,46 @@ For architecture, stability means the relevant branch has been completed breadth
 * high-level data flow is described
 * cross-domain solutions are resolved
 
-## Specification Refinement Loop
+If the desired architecture is a change from current reality, stabilize that
+intent in an ACD first. Do not make canonical architecture docs aspirational.
+
+## Spec-First Specification Discovery
 
 After stabilization:
 
-* break architecture or UI definitions into specifications
-* score each specification with Implementation Work Units (IWU)
-* annotate each specification near the top with its IWU count and basis
-* refine until leaves are implementation-sized
-* create paired test specifications for feature leaves as they become final
+* add or update `## Specification Sources` in architecture documents that imply downstream work
+* use ACD-local source notes when the work is an architectural transition that is not yet true in code
+* use `do specs` to create draft implementation specs from architecture, ACDs, parent specs, issues, or notes
+* use `review specs` as the independent refinement mechanism
+* when spec creation or review discovers missing/stale architecture, create or
+  update an ACD and link it from the affected specs; do not update canonical
+  architecture again until implementation is complete and reconciliation is
+  explicitly run
+* adversarially score, split, and review specs until they are small enough and ready enough to become final implementation specs
+* record implementation owner/module, routes, data ownership, UI field/control inventory, reuse/extraction decisions, performance/privacy constraints, and test strategy in the specs
+* create paired test specifications for final feature specs as needed
+* remove completed process scaffolding from active canonical architecture documents after final specs and paired test specs exist
+* archive or close parent specs only after child specs cover 100% of parent responsibilities
 
 Implementation should not be used as a substitute for unfinished architecture or unfinished UI definition work.
 
-During refinement, use IWU scoring as the standard signal for whether a branch needs another specification pass:
+Do not combine spec creation and spec review in one action. Creation uses
+`do specs`; critical review uses `review specs`.
 
-* intended final leaves should score 1 IWU
-* branches may score above 1 IWU as rollups over descendant leaves
-* split a specification when the IWU measures are plural, ambiguous, or unnamed
-* report branch rollups separately from leaf totals to avoid double counting
+If shared specification-sizing guidance conflicts with local process guidance,
+the stricter split, readiness, and coverage rule wins. Review scoring must use
+the current implementation-spec template selected through the process registry.
 
 ## Path Rule
 
 Implementation work must not begin without a durable planning anchor.
 
 Workspace overlays may define the allowed local paths and anchor variants.
+
+For spec-first projects, a valid planning anchor is a final implementation spec
+whose template-governed Review Score, split decision, and readiness blockers
+permit implementation.
+
+Source notes and parent specs are not planning anchors once canonical final
+specs exist. Progression should point to canonical final specs and paired test
+specs.
