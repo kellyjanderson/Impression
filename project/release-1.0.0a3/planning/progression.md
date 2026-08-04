@@ -22,8 +22,8 @@ separate completion state.
 
 - [x] [Fix 09: User-Model Loader Module Identity](../specifications/fix-09-user-model-loader-module-identity-v1_0.md)
 - [x] [Fix 09 Test](../test-specifications/fix-09-user-model-loader-module-identity-v1_0.md)
-- [ ] [Fix 10: SurfaceBody Preview and Export Consumption](../specifications/fix-10-surfacebody-preview-export-consumption-v1_0.md)
-- [ ] [Fix 10 Test](../test-specifications/fix-10-surfacebody-preview-export-consumption-v1_0.md)
+- [x] [Fix 10: SurfaceBody Preview and Export Consumption](../specifications/fix-10-surfacebody-preview-export-consumption-v1_0.md)
+- [x] [Fix 10 Test](../test-specifications/fix-10-surfacebody-preview-export-consumption-v1_0.md)
 - [ ] [Fix 11: Export Manufacturing Integrity Gate](../specifications/fix-11-export-manufacturing-integrity-gate-v1_0.md)
 - [ ] [Fix 11 Test](../test-specifications/fix-11-export-manufacturing-integrity-gate-v1_0.md)
 

@@ -784,7 +784,12 @@ def export(
     previewer = PyVistaPreviewer(console=console)
     _log_active_units(previewer)
     try:
-        datasets = previewer.collect_datasets(initial_scene)
+        from impression.modeling import export_tessellation_request
+
+        datasets = previewer.collect_datasets(
+            initial_scene,
+            tessellation_request=export_tessellation_request(),
+        )
         merged = previewer.combine_to_mesh(datasets)
     except PreviewBackendError as exc:
         raise typer.BadParameter(str(exc)) from exc
