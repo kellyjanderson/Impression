@@ -387,6 +387,11 @@ def _resolve_font_path(font_path: str | None, font: str) -> str:
     for path in candidates:
         if font_name in path.stem.lower().replace(" ", ""):
             return str(path)
+    if font_name == "arial":
+        for fallback_name in ("liberationsans", "dejavusans"):
+            for path in candidates:
+                if fallback_name in path.stem.lower().replace(" ", ""):
+                    return str(path)
     raise FileNotFoundError(
         f"Could not locate font '{font}'. Provide font_path explicitly."
     )

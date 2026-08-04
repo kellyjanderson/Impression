@@ -176,6 +176,8 @@ def test_changed_asset_invalidates_qualified_manifest(project_root: Path, tmp_pa
 def test_release_workflow_gates_build_qualification_and_publication(project_root: Path) -> None:
     workflow = (project_root / ".github" / "workflows" / "release.yml").read_text()
 
+    assert workflow.count("uses: actions/checkout@v4\n        with:\n          lfs: true") == 3
+    assert "fonts-dejavu-core" in workflow
     assert "qualify:\n    needs: test" in workflow
     assert "publish:\n    needs: qualify" in workflow
     assert workflow.index("Run full candidate suite") < workflow.index("Build package artifacts once")
