@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-### Release Line Cleanup
+## 1.0.0a2
+
+### Corrective Release Line Cleanup
 
 - Removed the accidentally merged shelved SDF/endcap experiment, its public
   exports, examples, fixtures, and core runtime dependency. The experiment
