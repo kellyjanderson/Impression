@@ -11,7 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CMAKE_ARGS: "-DMANIFOLD_PAR=OFF"
+      LIBGL_ALWAYS_SOFTWARE: "1"
       PYTHONPATH: "src"
+      PYVISTA_OFF_SCREEN: "true"
+      QT_OPENGL: "software"
+      QT_QPA_PLATFORM: "offscreen"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
