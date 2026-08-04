@@ -27,7 +27,7 @@ the issue tracker.
 | A3-10 | Normal scene collection recognizes mesh/polyline payloads but not a first-class `SurfaceBody` result | `src/impression/preview.py::_collect_datasets_from_scene` | [Fix 10](../specifications/fix-10-surfacebody-preview-export-consumption-v1_0.md) |
 | A3-11 | STL export can write a non-watertight or degenerate result without a manufacturing integrity gate | `src/impression/cli.py::export` and `write_stl` path | [Fix 11](../specifications/fix-11-export-manufacturing-integrity-gate-v1_0.md) |
 | A3-12 | Documentation-rule tests assert retired `agents/` and `project/agents/` paths | `tests/test_documentation_rules.py` | [Fix 12](../specifications/fix-12-documentation-policy-test-migration-v1_0.md) |
-| A3-13 | Tag workflow publishes untested artifacts and does not explicitly mark alpha releases as prereleases | `.github/workflows/release.yml` | [Fix 13](../specifications/fix-13-release-workflow-artifact-qualification-v1_0.md) |
+| A3-13 | Tag workflow publishes untested artifacts and does not explicitly mark alpha releases as prereleases | `.github/workflows/release.yml` | [Fix 13A](../specifications/fix-13a-release-artifact-build-qualification-v1_0.md) and [Fix 13B](../specifications/fix-13b-qualified-prerelease-publication-v1_0.md) ([split parent](../specifications/fix-13-release-workflow-artifact-qualification-v1_0.md)) |
 
 ## Accounted For But Deferred
 
@@ -53,6 +53,7 @@ the issue tracker.
 ## Change-Control Rule
 
 A newly discovered issue may enter a3 only when it is reproduced, corrective
-rather than expansive, sized as one IWU, supplied with a paired test
-specification, and added to this intake and progression. Otherwise it is logged
-for the next release instead of silently enlarging a3.
+rather than expansive, normalized and rescored with the current implementation
+template, below the forced-split threshold as a cohesive leaf, supplied with a
+paired test specification, and added to this intake and progression. Otherwise it
+is logged for the next release instead of silently enlarging a3.

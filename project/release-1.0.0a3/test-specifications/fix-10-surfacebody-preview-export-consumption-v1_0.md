@@ -2,18 +2,22 @@
 
 Date: 2026-08-04
 Status: Final
+Feature spec: `../specifications/fix-10-surfacebody-preview-export-consumption-v1_0.md`
+Feature spec canonical status: Canonical
+Architecture ancestor: `project/release-0.1.0a/architecture/surface-first-internal-model.md`
 
-## Work Units
+## Overview
 
-Count: 1 IWU.
+Verify direct `SurfaceBody` consumption through separate preview and export routes.
 
-### IWU 1 — Verify direct SurfaceBody preview/export consumption
+## Application Integration Under Test
 
-- Input: direct-body and mixed nested-group model fixtures with transforms.
-- Work: spy on tessellation policy/count and assert ordering, transforms, legacy
-  payload behavior, and unsupported-payload refusal.
-- Output: primary preview/export consumer integration coverage.
-- Complete when: CLI preview collection and STL export pass without model-side adapters.
+- App type: mixed.
+- User/caller surface: GUI preview viewport and console export command.
+- Invocation route: model result -> shared collector -> route policy -> viewport/export.
+- Wiring owner/module: `src/impression/preview.py`, called from `src/impression/cli.py`.
+- Observable result: render dataset and export-ready mesh.
+- Integration validation: separate preview and export route tests.
 
 ## Backlink
 
@@ -24,12 +28,12 @@ Count: 1 IWU.
 Create a model returning one surface-first box body; preview it, export it, and
 confirm no explicit tessellation call is present in the model.
 
-## Automated Smoke
+## Automated Smoke Tests
 
 Pass a `SurfaceBody` through scene collection and assert it yields a non-empty
 dataset using a spy that records the preview tessellation policy.
 
-## Automated Acceptance
+## Automated Acceptance Tests
 
 - Run CLI preview collection and STL export for a direct `SurfaceBody` result.
 - Assert preview/export policies are distinct and invoked once per surface payload.
@@ -38,3 +42,21 @@ dataset using a spy that records the preview tessellation policy.
 - Assert unsupported payloads receive a named diagnostic.
 
 Tests use deterministic primitive surfaces and do not require an interactive window.
+
+## App-Type Proof
+
+- GUI proof: offscreen preview collection reaches the viewport payload with preview policy.
+- Console proof: export command reaches shared collector with export policy and produces mesh.
+- Mixed-surface proof: each route has a separate failure assertion.
+- API/service and library-only proof: not applicable.
+
+## Fixtures And Data
+
+- Direct surface body and nested mixed groups with stable transforms/order.
+- Production-data rule: temporary deterministic models only.
+
+## Acceptance
+
+- [x] Feature spec is canonical and both independently failing routes are covered.
+- [x] Observable route outputs, policy, ordering, transforms, and refusal are asserted.
+- [x] Shared-helper-only tests cannot satisfy the contract.

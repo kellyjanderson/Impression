@@ -2,18 +2,22 @@
 
 Date: 2026-08-04
 Status: Final
+Feature spec: `../specifications/fix-07-reference-review-linux-lifecycle-v1_0.md`
+Feature spec canonical status: Canonical
+Architecture ancestor: `project/release-0.1.0a/architecture/reference-review-async-concurrency.md`
 
-## Work Units
+## Overview
 
-Count: 1 IWU.
+Verify deterministic reference-review GUI startup/teardown on Linux and macOS.
 
-### IWU 1 — Verify headless review-shell startup and teardown
+## Application Integration Under Test
 
-- Input: the complete UI-shell module on supported Linux headless and macOS lanes.
-- Work: repeat success, construction-failure, and close-during-work paths in one
-  process with faulthandler and bounded timeout.
-- Output: cross-platform CI lifecycle coverage retaining crash diagnostics.
-- Complete when: runs are stable with no skip, orphan, fatal message, signal, or masking.
+- App type: GUI.
+- User/caller surface: reference-review shell startup and close.
+- Invocation route: Qt event loop -> shell -> close -> work/renderer drain -> exit.
+- Wiring owner/module: reference-review UI shell/controller.
+- Observable result: normal process exit without hang/crash/orphan.
+- Integration validation: complete module repeated in one Linux/macOS process.
 
 ## Backlink
 
@@ -24,12 +28,12 @@ Count: 1 IWU.
 On Linux headless CI, run the full UI-shell module repeatedly with faulthandler
 enabled and confirm normal process exit; run the same focused module on macOS.
 
-## Automated Smoke
+## Automated Smoke Tests
 
 Launch and close the smallest reference-review shell in the supported headless Qt
 configuration and assert process exit code 0 within a bounded timeout.
 
-## Automated Acceptance
+## Automated Acceptance Tests
 
 - Run the complete `tests/test_reference_review_ui_shell.py` in one process.
 - Repeat it to expose teardown/order instability.
@@ -38,3 +42,19 @@ configuration and assert process exit code 0 within a bounded timeout.
 - Keep the module enabled in Linux and macOS CI lanes.
 
 CI logs must preserve faulthandler output on failure without converting crashes to skips.
+
+## App-Type Proof
+
+- GUI proof: offscreen visible shell lifecycle, event processing, close ordering, and native exit.
+- Console, API/service, mixed, and library-only proof: not applicable.
+
+## Fixtures And Data
+
+- Supported Qt platform configuration and local reference-review shell fixtures.
+- Production-data rule: no production database or user references.
+
+## Acceptance
+
+- [x] Feature spec is canonical and real GUI route is exercised.
+- [x] Observable exit status and failure diagnostics are asserted.
+- [x] Construction failure and close-during-work behavior are covered.

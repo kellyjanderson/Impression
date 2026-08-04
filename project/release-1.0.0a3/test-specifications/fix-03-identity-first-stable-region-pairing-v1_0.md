@@ -2,17 +2,22 @@
 
 Date: 2026-08-04
 Status: Final
+Feature spec: `../specifications/fix-03-identity-first-stable-region-pairing-v1_0.md`
+Feature spec canonical status: Canonical
+Architecture ancestor: `project/release-0.1.0a/architecture/loft-nm-mn-decomposition-architecture.md`
 
-## Work Units
+## Overview
 
-Count: 1 IWU.
+Verify that explicit region identity is resolved before bounded ambiguity search.
 
-### IWU 1 — Verify identity pairing bypasses ambiguity enumeration
+## Application Integration Under Test
 
-- Input: generated 1, 64, 65, and larger region sets with identified/anonymous variants.
-- Work: measure pairing, search visits, ordering, mixed residue, and invalid-ID behavior.
-- Output: a bounded planner regression matrix with positive and refusal controls.
-- Complete when: identified sets bypass the limit and anonymous sets still obey it.
+- App type: library-only.
+- User/caller surface: `Loft(...)` with multi-region stations.
+- Invocation route: station normalization -> identity pairing -> residual enumeration.
+- Wiring owner/module: `src/impression/modeling/loft.py`.
+- Observable result: deterministic plan or named conflict/limit refusal.
+- Integration validation: public loft planning with 65+ identified regions.
 
 ## Backlink
 
@@ -23,12 +28,12 @@ Count: 1 IWU.
 Run the multi-region test model at the default branch limit and inspect the plan
 diagnostic: explicit pairs should be resolved before candidate enumeration.
 
-## Automated Smoke
+## Automated Smoke Tests
 
 Create 65 geometrically identical regions with unique matching IDs and assert
 planning succeeds with zero ambiguous assignments visited for those pairs.
 
-## Automated Acceptance
+## Automated Acceptance Tests
 
 - Cover 1, 64, 65, and a larger bounded set of identity-matched regions.
 - Shuffle input order and assert identity pairing/output ordering is deterministic.
@@ -37,3 +42,19 @@ planning succeeds with zero ambiguous assignments visited for those pairs.
 - Assert a mixed fixture enumerates only the unmatched residue.
 
 Fixtures use generated local regions and deterministic IDs.
+
+## App-Type Proof
+
+- GUI, console, API/service, and mixed-surface proof: not applicable.
+- Library-only proof: public loft planning is exercised, not only the enumerator helper.
+
+## Fixtures And Data
+
+- Generated identified, shuffled, mixed, contradictory, and anonymous region sets.
+- Production-data rule: no production data.
+
+## Acceptance
+
+- [x] Feature spec is canonical and route-level behavior is asserted.
+- [x] Success, conflict, and branch-limit outcomes are covered.
+- [x] Observable search-visit and pairing results are measured.

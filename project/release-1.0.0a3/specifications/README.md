@@ -1,6 +1,8 @@
 # v1.0.0a3 Final Fix Specifications
 
-All entries are final, independently deliverable one-IWU leaves.
+All entries are canonical, independently deliverable leaves normalized and
+rescored with the current implementation-spec template. Numeric scores and split
+decisions are summarized in [progression](../planning/progression.md).
 
 1. [TopologyPath Loft Input Preservation](fix-01-topology-path-loft-input-preservation-v1_0.md)
 2. [Protected Loft Corner Tessellation](fix-02-protected-loft-corner-tessellation-v1_0.md)
@@ -14,4 +16,7 @@ All entries are final, independently deliverable one-IWU leaves.
 10. [SurfaceBody Preview and Export Consumption](fix-10-surfacebody-preview-export-consumption-v1_0.md)
 11. [Export Manufacturing Integrity Gate](fix-11-export-manufacturing-integrity-gate-v1_0.md)
 12. [Documentation Policy Test Migration](fix-12-documentation-policy-test-migration-v1_0.md)
-13. [Release Workflow Artifact Qualification](fix-13-release-workflow-artifact-qualification-v1_0.md)
+13. [Release Artifact Build and Qualification](fix-13a-release-artifact-build-qualification-v1_0.md)
+14. [Qualified Prerelease Publication](fix-13b-qualified-prerelease-publication-v1_0.md)
+
+Superseded split provenance: [Fix 13 parent](fix-13-release-workflow-artifact-qualification-v1_0.md).

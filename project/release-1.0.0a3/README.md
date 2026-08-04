@@ -26,8 +26,11 @@ built artifacts, clean-install behavior, and test-modeling reproductions agree.
 
 ## Planned Specifications
 
-The release contains 13 final implementation leaves and 13 paired verification
-leaves. The indexed lists live in [Specifications](specifications/README.md) and
+The release contains 14 canonical implementation leaves and 14 paired verification
+leaves. Each implementation leaf carries the complete current Review Score. The
+original Fix 13 scored 26 and was split into canonical Fix 13A and Fix 13B leaves;
+seven canonical scores in the 16-24 band include explicit cohesion decisions. The
+indexed lists live in [Specifications](specifications/README.md) and
 [Test Specifications](test-specifications/README.md); execution order lives in
 [Progression](planning/progression.md).
 
@@ -52,6 +55,19 @@ The release candidate may be tagged only after all of the following are true:
 7. Documentation archive traversal abuse cases are rejected before any write.
 8. GitHub publishes `v1.0.0a3` as a prerelease and attaches only the qualified
    artifacts produced by the gated workflow.
+
+## Specification Review Result
+
+- Scoring policy: `/Users/k/Documents/Projects/.agents/process/specification-review-scoring-policy.md`.
+- Template: `/Users/k/Documents/Projects/.agents/process/templates/implementation-spec-template.md`.
+- Score range: 8.5 to 23.
+- Forced splits (`25+`): Fix 13 at 26, fully covered and superseded by Fix 13A/13B.
+- Explicit split reviews (`16-24`): Fixes 05, 07, 08, 10, 11, 13A, and 13B; each
+  remains cohesive for the transaction boundary documented in its specification.
+- Readiness blockers, missing prerequisites, unresolved deferral/gap markers, and
+  parent coverage gaps: none.
+- Review ledger: [2026-08-04 scoring review](planning/spec-review-ledger-20260804-040607.md),
+  terminating on pass 2 with new leaves `none`.
 
 ## Exclusions
 

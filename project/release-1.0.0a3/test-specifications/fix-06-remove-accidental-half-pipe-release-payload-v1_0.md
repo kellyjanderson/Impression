@@ -2,18 +2,22 @@
 
 Date: 2026-08-04
 Status: Final
+Feature spec: `../specifications/fix-06-remove-accidental-half-pipe-release-payload-v1_0.md`
+Feature spec canonical status: Canonical
+Architecture ancestor: not applicable
 
-## Work Units
+## Overview
 
-Count: 1 IWU.
+Verify that source, built distributions, and clean installation contain no half-pipe payload.
 
-### IWU 1 — Verify half-pipe payload removal in source and distributions
+## Application Integration Under Test
 
-- Input: candidate source, wheel, sdist, and a fresh installation environment.
-- Work: inspect paths/dependencies/artifact contents, install the wheel, and smoke
-  supported imports/examples.
-- Output: source-and-distribution absence checks tied to release qualification.
-- Complete when: no artifact or clean installation contains or pulls the experiment.
+- App type: workflow.
+- User/caller surface: package build and clean-install consumer.
+- Invocation route: source -> build -> artifact inspection -> dependency install -> import smoke.
+- Wiring owner/module: package metadata and release qualification workflow.
+- Observable result: absence of files/import/dependency and successful approved imports.
+- Integration validation: wheel/sdist inspection and clean installation.
 
 ## Backlink
 
@@ -24,12 +28,12 @@ Count: 1 IWU.
 Build the candidate, inspect its dependency metadata and file list, then clean
 install it and import the supported package and examples.
 
-## Automated Smoke
+## Automated Smoke Tests
 
 Assert the source paths do not exist and parsed project dependencies do not
 contain `build123d`.
 
-## Automated Acceptance
+## Automated Acceptance Tests
 
 - Build wheel and sdist; inspect both archives for `half_pipe`, `cad.py`, and
   `build123d` metadata.
@@ -38,3 +42,19 @@ contain `build123d`.
 - Search maintained docs/tests for live references requiring the removed adapter.
 
 The test checks built artifacts, not source absence alone.
+
+## App-Type Proof
+
+- GUI, console, API/service, mixed, and library-only proof: not applicable.
+- Workflow proof: the exact built wheel/sdist are inspected and the wheel is installed fresh.
+
+## Fixtures And Data
+
+- Candidate source, built artifacts, and temporary clean environment.
+- Production-data rule: not applicable.
+
+## Acceptance
+
+- [x] Feature spec is canonical and full package route is proved.
+- [x] Observable source/artifact/install results are asserted.
+- [x] Source-only checks cannot satisfy this contract.

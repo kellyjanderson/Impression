@@ -3,8 +3,9 @@
 Date: 2026-08-04
 Status: Planned
 
-Only final one-IWU implementation leaves and their paired one-IWU verification
-leaves appear here. A feature and its test leaf have separate completion state.
+Only canonical implementation leaves that passed the current Review Score and
+their paired verification leaves appear here. A feature and its test leaf have
+separate completion state.
 
 ## Release Hygiene And Safety
 
@@ -14,8 +15,10 @@ leaves appear here. A feature and its test leaf have separate completion state.
 - [ ] [Fix 12 Test](../test-specifications/fix-12-documentation-policy-test-migration-v1_0.md)
 - [ ] [Fix 08: Safe Documentation Archive Extraction](../specifications/fix-08-safe-docs-archive-extraction-v1_0.md)
 - [ ] [Fix 08 Test](../test-specifications/fix-08-safe-docs-archive-extraction-v1_0.md)
-- [ ] [Fix 13: Release Workflow Artifact Qualification](../specifications/fix-13-release-workflow-artifact-qualification-v1_0.md)
-- [ ] [Fix 13 Test](../test-specifications/fix-13-release-workflow-artifact-qualification-v1_0.md)
+- [ ] [Fix 13A: Release Artifact Build and Qualification](../specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
+- [ ] [Fix 13A Test](../test-specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
+- [ ] [Fix 13B: Qualified Prerelease Publication](../specifications/fix-13b-qualified-prerelease-publication-v1_0.md)
+- [ ] [Fix 13B Test](../test-specifications/fix-13b-qualified-prerelease-publication-v1_0.md)
 - [ ] [Fix 07: Reference Review Linux Lifecycle](../specifications/fix-07-reference-review-linux-lifecycle-v1_0.md)
 - [ ] [Fix 07 Test](../test-specifications/fix-07-reference-review-linux-lifecycle-v1_0.md)
 
@@ -41,9 +44,26 @@ leaves appear here. A feature and its test leaf have separate completion state.
 - [ ] [Fix 04: Coplanar Loft-Body Union Outcome](../specifications/fix-04-coplanar-loft-body-union-outcome-v1_0.md)
 - [ ] [Fix 04 Test](../test-specifications/fix-04-coplanar-loft-body-union-outcome-v1_0.md)
 
-## Sizing Summary
+## Review Score Summary
 
-- Implementation leaves: 13 IWU.
-- Verification leaves: 13 IWU.
-- Branch rollups: 26 IWU total, reported separately from the leaf counts above.
-- Branches needing another refinement round: 0.
+| Fix | Score | Split decision |
+|---:|---:|---|
+| 01 | 12.5 | Cohesive leaf |
+| 02 | 14 | Cohesive leaf |
+| 03 | 12.5 | Cohesive leaf |
+| 04 | 13 | Cohesive leaf |
+| 05 | 17 | Retain after explicit split review: one loft-output transaction |
+| 06 | 8.5 | Cohesive leaf |
+| 07 | 19 | Retain after explicit split review: one GUI process lifecycle |
+| 08 | 19 | Retain after explicit split review: one atomic extraction boundary |
+| 09 | 14.5 | Cohesive leaf |
+| 10 | 23 | Retain after explicit split review: one shared consumer adapter with two route proofs |
+| 11 | 22.5 | Retain after explicit split review: one validated atomic export transaction |
+| 12 | 12.5 | Cohesive leaf |
+| 13 parent | 26 | Forced split; 100% covered and superseded |
+| 13A | 22 | Retain after explicit split review: one artifact qualification transaction |
+| 13B | 16 | Retain after explicit split review: one external publication transaction |
+
+- Forced splits (`25+`): Fix 13, completed into Fix 13A and Fix 13B.
+- Readiness blockers and unresolved parent coverage: none.
+- Terminal review pass: [ledger](spec-review-ledger-20260804-040607.md) pass 2, new leaves `none`.

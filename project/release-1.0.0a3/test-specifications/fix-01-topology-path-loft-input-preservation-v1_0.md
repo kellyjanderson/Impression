@@ -2,18 +2,23 @@
 
 Date: 2026-08-04
 Status: Final
+Feature spec: `../specifications/fix-01-topology-path-loft-input-preservation-v1_0.md`
+Feature spec canonical status: Canonical
+Architecture ancestor: `project/release-0.1.0a/architecture/loft-topology-point-correspondence-architecture.md`
 
-## Work Units
+## Overview
 
-Count: 1 IWU.
+Verify that the public loft route accepts a closed `TopologyPath`, preserves every
+authored identity field, and refuses invalid path topology.
 
-### IWU 1 — Verify lossless TopologyPath-to-loft normalization
+## Application Integration Under Test
 
-- Input: minimal and audio-cube paths with named/protected topology records.
-- Work: exercise direct `Loft` input, every retained identity field, invalid-path
-  refusals, and existing section-like inputs.
-- Output: a focused identity-preservation regression module and manual smoke record.
-- Complete when: the automated module and audio-cube smoke both pass.
+- App type: library-only.
+- User/caller surface: model authors calling `Loft(...)`.
+- Invocation route: `Loft` -> `as_section` -> topology adapter -> planner.
+- Wiring owner/module: `src/impression/modeling/loft.py`.
+- Observable result: surface plan/body with retained IDs or specific refusal.
+- Integration validation: direct public call plus audio-cube model smoke.
 
 ## Backlink
 
@@ -25,12 +30,12 @@ Run the audio-cube diagonal-halves model with its named `TopologyPath` passed
 directly to `Loft`; confirm planning succeeds and its diagnostic record retains
 the authored diagonal IDs and protection flag.
 
-## Automated Smoke
+## Automated Smoke Tests
 
 Add a minimal named rectangle `TopologyPath` fixture and assert `Loft` accepts it,
 returns a `SurfaceBody`, and retains point/correspondence identity in the plan.
 
-## Automated Acceptance
+## Automated Acceptance Tests
 
 - Reproduce the test-modeling diagonal path with exact point IDs and assert a
   lossless mapping to the section loop.
@@ -39,3 +44,21 @@ returns a `SurfaceBody`, and retains point/correspondence identity in the plan.
 - Run the existing `Section`, `Path2D`, and planar-shape loft API suite.
 
 Fixtures must be deterministic local geometry and require no production data.
+
+## App-Type Proof
+
+- GUI, console, API/service, and mixed-surface proof: not applicable.
+- Library-only proof: `Loft(...)` is invoked through the public modeling import and
+  the returned plan/body is inspected for canonical topology identity.
+
+## Fixtures And Data
+
+- Minimal closed/open/duplicate paths and committed audio-cube diagonal path.
+- Production-data rule: no production data; deterministic local geometry only.
+
+## Acceptance
+
+- [x] Feature spec is canonical.
+- [x] Public library route and observable result are asserted.
+- [x] Helper-only tests cannot satisfy the contract.
+- [x] Success and invalid-input behavior are covered.

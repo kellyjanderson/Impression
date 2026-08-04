@@ -1,8 +1,9 @@
 # v1.0.0a3 Paired Test Specifications
 
-Each final fix specification has one independently deliverable one-IWU
-verification leaf with manual smoke, automated smoke, and automated acceptance
-coverage.
+Each canonical fix specification has one independently deliverable paired
+verification leaf normalized to the current test-specification template, with
+application-route proof, manual smoke, automated smoke, automated acceptance,
+fixtures, failure behavior, and observable results.
 
 1. [Fix 01 Test](fix-01-topology-path-loft-input-preservation-v1_0.md)
 2. [Fix 02 Test](fix-02-protected-loft-corner-tessellation-v1_0.md)
@@ -16,4 +17,7 @@ coverage.
 10. [Fix 10 Test](fix-10-surfacebody-preview-export-consumption-v1_0.md)
 11. [Fix 11 Test](fix-11-export-manufacturing-integrity-gate-v1_0.md)
 12. [Fix 12 Test](fix-12-documentation-policy-test-migration-v1_0.md)
-13. [Fix 13 Test](fix-13-release-workflow-artifact-qualification-v1_0.md)
+13. [Fix 13A Test](fix-13a-release-artifact-build-qualification-v1_0.md)
+14. [Fix 13B Test](fix-13b-qualified-prerelease-publication-v1_0.md)
+
+Superseded split provenance: [Fix 13 parent test](fix-13-release-workflow-artifact-qualification-v1_0.md).
