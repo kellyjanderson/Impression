@@ -72,8 +72,14 @@ separate completion state.
 
 ## Final Artifact Qualification And Publication Readiness
 
-- [x] [Fix 13A: Release Artifact Build and Qualification](../specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
-- [x] [Fix 13A Test](../test-specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
+- [x] Hydrate Git LFS reference artifacts in every release job checkout.
+  - Specification: [Fix 13A](../specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
+- [x] Install the Linux font used by text and loft qualification tests and provide the default Arial-compatible fallback.
+  - Specification: [Fix 13A](../specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
+- [x] Make the preview PNG help assertion independent of CI terminal width and ANSI rendering.
+  - Test specification: [Fix 13A Test](../test-specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
+- [ ] Pass the complete tag-triggered test and artifact-qualification jobs.
+  - Test specification: [Fix 13A Test](../test-specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
 - [ ] [Fix 13B: Qualified Prerelease Publication](../specifications/fix-13b-qualified-prerelease-publication-v1_0.md)
 - [ ] [Fix 13B Test](../test-specifications/fix-13b-qualified-prerelease-publication-v1_0.md)
 
