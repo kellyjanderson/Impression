@@ -6,6 +6,7 @@ import sys
 import time
 from pathlib import Path
 
+import click
 import pytest
 from typer.testing import CliRunner
 
@@ -121,10 +122,10 @@ def test_preview_help_describes_one_shot_png_export() -> None:
     result = CliRunner().invoke(
         cli.app,
         ["preview", "--help"],
-        env={"COLUMNS": "160"},
+        env={"COLUMNS": "160", "FORCE_COLOR": "1"},
         color=False,
     )
-    normalized_output = " ".join(result.output.replace("│", " ").split())
+    normalized_output = " ".join(click.unstyle(result.output).replace("│", " ").split())
 
     assert result.exit_code == 0, result.output
     assert "--screenshot" in normalized_output

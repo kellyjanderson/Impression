@@ -7,6 +7,34 @@ on:
     branches: [ main, working ]
 
 jobs:
+  candidate-suite:
+    runs-on: macos-14
+    env:
+      CMAKE_ARGS: "-DMANIFOLD_PAR=OFF"
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      PYTHONPATH: "src"
+      PYVISTA_OFF_SCREEN: "true"
+      QT_OPENGL: "software"
+      QT_QPA_PLATFORM: "offscreen"
+    steps:
+      - name: Checkout exact reference artifacts
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install candidate dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run full candidate suite
+        run: python -m pytest
+
   build-test:
     runs-on: ubuntu-latest
     env:

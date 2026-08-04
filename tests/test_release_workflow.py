@@ -177,7 +177,7 @@ def test_release_workflow_gates_build_qualification_and_publication(project_root
     workflow = (project_root / ".github" / "workflows" / "release.yml").read_text()
 
     assert workflow.count("uses: actions/checkout@v4\n        with:\n          lfs: true") == 3
-    assert "fonts-dejavu-core" in workflow
+    assert "test:\n    runs-on: macos-14" in workflow
     assert "qualify:\n    needs: test" in workflow
     assert "publish:\n    needs: qualify" in workflow
     assert workflow.index("Run full candidate suite") < workflow.index("Build package artifacts once")
@@ -192,6 +192,16 @@ def test_release_workflow_gates_build_qualification_and_publication(project_root
     assert "prerelease: ${{ steps.verify.outputs.prerelease }}" in workflow
     assert "files: ${{ steps.verify.outputs.files }}" in workflow
     assert "Verify published release metadata" in workflow
+
+
+def test_pr_ci_runs_exact_references_on_the_authoring_platform(project_root: Path) -> None:
+    workflow = (project_root / ".github" / "workflows" / "ci.yml").read_text()
+
+    assert "candidate-suite:\n    runs-on: macos-14" in workflow
+    assert "Checkout exact reference artifacts" in workflow
+    assert "lfs: true" in workflow
+    assert "Run full candidate suite\n        run: python -m pytest" in workflow
+    assert "build-test:\n    runs-on: ubuntu-latest" in workflow
 
 
 def test_installed_candidate_smoke_invokes_the_real_cli_app(project_root: Path) -> None:

@@ -69,7 +69,7 @@ Owns:
 
 - release test gate, one-time wheel/sdist/docs build, artifact manifest, content/version
   inspection, fresh wheel/sdist/docs smoke, hydrated Git LFS references, and the
-  Linux runtime/font dependencies required by the complete candidate suite.
+  platform routing required by the complete candidate suite.
 
 Does not own:
 
@@ -101,8 +101,10 @@ Does not own:
 - Build each artifact once after tests pass; tag and project version must match.
 - Every release-job checkout hydrates Git LFS so qualification reads reference
   artifact contents rather than pointer records.
-- Linux qualification installs DejaVu Sans; the default Arial request may use
-  Liberation Sans or DejaVu Sans when Arial is unavailable.
+- The default Arial request may use Liberation Sans or DejaVu Sans when Arial
+  is unavailable, preserving text behavior in Linux environments.
+- Exact serialized-reference comparison runs on the macOS authoring platform;
+  Linux CI retains package build, installer, CLI, and reference-review integration coverage.
 - Qualify wheel and sdist in separate fresh environments; install the docs ZIP to temp.
 - Manifest records names, types, versions, and hashes; forbidden experiment payload fails.
 
@@ -176,8 +178,8 @@ Does not own:
 ## Acceptance Criteria
 
 - Tests pass before one-time artifact build.
-- The complete Linux test job runs against hydrated LFS references and a
-  glyph-capable font, with help assertions independent of terminal rendering width.
+- The complete macOS test job runs against hydrated LFS references; Linux CI
+  retains its integration route, and help assertions are independent of terminal styling.
 - Exact wheel, sdist, and docs outputs pass version/content/install smoke.
 - A qualified immutable manifest is emitted only after every check passes.
 
