@@ -5,11 +5,15 @@ Status: Final
 
 ## Work Units
 
-Unit: Implementation Work Unit (IWU).
-Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
-Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
 Count: 1 IWU.
-Basis: One input-normalization contract preserves authored topology identity through one loft-planning entry boundary.
+
+### IWU 1 — Accept identity-bearing TopologyPath loft sections
+
+- Input: closed identity-bearing `TopologyPath` values and current section-like inputs.
+- Work: extend `as_section`/`Loft`, map every authored topology field without
+  resampling, and refuse open or invalid paths specifically.
+- Output: a canonical loft section loop that retains the path's authored identity.
+- Complete when: direct-input and existing section-like regression tests pass.
 
 ## Problem And Outcome
 

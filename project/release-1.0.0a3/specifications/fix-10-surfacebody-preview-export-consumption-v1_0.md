@@ -5,11 +5,15 @@ Status: Final
 
 ## Work Units
 
-Unit: Implementation Work Unit (IWU).
-Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
-Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
 Count: 1 IWU.
-Basis: One canonical scene-consumer adapter lets the primary preview/export route consume SurfaceBody payloads with mode-appropriate tessellation.
+
+### IWU 1 — Connect SurfaceBody results to primary preview and export
+
+- Input: direct and grouped model results containing `SurfaceBody` and legacy payloads.
+- Work: recognize surfaces during traversal and tessellate exactly once at the
+  consumer boundary using the selected preview or export policy.
+- Output: ordered preview/export data with transforms applied once.
+- Complete when: direct and mixed results preview/export without model-side adapters.
 
 ## Problem And Outcome
 

@@ -5,11 +5,15 @@ Status: Final
 
 ## Work Units
 
-Unit: Implementation Work Unit (IWU).
-Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
-Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
 Count: 1 IWU.
-Basis: One pre-write export gate enforces a minimum mesh integrity contract for manufacturing STL output.
+
+### IWU 1 — Gate STL writes on manufacturing mesh integrity
+
+- Input: collected model geometry and a requested STL output path.
+- Work: run export tessellation/QA, reject invalid manufacturing meshes with measured
+  diagnostics, and place valid results through an atomic write boundary.
+- Output: a valid STL or a nonzero refusal that leaves the target untouched.
+- Complete when: valid ASCII/binary output succeeds and every invalid fixture fails pre-write.
 
 ## Problem And Outcome
 

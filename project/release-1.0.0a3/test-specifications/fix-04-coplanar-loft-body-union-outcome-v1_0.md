@@ -5,11 +5,15 @@ Status: Final
 
 ## Work Units
 
-Unit: Implementation Work Unit (IWU).
-Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
-Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
 Count: 1 IWU.
-Basis: One outcome-classification suite proves the reproduced union cannot silently discard either operand.
+
+### IWU 1 — Verify the coplanar union preserves or refuses both operands
+
+- Input: a minimal coplanar fixture and the full test-model enclosure composition.
+- Work: exercise both operand orders and measure success validity/witnesses or the
+  typed refusal classification.
+- Output: a committed boolean outcome regression alongside existing union controls.
+- Complete when: no fixture can return a partial body and supported unions still pass.
 
 ## Backlink
 

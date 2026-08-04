@@ -5,11 +5,16 @@ Status: Final
 
 ## Work Units
 
-Unit: Implementation Work Unit (IWU).
-Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects consistently.
-Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
 Count: 1 IWU.
-Basis: One gated release job qualifies the exact artifacts it later publishes and applies deterministic prerelease metadata.
+
+### IWU 1 — Qualify and publish the exact release artifacts
+
+- Input: one `v*` tag, matching project metadata, and the candidate source commit.
+- Work: gate tests; build once; install, smoke, and inspect the exact wheel/sdist/docs;
+  and derive GitHub prerelease status from PEP 440 semantics.
+- Output: a qualified immutable artifact set passed to the publish step.
+- Complete when: every failed gate blocks publish and an alpha publishes only that
+  qualified set as a prerelease.
 
 ## Problem And Outcome
 

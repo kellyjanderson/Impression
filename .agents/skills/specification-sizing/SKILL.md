@@ -53,19 +53,38 @@ When sizing a specification, count and discuss:
 
 ## Annotation Rule
 
-Every specification document should include a `## Work Units` section near the top of the document, immediately after the title/date block when present.
+Every specification document should include a `## Work Units` section near the
+top of the document, immediately after the title/date block when present.
 
-Use this format:
+Do not repeat the generic IWU definition or counting standard in each
+specification. The section must describe the discrete work being counted. A count
+without an inventory of work is not a useful work-unit annotation.
+
+For each counted unit, name the outcome and state:
+
+* the concrete input or starting state
+* the implementation, document, test, or process change accounted for
+* the reviewable output
+* the evidence that completes the unit
+
+Use this format for a final one-IWU leaf:
 
 ```markdown
 ## Work Units
 
-Unit: Implementation Work Unit (IWU).
-Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
-Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
-Count: N IWU.
-Basis: short reason for the count.
+Count: 1 IWU.
+
+### IWU 1 - Concrete outcome name
+
+- Input: exact artifact, behavior, or starting state.
+- Work: exact change or bounded set of changes accounted for.
+- Output: reviewable artifact or behavior produced by this unit.
+- Complete when: explicit verification evidence that closes this unit.
 ```
+
+Use additional `### IWU N` entries only for branch or parent specifications.
+An intended final leaf with more than one entry must be refined into child leaves
+instead of carrying a plural implementation inventory.
 
 ## Decision Rule
 

@@ -5,11 +5,15 @@ Status: Final
 
 ## Work Units
 
-Unit: Implementation Work Unit (IWU).
-Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
-Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
 Count: 1 IWU.
-Basis: One workflow-contract suite proves ordering, exact-artifact qualification, clean installation, and prerelease classification.
+
+### IWU 1 — Verify gated qualification and prerelease publication
+
+- Input: release workflow, version/tag fixtures, built artifacts, and injected failures.
+- Work: validate job ordering, install/smoke/inspect exact outputs, and test version
+  agreement plus alpha/beta/rc/final classification.
+- Output: automated pre-publish qualification and post-publish metadata evidence.
+- Complete when: injected failures block publishing and a3 exposes only qualified assets.
 
 ## Backlink
 

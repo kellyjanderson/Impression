@@ -5,11 +5,15 @@ Status: Final
 
 ## Work Units
 
-Unit: Implementation Work Unit (IWU).
-Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
-Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
 Count: 1 IWU.
-Basis: One boolean-union outcome contract prevents silent operand loss for a confirmed coplanar enclosure composition.
+
+### IWU 1 — Prevent operand loss in the coplanar enclosure union
+
+- Input: the reproduced enclosure and loft bodies sharing coplanar contact.
+- Work: validate successful `boolean_union` results against both operand witness
+  regions and return a typed refusal when the kernel result is incomplete.
+- Output: either one valid union containing both operands or an explicit refusal.
+- Complete when: both operand orders produce that outcome and never a partial body.
 
 ## Problem And Outcome
 

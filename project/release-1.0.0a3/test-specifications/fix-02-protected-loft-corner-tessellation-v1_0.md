@@ -5,11 +5,15 @@ Status: Final
 
 ## Work Units
 
-Unit: Implementation Work Unit (IWU).
-Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
-Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
 Count: 1 IWU.
-Basis: One geometry regression matrix proves a protected loft corner survives tessellation across sampling densities.
+
+### IWU 1 — Verify protected vertices across tessellation policies
+
+- Input: a minimal protected-point loft and both audio-cube diagonal halves.
+- Work: run preview/export policies across sampling densities and measure protected
+  coordinates, bounds, seams, degenerates, and validity.
+- Output: a parameterized numeric regression matrix plus rendered smoke evidence.
+- Complete when: every numeric invariant passes and both corners are visibly present.
 
 ## Backlink
 

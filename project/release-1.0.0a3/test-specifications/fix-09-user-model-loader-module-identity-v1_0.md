@@ -5,11 +5,15 @@ Status: Final
 
 ## Work Units
 
-Unit: Implementation Work Unit (IWU).
-Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
-Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
 Count: 1 IWU.
-Basis: One sequential-load isolation suite proves canonical package identity and user-code refresh together.
+
+### IWU 1 — Verify canonical package identity across model reloads
+
+- Input: temporary user models/helpers, canonical package modules, and unrelated modules.
+- Work: perform sequential edited loads and syntax/import/runtime failure cases while
+  comparing module/class identity and ownership cleanup.
+- Output: a loader isolation and refresh regression suite.
+- Complete when: user code refreshes without package identity change or module leakage.
 
 ## Backlink
 

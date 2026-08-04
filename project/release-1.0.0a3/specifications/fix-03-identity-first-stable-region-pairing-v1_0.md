@@ -5,11 +5,16 @@ Status: Final
 
 ## Work Units
 
-Unit: Implementation Work Unit (IWU).
-Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
-Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
 Count: 1 IWU.
-Basis: One planner ordering change resolves explicit region identities before bounded ambiguity enumeration.
+
+### IWU 1 — Resolve stable region identities before ambiguity search
+
+- Input: adjacent station regions containing explicit IDs and any unmatched residue.
+- Work: pair compatible IDs first, remove those pairs from search, preserve order,
+  and diagnose duplicate or contradictory identities.
+- Output: a reduced ambiguity-search input containing only genuinely unresolved regions.
+- Complete when: 65+ identified regions plan at the existing limit while anonymous
+  ambiguity still stops at that limit.
 
 ## Problem And Outcome
 

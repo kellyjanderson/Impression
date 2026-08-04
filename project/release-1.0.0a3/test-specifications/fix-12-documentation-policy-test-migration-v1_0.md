@@ -5,11 +5,15 @@ Status: Final
 
 ## Work Units
 
-Unit: Implementation Work Unit (IWU).
-Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
-Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
 Count: 1 IWU.
-Basis: One mutation-oriented documentation test review proves current authority paths and obligations are meaningfully covered.
+
+### IWU 1 — Verify documentation governance tests target real obligations
+
+- Input: current authority files, retired-path search, and temporary mutated copies.
+- Work: test live paths, remove required obligations, and alter unrelated prose to
+  distinguish semantic checks from exact-copy checks.
+- Output: mutation evidence for each active/archive/document/reference rule.
+- Complete when: current-tree tests pass and every required-rule removal fails.
 
 ## Backlink
 

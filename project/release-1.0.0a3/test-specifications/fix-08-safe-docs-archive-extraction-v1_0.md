@@ -5,11 +5,15 @@ Status: Final
 
 ## Work Units
 
-Unit: Implementation Work Unit (IWU).
-Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
-Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
 Count: 1 IWU.
-Basis: One hostile-archive matrix proves validation is contained and atomic before extraction writes.
+
+### IWU 1 — Verify documentation extraction containment and atomicity
+
+- Input: generated hostile ZIP variants, valid ZIPs, and protected filesystem sentinels.
+- Work: exercise unsafe member classes, valid-before-invalid ordering, containment,
+  and both clean modes.
+- Output: an atomicity/containment regression matrix plus real-package integration case.
+- Complete when: hostile archives change nothing and the packaged docs archive installs.
 
 ## Backlink
 

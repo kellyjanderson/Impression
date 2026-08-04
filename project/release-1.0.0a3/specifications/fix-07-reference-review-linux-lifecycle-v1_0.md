@@ -6,11 +6,15 @@ Issue: [#227](https://github.com/kellyjanderson/Impression/issues/227)
 
 ## Work Units
 
-Unit: Implementation Work Unit (IWU).
-Definition: one independently deliverable, reviewable change set with its own verification surface. An IWU is intentionally abstract so the same unit can size software, documentation, tooling, service, research, design, and process projects.
-Standard measures: count 1 IWU when the work has one primary outcome, one coherent responsibility boundary, one reviewable artifact or change set, one explicit verification method, declared inputs and outputs, and explicitly named unresolved assumptions or decisions. Split the work when any measure becomes plural, ambiguous, or unnamed.
 Count: 1 IWU.
-Basis: One headless application lifecycle boundary must terminate cleanly in one process on Linux while preserving macOS behavior.
+
+### IWU 1 — Make the reference-review shell lifecycle safe on Linux
+
+- Input: issue #227's Linux headless Qt/VTK UI-shell lifecycle.
+- Work: correct application, widget, renderer, and pending-work teardown ownership
+  and restore the full module to normal Linux CI.
+- Output: a deterministic one-process startup and teardown path on Linux and macOS.
+- Complete when: repeated runs exit 0 without timeout, orphan, fatal message, or signal.
 
 ## Problem And Outcome
 
