@@ -17,8 +17,8 @@ even when the launch directory already contains a live preview control file.
 - User/caller surface: `impression preview MODEL --screenshot PATH`.
 - Invocation route: CLI parsing -> one-shot route selection -> off-screen PyVista render -> PNG artifact.
 - Wiring owner/module: `src/impression/cli.py` and `src/impression/preview.py`.
-- Observable result: zero exit, success text, decodable PNG, and unchanged live control-file content.
-- Integration validation: fake-renderer route test plus a real installed-command subprocess smoke.
+- Observable result: discoverable help text, zero exit, success text, decodable PNG, and unchanged live control-file content.
+- Integration validation: help-screen test, fake-renderer route test, and a real installed-command subprocess smoke.
 
 ## Manual Smoke
 
@@ -27,6 +27,7 @@ even when the launch directory already contains a live preview control file.
 
 ## Automated Smoke Tests
 
+- Invoke `preview --help` and require the `--screenshot` description to state one-shot PNG output and live-preview isolation.
 - Invoke the CLI with a fake preview renderer and a live-looking control file; assert screenshot mode reaches the renderer with watching and control-file handoff disabled.
 - Run the installed command against a temporary box model and decode the resulting PNG.
 
@@ -44,7 +45,7 @@ even when the launch directory already contains a live preview control file.
 - GUI proof:
   - not applicable.
 - Console proof:
-  - command, model argument, screenshot flag, stdout, exit code, PNG side effect, and control-file non-mutation are asserted.
+  - help discoverability, command, model argument, screenshot flag, stdout, exit code, PNG side effect, and control-file non-mutation are asserted.
 - API/service proof:
   - not applicable.
 - Mixed-surface proof:
@@ -66,3 +67,4 @@ even when the launch directory already contains a live preview control file.
 - [x] Helper-only tests cannot satisfy this feature contract.
 - [x] PNG output, success text, exit code, and control-file preservation are asserted.
 - [x] Renderer failure behavior is covered.
+- [x] Help-screen discoverability and wording are asserted.

@@ -7,7 +7,7 @@ Architecture ancestor: `not applicable - restores the existing preview command c
 Source artifact: `docs/cli.md` and the existing `preview --screenshot PATH` option
 Split provenance: `none`
 Canonical status: `Canonical`
-Review Score: 15
+Review Score: 16
 Prerequisites:
 - The existing PyVista preview route and `--screenshot PATH` CLI option are implemented.
 
@@ -21,7 +21,7 @@ Prerequisites:
   - Dependencies/services: the existing PyVista `Plotter` screenshot capability.
   - Returns/outputs/signals: one PNG at the requested path and a success message naming that path.
   - UI surfaces/components: not applicable; this is a console command route.
-  - UI fields/elements: not applicable.
+  - UI fields/elements: the `--screenshot PATH` help entry explains one-shot PNG output and live-preview isolation.
   - Reusable code plan: reuse the existing CLI option and preview renderer rather than adding another export subsystem.
   - Database queries/tables/migrations: not applicable.
   - Async/concurrency behavior: not applicable; screenshot mode is a one-shot render and does not start file watching.
@@ -47,6 +47,7 @@ Owns:
 - Screenshot mode disabling file watching for its one-shot render.
 - Off-screen PyVista capture to the exact requested output path.
 - Success output that names the written PNG.
+- Discoverable `preview --help` text that states the one-shot PNG and live-preview behavior.
 
 Does not own:
 
@@ -67,7 +68,7 @@ Does not own:
 
 | Request ledger | Latest pass | Active specs reviewed | New leaves created this round | Fixed-point status |
 |---|---:|---|---|---|
-| `../planning/spec-review-ledger-20260804-preview-png.md` | 1 | Fix 15 | none | reached |
+| `../planning/spec-review-ledger-20260804-preview-png-help.md` | 1 | Fix 15 | none | reached |
 
 ## Implementation Routing
 
@@ -81,8 +82,7 @@ Does not own:
 - Reusable library/module files:
   - `src/impression/preview.py` - retain screenshot capture in the existing preview renderer boundary.
 - Tests:
-  - `tests/test_cli_preview.py` - prove route selection in the presence of a live control file.
-  - `tests/test_preview_png_export.py` - prove the installed command writes a decodable PNG.
+  - `tests/test_cli_preview.py` - prove help discoverability, route selection in the presence of a live control file, and real-command PNG output.
 
 ## Chosen Defaults / Parameters
 
@@ -133,8 +133,8 @@ Does not own:
 - User/caller surface: `impression preview MODEL --screenshot PATH`.
 - Invocation route: CLI option parsing -> screenshot-mode route selection -> `PyVistaPreviewer.show(...)` -> off-screen PNG write.
 - Wiring owner/module: `src/impression/cli.py` and `src/impression/preview.py`.
-- Observable result: exit code zero, a decodable PNG at `PATH`, a success message, and no mutation of the live preview control file.
-- Integration validation: invoke the installed CLI while a live-looking control file exists, then decode and inspect the resulting image.
+- Observable result: help describes the behavior; invocation returns exit code zero, a decodable PNG at `PATH`, a success message, and no mutation of the live preview control file.
+- Integration validation: inspect `preview --help`, invoke the installed CLI while a live-looking control file exists, then decode and inspect the resulting image.
 - Incomplete status risk: helper-only rendering would leave the control-file early exit in place and remain inaccessible through the real command.
 
 App-type-specific proof:
@@ -166,7 +166,7 @@ App-type-specific proof:
   - `preview(...) -> None` - route screenshot invocations independently from watched preview sessions.
   - `PyVistaPreviewer.show(...) -> None` - render and write a one-shot PNG off-screen.
 - UI fields / visible data, if applicable:
-  - not applicable.
+  - `--screenshot PATH` help - states that the command renders once off-screen, saves a PNG, exits, and does not redirect a running preview.
 - UI elements / controls, if applicable:
   - not applicable.
 - UI components, if applicable:
@@ -186,7 +186,7 @@ App-type-specific proof:
 ## Test Strategy
 
 - Unit tests:
-  - verify screenshot mode passes `watch_files=False`, no control file, and the requested path to the preview renderer.
+  - verify `preview --help` exposes the screenshot behavior and screenshot mode passes `watch_files=False`, no control file, and the requested path to the preview renderer.
 - Service/DB tests:
   - not applicable.
 - GUI/controller tests, if applicable:
@@ -199,6 +199,7 @@ App-type-specific proof:
 ## Acceptance Criteria
 
 - `impression preview MODEL --screenshot PATH` writes a decodable PNG and exits without opening an interactive window.
+- `impression preview --help` describes one-shot PNG output and live-preview isolation beside `--screenshot`.
 - An existing live preview control file is unchanged and does not intercept screenshot mode.
 - The CLI reports the written path and returns a non-zero result when rendering fails.
 - Normal watched-preview control-file handoff remains unchanged when `--screenshot` is absent.
@@ -220,7 +221,7 @@ App-type-specific proof:
 - [x] Implementation owner/module is named.
 - [x] Existing code reuse/extraction decision is explicit.
 - [x] Existing library/module additions are named and new modules are marked not applicable.
-- [x] UI fields/elements are marked not applicable.
+- [x] The screenshot help field is listed explicitly.
 - [x] Chosen defaults are explicit.
 - [x] Data source of truth and write owner are explicit.
 - [x] GUI/concurrency routes are marked not applicable.
@@ -235,14 +236,14 @@ App-type-specific proof:
 ## Review Score Calculation
 
 - Template source: `/Users/k/Documents/Projects/.agents/process/templates/implementation-spec-template.md`
-- Prior recorded score: none; independently scored from the current specification.
-- Adversarial rescore basis: checked for a hidden interactive surface, control-file concurrency, missing overwrite ownership, separate image-export subsystems, omitted console side effects, and unnamed additional work; the spec retains one cohesive one-shot command transaction.
+- Prior recorded score: 15; treated as an adversarial input rather than trusted.
+- Adversarial rescore basis: recounted the user-visible command contract and found the previously omitted `--screenshot` help field; checked for a hidden interactive surface, control-file concurrency, missing overwrite ownership, separate image-export subsystems, omitted console side effects, and unnamed additional work. The score crosses into explicit split review, but help discoverability cannot be delivered independently from the same screenshot option contract, so the spec remains one cohesive command transaction.
 - Functions/methods: 2 x 2 = 4
 - Data structures/models: 0 x 1 = 0
 - Dependencies/services: 1 x 1 = 1
 - Returns/outputs/signals: 2 x 1 = 2
 - UI surfaces/components: 0 x 2 = 0
-- UI fields/elements: 0 x 1 = 0
+- UI fields/elements: 1 x 1 = 1
 - Existing reusable code reused as-is: 2 x 0.5 = 1
 - Adding code to an existing library/module: 2 x 1 = 2
 - Creating a new reusable library/module: 0 x 3 = 0
@@ -255,5 +256,5 @@ App-type-specific proof:
 - Readiness blockers: 0 x 2 = 0
 - Missing prerequisites: 0 x 2 = 0
 - Unresolved deferral/gap markers: 0 x 100 = 0
-- Total: 15
-- If total matches prior score, adversarial survival reason: not applicable because there was no prior score.
+- Total: 16
+- If total matches prior score, adversarial survival reason: not applicable because the fresh score increased after counting the omitted help field.

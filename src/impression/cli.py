@@ -585,7 +585,9 @@ def preview(
         help="Force a new preview window even if a live control file exists.",
     ),
     screenshot: pathlib.Path | None = typer.Option(
-        None, "--screenshot", help="Optional path to save a screenshot of the preview."
+        None,
+        "--screenshot",
+        help="Render once off-screen, save a PNG, and exit without redirecting a running preview.",
     ),
     show_edges: bool = typer.Option(False, "--show-edges/--hide-edges", help="Toggle triangle edge rendering."),
     face_edges: bool = typer.Option(
@@ -595,7 +597,8 @@ def preview(
     ),
 ) -> None:
     """
-    Load a Python model module or .impress document and open an interactive preview window.
+    Load a Python model module or .impress document, then open an interactive
+    preview or write a one-shot PNG with --screenshot.
     """
 
     if not model.exists():

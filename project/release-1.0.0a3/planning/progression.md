@@ -79,10 +79,11 @@ separate completion state.
 | 13A | 22 | Retain after explicit split review: one artifact qualification transaction |
 | 13B | 16 | Retain after explicit split review: one external publication transaction |
 | 14 | 13 | Cohesive leaf: archive-before-removal transaction for retired experiment ownership |
-| 15 | 15 | Cohesive leaf: one-shot command routing and render transaction |
+| 15 | 16 | Retain after explicit split review: help, routing, and rendering are one `--screenshot` command contract |
 
 - Forced splits (`25+`): Fix 13, completed into Fix 13A and Fix 13B.
 - Readiness blockers and unresolved parent coverage: none.
 - Original release set terminal review: [ledger](spec-review-ledger-20260804-040607.md) pass 2, new leaves `none`.
 - Fix 14 terminal review: [ledger](spec-review-ledger-20260804-071535.md) pass 1, new leaves `none`.
 - Fix 15 terminal review: [ledger](spec-review-ledger-20260804-preview-png.md) pass 1, new leaves `none`.
+- Fix 15 help-surface review: [ledger](spec-review-ledger-20260804-preview-png-help.md) pass 1, new leaves `none`.

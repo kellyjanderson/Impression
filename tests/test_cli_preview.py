@@ -117,6 +117,16 @@ def _write_triangle_model(path: Path) -> None:
     )
 
 
+def test_preview_help_describes_one_shot_png_export() -> None:
+    result = CliRunner().invoke(cli.app, ["preview", "--help"])
+    normalized_output = " ".join(result.output.replace("│", " ").split())
+
+    assert result.exit_code == 0, result.output
+    assert "--screenshot" in normalized_output
+    assert "Render once off-screen, save a PNG, and exit" in normalized_output
+    assert "without redirecting a running preview" in normalized_output
+
+
 def test_preview_screenshot_bypasses_live_control_file(monkeypatch, tmp_path: Path) -> None:
     model = tmp_path / "model.py"
     output = tmp_path / "captures" / "model.png"
