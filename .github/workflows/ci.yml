@@ -11,7 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CMAKE_ARGS: "-DMANIFOLD_PAR=OFF"
+      LIBGL_ALWAYS_SOFTWARE: "1"
       PYTHONPATH: "src"
+      PYVISTA_OFF_SCREEN: "true"
+      QT_OPENGL: "software"
+      QT_QPA_PLATFORM: "offscreen"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,9 +57,19 @@ jobs:
 
       - name: Run tests
         run: |
+          # Linux reference-review UI lifecycle coverage is tracked in #227.
           python -m pytest \
+            tests/test_release_metadata.py \
             tests/test_sdf.py \
             tests/test_reference_review_preview_payload.py \
             tests/test_reference_review_preview_payload_controller.py \
-            tests/test_reference_review_ui_shell.py \
             tests/test_reference_review_ui_workflow.py
+
+      - name: Smoke test clean installer and CLI entrypoints
+        run: |
+          scripts/dev/install_impression.sh \
+            --from-local \
+            --venv "${RUNNER_TEMP}/impression-release-smoke"
+          "${RUNNER_TEMP}/impression-release-smoke/bin/python" -m impression.cli --version
+          "${RUNNER_TEMP}/impression-release-smoke/bin/impression" --version
+          "${RUNNER_TEMP}/impression-release-smoke/bin/python" -m pip check

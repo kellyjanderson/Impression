@@ -365,17 +365,20 @@ else
     fi
 fi
 
-# Ensure PyVista (viewer) is available in the target venv.
-log "Ensuring Impression CLI runtime dependencies are installed"
-"$py" -m pip install --upgrade typer rich watchfiles mapbox_earcut pyclipper fonttools markdown Pillow
+# Resolve the freshly built wheel normally so pyproject.toml remains the single
+# authority for runtime dependencies. Reinstall only Impression afterward so a
+# same-version local build still replaces the installed package without forcing
+# expensive dependency reinstalls or bypassing the manifold setup above.
+log "Resolving Impression wheel dependencies"
+CMAKE_ARGS="-DMANIFOLD_PAR=OFF" "$py" -m pip install --upgrade "$wheel"
 
-# Ensure PyVista (viewer) is available in the target venv.
-log "Ensuring PyVista is installed"
-"$py" -m pip install --upgrade pyvista
-
-# Install the freshly built wheel.
 log "Installing Impression wheel"
 CMAKE_ARGS="-DMANIFOLD_PAR=OFF" "$py" -m pip install --upgrade --force-reinstall --no-deps "$wheel"
+
+if ! "$py" -m pip check; then
+    echo "Impression dependencies are inconsistent after install." >&2
+    exit 1
+fi
 
 # Validate CLI installation (module + executable entrypoint).
 if ! "$py" -m impression.cli --version >/dev/null 2>&1; then

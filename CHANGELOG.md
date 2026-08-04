@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 1.0.0a1
+
+### Release Repair
+
+- Fixed clean CLI startup after the hinge extension was split out of the core
+  modeling package.
+- Made the installer resolve dependencies from the built wheel's package
+  metadata instead of maintaining a divergent hand-written dependency list.
+- Constrained NumPy below 2.5 to match the repository's validated
+  scikit-image and VTK runtime compatibility window.
+- Added clean-install CLI smoke coverage and package/runtime version parity
+  coverage to CI.
+
 ## 0.0.3a2
 
 ### Release Correction
