@@ -2,43 +2,65 @@
 
 Date: 2026-08-04
 Status: Proposed
-Feature specification: [Fix 07: Surface-Only Public Boolean API](../specifications/fix-07-surface-only-public-boolean-api-v1_0.md)
-Canonical status: Draft
+Feature spec: [Fix 07: Surface-Only Public Boolean API](../specifications/fix-07-surface-only-public-boolean-api-v1_0.md)
+Feature spec canonical status: Draft
+Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 
 ## Overview
 
-This contract proves the user-visible behavior, internal invariants, failure behavior, and release regression boundary for Fix 07. It becomes binding only when the paired feature spec is independently reviewed and canonicalized.
+This paired contract verifies the complete draft feature boundary for Fix 07. It remains a draft until independent `review specs` canonicalizes the feature leaf.
 
 ## Application Integration Under Test
 
-Packaging/API proof: verify source checkout and clean wheel plus rendered/reference documentation inventory.
+- App type: library-only
+- User/caller surface: installed `impression.modeling` public API
+- Invocation route: import/call -> representation guard -> surfaced solver -> surfaced result
+- Wiring owner/module: `src/impression/modeling/csg.py` and `src/impression/modeling/__init__.py`
+- Observable result: consistent source/wheel signatures, surfaced results, and actionable mesh rejection
+- Integration validation: source and clean-wheel signature/runtime matrix plus docs/example scan
 
 ## Manual Smoke
 
-From a clean installed wheel, call public booleans with surfaces, meshes, and mixed operands; follow the mesh migration message. Confirm the last valid result remains usable after any deliberate failure.
+- Install the candidate wheel in a clean environment.
+- Call each public boolean with surfaced operands, then mesh and mixed operands.
+- Confirm surfaced results and early mesh migration errors; inspect docs/examples.
 
 ## Automated Smoke Tests
 
-Signature/export tests, runtime operand matrix, docs scan, and installed-package import tests cover the contract.
+- Installed public signatures contain no `Mesh`/`MeshGroup`.
+- Mesh inputs fail before kernel dispatch and separately named mesh utilities remain explicit if retained.
 
 ## Automated Acceptance Tests
 
-Surface calls work; mesh/mixed calls fail before kernel work; separately named mesh utilities remain usable if retained. Include deterministic positive, negative, and regression assertions and require actionable diagnostic content for refusals.
+- Unit/helper behavior:
+  - annotations, parameter names, exports, runtime guards, error text, docs inventory
+- Integrated route behavior:
+  - clean wheel imports/calls, documentation examples, preview/export surface consumer
+- Failure and stale-result behavior, if applicable:
+  - source/docs/wheel mismatch or implicit conversion fails the contract
 
 ## App-Type Proof
 
-Packaging/API proof: verify source checkout and clean wheel plus rendered/reference documentation inventory.
+- GUI proof: not applicable
+- Console proof: not applicable
+- API/service proof:
+  - not applicable
+- Mixed-surface proof: not applicable
+- Library-only proof: installed public API and consuming docs/preview/export
 
 ## Fixtures And Data
 
-SurfaceBody operands, mesh operands, mixed pairs, public imports, docs snippets, and migration examples. Fixtures must be deterministic, project-local, and small enough for normal CI. Preserve the exact issue reproduction where it is the acceptance fixture.
+- surface, mesh, and mixed operand matrix
+- public export inventory
+- docs/examples and clean wheel
+- Production-data rule: tests use project-local deterministic fixtures and temporary directories; no user production data is required.
 
 ## Acceptance
 
-- [ ] Manual smoke succeeds on a supported macOS development environment.
-- [ ] Automated smoke covers the primary state transition and failure recovery.
-- [ ] Automated acceptance proves every criterion in the paired implementation specification.
-- [ ] The real application/public route is exercised; helper-only proof is rejected.
-- [ ] The focused suite and full configured suite pass without workaround geometry or mesh fallback.
-- [ ] Test names and failure output identify the violated contract and relevant fixture.
+- [ ] Feature spec is canonical, or this test spec remains explicitly temporary while review/split coverage is incomplete.
+- [ ] Route-level proof exists for the declared app type.
+- [ ] Helper-only tests cannot satisfy this contract.
+- [ ] Every observable result and feature acceptance criterion is asserted through the intended route.
+- [ ] Failure, stale-result, refusal, or no-cut behavior is covered where applicable.
+- [ ] Focused and full configured suites pass without mesh modeling fallback or test-model workaround geometry.
 

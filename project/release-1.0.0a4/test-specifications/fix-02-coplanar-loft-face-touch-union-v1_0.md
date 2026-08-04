@@ -2,43 +2,65 @@
 
 Date: 2026-08-04
 Status: Proposed
-Feature specification: [Fix 02: Coplanar Loft Face-Touch Union](../specifications/fix-02-coplanar-loft-face-touch-union-v1_0.md)
-Canonical status: Draft
+Feature spec: [Fix 02: Coplanar Loft Face-Touch Union](../specifications/fix-02-coplanar-loft-face-touch-union-v1_0.md)
+Feature spec canonical status: Draft
+Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 
 ## Overview
 
-This contract proves the user-visible behavior, internal invariants, failure behavior, and release regression boundary for Fix 02. It becomes binding only when the paired feature spec is independently reviewed and canonicalized.
+This paired contract verifies the complete draft feature boundary for Fix 02. It remains a draft until independent `review specs` canonicalizes the feature leaf.
 
 ## Application Integration Under Test
 
-Surface-kernel proof: use real `SurfaceBody` patches and the public boolean route; mesh-derived assertions are insufficient.
+- App type: library-only
+- User/caller surface: public `boolean_union` consumed by modeling, preview, and export
+- Invocation route: two surfaced loft operands -> face-touch classifier -> interior-pair removal -> shell assembly -> public result gate
+- Wiring owner/module: `src/impression/modeling/csg.py`
+- Observable result: one closed surfaced shell or precise refusal
+- Integration validation: public union fixture plus real enclosure preview/export
 
 ## Manual Smoke
 
-Build the two reproduced face-touching loft bodies and inspect the union shell, shared face removal, and seams. Confirm the last valid result remains usable after any deliberate failure.
+- Build the issue's two closed loft bodies sharing a designed face.
+- Call public `boolean_union`, inspect one-shell closure/seams and absence of the shared interior patches.
+- Preview/export the composed enclosure and confirm no mesh modeling fallback.
 
 ## Automated Smoke Tests
 
-Unit tests cover coincident domain/orientation classification, interior-pair filtering, and shell assembly negatives.
+- Exact face-touch fixture returns succeeded, non-null, one-shell `SurfaceBody`.
+- Near-coplanar control does not take the exact face-touch route.
 
 ## Automated Acceptance Tests
 
-Public surface union must produce one closed shell for the fixture and refuse near-coplanar/partial-domain controls. Include deterministic positive, negative, and regression assertions and require actionable diagnostic content for refusals.
+- Unit/helper behavior:
+  - bounds candidates, trimmed-domain equivalence, orientation, interior-pair removal, seam/adjacency reconstruction
+- Integrated route behavior:
+  - public union exact fixture, partial-overlap and near-coplanar controls, enclosure preview/export
+- Failure and stale-result behavior, if applicable:
+  - ambiguous/partial contact, open seams, duplicate shells, or missing witnesses cannot report success
 
 ## App-Type Proof
 
-Surface-kernel proof: use real `SurfaceBody` patches and the public boolean route; mesh-derived assertions are insufficient.
+- GUI proof: not applicable
+- Console proof: not applicable
+- API/service proof:
+  - not applicable
+- Mixed-surface proof: not applicable
+- Library-only proof: public union plus downstream preview/export consumer
 
 ## Fixtures And Data
 
-Exact face-touching loft pair; reversed orientation; near-coplanar gap; partial overlap; open-seam negative. Fixtures must be deterministic, project-local, and small enough for normal CI. Preserve the exact issue reproduction where it is the acceptance fixture.
+- exact face-touch loft pair
+- reversed orientation
+- near-coplanar gap and partial-domain overlap
+- Production-data rule: tests use project-local deterministic fixtures and temporary directories; no user production data is required.
 
 ## Acceptance
 
-- [ ] Manual smoke succeeds on a supported macOS development environment.
-- [ ] Automated smoke covers the primary state transition and failure recovery.
-- [ ] Automated acceptance proves every criterion in the paired implementation specification.
-- [ ] The real application/public route is exercised; helper-only proof is rejected.
-- [ ] The focused suite and full configured suite pass without workaround geometry or mesh fallback.
-- [ ] Test names and failure output identify the violated contract and relevant fixture.
+- [ ] Feature spec is canonical, or this test spec remains explicitly temporary while review/split coverage is incomplete.
+- [ ] Route-level proof exists for the declared app type.
+- [ ] Helper-only tests cannot satisfy this contract.
+- [ ] Every observable result and feature acceptance criterion is asserted through the intended route.
+- [ ] Failure, stale-result, refusal, or no-cut behavior is covered where applicable.
+- [ ] Focused and full configured suites pass without mesh modeling fallback or test-model workaround geometry.
 

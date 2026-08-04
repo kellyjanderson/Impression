@@ -92,9 +92,11 @@ reload unless a manual or file-change request also arrives.
 
 ## Specification Conformance
 
-- Parent specs created or affected: none.
-- Canonical child specs: none; draft Fix 01 awaits independent review.
-- Paired test specs: draft Fix 01 test specification.
+- Parent specs created or affected:
+  - [Fix 01 draft](../specifications/fix-01-preview-watch-and-forced-refresh-v1_0.md) - created from this ACD; independent review pending.
+- Canonical child specs: none yet.
+- Paired test specs:
+  - [Fix 01 test draft](../test-specifications/fix-01-preview-watch-and-forced-refresh-v1_0.md) - verifies the mixed CLI/GUI route.
 
 ## Conformance Checklist
 
@@ -118,4 +120,5 @@ artifacts no longer depend on this ACD.
 
 ## Change History
 
+- 2026-08-04 - Linked the full-template Fix 01 and paired test drafts. Reason: complete the `do specs` creation handoff.
 - 2026-08-04 - Initial draft. Reason: plan issue #242 for `v1.0.0a4`.

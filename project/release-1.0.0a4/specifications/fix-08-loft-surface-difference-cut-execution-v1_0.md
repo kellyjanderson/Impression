@@ -2,104 +2,248 @@
 
 Date: 2026-08-04
 Status: Proposed
-Primary ancestor: [Loft Surface Difference Cut Execution ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
-Architecture ancestor: [Loft Surface Difference Cut Execution ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
+Primary ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
+Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Source artifact: [GitHub issue #248](https://github.com/kellyjanderson/Impression/issues/248)
-Split provenance: Issue #248 is split by [Known-Issue Intake](../planning/known-issue-intake.md).
+Split provenance: Issue #248 is split by `../planning/known-issue-intake.md`; this leaf owns cut construction and branch decomposition while Fix 09 owns shared no-op validation.
 Canonical status: Draft
 Review Score: pending independent review
+Prerequisites:
+- `fix-05-count-changing-region-identity-preservation-v1_0.md` - supplies reliable lineage for branched loft decomposition
+- `fix-09-surface-difference-no-op-result-gate-v1_0.md` - blocks false success for every new executor result
 
 ## Source Field Carryover
 
-The source failure, expected result, test-model evidence, and a4 milestone are retained. This draft defines a narrow implementation and validation boundary without weakening the issue.
+- Source purpose: Construct real changed surface geometry for USB-C, acoustic, and snap-pocket loft cutters, including validated branch decomposition and recomposition where topology requires it.
+- Source responsibilities by category:
+  - Functions/methods: intersect, trim, fragment, classify, add reversed cutter patches, decompose/recompose branches, validate
+  - Data structures/models: intersection curve, trim fragment, branch decomposition, provenance, and result-shell evidence
+  - Dependencies/services: surface evaluators/intersections, seam graph, topology lineage, CSG result gate
+  - Returns/outputs/signals: changed closed `SurfaceBody` with intended opening/pocket or precise unsupported/invalid result
+  - UI surfaces/components: not applicable; downstream preview/export consumer
+  - UI fields/elements: not applicable
+  - Reusable code plan: extend existing loft surface CSG evidence and reconstruction
+  - Database queries/tables/migrations: not applicable
+  - Async/concurrency behavior: not applicable
+  - Destructive/write behavior: no destructive runtime writes; preview/export smoke may write temporary artifacts
+  - Security/privacy-sensitive behavior: not applicable
+  - Performance-sensitive behavior: bounds-pruned patch candidates and bounded branch decomposition; no whole-body dense sampling
+  - Cross-screen reusable behavior: not applicable
+- Source open questions / nuance discovered: none hidden; independent review may refine split cohesion and exact symbol names.
+- Source split/provenance notes: Issue #248 is split by `../planning/known-issue-intake.md`; this leaf owns cut construction and branch decomposition while Fix 09 owns shared no-op validation.
 
 ## Purpose
 
-Execute real surface difference for the reproduced loft cutters, including validated branch decomposition and recomposition where topology requires it.
+Construct real changed surface geometry for USB-C, acoustic, and snap-pocket loft cutters, including validated branch decomposition and recomposition where topology requires it.
 
 ## Scope
 
-Loft/cutter intersection evidence, trim curves, patch fragmentation, kept-fragment classification, cutter-derived closure patches, branch decomposition/recomposition, body validation, and fixtures.
+- Owns:
+  - surface intersection evidence and patch-local trim curves
+  - base/cutter fragmentation, retained-fragment classification, cutter-derived closure patches, and shell rebuild
+  - bounded branch-graph decomposition/recomposition with provenance and seam validation
+  - public difference, audio-cube, preview/export, closure, and no-mesh regressions
+
+- Does not own:
+  - the shared unchanged-result success gate, owned by Fix 09
+  - universal support for every surface family or arbitrary underconstrained topology
 
 ## Split Coverage
 
-Fixes 08 and 09 collectively preserve 100% of issue #248: execution constructs changed geometry; the shared result gate prevents false success. Neither leaf is optional.
+- Parent spec: none
+- Parent coverage status: not applicable
+- Parent responsibilities owned by this child: not applicable
+- Parent responsibilities still missing from children: none
+- Issue-level split disposition: Issue #248 is split by `../planning/known-issue-intake.md`; this leaf owns cut construction and branch decomposition while Fix 09 owns shared no-op validation.
 
 ## Refinement History
 
-Initial do-specs draft. Independent refinement has not yet occurred.
+Not applicable before review. No request review ledger exists; this is a do-specs creation draft.
 
 ## Implementation Routing
 
-Feature branch after canonical review; integrate through the future a4 working branch. Back-reference issue #248 and this specification in commits and PRs.
+- Primary modules/files:
+  - `src/impression/modeling/csg.py` - loft difference eligibility, intersection, trimming, reconstruction, branch handling, result evidence
+- Supporting modules/files:
+  - `src/impression/modeling/loft.py` - read-only branch/topology lineage contract
+  - `src/impression/modeling/surface.py` - patch/seam/body invariants if extension is required
+- GUI/QML files, if applicable:
+  - none; no QML is involved
+- Reusable library/module files:
+  - `src/impression/modeling/csg.py` - loft difference eligibility, intersection, trimming, reconstruction, branch handling, result evidence
+- Tests:
+  - `tests/test_surface_csg.py` - public difference and evidence
+  - `tests/csg_reference_fixtures.py` - USB-C, acoustic, snap-pocket, branch controls
+  - test-model preview/export smoke - consumer proof without modeling mesh fallback
 
 ## Chosen Defaults / Parameters
 
-Build explicit intersection/trim evidence, fragment affected patches, retain fragments by oriented inside/outside classification, add cutter boundary patches, then reconstruct and validate closed shells. Branch decomposition is allowed only with preserved topology lineage.
+- require closed trim loops and deterministic oriented inside/outside classification
+- retain minuend fragments outside cutters and add correctly oriented cutter-derived boundary patches
+- decompose branching lofts only when lineage/provenance is complete and recomposition validates
+- route every result through Fix 09 and shared body validity gates
 
 ## Data Ownership
 
-The CSG executor owns intersection and fragment records. The result assembler owns final patch topology. Validation—not the caller—decides whether the cut can report success.
+- source of truth: immutable operand surface topology and intersection evidence
+- read ownership: difference executor and branch decomposer
+- write ownership: result assembler creates new patch/seam topology; operands remain unchanged
+- derived/cache data: candidates, trim fragments, classification, and branch records are recomputable
+- privacy/logging: not applicable
 
 ## Dependencies And Routes
 
-Fix 05 identity preservation supports branch decomposition. Fix 09 supplies the mandatory geometry-change gate. Existing surface patch evaluators and CSG evidence records are reused.
+- Domain/service dependencies:
+  - Fix 05 lineage, Fix 09 no-op gate, surface intersections/evaluators, seam rebuild, result envelope
+  - library route: `boolean_difference` -> eligibility/decomposition -> intersection/fragment reconstruction -> result gates -> consumer
+- Database dependencies:
+  - none
+- GUI route, if applicable:
+  - not applicable
+- Background/concurrency route, if applicable:
+  - not applicable
 
 ## Prerequisite Handling
 
-Fix 09 is a hard prerequisite for success reporting; Fix 05 is required for branched loft fixtures. Unsupported intersection families remain explicit refusals.
+- Architecture feedback artifacts:
+  - `../architecture/acd-surface-boolean-correctness-and-api-boundary.md` - owns trim reconstruction and branch handling
+- Architecture feedback status:
+  - tracked in active ACD
+- Already implemented prerequisites:
+  - surface evaluators/intersections, patch provenance, seam rebuild, and structured CSG results
+- Missing prerequisite architecture:
+  - none
+- Missing prerequisite specifications:
+  - none
+- Unimplemented prerequisite specifications:
+  - Fix 05 and Fix 09
+- Progression handling:
+  - implement after Fix 05 and Fix 09; retain precise refusal for unsupported families
 
 ## Application Integration
 
-`boolean_difference` routes qualifying loft/cutter pairs through this executor and returns only validated `SurfaceBody` results. The test model uses no grouped-body workaround.
+- App type: library-only
+- User/caller surface: public `boolean_difference` consumed by the audio-cube model and preview/export
+- Invocation route: surface base/cutters -> route selection -> decomposition/intersection/trims -> shell rebuild -> validators -> consumer
+- Wiring owner/module: `src/impression/modeling/csg.py`
+- Observable result: changed closed surfaced enclosure with intended opening/pocket
+- Integration validation: public fixture suite plus real preview/export consumer with no workaround geometry
+- Incomplete status risk: drafted and prerequisite-blocked
+
+App-type-specific proof:
+
+- GUI: not applicable
+- Console: not applicable
+- API/service: not applicable
+- Mixed: not applicable
+- Library-only: public `boolean_difference` consumed by the audio-cube model and preview/export is the consuming public route and public fixture suite plus real preview/export consumer with no workaround geometry
 
 ## Reuse And Extraction Plan
 
-Extend canonical surface CSG evidence, reconstruction, and validation. Do not introduce a mesh fallback or test-model-only route.
+- Existing code to reuse:
+  - existing code: CSG route/evidence records, surface evaluator/intersection helpers, trim fragments, seam/adjacency rebuild, result envelope
+- Current reuse readiness:
+  - readiness: complete existing loft trim/fragment executor
+- Extraction/wrapping needed:
+  - extraction: shared patch-fragment classifier and branch recomposition helpers inside CSG module
+- Additions to existing library/modules:
+  - readiness: complete existing loft trim/fragment executor
+- New reusable modules to expose:
+  - new reusable modules: none unless review identifies a stable surface-fragment boundary
+- One-off code justification, if any:
+  - one-off justification: none
 
 ## Required DTOs / Functions / Components
 
-Intersection-curve evidence; trim-fragment record; inside/outside classifier; cutter-cap builder; branch decomposition/recomposition record; result-shell assembler.
+- DTOs/models:
+  - intersection-curve evidence record
+- Functions/methods:
+  - patch-local trim-fragment record with provenance
+  - inside/outside classification result
+  - cutter-derived boundary patch builder
+  - branch decomposition/recomposition record and result-shell assembler
+- UI fields / visible data, if applicable:
+  - not applicable
+- UI elements / controls, if applicable:
+  - not applicable
+- UI components, if applicable:
+  - none
 
 ## Performance Contract
 
-Candidate patch pairs must use bounds pruning. Fixture cuts must avoid whole-body dense sampling and complete within the test timeout defined by the paired spec.
+- prune operand patch pairs by bounds
+- branch decomposition obeys configured planner/CSG bounds
+- fixture cuts complete within focused-test timeouts without dense tessellation
 
 ## Error And State Behavior
 
-Missing closed trim loops, ambiguous classification, invalid branch recomposition, open seams, or failed body validation returns an unsupported/invalid result with preserved operands.
+- missing closed trims, ambiguous classification, invalid branch graph, open seams, or failed body validity returns precise refusal
+- no partial or unchanged body can report success
+- operands remain immutable and no mesh fallback runs
 
 ## Test Strategy
 
-Cut USB, acoustic, and snap-pocket fixtures; include separated branch and topology-native notch cases plus tangential/no-cut negatives. Assert operand witnesses, new boundaries, closure, and deterministic evidence. The paired contract is [Fix 08 Test](../test-specifications/fix-08-loft-surface-difference-cut-execution-v1_0.md).
+- Unit tests:
+  - intersection/trim evidence, fragment classification, cutter patch orientation, branch decomposition/recomposition, seam rebuild, invalid controls
+- Service/DB tests:
+  - not applicable
+- GUI/controller tests, if applicable:
+  - not applicable
+- Integrated route tests:
+  - USB-C, acoustic, and rotated snap-pocket fixtures through public difference, followed by preview and export consumer smoke
+- Production-data rule:
+  - tests use project fixtures and temporary directories; they do not require user production data
 
 ## Acceptance Criteria
 
-- [ ] Each reproduced qualifying cutter removes material and yields the expected new boundary patches.
-- [ ] Branched loft topology is decomposed and recomposed into validated closed result shells.
-- [ ] No grouped-body, separated-rail, topology-native notch, or flat-rim workaround is required.
-- [ ] Unsupported or invalid geometry is refused without unchanged or partial success.
+- USB-C, acoustic, and rotated snap-pocket cutters produce geometry measurably different from the base and contain the intended opening or pocket.
+- Every successful result is a closed `SurfaceBody` with valid caps, complete seams, operand witnesses, and geometry-change evidence.
+- Validated branching loft topology is decomposed and recomposed without grouped-body, separated-rail, notch, or rim workarounds.
+- Unsupported or invalid topology returns a precise refusal without partial or unchanged success.
+- Preview/export consumers accept the surfaced result without mesh construction as a modeling fallback.
 
 ## Readiness Checklist
 
-- [x] Source issue and release ownership recorded.
-- [x] Architecture transition and paired test contract identified.
-- [x] Ownership, failure behavior, and measurable acceptance drafted.
-- [ ] Independent review specs completed.
-- [ ] Valid Review Score assigned and canonical status confirmed.
-- [ ] Final progression responsibility coverage verified.
+- [x] Primary ancestor and architecture ancestor are explicit.
+- [ ] Review Score appears in front matter and matches a completed independent calculation.
+- [x] Current implementation-spec template was loaded; its path is recorded below.
+- [ ] Independent adversarial recount completed.
+- [x] No unresolved placeholder is hidden as implementation-ready behavior.
+- [x] Source responsibilities are carried into durable sections.
+- [x] Canonical status is Draft.
+- [x] Prerequisites are linked or marked not applicable.
+- [x] Missing/stale architecture is tracked in the active ACD.
+- [x] Missing prerequisite behavior is linked or marked not applicable.
+- [x] Split coverage is recorded for issue-level splits.
+- [x] Review ledger is marked not applicable before review.
+- [x] Implementation owner/module and reuse/extraction decisions are named.
+- [x] UI fields/elements and concurrency are explicit or not applicable.
+- [x] Defaults, data ownership, app type, route, performance, privacy, and test strategy are explicit.
+- [x] Acceptance criteria are observable and testable.
+- [ ] Independent `review specs` confirms cohesion, scoring, canonical status, and final progression coverage.
 
 ## Review Score Calculation
 
-Template source: /Users/k/Documents/Projects/.agents/process/templates/implementation-spec-template.md
-
-Prior score: none
-
-- Intent and scope: pending independent review
-- Architecture and ownership: pending independent review
-- Dependencies and integration: pending independent review
-- Error, performance, and test contracts: pending independent review
-- Acceptance and implementability: pending independent review
-
-Total: pending independent review
-
+- Template source: `/Users/k/Documents/Projects/.agents/process/templates/implementation-spec-template.md`
+- Prior recorded score: none
+- Adversarial rescore basis: pending independent `review specs`; this creation action does not count or certify categories.
+- Functions/methods: pending independent review
+- Data structures/models: pending independent review
+- Dependencies/services: pending independent review
+- Returns/outputs/signals: pending independent review
+- UI surfaces/components: pending independent review
+- UI fields/elements: pending independent review
+- Existing reusable code reused as-is: pending independent review
+- Adding code to an existing library/module: pending independent review
+- Creating a new reusable library/module: pending independent review
+- Database queries/tables/migrations: pending independent review
+- Async/concurrency behavior: pending independent review
+- Destructive/write behavior: pending independent review
+- Security/privacy-sensitive behavior: pending independent review
+- Performance-sensitive behavior: pending independent review
+- Cross-screen reusable behavior: pending independent review
+- Readiness blockers: pending independent review
+- Missing prerequisites: pending independent review
+- Unresolved deferral/gap markers: pending independent review
+- Total: pending independent review
+- If total matches prior score, adversarial survival reason: not applicable until independent review calculates a score.

@@ -2,104 +2,244 @@
 
 Date: 2026-08-04
 Status: Proposed
-Primary ancestor: [Coplanar Loft Face-Touch Union ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
-Architecture ancestor: [Coplanar Loft Face-Touch Union ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
+Primary ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
+Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Source artifact: [GitHub issue #243](https://github.com/kellyjanderson/Impression/issues/243)
 Split provenance: none
 Canonical status: Draft
 Review Score: pending independent review
+Prerequisites:
+- none - the current `SurfaceBody` topology, tolerance policy, and result envelope are the baseline
 
 ## Source Field Carryover
 
-The issue's observed behavior, expected behavior, reproduction geometry, and a4 milestone are retained. This specification adds an implementation boundary and measurable acceptance contract without weakening the issue.
+- Source purpose: Fuse closed loft bodies that share an exact designed coplanar face into one validated surface shell without mesh fallback.
+- Source responsibilities by category:
+  - Functions/methods: classify coincident contacts, remove interior patch pairs, assemble/validate union
+  - Data structures/models: coincident-contact evidence containing patch ids, orientation, overlap/domain match, and tolerance
+  - Dependencies/services: surface evaluator, patch bounds, seam graph, CSG result/validity gates
+  - Returns/outputs/signals: `SurfaceBooleanResult(status=succeeded, body=<one closed SurfaceBody>)` or precise refusal
+  - UI surfaces/components: not applicable; library-only with preview/export consumers
+  - UI fields/elements: not applicable
+  - Reusable code plan: extend existing loft-pair CSG and public surface-union validator
+  - Database queries/tables/migrations: not applicable
+  - Async/concurrency behavior: not applicable
+  - Destructive/write behavior: no destructive writes; operands remain immutable
+  - Security/privacy-sensitive behavior: not applicable
+  - Performance-sensitive behavior: candidate bounds pruning prevents unconditional all-patch dense comparison
+  - Cross-screen reusable behavior: not applicable
+- Source open questions / nuance discovered: none hidden; independent review may refine split cohesion and exact symbol names.
+- Source split/provenance notes: none
 
 ## Purpose
 
-Make union of loft surface bodies sharing a coplanar face return one validated shell instead of overlapping shells or a rejected partial result.
+Fuse closed loft bodies that share an exact designed coplanar face into one validated surface shell without mesh fallback.
 
 ## Scope
 
-Surface union contact classification, coincident-patch comparison, interior-pair removal, boundary seam merging, shell reconstruction, diagnostics, and fixture tests.
+- Owns:
+  - candidate contact pruning and exact coincident trimmed-domain classification
+  - opposite-orientation interior patch-pair removal
+  - remaining patch/seam/adjacency reconstruction and one-shell validation
+  - public union regression and real enclosure composition proof
+
+- Does not own:
+  - partial-overlap trimming or arbitrary intersecting union families
+  - mesh repair or mesh-to-surface conversion
 
 ## Split Coverage
 
-This leaf owns the complete responsibility stated above. It does not claim adjacent leaves indexed by the release intake.
+- Parent spec: none
+- Parent coverage status: not applicable
+- Parent responsibilities owned by this child: not applicable
+- Parent responsibilities still missing from children: none
+- Issue-level split disposition: none
 
 ## Refinement History
 
-Initial do-specs draft. Independent refinement has not yet occurred.
+Not applicable before review. No request review ledger exists; this is a do-specs creation draft.
 
 ## Implementation Routing
 
-Feature branch after canonical review; integrate through the future a4 working branch. Back-reference issue #243 and this specification in commits and PRs.
+- Primary modules/files:
+  - `src/impression/modeling/csg.py` - contact classification, patch removal, shell assembly, and result validation
+- Supporting modules/files:
+  - `src/impression/modeling/surface.py` - existing patch/seam/body invariants if extension is required
+- GUI/QML files, if applicable:
+  - none; no QML is involved
+- Reusable library/module files:
+  - `src/impression/modeling/csg.py` - contact classification, patch removal, shell assembly, and result validation
+- Tests:
+  - `tests/test_coplanar_loft_union_outcome.py` - exact issue regression and negative controls
+  - `tests/test_surface_csg.py` - public result and no-mesh invariants
 
 ## Chosen Defaults / Parameters
 
-Classify geometrically coincident patches with opposite orientation as an interior pair only when their trimmed domains match within the existing surface tolerance. Remove both, merge the remaining boundary graph, and validate exactly one closed shell.
+- use the existing modeling tolerance unless a caller supplies one
+- treat patches as the removable interior pair only when trimmed domains match and normals are opposite within tolerance
+- require exactly one closed output shell with complete seams and operand witnesses
+- refuse ambiguous, partial-domain, or near-coplanar contacts rather than returning overlapping shells
 
 ## Data Ownership
 
-The surface CSG executor owns contact classification and reconstruction. `SurfaceBody` remains the owner of final patches and topology; validation owns success eligibility.
+- source of truth: input `SurfaceBody` patch topology and evaluator domains
+- read ownership: CSG classifier reads immutable operand patches and tolerance
+- write ownership: result assembler creates new patches/seams; operands are unchanged
+- derived/cache data: contact candidates and reconstructed adjacency are recomputable
+- privacy/logging: not applicable
 
 ## Dependencies And Routes
 
-Existing loft patch metadata, surface tolerances, `execute_loft_pair_csg`, and public surface-union validation.
+- Domain/service dependencies:
+  - existing `execute_loft_pair_csg`, surface bounds/evaluation, seam rebuild, and public union validity gate
+  - library route: `boolean_union` -> route selection -> coincident face-touch executor -> shared validator
+- Database dependencies:
+  - none
+- GUI route, if applicable:
+  - not applicable
+- Background/concurrency route, if applicable:
+  - not applicable
 
 ## Prerequisite Handling
 
-No dependency on difference execution. The coincident classifier becomes reusable evidence for later boolean work.
+- Architecture feedback artifacts:
+  - `../architecture/acd-surface-boolean-correctness-and-api-boundary.md` - owns face-touch classification and shell merger transition
+- Architecture feedback status:
+  - tracked in active ACD
+- Already implemented prerequisites:
+  - surface body/seam records, tolerance policy, result envelope, and overlapping-shell invalid gate
+- Missing prerequisite architecture:
+  - none
+- Missing prerequisite specifications:
+  - none
+- Unimplemented prerequisite specifications:
+  - none
+- Progression handling:
+  - this leaf may proceed after independent review canonicalizes it
 
 ## Application Integration
 
-`boolean_union` and internal loft-pair CSG use the same result validator. There is no mesh conversion or silent multi-shell fallback.
+- App type: library-only
+- User/caller surface: public `boolean_union` consumed by modeling scripts and downstream preview/export
+- Invocation route: surface operands -> union route selection -> coincident classifier -> shell assembly -> result gate
+- Wiring owner/module: `src/impression/modeling/csg.py`
+- Observable result: one closed surfaced union or explicit structured refusal
+- Integration validation: public API fixture plus preview/export of the composed enclosure
+- Incomplete status risk: drafted; helper-only patch comparison is insufficient without public route proof
+
+App-type-specific proof:
+
+- GUI: not applicable
+- Console: not applicable
+- API/service: not applicable
+- Mixed: not applicable
+- Library-only: public `boolean_union` consumed by modeling scripts and downstream preview/export is the consuming public route and public API fixture plus preview/export of the composed enclosure
 
 ## Reuse And Extraction Plan
 
-Extract only the shared records and validators named here. Do not create a parallel execution stack or copy planner logic between public and internal routes.
+- Existing code to reuse:
+  - existing code: surface tolerance, patch bounds, result evidence, seam/adjacency rebuild, validity gates
+- Current reuse readiness:
+  - readiness: add a face-touch branch to the existing surface CSG module
+- Extraction/wrapping needed:
+  - extraction: reusable coincident-contact record/classifier inside existing CSG boundaries
+- Additions to existing library/modules:
+  - readiness: add a face-touch branch to the existing surface CSG module
+- New reusable modules to expose:
+  - new reusable modules: none
+- One-off code justification, if any:
+  - one-off justification: none
 
 ## Required DTOs / Functions / Components
 
-Coincident contact record with patch ids, orientation relation, and domain match; interior-pair filter; remaining-shell assembler; union diagnostic evidence.
+- DTOs/models:
+  - `CoincidentPatchContact` - operand/patch ids, orientation relation, trimmed-domain match, tolerance evidence
+- Functions/methods:
+  - candidate contact classifier
+  - interior-pair filter and remaining-shell assembler
+  - union diagnostic/result evidence
+- UI fields / visible data, if applicable:
+  - not applicable
+- UI elements / controls, if applicable:
+  - not applicable
+- UI components, if applicable:
+  - none
 
 ## Performance Contract
 
-Patch-pair classification must be bounded by candidate spatial overlap, not unconditional sampling of every patch pair.
+- candidate patch pairs are pruned by spatial bounds
+- no whole-body dense sampling or mesh tessellation
+- fixture completes within the normal focused-test timeout
 
 ## Error And State Behavior
 
-Ambiguous orientation, partial domain overlap, open seams, or a result other than one closed shell produces an explicit unsupported/invalid result; operands remain unchanged.
+- partial-domain or ambiguous contact returns unsupported/invalid with contact diagnostic
+- open seams, duplicate shells, missing operand witnesses, or shell_count != 1 blocks success
+- operands remain unchanged and no partial body is returned
 
 ## Test Strategy
 
-Use two face-touching loft fixtures plus near-coplanar and partial-overlap negatives. Assert patch removal, seam closure, shell count, and deterministic diagnostics. The paired contract is [Fix 02 Test](../test-specifications/fix-02-coplanar-loft-face-touch-union-v1_0.md).
+- Unit tests:
+  - contact candidate pruning, domain equivalence, orientation, patch removal, seam assembly, and negative classification
+- Service/DB tests:
+  - not applicable
+- GUI/controller tests, if applicable:
+  - not applicable
+- Integrated route tests:
+  - public `boolean_union` on exact face-touch lofts, near-coplanar and partial-overlap negatives, then preview/export consumer smoke
+- Production-data rule:
+  - tests use project fixtures and temporary directories; they do not require user production data
 
 ## Acceptance Criteria
 
-- [ ] The reproduced coplanar loft union yields exactly one closed SurfaceBody shell.
-- [ ] The shared opposite-oriented interior patch pair is absent from the result.
-- [ ] Near-coplanar or partial-domain contacts are not misclassified as the exact face-touch route.
-- [ ] No mesh conversion or overlapping-shell partial success is returned.
+- The issue fixture returns `status=succeeded` with one non-null closed `SurfaceBody`.
+- The opposite-oriented shared interior patches are absent and seam coverage is complete.
+- No duplicate overlapping shell or partial body can report success.
+- Near-coplanar, partial-domain, or ambiguous contacts are not misclassified as exact face-touch union.
+- No mesh fallback is invoked, and a real enclosure composition validates through the public route.
 
 ## Readiness Checklist
 
-- [x] Source issue and release ownership recorded.
-- [x] Architecture transition and paired test contract identified.
-- [x] Ownership, failure behavior, and measurable acceptance drafted.
-- [ ] Independent review specs completed.
-- [ ] Valid Review Score assigned and canonical status confirmed.
-- [ ] Final progression responsibility coverage verified.
+- [x] Primary ancestor and architecture ancestor are explicit.
+- [ ] Review Score appears in front matter and matches a completed independent calculation.
+- [x] Current implementation-spec template was loaded; its path is recorded below.
+- [ ] Independent adversarial recount completed.
+- [x] No unresolved placeholder is hidden as implementation-ready behavior.
+- [x] Source responsibilities are carried into durable sections.
+- [x] Canonical status is Draft.
+- [x] Prerequisites are linked or marked not applicable.
+- [x] Missing/stale architecture is tracked in the active ACD.
+- [x] Missing prerequisite behavior is linked or marked not applicable.
+- [x] Split coverage is recorded for issue-level splits.
+- [x] Review ledger is marked not applicable before review.
+- [x] Implementation owner/module and reuse/extraction decisions are named.
+- [x] UI fields/elements and concurrency are explicit or not applicable.
+- [x] Defaults, data ownership, app type, route, performance, privacy, and test strategy are explicit.
+- [x] Acceptance criteria are observable and testable.
+- [ ] Independent `review specs` confirms cohesion, scoring, canonical status, and final progression coverage.
 
 ## Review Score Calculation
 
-Template source: /Users/k/Documents/Projects/.agents/process/templates/implementation-spec-template.md
-
-Prior score: none
-
-- Intent and scope: pending independent review
-- Architecture and ownership: pending independent review
-- Dependencies and integration: pending independent review
-- Error, performance, and test contracts: pending independent review
-- Acceptance and implementability: pending independent review
-
-Total: pending independent review
-
+- Template source: `/Users/k/Documents/Projects/.agents/process/templates/implementation-spec-template.md`
+- Prior recorded score: none
+- Adversarial rescore basis: pending independent `review specs`; this creation action does not count or certify categories.
+- Functions/methods: pending independent review
+- Data structures/models: pending independent review
+- Dependencies/services: pending independent review
+- Returns/outputs/signals: pending independent review
+- UI surfaces/components: pending independent review
+- UI fields/elements: pending independent review
+- Existing reusable code reused as-is: pending independent review
+- Adding code to an existing library/module: pending independent review
+- Creating a new reusable library/module: pending independent review
+- Database queries/tables/migrations: pending independent review
+- Async/concurrency behavior: pending independent review
+- Destructive/write behavior: pending independent review
+- Security/privacy-sensitive behavior: pending independent review
+- Performance-sensitive behavior: pending independent review
+- Cross-screen reusable behavior: pending independent review
+- Readiness blockers: pending independent review
+- Missing prerequisites: pending independent review
+- Unresolved deferral/gap markers: pending independent review
+- Total: pending independent review
+- If total matches prior score, adversarial survival reason: not applicable until independent review calculates a score.

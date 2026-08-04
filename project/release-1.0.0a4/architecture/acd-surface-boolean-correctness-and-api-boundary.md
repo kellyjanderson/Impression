@@ -105,9 +105,17 @@ surface union/difference correction so callers have a complete surfaced route.
 
 ## Specification Conformance
 
-- Parent specs created or affected: none.
-- Canonical child specs: none; draft Fixes 02, 07-09 await independent review.
-- Paired test specs: draft Fixes 02, 07-09 test specifications.
+- Parent specs created or affected:
+  - [Fix 02 draft](../specifications/fix-02-coplanar-loft-face-touch-union-v1_0.md) - exact face-touch union.
+  - [Fix 07 draft](../specifications/fix-07-surface-only-public-boolean-api-v1_0.md) - public representation boundary.
+  - [Fix 08 draft](../specifications/fix-08-loft-surface-difference-cut-execution-v1_0.md) - real cut construction and branch handling.
+  - [Fix 09 draft](../specifications/fix-09-surface-difference-no-op-result-gate-v1_0.md) - shared success postcondition.
+- Canonical child specs: none yet; independent review is pending.
+- Paired test specs:
+  - [Fix 02 test draft](../test-specifications/fix-02-coplanar-loft-face-touch-union-v1_0.md)
+  - [Fix 07 test draft](../test-specifications/fix-07-surface-only-public-boolean-api-v1_0.md)
+  - [Fix 08 test draft](../test-specifications/fix-08-loft-surface-difference-cut-execution-v1_0.md)
+  - [Fix 09 test draft](../test-specifications/fix-09-surface-difference-no-op-result-gate-v1_0.md)
 
 ## Conformance Checklist
 
@@ -131,4 +139,5 @@ architecture records the conformed solver and compatibility boundaries.
 
 ## Change History
 
+- 2026-08-04 - Linked the full-template Fix 02 and Fix 07-09 paired drafts. Reason: complete the `do specs` creation handoff.
 - 2026-08-04 - Initial draft. Reason: plan issues #243, #247, and #248 for `v1.0.0a4`.

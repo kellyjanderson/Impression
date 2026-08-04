@@ -2,104 +2,244 @@
 
 Date: 2026-08-04
 Status: Proposed
-Primary ancestor: [Expanded Planner Configuration Propagation ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
-Architecture ancestor: [Expanded Planner Configuration Propagation ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
+Primary ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
+Architecture ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 Source artifact: [GitHub issue #246](https://github.com/kellyjanderson/Impression/issues/246)
-Split provenance: Issue #246 is split by [Known-Issue Intake](../planning/known-issue-intake.md).
+Split provenance: Issue #246 is split by `../planning/known-issue-intake.md`; this leaf owns configuration propagation while Fix 05 owns identity and lineage.
 Canonical status: Draft
 Review Score: pending independent review
+Prerequisites:
+- none - existing public loft planner parameters and default validation are the baseline
 
 ## Source Field Carryover
 
-The source failure, expected outcome, reproduction evidence, and a4 milestone are retained. This leaf owns only the responsibility stated below; its sibling leaf retains the rest of issue #246.
+- Source purpose: Ensure every direct, nested, and synthetic transition-planning call uses the caller's effective configuration, particularly `ambiguity_max_branches`.
+- Source responsibilities by category:
+  - Functions/methods: construct/validate options, pass through helpers, enforce branch cap, report effective config
+  - Data structures/models: `LoftPlannerOptions` immutable value
+  - Dependencies/services: public planner functions, expansion/pairing helpers, ambiguity diagnostics
+  - Returns/outputs/signals: bounded candidate enumeration or precise refusal carrying effective cap/location
+  - UI surfaces/components: not applicable
+  - UI fields/elements: not applicable
+  - Reusable code plan: centralize existing planner parameters rather than adding helper defaults
+  - Database queries/tables/migrations: not applicable
+  - Async/concurrency behavior: not applicable
+  - Destructive/write behavior: no destructive writes
+  - Security/privacy-sensitive behavior: not applicable
+  - Performance-sensitive behavior: caller branch cap is a hard global bound through nested expansion
+  - Cross-screen reusable behavior: not applicable
+- Source open questions / nuance discovered: none hidden; independent review may refine split cohesion and exact symbol names.
+- Source split/provenance notes: Issue #246 is split by `../planning/known-issue-intake.md`; this leaf owns configuration propagation while Fix 05 owns identity and lineage.
 
 ## Purpose
 
-Ensure every internal planning pass honors caller-supplied ambiguity and search configuration, especially during expanded split/merge transitions.
+Ensure every direct, nested, and synthetic transition-planning call uses the caller's effective configuration, particularly `ambiguity_max_branches`.
 
 ## Scope
 
-Planner options object, internal expansion calls, ambiguity branch limit, tolerance propagation, diagnostics, and configuration tests.
+- Owns:
+  - one immutable planner-options record at the public boundary
+  - explicit propagation through expansion and nested pairing
+  - hard enforcement and diagnostics for the effective branch cap
+  - 1-to-4-to-7 non-default-limit regression
+
+- Does not own:
+  - identity preservation or synthetic lineage, owned by Fix 05
+  - changing the public default value or adding new search heuristics
 
 ## Split Coverage
 
-The intake ledger records sibling ownership and collectively preserves 100% of issue #246. Neither leaf is optional.
+- Parent spec: none
+- Parent coverage status: not applicable
+- Parent responsibilities owned by this child: not applicable
+- Parent responsibilities still missing from children: none
+- Issue-level split disposition: Issue #246 is split by `../planning/known-issue-intake.md`; this leaf owns configuration propagation while Fix 05 owns identity and lineage.
 
 ## Refinement History
 
-Initial do-specs draft. Independent refinement has not yet occurred.
+Not applicable before review. No request review ledger exists; this is a do-specs creation draft.
 
 ## Implementation Routing
 
-Feature branch after canonical review; integrate through the future a4 working branch. Back-reference issue #246, this leaf, and its sibling where sequencing applies.
+- Primary modules/files:
+  - `src/impression/modeling/loft.py` - public option construction and explicit propagation through every pairing/expansion helper
+- Supporting modules/files:
+  - none
+- GUI/QML files, if applicable:
+  - none; no QML is involved
+- Reusable library/module files:
+  - `src/impression/modeling/loft.py` - public option construction and explicit propagation through every pairing/expansion helper
+- Tests:
+  - `tests/test_loft_identity_first_pairing.py` - direct/expanded configured limits
+  - `tests/test_loft.py` - staged 1-to-4-to-7 public regression
 
 ## Chosen Defaults / Parameters
 
-Create one immutable planner-options value at the public entry point and pass it explicitly through every pairing and expansion call. No internal call may silently rely on a default after caller configuration exists.
+- retain public default `ambiguity_max_branches=64` unless independently changed elsewhere
+- construct one immutable options value per public planning invocation
+- nested helpers receive options explicitly and define no shadow defaults
+- invalid values fail at the public boundary
 
 ## Data Ownership
 
-The top-level loft planning invocation owns configuration. Nested helpers borrow the same immutable options and report its effective values.
+- source of truth: caller-supplied public planner arguments normalized into `LoftPlannerOptions`
+- read ownership: every planning helper reads the same immutable value
+- write ownership: none after construction
+- derived/cache data: effective diagnostic payload is derived from options
+- privacy/logging: not applicable
 
 ## Dependencies And Routes
 
-Existing `ambiguity_max_branches` behavior and transition pairing helpers. No change to the default value itself is required.
+- Domain/service dependencies:
+  - public `loft_plan_*` functions, transition expansion, pairing/ambiguity enumeration, diagnostics
+  - library route: public args -> options -> all nested planning calls
+- Database dependencies:
+  - none
+- GUI route, if applicable:
+  - not applicable
+- Background/concurrency route, if applicable:
+  - not applicable
 
 ## Prerequisite Handling
 
-Independent of Fix 05 implementation but both must pass before Fix 04 can be claimed complete.
+- Architecture feedback artifacts:
+  - `../architecture/acd-loft-identity-and-junction-correctness.md` - owns caller configuration through expansion
+- Architecture feedback status:
+  - tracked in active ACD
+- Already implemented prerequisites:
+  - public option validation, ambiguity counters, and diagnostic metadata
+- Missing prerequisite architecture:
+  - none
+- Missing prerequisite specifications:
+  - none
+- Unimplemented prerequisite specifications:
+  - none
+- Progression handling:
+  - this leaf and Fix 05 may proceed independently after review; both precede Fix 04 completion
 
 ## Application Integration
 
-Every public and internal loft planning route constructs or receives the same options record; diagnostics include the effective branch cap when refusal occurs.
+- App type: library-only
+- User/caller surface: all public loft planning and `Loft(...)` calls exposing planner limits
+- Invocation route: caller args -> immutable options -> direct/nested expansion and pairing
+- Wiring owner/module: `src/impression/modeling/loft.py`
+- Observable result: candidate enumeration respects requested cap and reports it on refusal
+- Integration validation: public route tests below/at/above required search size
+- Incomplete status risk: drafted; direct-helper-only proof is insufficient
+
+App-type-specific proof:
+
+- GUI: not applicable
+- Console: not applicable
+- API/service: not applicable
+- Mixed: not applicable
+- Library-only: all public loft planning and `Loft(...)` calls exposing planner limits is the consuming public route and public route tests below/at/above required search size
 
 ## Reuse And Extraction Plan
 
-Extend the canonical planner/executor records and helpers. Do not add test-model-specific identity, junction, or configuration paths.
+- Existing code to reuse:
+  - existing code: planner parameters, validation, ambiguity counters, diagnostic metadata
+- Current reuse readiness:
+  - readiness: group and thread through existing module
+- Extraction/wrapping needed:
+  - extraction: `LoftPlannerOptions` in the loft module
+- Additions to existing library/modules:
+  - readiness: group and thread through existing module
+- New reusable modules to expose:
+  - new reusable modules: none
+- One-off code justification, if any:
+  - one-off justification: none
 
 ## Required DTOs / Functions / Components
 
-`LoftPlannerOptions`; explicit helper parameters; effective-configuration diagnostic payload; test hooks for attempted branch counts.
+- DTOs/models:
+  - `LoftPlannerOptions(ambiguity_max_branches, tolerances, split_merge_mode, fairness_mode, ...)`
+- Functions/methods:
+  - public option normalizer/validator
+  - effective-configuration diagnostic payload
+  - branch-attempt instrumentation for tests
+- UI fields / visible data, if applicable:
+  - not applicable
+- UI elements / controls, if applicable:
+  - not applicable
+- UI components, if applicable:
+  - none
 
 ## Performance Contract
 
-The configured branch limit is a hard upper bound across all expansion passes; nested planning cannot reset or multiply it.
+- visited/retained candidates never exceed the caller cap
+- nested expansion cannot reset or multiply the cap
+- options propagation adds constant overhead
 
 ## Error And State Behavior
 
-Invalid option values fail at the public boundary. Limit exhaustion returns the existing ambiguity refusal enriched with effective configuration and transition location.
+- invalid options fail before planning
+- limit exhaustion names effective cap, candidate count, and transition location
+- no nested call silently falls back to 64 when caller supplied another value
 
 ## Test Strategy
 
-Set branch limits below, at, and above fixture needs across direct and expanded transitions. Assert attempted branches never exceed the caller cap. The paired contract is [Fix 06 Test](../test-specifications/fix-06-expanded-planner-configuration-propagation-v1_0.md).
+- Unit tests:
+  - options construction, explicit helper propagation, invalid values, below/at/above cap behavior
+- Service/DB tests:
+  - not applicable
+- GUI/controller tests, if applicable:
+  - not applicable
+- Integrated route tests:
+  - staged 1-to-4-to-7 public planning with `ambiguity_max_branches=4096` does not report 64; a smaller cap refuses at that exact cap
+- Production-data rule:
+  - tests use project fixtures and temporary directories; they do not require user production data
 
 ## Acceptance Criteria
 
-- [ ] Every nested transition pairing receives the caller's planner options.
-- [ ] `ambiguity_max_branches` is never reset to the default during expansion.
-- [ ] Observed branch attempts respect the configured hard bound.
-- [ ] Limit refusal identifies the effective cap and transition location deterministically.
+- Every direct and nested planning helper receives the caller's effective options.
+- `ambiguity_max_branches` is never reset to 64 during synthetic expansion when the caller supplied another value.
+- Observed branch attempts honor the configured hard bound.
+- The staged 1-to-4-to-7 regression succeeds or refuses according to the supplied limit, never a hidden default.
+- Limit diagnostics deterministically identify the effective cap and transition location.
 
 ## Readiness Checklist
 
-- [x] Source issue, split ledger, and release ownership recorded.
-- [x] Architecture transition and paired test contract identified.
-- [x] Ownership, failure behavior, and measurable acceptance drafted.
-- [ ] Independent review specs completed.
-- [ ] Valid Review Score assigned and canonical status confirmed.
-- [ ] Split responsibility coverage re-verified at the review fixed point.
+- [x] Primary ancestor and architecture ancestor are explicit.
+- [ ] Review Score appears in front matter and matches a completed independent calculation.
+- [x] Current implementation-spec template was loaded; its path is recorded below.
+- [ ] Independent adversarial recount completed.
+- [x] No unresolved placeholder is hidden as implementation-ready behavior.
+- [x] Source responsibilities are carried into durable sections.
+- [x] Canonical status is Draft.
+- [x] Prerequisites are linked or marked not applicable.
+- [x] Missing/stale architecture is tracked in the active ACD.
+- [x] Missing prerequisite behavior is linked or marked not applicable.
+- [x] Split coverage is recorded for issue-level splits.
+- [x] Review ledger is marked not applicable before review.
+- [x] Implementation owner/module and reuse/extraction decisions are named.
+- [x] UI fields/elements and concurrency are explicit or not applicable.
+- [x] Defaults, data ownership, app type, route, performance, privacy, and test strategy are explicit.
+- [x] Acceptance criteria are observable and testable.
+- [ ] Independent `review specs` confirms cohesion, scoring, canonical status, and final progression coverage.
 
 ## Review Score Calculation
 
-Template source: /Users/k/Documents/Projects/.agents/process/templates/implementation-spec-template.md
-
-Prior score: none
-
-- Intent and scope: pending independent review
-- Architecture and ownership: pending independent review
-- Dependencies and integration: pending independent review
-- Error, performance, and test contracts: pending independent review
-- Acceptance and implementability: pending independent review
-
-Total: pending independent review
-
+- Template source: `/Users/k/Documents/Projects/.agents/process/templates/implementation-spec-template.md`
+- Prior recorded score: none
+- Adversarial rescore basis: pending independent `review specs`; this creation action does not count or certify categories.
+- Functions/methods: pending independent review
+- Data structures/models: pending independent review
+- Dependencies/services: pending independent review
+- Returns/outputs/signals: pending independent review
+- UI surfaces/components: pending independent review
+- UI fields/elements: pending independent review
+- Existing reusable code reused as-is: pending independent review
+- Adding code to an existing library/module: pending independent review
+- Creating a new reusable library/module: pending independent review
+- Database queries/tables/migrations: pending independent review
+- Async/concurrency behavior: pending independent review
+- Destructive/write behavior: pending independent review
+- Security/privacy-sensitive behavior: pending independent review
+- Performance-sensitive behavior: pending independent review
+- Cross-screen reusable behavior: pending independent review
+- Readiness blockers: pending independent review
+- Missing prerequisites: pending independent review
+- Unresolved deferral/gap markers: pending independent review
+- Total: pending independent review
+- If total matches prior score, adversarial survival reason: not applicable until independent review calculates a score.

@@ -98,9 +98,17 @@ internal resets.
 
 ## Specification Conformance
 
-- Parent specs created or affected: none.
-- Canonical child specs: none; draft Fixes 03-06 await independent review.
-- Paired test specs: draft Fixes 03-06 test specifications.
+- Parent specs created or affected:
+  - [Fix 03 draft](../specifications/fix-03-named-hole-identity-pairing-v1_0.md) - named-hole identity pairing.
+  - [Fix 04 draft](../specifications/fix-04-hole-split-merge-junction-surfaces-v1_0.md) - junction surface execution.
+  - [Fix 05 draft](../specifications/fix-05-count-changing-region-identity-preservation-v1_0.md) - synthetic lineage.
+  - [Fix 06 draft](../specifications/fix-06-expanded-planner-configuration-propagation-v1_0.md) - planner configuration propagation.
+- Canonical child specs: none yet; independent review is pending.
+- Paired test specs:
+  - [Fix 03 test draft](../test-specifications/fix-03-named-hole-identity-pairing-v1_0.md)
+  - [Fix 04 test draft](../test-specifications/fix-04-hole-split-merge-junction-surfaces-v1_0.md)
+  - [Fix 05 test draft](../test-specifications/fix-05-count-changing-region-identity-preservation-v1_0.md)
+  - [Fix 06 test draft](../test-specifications/fix-06-expanded-planner-configuration-propagation-v1_0.md)
 
 ## Conformance Checklist
 
@@ -124,4 +132,5 @@ through public routes with closed-valid surface output.
 
 ## Change History
 
+- 2026-08-04 - Linked the full-template Fix 03-06 and paired test drafts. Reason: complete the `do specs` creation handoff.
 - 2026-08-04 - Initial draft. Reason: plan issues #244-#246 for `v1.0.0a4`.

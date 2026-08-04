@@ -2,43 +2,64 @@
 
 Date: 2026-08-04
 Status: Proposed
-Feature specification: [Fix 06: Expanded Planner Configuration Propagation](../specifications/fix-06-expanded-planner-configuration-propagation-v1_0.md)
-Canonical status: Draft
+Feature spec: [Fix 06: Expanded Planner Configuration Propagation](../specifications/fix-06-expanded-planner-configuration-propagation-v1_0.md)
+Feature spec canonical status: Draft
+Architecture ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 
 ## Overview
 
-This contract proves the user-visible behavior, internal invariants, failure behavior, and release regression boundary for Fix 06. It becomes binding only when the paired feature spec is independently reviewed and canonicalized.
+This paired contract verifies the complete draft feature boundary for Fix 06. It remains a draft until independent `review specs` canonicalizes the feature leaf.
 
 ## Application Integration Under Test
 
-Planner integration proof: configure through the public entry point; direct helper invocation alone is insufficient.
+- App type: library-only
+- User/caller surface: all public loft planner entry points and `Loft(...)`
+- Invocation route: caller arguments -> immutable options -> direct/nested pairing and expansion
+- Wiring owner/module: `src/impression/modeling/loft.py`
+- Observable result: candidate search respects caller cap and reports effective configuration
+- Integration validation: public direct and staged 1-to-4-to-7 tests below/at/above required cap
 
 ## Manual Smoke
 
-Run direct and expanded transitions with intentionally small branch caps and inspect refusal diagnostics. Confirm the last valid result remains usable after any deliberate failure.
+- Run the staged transition with a deliberately small cap and inspect refusal.
+- Repeat with `ambiguity_max_branches=4096` and confirm no internal diagnostic reports 64.
 
 ## Automated Smoke Tests
 
-Tests instrument attempted branches and cover limits below, at, and above the required search size.
+- Nested expansion observes the supplied non-default cap.
+- Invalid option values fail at the public boundary.
 
 ## Automated Acceptance Tests
 
-Every nested expansion must remain at or below the caller cap and report the effective value on refusal. Include deterministic positive, negative, and regression assertions and require actionable diagnostic content for refusals.
+- Unit/helper behavior:
+  - options construction, every helper handoff, hard cap enforcement, diagnostic payload
+- Integrated route behavior:
+  - public 1-to-4-to-7 planning with small and large limits
+- Failure and stale-result behavior, if applicable:
+  - limit exhaustion names the supplied cap/location; no nested reset or multiplication
 
 ## App-Type Proof
 
-Planner integration proof: configure through the public entry point; direct helper invocation alone is insufficient.
+- GUI proof: not applicable
+- Console proof: not applicable
+- API/service proof:
+  - not applicable
+- Mixed-surface proof: not applicable
+- Library-only proof: options supplied only through public planning route
 
 ## Fixtures And Data
 
-Direct/expanded ambiguity fixtures with multiple branch caps and invalid configuration values. Fixtures must be deterministic, project-local, and small enough for normal CI. Preserve the exact issue reproduction where it is the acceptance fixture.
+- direct ambiguity fixture
+- staged 1-to-4-to-7 expansion
+- invalid and boundary option values
+- Production-data rule: tests use project-local deterministic fixtures and temporary directories; no user production data is required.
 
 ## Acceptance
 
-- [ ] Manual smoke succeeds on a supported macOS development environment.
-- [ ] Automated smoke covers the primary state transition and failure recovery.
-- [ ] Automated acceptance proves every criterion in the paired implementation specification.
-- [ ] The real application/public route is exercised; helper-only proof is rejected.
-- [ ] The focused suite and full configured suite pass without workaround geometry or mesh fallback.
-- [ ] Test names and failure output identify the violated contract and relevant fixture.
+- [ ] Feature spec is canonical, or this test spec remains explicitly temporary while review/split coverage is incomplete.
+- [ ] Route-level proof exists for the declared app type.
+- [ ] Helper-only tests cannot satisfy this contract.
+- [ ] Every observable result and feature acceptance criterion is asserted through the intended route.
+- [ ] Failure, stale-result, refusal, or no-cut behavior is covered where applicable.
+- [ ] Focused and full configured suites pass without mesh modeling fallback or test-model workaround geometry.
 

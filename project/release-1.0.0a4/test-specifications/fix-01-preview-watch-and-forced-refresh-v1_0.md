@@ -2,43 +2,65 @@
 
 Date: 2026-08-04
 Status: Proposed
-Feature specification: [Fix 01: Preview Watch And Forced Refresh](../specifications/fix-01-preview-watch-and-forced-refresh-v1_0.md)
-Canonical status: Draft
+Feature spec: [Fix 01: Preview Watch And Forced Refresh](../specifications/fix-01-preview-watch-and-forced-refresh-v1_0.md)
+Feature spec canonical status: Draft
+Architecture ancestor: [Active ACD](../architecture/acd-preview-reload-coordination.md)
 
 ## Overview
 
-This contract proves the user-visible behavior, internal invariants, failure behavior, and release regression boundary for Fix 01. It becomes binding only when the paired feature spec is independently reviewed and canonicalized.
+This paired contract verifies the complete draft feature boundary for Fix 01. It remains a draft until independent `review specs` canonicalizes the feature leaf.
 
 ## Application Integration Under Test
 
-Desktop/CLI integration proof: drive the actual watcher adapter, controller, module loader, and visible preview status rather than invoking the scene factory alone.
+- App type: mixed
+- User/caller surface: live `impression preview` command and preview window
+- Invocation route: saved top-level/transitive file or `R` key -> reload coordinator -> loader/build lane -> UI-thread scene application
+- Wiring owner/module: `src/impression/preview.py` and `src/impression/cli.py`
+- Observable result: fresh visible scene after real build time, preserved camera/last-good scene, and visible failure status
+- Integration validation: real command/GUI smoke plus actual filesystem timing and module-cache assertions
 
 ## Manual Smoke
 
-Run `impression preview` on a model importing a helper module; edit each file and press `R` after an mtime-neutral rewrite. Confirm the last valid result remains usable after any deliberate failure.
+- Launch `impression preview` on an entry model importing a local helper.
+- Save the entry model and helper separately; confirm each schedules promptly and displays the new value.
+- Rewrite the helper while restoring its prior mtime, press `R`, and confirm the new value appears.
+- Trigger a build error, confirm the last good scene/camera remains, repair it, and confirm recovery.
 
 ## Automated Smoke Tests
 
-Controller tests cover one-active/one-latest coalescing, force-bit retention, failure recovery, and cache-generation changes.
+- A temporary real file event reaches captured build submission within 250 ms, excluding build/render.
+- The actual `R` event reaches forced cache invalidation and a visible scene apply.
 
 ## Automated Acceptance Tests
 
-A real temporary filesystem write must reach captured build submission within 250 ms; `R` must load changed transitive module content. Include deterministic positive, negative, and regression assertions and require actionable diagnostic content for refusals.
+- Unit/helper behavior:
+  - request coalescing, force-bit retention, generation invalidation, dependency rediscovery, stale completion, failure recovery, camera preservation
+- Integrated route behavior:
+  - top-level save, transitive save, mtime-neutral forced refresh, burst saves, error/recovery, and orderly shutdown through the CLI/preview route
+- Failure and stale-result behavior, if applicable:
+  - older completions cannot overwrite newer state; errors retain last-good scene; forced intent survives adjacent watcher events
 
 ## App-Type Proof
 
-Desktop/CLI integration proof: drive the actual watcher adapter, controller, module loader, and visible preview status rather than invoking the scene factory alone.
+- GUI proof: visible preview, `R` event, UI-thread apply, stale/failure behavior, and camera state
+- Console proof: actual command startup, watched paths, status/error output, and shutdown
+- API/service proof:
+  - not applicable
+- Mixed-surface proof: separate command/watcher submission and visible renderer assertions
+- Library-only proof: not applicable
 
 ## Fixtures And Data
 
-Top-level and transitive model modules; burst edits; mtime-neutral content replacement; one intentionally failing revision. Fixtures must be deterministic, project-local, and small enough for normal CI. Preserve the exact issue reproduction where it is the acceptance fixture.
+- temporary entry/helper Python modules with observable scene values
+- burst edit sequence, mtime-restored helper edit, deliberate syntax/build failure
+- Production-data rule: tests use project-local deterministic fixtures and temporary directories; no user production data is required.
 
 ## Acceptance
 
-- [ ] Manual smoke succeeds on a supported macOS development environment.
-- [ ] Automated smoke covers the primary state transition and failure recovery.
-- [ ] Automated acceptance proves every criterion in the paired implementation specification.
-- [ ] The real application/public route is exercised; helper-only proof is rejected.
-- [ ] The focused suite and full configured suite pass without workaround geometry or mesh fallback.
-- [ ] Test names and failure output identify the violated contract and relevant fixture.
+- [ ] Feature spec is canonical, or this test spec remains explicitly temporary while review/split coverage is incomplete.
+- [ ] Route-level proof exists for the declared app type.
+- [ ] Helper-only tests cannot satisfy this contract.
+- [ ] Every observable result and feature acceptance criterion is asserted through the intended route.
+- [ ] Failure, stale-result, refusal, or no-cut behavior is covered where applicable.
+- [ ] Focused and full configured suites pass without mesh modeling fallback or test-model workaround geometry.
 

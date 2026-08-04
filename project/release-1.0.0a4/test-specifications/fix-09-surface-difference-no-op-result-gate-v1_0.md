@@ -2,43 +2,64 @@
 
 Date: 2026-08-04
 Status: Proposed
-Feature specification: [Fix 09: Surface Difference No-Op Result Gate](../specifications/fix-09-surface-difference-no-op-result-gate-v1_0.md)
-Canonical status: Draft
+Feature spec: [Fix 09: Surface Difference No-Op Result Gate](../specifications/fix-09-surface-difference-no-op-result-gate-v1_0.md)
+Feature spec canonical status: Draft
+Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 
 ## Overview
 
-This contract proves the user-visible behavior, internal invariants, failure behavior, and release regression boundary for Fix 09. It becomes binding only when the paired feature spec is independently reviewed and canonicalized.
+This paired contract verifies the complete draft feature boundary for Fix 09. It remains a draft until independent `review specs` canonicalizes the feature leaf.
 
 ## Application Integration Under Test
 
-Public-route proof: validate through `boolean_difference`; validator-only unit tests are necessary but insufficient.
+- App type: library-only
+- User/caller surface: public `boolean_difference` and every surfaced executor
+- Invocation route: executor body/evidence -> normalized change/no-cut gate -> public result
+- Wiring owner/module: `src/impression/modeling/csg.py`
+- Observable result: truthful changed success, documented disjoint no-cut, or invalid/unsupported outcome
+- Integration validation: public result matrix across every registered surfaced difference executor
 
 ## Manual Smoke
 
-Exercise a true cut, a disjoint cutter, and an executor double that returns a cloned minuend with interaction evidence. Confirm the last valid result remains usable after any deliberate failure.
+- Run a true cut, a proven disjoint cutter, and the rotated false-success reproduction.
+- Confirm only changed geometry succeeds and each outcome includes inspectable evidence/diagnostics.
 
 ## Automated Smoke Tests
 
-Validator tests cover each witness type, unchanged comparisons, disjoint classification, tangency, and tolerance-near changes.
+- A cloned-minuend executor result is rejected.
+- A true cut with a valid witness succeeds; proven disjoint remains a distinct no-cut.
 
 ## Automated Acceptance Tests
 
-Every registered surface-difference executor passes the shared gate; cloned-minuend success is rejected. Include deterministic positive, negative, and regression assertions and require actionable diagnostic content for refusals.
+- Unit/helper behavior:
+  - each witness kind, normalized evidence, unchanged comparison, disjoint/tangent/tolerance-near classification
+- Integrated route behavior:
+  - public route for every registered surfaced difference executor
+- Failure and stale-result behavior, if applicable:
+  - overlap plus unchanged or ambiguous evidence refuses success; no executor bypasses the gate
 
 ## App-Type Proof
 
-Public-route proof: validate through `boolean_difference`; validator-only unit tests are necessary but insufficient.
+- GUI proof: not applicable
+- Console proof: not applicable
+- API/service proof:
+  - not applicable
+- Mixed-surface proof: not applicable
+- Library-only proof: public result gate exercised through every executor route
 
 ## Fixtures And Data
 
-Changed result, cloned minuend, proven disjoint cutter, tangent contact, tolerance-near patch/domain changes. Fixtures must be deterministic, project-local, and small enough for normal CI. Preserve the exact issue reproduction where it is the acceptance fixture.
+- changed result
+- cloned minuend with interaction evidence
+- disjoint, tangent, tolerance-near, and ambiguous cases
+- Production-data rule: tests use project-local deterministic fixtures and temporary directories; no user production data is required.
 
 ## Acceptance
 
-- [ ] Manual smoke succeeds on a supported macOS development environment.
-- [ ] Automated smoke covers the primary state transition and failure recovery.
-- [ ] Automated acceptance proves every criterion in the paired implementation specification.
-- [ ] The real application/public route is exercised; helper-only proof is rejected.
-- [ ] The focused suite and full configured suite pass without workaround geometry or mesh fallback.
-- [ ] Test names and failure output identify the violated contract and relevant fixture.
+- [ ] Feature spec is canonical, or this test spec remains explicitly temporary while review/split coverage is incomplete.
+- [ ] Route-level proof exists for the declared app type.
+- [ ] Helper-only tests cannot satisfy this contract.
+- [ ] Every observable result and feature acceptance criterion is asserted through the intended route.
+- [ ] Failure, stale-result, refusal, or no-cut behavior is covered where applicable.
+- [ ] Focused and full configured suites pass without mesh modeling fallback or test-model workaround geometry.
 

@@ -2,43 +2,65 @@
 
 Date: 2026-08-04
 Status: Proposed
-Feature specification: [Fix 04: Hole Split/Merge Junction Surfaces](../specifications/fix-04-hole-split-merge-junction-surfaces-v1_0.md)
-Canonical status: Draft
+Feature spec: [Fix 04: Hole Split/Merge Junction Surfaces](../specifications/fix-04-hole-split-merge-junction-surfaces-v1_0.md)
+Feature spec canonical status: Draft
+Architecture ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 
 ## Overview
 
-This contract proves the user-visible behavior, internal invariants, failure behavior, and release regression boundary for Fix 04. It becomes binding only when the paired feature spec is independently reviewed and canonicalized.
+This paired contract verifies the complete draft feature boundary for Fix 04. It remains a draft until independent `review specs` canonicalizes the feature leaf.
 
 ## Application Integration Under Test
 
-Surface-body proof: validate real patches and seams through the standard loft builder, not plan-only mocks.
+- App type: library-only
+- User/caller surface: published split/merge example and `Loft(...)`
+- Invocation route: identity-aware plan -> junction event -> surface patches/seams -> cap/closure validation
+- Wiring owner/module: `src/impression/modeling/loft.py`
+- Observable result: closed body, valid orientations/seams, exactly two terminal caps
+- Integration validation: published many-to-one plus reversed one-to-many public execution
 
 ## Manual Smoke
 
-Build one-to-two and two-to-one hole lofts and inspect body closure, patch roles, cap count, and seam incidence. Confirm the last valid result remains usable after any deliberate failure.
+- Run the published many-to-one example and reversed one-to-many variant.
+- Inspect `cap_valid`, `closed_valid`, seam coverage, patch roles, and cap count.
+- Confirm no interior planar closure cap or mesh fallback.
 
 ## Automated Smoke Tests
 
-Unit tests cover junction event construction, orientation, terminal-cap classification, and invalid lineage refusal.
+- Both transition directions return closed-valid surfaced bodies.
+- Each has exactly two terminal caps.
 
 ## Automated Acceptance Tests
 
-Real loft execution must return a closed body with exactly two terminal caps and no internal closure cap. Include deterministic positive, negative, and regression assertions and require actionable diagnostic content for refusals.
+- Unit/helper behavior:
+  - junction event direction, lineage, patch orientation, seam incidence, terminal/junction roles
+- Integrated route behavior:
+  - public `Loft` execution for published and reversed examples
+- Failure and stale-result behavior, if applicable:
+  - ambiguous lineage, invalid orientation, self-intersection, or non-manifold seams return no partial body
 
 ## App-Type Proof
 
-Surface-body proof: validate real patches and seams through the standard loft builder, not plan-only mocks.
+- GUI proof: not applicable
+- Console proof: not applicable
+- API/service proof:
+  - not applicable
+- Mixed-surface proof: not applicable
+- Library-only proof: published caller route through real surface executor
 
 ## Fixtures And Data
 
-Split and merge fixtures, reversed station order, terminal birth/death, crossing/ambiguous lineage negatives. Fixtures must be deterministic, project-local, and small enough for normal CI. Preserve the exact issue reproduction where it is the acceptance fixture.
+- published many-to-one
+- reversed one-to-many
+- crossing/ambiguous lineage and invalid orientation controls
+- Production-data rule: tests use project-local deterministic fixtures and temporary directories; no user production data is required.
 
 ## Acceptance
 
-- [ ] Manual smoke succeeds on a supported macOS development environment.
-- [ ] Automated smoke covers the primary state transition and failure recovery.
-- [ ] Automated acceptance proves every criterion in the paired implementation specification.
-- [ ] The real application/public route is exercised; helper-only proof is rejected.
-- [ ] The focused suite and full configured suite pass without workaround geometry or mesh fallback.
-- [ ] Test names and failure output identify the violated contract and relevant fixture.
+- [ ] Feature spec is canonical, or this test spec remains explicitly temporary while review/split coverage is incomplete.
+- [ ] Route-level proof exists for the declared app type.
+- [ ] Helper-only tests cannot satisfy this contract.
+- [ ] Every observable result and feature acceptance criterion is asserted through the intended route.
+- [ ] Failure, stale-result, refusal, or no-cut behavior is covered where applicable.
+- [ ] Focused and full configured suites pass without mesh modeling fallback or test-model workaround geometry.
 
