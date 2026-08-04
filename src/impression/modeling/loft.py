@@ -3544,6 +3544,11 @@ def loft_plan_sections(
     if rational_weights is not None:
         rational_weights_payload = float(rational_weights) if np.isscalar(rational_weights) else np.asarray(rational_weights, dtype=float).tolist()
     sweep_path_points_payload = None if sweep_path is None else tuple(tuple(float(value) for value in point) for point in sweep_path.sample())
+    source_topology_paths = tuple(
+        tuple(station.section.metadata.get("topology_paths", ()))
+        for station in effective_stations
+        if station.section is not None
+    )
     plan = LoftPlan(
         samples=samples,
         stations=tuple(planned_stations),
@@ -3584,6 +3589,7 @@ def loft_plan_sections(
             "fairness_objective_post": fairness_objective_post,
             "fairness_diagnostics": fairness_diagnostics,
             "fairness_optimization_convergence_status": fairness_convergence_status,
+            "source_topology_paths": source_topology_paths,
         },
     )
     _validate_loft_plan(plan)
@@ -4192,7 +4198,8 @@ def _loft_execute_plan_surface(
             "loft_cap_validity": cap_validity.canonical_payload(),
             "loft_closure_evidence": closure_evidence.canonical_payload(),
             "loft_seam_coverage": seam_coverage.canonical_payload(),
-        }
+        },
+        "source_topology_paths": plan.metadata.get("source_topology_paths", ()),
     }
     shell = make_surface_shell(
         tuple(patches),
@@ -5818,7 +5825,11 @@ def _canonicalize_section_for_loft(
             ).normalized()
         )
         region_order.append(original_index)
-    canonical = Section(tuple(ordered_regions), color=normalized.color).normalized()
+    canonical = Section(
+        tuple(ordered_regions),
+        color=normalized.color,
+        metadata=dict(normalized.metadata),
+    ).normalized()
     if return_region_order:
         return canonical, tuple(region_order)
     return canonical

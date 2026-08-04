@@ -1094,7 +1094,7 @@ class Section:
 
 
 def as_section(
-    shape: Section | Region | Path2D | object,
+    shape: Section | Region | Path2D | TopologyPath | object,
     *,
     segments_per_circle: int = 64,
     bezier_samples: int = 32,
@@ -1105,6 +1105,16 @@ def as_section(
         return shape.normalized()
     if isinstance(shape, Region):
         return Section((shape.normalized(),))
+    if isinstance(shape, TopologyPath):
+        if not shape.closed:
+            raise ValueError("TopologyPath must be closed for loft and planar solid operations.")
+        loop = shape.to_section_loop()
+        if loop.points.shape[0] < 3:
+            raise ValueError("Closed TopologyPath must resolve to at least three loop points.")
+        return Section(
+            (Region(outer=Loop(ensure_winding(loop.points, clockwise=False))),),
+            metadata={"topology_paths": (shape,), "topology_source": "TopologyPath"},
+        ).normalized()
     if isinstance(shape, Path2D):
         if not shape.closed:
             raise ValueError("Path2D must be closed for planar solid operations.")
@@ -1139,7 +1149,10 @@ def as_section(
         color = getattr(shape, "color", None)
         metadata = dict(getattr(shape, "metadata", {}) or {})
         return Section((region,), color=color, metadata=metadata)
-    raise TypeError("Expected Section, Region, closed Path2D, or shape with .outer/.holes Path2D loops.")
+    raise TypeError(
+        "Expected Section, Region, closed TopologyPath, closed Path2D, "
+        "or shape with .outer/.holes Path2D loops."
+    )
 
 
 def as_sections(
