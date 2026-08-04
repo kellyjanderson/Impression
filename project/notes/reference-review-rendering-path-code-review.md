@@ -1,6 +1,8 @@
-# Reference Review Rendering Path Code Review
+---
+created: 2026-07-23
+---
 
-Date: 2026-07-23
+# Reference Review Rendering Path Code Review
 
 ## Context
 

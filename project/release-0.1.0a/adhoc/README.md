@@ -3,6 +3,10 @@
 This folder is the durable planning space for small, named work that should not
 be blocked on heavy feature-spec refinement.
 
+## Active Work
+
+- [CSG One-To-One Surface Patch Completeness Matrix](csg-one-to-one-surface-patch-completeness-matrix.md)
+
 It exists alongside:
 
 - `project/specifications/`
