@@ -11727,6 +11727,61 @@ def _apply_face_colors(result: Mesh, face_ids: np.ndarray, color_map: dict[int, 
     result.face_colors = face_colors
 
 
+def _weld_boolean_result_degenerate_vertices(mesh: Mesh) -> Mesh:
+    """Remove manifold-output zero edges when exact duplicate vertices are safe to weld."""
+
+    original_analysis = analyze_mesh(mesh)
+    if original_analysis.degenerate_faces == 0:
+        return mesh
+    triangles = mesh.vertices[mesh.faces]
+    areas = np.linalg.norm(
+        np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]),
+        axis=1,
+    ) * 0.5
+    parent = np.arange(mesh.n_vertices, dtype=int)
+
+    def root(vertex_index: int) -> int:
+        while parent[vertex_index] != vertex_index:
+            parent[vertex_index] = parent[parent[vertex_index]]
+            vertex_index = int(parent[vertex_index])
+        return vertex_index
+
+    merged = False
+    for face in mesh.faces[areas <= 1e-12]:
+        for first, second in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0])):
+            if np.array_equal(mesh.vertices[first], mesh.vertices[second]):
+                first_root = root(int(first))
+                second_root = root(int(second))
+                if first_root != second_root:
+                    parent[max(first_root, second_root)] = min(first_root, second_root)
+                    merged = True
+    if not merged:
+        return mesh
+    inverse = np.asarray([root(index) for index in range(mesh.n_vertices)], dtype=int)
+    remapped_faces = inverse[mesh.faces]
+    keep_faces = np.asarray([len(set(face)) == 3 for face in remapped_faces], dtype=bool)
+    remapped_faces = remapped_faces[keep_faces]
+    referenced = np.unique(remapped_faces.reshape(-1))
+    compact_remap = np.full(mesh.n_vertices, -1, dtype=int)
+    compact_remap[referenced] = np.arange(len(referenced), dtype=int)
+    candidate = Mesh(
+        vertices=mesh.vertices[referenced],
+        faces=compact_remap[remapped_faces],
+        color=mesh.color,
+        metadata=dict(mesh.metadata),
+    )
+    if mesh.face_colors is not None and len(mesh.face_colors) == mesh.n_faces:
+        candidate.face_colors = mesh.face_colors[keep_faces]
+    candidate_analysis = analyze_mesh(candidate)
+    if (
+        candidate_analysis.degenerate_faces == 0
+        and candidate_analysis.boundary_edges == original_analysis.boundary_edges
+        and candidate_analysis.nonmanifold_edges == original_analysis.nonmanifold_edges
+    ):
+        return candidate
+    return mesh
+
+
 def _apply_boolean(
     meshes: Iterable[Mesh],
     operation: str,
@@ -11781,7 +11836,7 @@ def _apply_boolean(
         _combine_color(result, meshes_list)
     else:
         _combine_color(result, meshes_list)
-    return result
+    return _weld_boolean_result_degenerate_vertices(result)
 
 
 def _classify_surface_body(body: SurfaceBody) -> Literal["open", "closed"]:

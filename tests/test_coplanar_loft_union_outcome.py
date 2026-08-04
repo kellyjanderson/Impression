@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 import impression.modeling.csg as csg_module
+from impression.mesh import Mesh, analyze_mesh
 from impression.modeling import (
     Loft,
     Loop,
@@ -13,6 +14,7 @@ from impression.modeling import (
     SurfaceBooleanResult,
     boolean_union,
     make_box,
+    make_box_mesh,
 )
 
 
@@ -178,3 +180,26 @@ def test_existing_supported_box_union_remains_successful() -> None:
     assert result.classification == "closed"
     assert result.body is not None
     assert result.body.bounds_estimate() == pytest.approx(outer.bounds_estimate())
+
+
+def test_mesh_boolean_result_welds_only_duplicate_vertices_that_form_zero_edges() -> None:
+    box = make_box_mesh()
+    duplicate_index = box.n_vertices
+    vertices = np.vstack((box.vertices, box.vertices[0]))
+    faces = box.faces.copy()
+    faces[0, faces[0] == 0] = duplicate_index
+    faces[1, faces[1] == 0] = duplicate_index
+    faces = np.vstack((faces, (0, duplicate_index, 1), (0, 3, duplicate_index)))
+    bridged = Mesh(vertices=vertices, faces=faces)
+    before = analyze_mesh(bridged)
+
+    repaired = csg_module._weld_boolean_result_degenerate_vertices(bridged)
+    after = analyze_mesh(repaired)
+
+    assert before.degenerate_faces == 2
+    assert before.boundary_edges == 0
+    assert before.nonmanifold_edges == 0
+    assert after.degenerate_faces == 0
+    assert after.boundary_edges == 0
+    assert after.nonmanifold_edges == 0
+    assert repaired.bounds == pytest.approx(box.bounds)
