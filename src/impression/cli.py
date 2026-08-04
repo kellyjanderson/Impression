@@ -24,6 +24,7 @@ import urllib.error
 import zipfile
 import os
 import re
+import stat
 
 from impression.io import write_stl
 from impression import __version__
@@ -145,45 +146,118 @@ def _format_exception(exc: BaseException) -> str:
     return "".join(traceback.format_exception(exc))
 
 
-def _extract_docs_archive(data: bytes, destination: pathlib.Path, clean: bool) -> None:
-    if clean and destination.exists():
-        shutil.rmtree(destination)
-    destination.mkdir(parents=True, exist_ok=True)
+@dataclass(frozen=True)
+class _ValidatedArchiveMember:
+    info: zipfile.ZipInfo
+    parts: tuple[str, ...]
+    is_directory: bool
 
+
+def _validate_archive_member(member: zipfile.ZipInfo) -> _ValidatedArchiveMember:
+    raw_name = member.orig_filename
+    if "\x00" in raw_name:
+        raise typer.BadParameter(f"Unsafe docs archive member: {raw_name!r} (NUL byte).")
+
+    normalized = raw_name.replace("\\", "/")
+    if (
+        normalized.startswith("/")
+        or normalized.startswith("//")
+        or re.match(r"^[A-Za-z]:", normalized)
+    ):
+        raise typer.BadParameter(f"Unsafe docs archive member: {raw_name!r} (absolute path).")
+
+    parts = tuple(part for part in pathlib.PurePosixPath(normalized).parts if part not in {"", "."})
+    if not parts or ".." in parts:
+        raise typer.BadParameter(f"Unsafe docs archive member: {raw_name!r} (invalid path).")
+
+    unix_mode = member.external_attr >> 16
+    file_type = stat.S_IFMT(unix_mode)
+    if file_type not in {0, stat.S_IFREG, stat.S_IFDIR}:
+        raise typer.BadParameter(f"Unsafe docs archive member: {raw_name!r} (link-like type).")
+
+    is_directory = member.is_dir() or file_type == stat.S_IFDIR
+    return _ValidatedArchiveMember(member, parts, is_directory)
+
+
+def _replace_directory_atomically(staged: pathlib.Path, destination: pathlib.Path) -> None:
+    backup: pathlib.Path | None = None
+    if destination.exists():
+        backup = pathlib.Path(
+            tempfile.mkdtemp(prefix=f".{destination.name}.backup-", dir=destination.parent)
+        )
+        backup.rmdir()
+        os.replace(destination, backup)
+    try:
+        os.replace(staged, destination)
+    except BaseException:
+        if backup is not None and not destination.exists():
+            os.replace(backup, destination)
+        raise
+    if backup is not None:
+        shutil.rmtree(backup)
+
+
+def _extract_docs_archive(data: bytes, destination: pathlib.Path, clean: bool) -> None:
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        names = archive.namelist()
-        if not names:
+        members = tuple(_validate_archive_member(member) for member in archive.infolist())
+        if not members:
             raise typer.BadParameter("Downloaded archive is empty.")
 
-        prefixes: list[str] = []
-        for name in names:
-            if name.startswith("docs/"):
-                prefixes.append("docs/")
-            idx = name.find("/docs/")
-            if idx != -1:
-                prefixes.append(name[: idx + len("/docs/")])
+        prefixes: list[tuple[str, ...]] = []
+        for member in members:
+            for index, part in enumerate(member.parts):
+                if part == "docs" and (index < len(member.parts) - 1 or member.is_directory):
+                    prefixes.append(member.parts[: index + 1])
+                    break
         if not prefixes:
             raise typer.BadParameter("Docs folder not found in the downloaded archive.")
-        docs_prefix = min(prefixes, key=len)
+        docs_prefix = min(prefixes, key=lambda prefix: (len(prefix), prefix))
 
-        extracted = False
-        for member in archive.infolist():
-            if not member.filename.startswith(docs_prefix):
-                continue
-            rel_path = pathlib.Path(member.filename[len(docs_prefix):])
-            if not rel_path.parts:
-                continue
-            target_path = destination / rel_path
-            if member.is_dir():
-                target_path.mkdir(parents=True, exist_ok=True)
-                continue
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            with archive.open(member) as src, open(target_path, "wb") as dst:
-                shutil.copyfileobj(src, dst)
-            extracted = True
+        destination = destination.expanduser()
+        if destination.is_symlink() or (destination.exists() and not destination.is_dir()):
+            raise typer.BadParameter(f"Docs destination is not a directory: {destination}")
+        destination = destination.resolve(strict=False)
 
-    if not extracted:
-        raise typer.BadParameter("Docs folder not found in the downloaded archive.")
+        selected: list[tuple[_ValidatedArchiveMember, pathlib.Path]] = []
+        for member in members:
+            if member.parts[: len(docs_prefix)] != docs_prefix:
+                continue
+            relative_parts = member.parts[len(docs_prefix):]
+            if not relative_parts:
+                continue
+            target = destination.joinpath(*relative_parts).resolve(strict=False)
+            if not _path_is_relative_to(target, destination):
+                raise typer.BadParameter(
+                    f"Unsafe docs archive member: {member.info.orig_filename!r} (outside destination)."
+                )
+            selected.append((member, target))
+
+        if not any(not member.is_directory for member, _ in selected):
+            raise typer.BadParameter("Docs folder not found in the downloaded archive.")
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        staged = pathlib.Path(
+            tempfile.mkdtemp(prefix=f".{destination.name}.staged-", dir=destination.parent)
+        )
+        try:
+            if destination.exists() and not clean:
+                shutil.copytree(destination, staged, dirs_exist_ok=True, symlinks=True)
+
+            for member, intended_target in selected:
+                relative = intended_target.relative_to(destination)
+                staged_target = staged / relative
+                if member.is_directory:
+                    staged_target.mkdir(parents=True, exist_ok=True)
+                    continue
+                staged_target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(member.info) as source, staged_target.open("wb") as target_file:
+                    shutil.copyfileobj(source, target_file)
+
+            _replace_directory_atomically(staged, destination)
+        except BaseException:
+            if staged.exists():
+                shutil.rmtree(staged)
+            raise
     console.print(f"[green]Docs saved to {destination}[/green]")
 
 
