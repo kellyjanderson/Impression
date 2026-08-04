@@ -37,8 +37,8 @@ separate completion state.
 - [x] [Fix 03 Test](../test-specifications/fix-03-identity-first-stable-region-pairing-v1_0.md)
 - [x] [Fix 05: Multi-Opening Loft Wall Integrity](../specifications/fix-05-multi-opening-loft-wall-integrity-v1_0.md)
 - [x] [Fix 05 Test](../test-specifications/fix-05-multi-opening-loft-wall-integrity-v1_0.md)
-- [ ] [Fix 04: Coplanar Loft-Body Union Outcome](../specifications/fix-04-coplanar-loft-body-union-outcome-v1_0.md)
-- [ ] [Fix 04 Test](../test-specifications/fix-04-coplanar-loft-body-union-outcome-v1_0.md)
+- [x] [Fix 04: Coplanar Loft-Body Union Outcome](../specifications/fix-04-coplanar-loft-body-union-outcome-v1_0.md)
+- [x] [Fix 04 Test](../test-specifications/fix-04-coplanar-loft-body-union-outcome-v1_0.md)
 
 ## Final Artifact Qualification And Publication Readiness
 

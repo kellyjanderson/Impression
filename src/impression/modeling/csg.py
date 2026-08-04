@@ -18618,6 +18618,114 @@ def _surface_boolean_result_after_family_gate(
     )
 
 
+def _surface_union_has_loft_contact(
+    operands: SurfaceBooleanOperands,
+    *,
+    tolerance: float,
+) -> bool:
+    policy = normalize_surface_csg_tolerance_policy(
+        {
+            "equality_tolerance": tolerance,
+            "domain_tolerance": min(tolerance, DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.domain_tolerance),
+        }
+    )
+    for first_index, first_body in enumerate(operands.bodies):
+        for second_body in operands.bodies[first_index + 1 :]:
+            if (
+                _surface_body_loft_provenance(first_body) is not None
+                or _surface_body_loft_provenance(second_body) is not None
+            ) and _surface_boolean_body_relation(
+                first_body.bounds_estimate(),
+                second_body.bounds_estimate(),
+            ) != "disjoint":
+                return True
+            for first_patch in first_body.iter_patches(world=True):
+                for second_patch in second_body.iter_patches(world=True):
+                    if _surface_csg_rectangular_overlap_evidence(first_patch, second_patch, policy=policy) is not None:
+                        return True
+    return False
+
+
+def _validate_public_surface_union_result(
+    result: SurfaceBooleanResult,
+    *,
+    tolerance: float,
+) -> SurfaceBooleanResult:
+    """Reject incomplete union results before they cross the public boundary."""
+
+    operands = result.operands
+    if any(not isinstance(body, SurfaceBody) for body in operands.bodies):
+        return result
+    loft_operands = tuple(_surface_body_loft_provenance(body) is not None for body in operands.bodies)
+    coplanar_loft_overlap = bool(
+        any(loft_operands)
+        and _surface_union_has_loft_contact(operands, tolerance=tolerance)
+    )
+    if result.status != "succeeded":
+        if coplanar_loft_overlap:
+            return SurfaceBooleanResult(
+                operation="union",
+                operands=operands,
+                status="unsupported",
+                failure_reason=(
+                    "Coplanar loft-body union is unsupported by the selected surface CSG route; "
+                    "coplanar-unsupported classification; no partial result was returned."
+                ),
+            )
+        return result
+    if result.body is None or result.classification != "closed":
+        return SurfaceBooleanResult(
+            operation="union",
+            operands=operands,
+            status="invalid",
+            failure_reason="Surface union invalid-result classification: a non-empty closed body was required.",
+        )
+
+    expected_bounds = _surface_boolean_result_bounds(operands)
+    actual_bounds = result.body.bounds_estimate()
+    if expected_bounds is None or not np.allclose(actual_bounds, expected_bounds, atol=tolerance, rtol=0.0):
+        return SurfaceBooleanResult(
+            operation="union",
+            operands=operands,
+            status="invalid",
+            failure_reason=(
+                "Surface union invalid-result classification: operand-witness bounds were not retained; "
+                "no partial result was returned."
+            ),
+        )
+
+    gate = finalize_surface_csg_validity_gate("union", operands, result.body)
+    if not gate.accepted or gate.body is None:
+        detail = "; ".join(diagnostic.message for diagnostic in gate.diagnostics)
+        return SurfaceBooleanResult(
+            operation="union",
+            operands=operands,
+            status="invalid",
+            failure_reason=(
+                "Surface union invalid-result classification: result validity failed; "
+                f"{detail or 'no valid body was produced.'}"
+            ),
+        )
+
+    if coplanar_loft_overlap and gate.body.shell_count != 1:
+        return SurfaceBooleanResult(
+            operation="union",
+            operands=operands,
+            status="invalid",
+            failure_reason=(
+                "Coplanar loft-body union invalid-result classification: the selected route retained "
+                "overlapping operand shells instead of one fused shell; no partial result was returned."
+            ),
+        )
+    return SurfaceBooleanResult(
+        operation="union",
+        operands=operands,
+        status="succeeded",
+        body=gate.body,
+        classification="closed",
+    )
+
+
 def boolean_union(
     meshes: Iterable[Mesh | MeshGroup | SurfaceBody],
     tolerance: float = 1e-4,
@@ -18627,12 +18735,15 @@ def boolean_union(
     bodies = tuple(meshes)
     gated = _surface_boolean_result_after_family_gate("union", bodies, caller_id="csg.boolean_union")  # type: ignore[arg-type]
     if gated is not None:
-        return gated
+        return _validate_public_surface_union_result(gated, tolerance=tolerance)
     operands = prepare_surface_boolean_operands("union", bodies)  # type: ignore[arg-type]
-    return assert_no_hidden_surface_csg_mesh_fallback(
+    raw_result = assert_no_hidden_surface_csg_mesh_fallback(
         "csg.boolean_union",
         surface_boolean_result("union", operands),
     )
+    if not isinstance(raw_result, SurfaceBooleanResult):
+        raise BooleanOperationError("csg.boolean_union did not return a structured SurfaceBooleanResult.")
+    return _validate_public_surface_union_result(raw_result, tolerance=tolerance)
 
 
 def boolean_difference(
