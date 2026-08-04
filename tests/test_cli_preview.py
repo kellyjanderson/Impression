@@ -118,7 +118,12 @@ def _write_triangle_model(path: Path) -> None:
 
 
 def test_preview_help_describes_one_shot_png_export() -> None:
-    result = CliRunner().invoke(cli.app, ["preview", "--help"])
+    result = CliRunner().invoke(
+        cli.app,
+        ["preview", "--help"],
+        env={"COLUMNS": "160"},
+        color=False,
+    )
     normalized_output = " ".join(result.output.replace("│", " ").split())
 
     assert result.exit_code == 0, result.output

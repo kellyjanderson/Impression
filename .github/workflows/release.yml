@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout candidate
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -31,6 +33,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            fonts-dejavu-core \
             libegl1 \
             libgl1 \
             libxkbcommon-x11-0 \
@@ -60,6 +63,8 @@ jobs:
     steps:
       - name: Checkout candidate
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -126,6 +131,8 @@ jobs:
     steps:
       - name: Checkout candidate
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Set up Python
         uses: actions/setup-python@v5

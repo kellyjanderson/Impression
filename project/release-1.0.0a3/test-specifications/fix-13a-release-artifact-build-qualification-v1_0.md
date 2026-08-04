@@ -28,12 +28,16 @@ artifacts pass version/content/clean-install checks before a manifest is emitted
 ## Automated Smoke Tests
 
 - Parse tag/project versions, build artifacts once, and assert expected manifest entries.
+- Assert every release checkout enables Git LFS and the Linux test environment
+  installs the glyph-capable font used by text fixtures.
+- Exercise preview help at a fixed terminal width with ANSI color disabled.
 - Install the wheel and run import/model-load/preview-export non-GUI smoke.
 
 ## Automated Acceptance Tests
 
 - Unit/helper behavior: version agreement, artifact names/hashes/types, forbidden payload.
-- Integrated route behavior: tests precede build; exact outputs feed wheel/sdist/docs smoke.
+- Integrated route behavior: hydrated references and Linux font support feed the
+  full tests; tests precede build; exact outputs feed wheel/sdist/docs smoke.
 - Failure behavior: injected test/build/content/install failure prevents manifest emission.
 
 ## App-Type Proof
