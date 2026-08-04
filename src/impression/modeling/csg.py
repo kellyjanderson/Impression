@@ -12484,15 +12484,6 @@ SURFACE_CSG_CALLER_INVENTORY: tuple[SurfaceCSGCallerInventoryRecord, ...] = (
         explicit_mesh_route=True,
     ),
     SurfaceCSGCallerInventoryRecord(
-        caller_id="hinges.make_traditional_hinge_pair",
-        module="impression.modeling.hinges",
-        category="feature",
-        operation="union",
-        surface_route="make_traditional_hinge_pair",
-        mesh_route="_call_with_legacy_mesh_primitives",
-        explicit_mesh_route=True,
-    ),
-    SurfaceCSGCallerInventoryRecord(
         caller_id="primitive.boolean_dependent_surface_builders",
         module="impression.modeling.primitives",
         category="primitive",

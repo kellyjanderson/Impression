@@ -46,8 +46,8 @@ the issue tracker.
 
 | Item | Disposition |
 | --- | --- |
-| Installer references to the retired hinge modules | Corrected and released in `v1.0.0a2`; retained as an installed-artifact regression check. |
-| Accidentally merged SDF experiment | Extracted before a2; absence remains a package-content regression check. |
+| Installer references to the retired hinge modules | The remaining bridge, docs, examples, tests, and active specifications are removed for a3; the implementation is preserved in the standalone `impression-hinges` archive. |
+| Accidentally merged SDF experiment | Absent from core and preserved in the standalone `impression-sdf-experiments` Git archive; package-content absence remains a release gate. |
 | a2 release record and prerelease correction | Complete; A3-13 makes the metadata behavior automatic. |
 
 ## Change-Control Rule

@@ -15,6 +15,8 @@ separate completion state.
 - [x] [Fix 12 Test](../test-specifications/fix-12-documentation-policy-test-migration-v1_0.md)
 - [x] [Fix 08: Safe Documentation Archive Extraction](../specifications/fix-08-safe-docs-archive-extraction-v1_0.md)
 - [x] [Fix 08 Test](../test-specifications/fix-08-safe-docs-archive-extraction-v1_0.md)
+- [x] [Fix 14: Archive Retired Modeling Experiments](../specifications/fix-14-archive-retired-modeling-experiments-v1_0.md)
+- [x] [Fix 14 Test](../test-specifications/fix-14-archive-retired-modeling-experiments-v1_0.md)
 - [ ] [Fix 07: Reference Review Linux Lifecycle](../specifications/fix-07-reference-review-linux-lifecycle-v1_0.md)
 - [ ] [Fix 07 Test](../test-specifications/fix-07-reference-review-linux-lifecycle-v1_0.md)
 
@@ -66,7 +68,9 @@ separate completion state.
 | 13 parent | 26 | Forced split; 100% covered and superseded |
 | 13A | 22 | Retain after explicit split review: one artifact qualification transaction |
 | 13B | 16 | Retain after explicit split review: one external publication transaction |
+| 14 | 13 | Cohesive leaf: archive-before-removal transaction for retired experiment ownership |
 
 - Forced splits (`25+`): Fix 13, completed into Fix 13A and Fix 13B.
 - Readiness blockers and unresolved parent coverage: none.
-- Terminal review pass: [ledger](spec-review-ledger-20260804-040607.md) pass 2, new leaves `none`.
+- Original release set terminal review: [ledger](spec-review-ledger-20260804-040607.md) pass 2, new leaves `none`.
+- Fix 14 terminal review: [ledger](spec-review-ledger-20260804-071535.md) pass 1, new leaves `none`.

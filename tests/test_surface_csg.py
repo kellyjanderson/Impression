@@ -1800,7 +1800,6 @@ def test_surface_csg_caller_inventory_names_surface_and_explicit_mesh_routes() -
         "csg.boolean_union",
         "csg.boolean_difference",
         "csg.boolean_intersection",
-        "hinges.make_traditional_hinge_pair",
         "primitive.boolean_dependent_surface_builders",
     }.issubset(ids)
     assert all(record.surface_route for record in inventory)

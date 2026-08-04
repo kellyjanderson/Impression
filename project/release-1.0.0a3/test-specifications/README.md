@@ -19,5 +19,6 @@ fixtures, failure behavior, and observable results.
 12. [Fix 12 Test](fix-12-documentation-policy-test-migration-v1_0.md)
 13. [Fix 13A Test](fix-13a-release-artifact-build-qualification-v1_0.md)
 14. [Fix 13B Test](fix-13b-qualified-prerelease-publication-v1_0.md)
+15. [Fix 14 Test](fix-14-archive-retired-modeling-experiments-v1_0.md)
 
 Superseded split provenance: [Fix 13 parent test](fix-13-release-workflow-artifact-qualification-v1_0.md).

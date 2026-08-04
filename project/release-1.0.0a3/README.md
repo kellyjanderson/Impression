@@ -20,13 +20,13 @@ built artifacts, clean-install behavior, and test-modeling reproductions agree.
 - Export refuses invalid manufacturing output instead of silently writing it.
 - The Linux reference-review shell exits cleanly under the supported headless
   test configuration.
-- The accidental half-pipe experiment and its dependency are absent from the
-  released package.
+- The hinge, SDF, and half-pipe experiments are absent from the released package
+  and remain recoverable in standalone archives.
 - Release artifacts are tested, clean-installed, and published as prereleases.
 
 ## Planned Specifications
 
-The release contains 14 canonical implementation leaves and 14 paired verification
+The release contains 15 canonical implementation leaves and 15 paired verification
 leaves. Each implementation leaf carries the complete current Review Score. The
 original Fix 13 scored 26 and was split into canonical Fix 13A and Fix 13B leaves;
 seven canonical scores in the 16-24 band include explicit cohesion decisions. The
@@ -50,8 +50,8 @@ The release candidate may be tagged only after all of the following are true:
    candidate commit and tested by clean installation in fresh environments.
 5. Installed-artifact smoke tests cover import, model load, preview, STL export,
    and documentation installation.
-6. Package contents contain no accidental `half_pipe` example, `cad.py` adapter,
-   or runtime `build123d` dependency.
+6. Package contents contain no hinge or SDF experiment, accidental `half_pipe`
+   example, `cad.py` adapter, or runtime `build123d` dependency.
 7. Documentation archive traversal abuse cases are rejected before any write.
 8. GitHub publishes `v1.0.0a3` as a prerelease and attaches only the qualified
    artifacts produced by the gated workflow.
@@ -66,8 +66,10 @@ The release candidate may be tagged only after all of the following are true:
   remains cohesive for the transaction boundary documented in its specification.
 - Readiness blockers, missing prerequisites, unresolved deferral/gap markers, and
   parent coverage gaps: none.
-- Review ledger: [2026-08-04 scoring review](planning/spec-review-ledger-20260804-040607.md),
-  terminating on pass 2 with new leaves `none`.
+- Review ledgers: [original release-set review](planning/spec-review-ledger-20260804-040607.md),
+  terminating on pass 2 with new leaves `none`; and
+  [Fix 14 review](planning/spec-review-ledger-20260804-071535.md), terminating
+  on pass 1 with new leaves `none`.
 
 ## Exclusions
 
