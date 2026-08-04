@@ -18,7 +18,7 @@ separate completion state.
 - [x] [Fix 14: Archive Retired Modeling Experiments](../specifications/fix-14-archive-retired-modeling-experiments-v1_0.md)
 - [x] [Fix 14 Test](../test-specifications/fix-14-archive-retired-modeling-experiments-v1_0.md)
 - [x] [Fix 07: Reference Review Linux Lifecycle](../specifications/fix-07-reference-review-linux-lifecycle-v1_0.md)
-- [ ] [Fix 07 Test](../test-specifications/fix-07-reference-review-linux-lifecycle-v1_0.md)
+- [x] [Fix 07 Test](../test-specifications/fix-07-reference-review-linux-lifecycle-v1_0.md)
 
 ## Runtime, Preview, And Export
 
@@ -72,8 +72,8 @@ separate completion state.
 
 ## Final Artifact Qualification And Publication Readiness
 
-- [ ] [Fix 13A: Release Artifact Build and Qualification](../specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
-- [ ] [Fix 13A Test](../test-specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
+- [x] [Fix 13A: Release Artifact Build and Qualification](../specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
+- [x] [Fix 13A Test](../test-specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
 - [ ] [Fix 13B: Qualified Prerelease Publication](../specifications/fix-13b-qualified-prerelease-publication-v1_0.md)
 - [ ] [Fix 13B Test](../test-specifications/fix-13b-qualified-prerelease-publication-v1_0.md)
 
