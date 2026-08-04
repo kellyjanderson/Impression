@@ -33,6 +33,7 @@ from impression.preview import PyVistaPreviewer, PreviewBackendError
 console = Console()
 app = typer.Typer(help="Experiment with parametric models and preview pipelines.")
 WatchPathsCallback = Callable[[tuple[pathlib.Path, ...]], None]
+_USER_MODEL_OWNED_MODULE_PATHS: dict[str, pathlib.Path] = {}
 
 
 @dataclass(frozen=True)
@@ -53,13 +54,40 @@ def _log_active_units(previewer: PyVistaPreviewer) -> None:
         )
 
 
+def _drop_owned_user_model_modules() -> None:
+    for name, owned_path in tuple(_USER_MODEL_OWNED_MODULE_PATHS.items()):
+        module = sys.modules.get(name)
+        module_file = getattr(module, "__file__", None) if module is not None else None
+        if module_file is not None:
+            try:
+                current_path = pathlib.Path(module_file).resolve()
+            except OSError:
+                current_path = None
+            if current_path == owned_path:
+                sys.modules.pop(name, None)
+                cached_path = getattr(module, "__cached__", None)
+                if cached_path:
+                    try:
+                        pathlib.Path(cached_path).unlink(missing_ok=True)
+                    except OSError:
+                        pass
+    _USER_MODEL_OWNED_MODULE_PATHS.clear()
+    importlib.invalidate_caches()
+
+
+def _record_user_model_modules(
+    model_path: pathlib.Path,
+    module_names: Iterable[str],
+) -> None:
+    _USER_MODEL_OWNED_MODULE_PATHS.update(
+        _tracked_preview_module_paths(model_path, module_names)
+    )
+
+
 def _load_module(path: pathlib.Path) -> ModuleType:
     module_name = "impression_user_model"
-    if module_name in sys.modules:
-        del sys.modules[module_name]
-    for name in list(sys.modules.keys()):
-        if name == "impression.modeling" or name.startswith("impression.modeling."):
-            del sys.modules[name]
+    _drop_owned_user_model_modules()
+    before_names = set(sys.modules)
 
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
@@ -74,12 +102,17 @@ def _load_module(path: pathlib.Path) -> ModuleType:
         sys.path.insert(0, model_dir)
     try:
         spec.loader.exec_module(module)
+    except BaseException:
+        _record_user_model_modules(path, set(sys.modules) - before_names | {module_name})
+        _drop_owned_user_model_modules()
+        raise
     finally:
         if added_model_dir:
             try:
                 sys.path.remove(model_dir)
             except ValueError:
                 pass
+    _record_user_model_modules(path, set(sys.modules) - before_names | {module_name})
     return module
 
 
@@ -431,7 +464,10 @@ def _scene_factory_from_module(
         if not cache_module:
             before_names = set(sys.modules)
             module = _load_module(model_path)
-            return _finish_module_load(module, set(sys.modules) - before_names)
+            return _finish_module_load(
+                module,
+                set(sys.modules) - before_names | set(_USER_MODEL_OWNED_MODULE_PATHS),
+            )
 
         current_mtimes = _watch_mtimes(cached_mtimes or [model_path])
         needs_reload = cached_module is None or current_mtimes != cached_mtimes
@@ -439,7 +475,10 @@ def _scene_factory_from_module(
             _drop_cached_modules()
             before_names = set(sys.modules)
             cached_module = _load_module(model_path)
-            _finish_module_load(cached_module, set(sys.modules) - before_names)
+            _finish_module_load(
+                cached_module,
+                set(sys.modules) - before_names | set(_USER_MODEL_OWNED_MODULE_PATHS),
+            )
         return cached_module
 
     def factory() -> object:
