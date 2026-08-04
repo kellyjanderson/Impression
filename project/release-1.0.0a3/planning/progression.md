@@ -29,6 +29,16 @@ separate completion state.
 - [x] [Fix 11: Export Manufacturing Integrity Gate](../specifications/fix-11-export-manufacturing-integrity-gate-v1_0.md)
 - [x] [Fix 11 Test](../test-specifications/fix-11-export-manufacturing-integrity-gate-v1_0.md)
 
+### Fix 15: Preview PNG Export
+
+- [x] Implement one-shot off-screen PNG capture in the existing preview renderer.
+  - Specification: [Fix 15](../specifications/fix-15-preview-png-export-v1_0.md)
+- [x] Wire `preview --screenshot PATH` to bypass watched-preview control-file handoff.
+  - Specification: [Fix 15](../specifications/fix-15-preview-png-export-v1_0.md)
+- [x] Validate the installed CLI route with a live preview control file present and inspect the generated PNG.
+  - Test specification: [Fix 15 Test](../test-specifications/fix-15-preview-png-export-v1_0.md)
+- [x] Update CLI documentation and mark Fix 15 status only after route validation.
+
 ## Test-Modeling Loft And Boolean Corrections
 
 - [x] [Fix 01: TopologyPath Loft Input Preservation](../specifications/fix-01-topology-path-loft-input-preservation-v1_0.md)
@@ -69,8 +79,10 @@ separate completion state.
 | 13A | 22 | Retain after explicit split review: one artifact qualification transaction |
 | 13B | 16 | Retain after explicit split review: one external publication transaction |
 | 14 | 13 | Cohesive leaf: archive-before-removal transaction for retired experiment ownership |
+| 15 | 15 | Cohesive leaf: one-shot command routing and render transaction |
 
 - Forced splits (`25+`): Fix 13, completed into Fix 13A and Fix 13B.
 - Readiness blockers and unresolved parent coverage: none.
 - Original release set terminal review: [ledger](spec-review-ledger-20260804-040607.md) pass 2, new leaves `none`.
 - Fix 14 terminal review: [ledger](spec-review-ledger-20260804-071535.md) pass 1, new leaves `none`.
+- Fix 15 terminal review: [ledger](spec-review-ledger-20260804-preview-png.md) pass 1, new leaves `none`.

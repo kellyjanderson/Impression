@@ -602,6 +602,8 @@ def preview(
         raise typer.BadParameter(f"Model path {model} does not exist.")
 
     opts = PreviewOptions(watch=watch, target_fps=target_fps)
+    screenshot_mode = screenshot is not None
+    effective_watch = opts.watch and not screenshot_mode
 
     model_state = {"path": model}
     auto_rebuild_state: dict[str, float | None] = {"interval": None}
@@ -720,7 +722,7 @@ def preview(
     try:
         initial_scene = scene_factory()
     except Exception as exc:
-        if opts.watch:
+        if effective_watch:
             panel = Panel.fit(_format_exception(exc), title="Initial build failed — watching for changes", style="red")
             console.print(panel)
             initial_scene = None
@@ -730,7 +732,7 @@ def preview(
     console.rule("Impression Preview")
     console.print(f"Using model [green]{model}[/green]")
     control_path: pathlib.Path | None = None
-    if opts.watch:
+    if effective_watch:
         console.print("[cyan]Watching for changes — save to hot reload, close the window to stop.[/cyan]")
         control_path = _ensure_control_file()
         if control_path is not None:
@@ -749,7 +751,7 @@ def preview(
             initial_scene=initial_scene,
             model_path=model,
             model_path_state=model_state,
-            watch_files=opts.watch,
+            watch_files=effective_watch,
             target_fps=opts.target_fps,
             screenshot_path=screenshot,
             show_edges=show_edges,
@@ -760,6 +762,8 @@ def preview(
             watch_paths_getter=_get_watch_paths,
             auto_rebuild_interval_getter=lambda: auto_rebuild_state["interval"],
         )
+        if screenshot is not None:
+            console.print(f"[green]Saved preview PNG to {screenshot.resolve()}[/green]")
     except PreviewBackendError as exc:
         raise typer.BadParameter(str(exc)) from exc
 

@@ -783,7 +783,7 @@ class PyVistaPreviewer:
                     raise
 
         pv = self._ensure_backend()
-        plotter = pv.Plotter(window_size=(1280, 800))
+        plotter = pv.Plotter(window_size=(1280, 800), off_screen=screenshot_path is not None)
         self._configure_plotter(plotter, show_bounds=show_bounds, show_axes=show_axes)
         if datasets:
             self._apply_scene(
@@ -798,7 +798,12 @@ class PyVistaPreviewer:
 
         if screenshot_path is not None:
             screenshot_path.parent.mkdir(parents=True, exist_ok=True)
-            plotter.show(title="Impression Preview", auto_close=True, screenshot=str(screenshot_path))
+            plotter.show(
+                title="Impression Preview",
+                auto_close=True,
+                interactive=False,
+                screenshot=str(screenshot_path),
+            )
             plotter.close()
             return
 

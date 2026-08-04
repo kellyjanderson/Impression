@@ -19,5 +19,6 @@ decisions are summarized in [progression](../planning/progression.md).
 13. [Release Artifact Build and Qualification](fix-13a-release-artifact-build-qualification-v1_0.md)
 14. [Qualified Prerelease Publication](fix-13b-qualified-prerelease-publication-v1_0.md)
 15. [Archive Retired Modeling Experiments](fix-14-archive-retired-modeling-experiments-v1_0.md)
+16. [Preview PNG Export](fix-15-preview-png-export-v1_0.md)
 
 Superseded split provenance: [Fix 13 parent](fix-13-release-workflow-artifact-qualification-v1_0.md).
