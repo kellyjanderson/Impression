@@ -32,6 +32,7 @@ from impression.preview import PyVistaPreviewer, PreviewBackendError
 console = Console()
 app = typer.Typer(help="Experiment with parametric models and preview pipelines.")
 WatchPathsCallback = Callable[[tuple[pathlib.Path, ...]], None]
+ReloadGenerationGetter = Callable[[], int]
 
 
 @dataclass(frozen=True)
@@ -292,11 +293,13 @@ def _scene_factory_from_module(
     *,
     on_module_loaded: Callable[[ModuleType], None] | None = None,
     on_watch_paths_changed: WatchPathsCallback | None = None,
+    reload_generation_getter: ReloadGenerationGetter | None = None,
     cache_module: bool = False,
 ) -> Callable[[], object]:
     cached_module: ModuleType | None = None
     cached_mtimes: dict[pathlib.Path, int | None] = {}
     cached_module_names: set[str] = set()
+    loaded_reload_generation = -1
     builder_signature: inspect.Signature | None = None
     accepts_kwargs = False
     accepted_kw_names: set[str] = set()
@@ -353,19 +356,25 @@ def _scene_factory_from_module(
         return module
 
     def _load_cached_or_fresh_module() -> ModuleType:
-        nonlocal cached_module
+        nonlocal cached_module, loaded_reload_generation
         if not cache_module:
             before_names = set(sys.modules)
             module = _load_module(model_path)
             return _finish_module_load(module, set(sys.modules) - before_names)
 
         current_mtimes = _watch_mtimes(cached_mtimes or [model_path])
-        needs_reload = cached_module is None or current_mtimes != cached_mtimes
+        reload_generation = reload_generation_getter() if reload_generation_getter is not None else 0
+        needs_reload = (
+            cached_module is None
+            or current_mtimes != cached_mtimes
+            or reload_generation != loaded_reload_generation
+        )
         if needs_reload:
             _drop_cached_modules()
             before_names = set(sys.modules)
             cached_module = _load_module(model_path)
             _finish_module_load(cached_module, set(sys.modules) - before_names)
+            loaded_reload_generation = reload_generation
         return cached_module
 
     def factory() -> object:
@@ -407,6 +416,7 @@ def _scene_factory_from_path(
     *,
     on_module_loaded: Callable[[ModuleType], None] | None = None,
     on_watch_paths_changed: WatchPathsCallback | None = None,
+    reload_generation_getter: ReloadGenerationGetter | None = None,
     cache_module: bool = False,
 ) -> Callable[[], object]:
     if model_path.suffix.lower() == ".impress":
@@ -417,6 +427,7 @@ def _scene_factory_from_path(
         model_path,
         on_module_loaded=on_module_loaded,
         on_watch_paths_changed=on_watch_paths_changed,
+        reload_generation_getter=reload_generation_getter,
         cache_module=cache_module,
     )
 
@@ -559,6 +570,8 @@ def preview(
     }
     watched_paths_lock = threading.Lock()
     watched_paths: set[pathlib.Path] = {model.resolve()}
+    manual_reload_lock = threading.Lock()
+    manual_reload_generation = 0
 
     def _on_watch_paths_changed(paths: tuple[pathlib.Path, ...]) -> None:
         nonlocal watched_paths
@@ -569,6 +582,15 @@ def preview(
         with watched_paths_lock:
             return tuple(watched_paths)
 
+    def _get_manual_reload_generation() -> int:
+        with manual_reload_lock:
+            return manual_reload_generation
+
+    def _force_scene_reload() -> None:
+        nonlocal manual_reload_generation
+        with manual_reload_lock:
+            manual_reload_generation += 1
+
     def _get_scene_factory(path: pathlib.Path) -> Callable[[], object]:
         current_path = scene_factory_cache["path"]
         factory = scene_factory_cache["factory"]
@@ -578,6 +600,7 @@ def preview(
                 path,
                 on_module_loaded=_on_module_loaded,
                 on_watch_paths_changed=_on_watch_paths_changed,
+                reload_generation_getter=_get_manual_reload_generation,
                 cache_module=True,
             )
             scene_factory_cache["path"] = resolved
@@ -627,6 +650,7 @@ def preview(
             show_axes=preview_chrome_state["show_axes"],
             control_file=control_path,
             watch_paths_getter=_get_watch_paths,
+            force_scene_reload=_force_scene_reload,
             auto_rebuild_interval_getter=lambda: auto_rebuild_state["interval"],
         )
     except PreviewBackendError as exc:

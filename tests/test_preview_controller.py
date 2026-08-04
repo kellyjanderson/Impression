@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import numpy as np
+import queue
+import threading
 from pathlib import Path
+
+from watchfiles import Change
 
 from impression._config import UnitSettings
 from impression.mesh import Mesh, Polyline
@@ -586,6 +590,34 @@ def test_preview_module_does_not_import_reference_review_ui() -> None:
 
     assert "impression.devtools.reference_review" not in preview_source
     assert "PySide6" not in preview_source
+
+
+def test_model_watcher_uses_low_latency_coalescing(monkeypatch, tmp_path: Path) -> None:
+    model_path = tmp_path / "model.py"
+    model_path.write_text("def build():\n    return None\n")
+    reload_queue: queue.Queue[float] = queue.Queue(maxsize=1)
+    watch_call: dict[str, object] = {}
+
+    def fake_watch(*paths, **kwargs):
+        watch_call["paths"] = paths
+        watch_call["kwargs"] = kwargs
+        yield {(Change.modified, str(model_path))}
+
+    monkeypatch.setattr("impression.preview.watch", fake_watch)
+    previewer = PyVistaPreviewer(console=None)
+    previewer._watch_model_file(
+        {"path": model_path},
+        reload_queue,
+        threading.Event(),
+        [tmp_path],
+        None,
+        watch_paths_getter=lambda: (model_path,),
+    )
+
+    assert watch_call["paths"] == (str(tmp_path),)
+    assert watch_call["kwargs"]["debounce"] == 50
+    assert watch_call["kwargs"]["step"] == 10
+    assert reload_queue.get_nowait() == 0.0
 
 
 def test_qt_preview_surface_config_has_workbench_defaults() -> None:

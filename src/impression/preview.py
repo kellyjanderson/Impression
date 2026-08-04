@@ -730,6 +730,7 @@ class PyVistaPreviewer:
         control_file: Path | None = None,
         model_path_state: ModelPathState | None = None,
         watch_paths_getter: WatchPathsGetter | None = None,
+        force_scene_reload: Callable[[], None] | None = None,
         auto_rebuild_interval_getter: Callable[[], float | None] | None = None,
     ) -> None:
         datasets = []
@@ -769,7 +770,7 @@ class PyVistaPreviewer:
             return
 
         model_state = model_path_state or {"path": model_path}
-        reload_queue: queue.Queue[float] = queue.Queue()
+        reload_queue: queue.Queue[float] = queue.Queue(maxsize=1)
         stop_event = threading.Event()
         watcher_thread = None
         watch_roots: list[Path] = []
@@ -852,15 +853,17 @@ class PyVistaPreviewer:
         _start_watcher(model_state["path"])
         previous_handler = None
 
-        def request_reload() -> None:
+        def request_reload(*, force: bool = False) -> None:
+            if force and force_scene_reload is not None:
+                force_scene_reload()
             try:
                 reload_queue.put_nowait(0.0)
             except queue.Full:
                 return
 
-        def request_reload_with_message(message: str) -> None:
+        def request_reload_with_message(message: str, *, force: bool = False) -> None:
             self.console.print(message)
-            request_reload()
+            request_reload(force=force)
 
         def _build_scene_datasets() -> list[Mesh | Polyline]:
             return _collect_datasets_from_scene(scene_factory())
@@ -932,7 +935,10 @@ class PyVistaPreviewer:
                 if maybe_switch_model():
                     request_reload_with_message("[yellow]Reload requested (switch).[/yellow]")
                 else:
-                    request_reload_with_message("[yellow]Reload requested (SIGUSR1).[/yellow]")
+                    request_reload_with_message(
+                        "[yellow]Reload requested (SIGUSR1).[/yellow]",
+                        force=True,
+                    )
 
             previous_handler = signal.getsignal(signal.SIGUSR1)
             signal.signal(signal.SIGUSR1, _signal_reload)
@@ -1002,7 +1008,10 @@ class PyVistaPreviewer:
                 return False
 
             def _handle_key_reload() -> None:
-                request_reload_with_message("[yellow]Reload requested (R).[/yellow]")
+                request_reload_with_message(
+                    "[yellow]Reload requested (R).[/yellow]",
+                    force=True,
+                )
 
             plotter.add_key_event("r", _handle_key_reload)
 
@@ -1239,7 +1248,12 @@ class PyVistaPreviewer:
         watch_paths = [str(root) for root in watch_roots]
         resolved_control = control_path.resolve() if control_path is not None else None
 
-        for changes in watch(*watch_paths, stop_event=stop_event, debounce=300):
+        for changes in watch(
+            *watch_paths,
+            stop_event=stop_event,
+            debounce=50,
+            step=10,
+        ):
             if stop_event.is_set():
                 return
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -95,3 +96,40 @@ def test_preview_scene_factory_reloads_cached_transitive_includes(tmp_path: Path
     assert isinstance(second_scene, Mesh)
     assert first_scene.vertices[1, 0] == 1.0
     assert second_scene.vertices[1, 0] == 2.0
+
+
+def test_preview_scene_factory_manual_reload_bypasses_unchanged_mtime(tmp_path: Path) -> None:
+    source = tmp_path / "manual_reload_model.py"
+    include = tmp_path / "manual_reload_include.py"
+    include.write_text("vertex_x = 1.0\n")
+    source.write_text(
+        "import numpy as np\n"
+        "from impression.mesh import Mesh\n"
+        "from manual_reload_include import vertex_x\n\n"
+        "def build():\n"
+        "    return Mesh(\n"
+        "        vertices=np.asarray(((0, 0, 0), (vertex_x, 0, 0), (0, 1, 0)), dtype=float),\n"
+        "        faces=np.asarray(((0, 1, 2),), dtype=int),\n"
+        "    )\n"
+    )
+    reload_generation = 0
+
+    factory = _scene_factory_from_path(
+        source,
+        cache_module=True,
+        reload_generation_getter=lambda: reload_generation,
+    )
+    first_scene = factory()
+    original_mtime = include.stat().st_mtime_ns
+    include.write_text("vertex_x = 2.0\n")
+    os.utime(include, ns=(original_mtime, original_mtime))
+    cached_scene = factory()
+    reload_generation += 1
+    reloaded_scene = factory()
+
+    assert isinstance(first_scene, Mesh)
+    assert isinstance(cached_scene, Mesh)
+    assert isinstance(reloaded_scene, Mesh)
+    assert first_scene.vertices[1, 0] == 1.0
+    assert cached_scene.vertices[1, 0] == 1.0
+    assert reloaded_scene.vertices[1, 0] == 2.0
