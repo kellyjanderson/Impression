@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Release Line Cleanup
+
+- Removed the accidentally merged shelved SDF/endcap experiment, its public
+  exports, examples, fixtures, and core runtime dependency. The experiment
+  remains preserved on `feature/sdf-endcaps-shelved` for future research.
+
 ## 1.0.0a1
 
 ### Release Repair
