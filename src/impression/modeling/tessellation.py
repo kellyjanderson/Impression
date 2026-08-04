@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -1373,10 +1374,9 @@ def tessellate_surface_shell(
             if len(set(face)) == 3:
                 faces.append(np.asarray(face, dtype=int))
 
-    mesh = Mesh(
-        vertices=np.asarray(vertices, dtype=float),
-        faces=np.asarray(faces, dtype=int),
-    )
+    mesh_vertices = np.asarray(vertices, dtype=float)
+    mesh_faces = _repair_collinear_mesh_faces(mesh_vertices, np.asarray(faces, dtype=int))
+    mesh = Mesh(vertices=mesh_vertices, faces=mesh_faces)
     mesh.metadata.update(
         {
             "surface_shell_id": shell.stable_identity,
@@ -1386,6 +1386,96 @@ def tessellate_surface_shell(
         }
     )
     return mesh
+
+
+def _repair_collinear_mesh_faces(vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:
+    """Replace collinear triangles by splitting their non-degenerate neighbor."""
+
+    def face_normal(face: tuple[int, int, int]) -> np.ndarray:
+        return np.cross(
+            vertices[face[1]] - vertices[face[0]],
+            vertices[face[2]] - vertices[face[0]],
+        )
+
+    def edges(face: tuple[int, int, int]) -> tuple[tuple[int, int], ...]:
+        return tuple(
+            tuple(sorted(edge))
+            for edge in ((face[0], face[1]), (face[1], face[2]), (face[2], face[0]))
+        )
+
+    active = {
+        index: tuple(int(value) for value in face)
+        for index, face in enumerate(np.asarray(faces, dtype=int))
+    }
+    edge_faces: dict[tuple[int, int], set[int]] = {}
+    normals: dict[int, np.ndarray] = {}
+    degenerate = deque()
+
+    def add_face(face_index: int, face: tuple[int, int, int]) -> None:
+        active[face_index] = face
+        normal = face_normal(face)
+        normals[face_index] = normal
+        for edge in edges(face):
+            edge_faces.setdefault(edge, set()).add(face_index)
+        if float(np.linalg.norm(normal)) * 0.5 <= 1e-12:
+            degenerate.append(face_index)
+
+    def remove_face(face_index: int) -> None:
+        face = active.pop(face_index)
+        normals.pop(face_index, None)
+        for edge in edges(face):
+            owners = edge_faces[edge]
+            owners.discard(face_index)
+            if not owners:
+                del edge_faces[edge]
+
+    original_faces = tuple(active.items())
+    active.clear()
+    for face_index, face in original_faces:
+        add_face(face_index, face)
+
+    while degenerate:
+        deferred: list[int] = []
+        repaired_in_pass = False
+        for _ in range(len(degenerate)):
+            face_index = degenerate.popleft()
+            face = active.get(face_index)
+            if face is None or float(np.linalg.norm(normals[face_index])) * 0.5 > 1e-12:
+                continue
+            endpoint_a, endpoint_b, middle = max(
+                ((face[0], face[1], face[2]), (face[0], face[2], face[1]), (face[1], face[2], face[0])),
+                key=lambda item: float(np.linalg.norm(vertices[item[1]] - vertices[item[0]])),
+            )
+            boundary_edge = tuple(sorted((endpoint_a, endpoint_b)))
+            adjacent_index = next(
+                (
+                    owner
+                    for owner in edge_faces.get(boundary_edge, ())
+                    if owner != face_index and float(np.linalg.norm(normals[owner])) * 0.5 > 1e-12
+                ),
+                None,
+            )
+            if adjacent_index is None:
+                deferred.append(face_index)
+                continue
+            adjacent = active[adjacent_index]
+            opposite = next(index for index in adjacent if index not in {endpoint_a, endpoint_b})
+            reference_normal = normals[adjacent_index]
+            replacements = [(endpoint_a, middle, opposite), (middle, endpoint_b, opposite)]
+            for index, candidate in enumerate(replacements):
+                if float(np.dot(face_normal(candidate), reference_normal)) < 0.0:
+                    replacements[index] = (candidate[1], candidate[0], candidate[2])
+
+            remove_face(face_index)
+            remove_face(adjacent_index)
+            add_face(face_index, replacements[0])
+            add_face(adjacent_index, replacements[1])
+            repaired_in_pass = True
+        if not repaired_in_pass:
+            break
+        degenerate.extend(deferred)
+
+    return np.asarray(tuple(active.values()), dtype=int).reshape(-1, 3)
 
 
 def tessellate_surface_body(

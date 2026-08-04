@@ -3216,6 +3216,7 @@ def loft_plan_sections(
     _validate_fairness_iterations(fairness_iterations)
     sweep_policy = resolve_loft_sweep_frame_policy(sweep_frame_policy)
     _validate_section_stations(stations)
+    _validate_station_hole_topology(stations)
 
     resolved_disambiguation_seed = (
         _derive_disambiguation_seed(stations, samples)
@@ -3658,6 +3659,7 @@ def loft_plan_ambiguities(
     _validate_ambiguity_cost_profile(ambiguity_cost_profile)
     _validate_ambiguity_max_branches(ambiguity_max_branches)
     _validate_section_stations(stations)
+    _validate_station_hole_topology(stations)
 
     effective_stations = list(stations)
     if split_merge_mode == "resolve":
@@ -5601,7 +5603,7 @@ def _validate_profile_topology_input(
         except ValueError as exc:
             raise ValueError(
                 "Unsupported topology transition: region split/merge or invalid "
-                f"hole containment in {fn_name} (profile index {idx})."
+                f"hole containment in {fn_name} (profile index {idx}): {exc}"
             ) from exc
 
 
@@ -5616,6 +5618,24 @@ def _validate_section_stations(stations: Sequence[Station]) -> None:
         if prev_t is not None and station.t <= prev_t:
             raise ValueError("Stations must be strictly ordered by t.")
         prev_t = station.t
+
+
+def _validate_station_hole_topology(stations: Sequence[Station]) -> None:
+    """Reject invalid authored holes before split/merge staging emits geometry."""
+
+    for station_index, station in enumerate(stations):
+        if station.section is None:
+            continue
+        normalized = _canonicalize_section_for_loft(station.section)
+        for region_index, region in enumerate(normalized.regions):
+            loops = [region.outer.points, *(hole.points for hole in region.holes)]
+            try:
+                _classify_loops(loops, expected_holes=len(region.holes))
+            except ValueError as exc:
+                raise ValueError(
+                    "hole split/merge ambiguity: invalid authored hole topology "
+                    f"at station {station_index}, region {region_index}: {exc}"
+                ) from exc
 
 
 def _validate_station_frame(station: Station, idx: int, tol: float = 1e-6) -> None:
@@ -5833,21 +5853,27 @@ def _section_to_region_loops(section: Section, *, samples: int) -> list[list[np.
         if region_index < len(topology_paths) and isinstance(topology_paths[region_index], TopologyPath):
             topology_path = topology_paths[region_index]
             outer = _resample_loop_preserving_authored_points(topology_path, samples)
-            regions.append([outer, *(_resample_loop(loop, samples) for loop in loops[1:])])
+            regions.append([outer, *(_resample_loop_preserving_vertices(loop, samples) for loop in loops[1:])])
         else:
-            regions.append([_resample_loop(loop, samples) for loop in loops])
+            regions.append([_resample_loop_preserving_vertices(loop, samples) for loop in loops])
     return regions
 
 
 def _resample_loop_preserving_authored_points(path: TopologyPath, samples: int) -> np.ndarray:
     """Distribute samples by span while retaining authored path points exactly."""
 
-    authored = np.asarray(path.to_section_loop().points, dtype=float).reshape(-1, 2)
-    authored = ensure_winding(authored, clockwise=False)
+    authored = ensure_winding(path.to_section_loop().points, clockwise=False)
+    return _resample_loop_preserving_vertices(authored, samples)
+
+
+def _resample_loop_preserving_vertices(points: np.ndarray, samples: int) -> np.ndarray:
+    authored = np.asarray(points, dtype=float).reshape(-1, 2)
     authored = _anchor_loop(authored)
     point_count = len(authored)
     if point_count < 3:
         raise ValueError("Closed TopologyPath must provide at least three authored points.")
+    if point_count > int(samples):
+        return _resample_loop(authored, int(samples))
     target_count = max(int(samples), point_count)
     closed = np.vstack([authored, authored[0]])
     lengths = np.linalg.norm(np.diff(closed, axis=0), axis=1)

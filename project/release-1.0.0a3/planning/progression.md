@@ -1,7 +1,7 @@
 # v1.0.0a3 Fix Release Progression
 
 Date: 2026-08-04
-Status: Planned
+Status: In Progress
 
 Only canonical implementation leaves that passed the current Review Score and
 their paired verification leaves appear here. A feature and its test leaf have
@@ -35,8 +35,8 @@ separate completion state.
 - [x] [Fix 02 Test](../test-specifications/fix-02-protected-loft-corner-tessellation-v1_0.md)
 - [x] [Fix 03: Identity-First Stable Region Pairing](../specifications/fix-03-identity-first-stable-region-pairing-v1_0.md)
 - [x] [Fix 03 Test](../test-specifications/fix-03-identity-first-stable-region-pairing-v1_0.md)
-- [ ] [Fix 05: Multi-Opening Loft Wall Integrity](../specifications/fix-05-multi-opening-loft-wall-integrity-v1_0.md)
-- [ ] [Fix 05 Test](../test-specifications/fix-05-multi-opening-loft-wall-integrity-v1_0.md)
+- [x] [Fix 05: Multi-Opening Loft Wall Integrity](../specifications/fix-05-multi-opening-loft-wall-integrity-v1_0.md)
+- [x] [Fix 05 Test](../test-specifications/fix-05-multi-opening-loft-wall-integrity-v1_0.md)
 - [ ] [Fix 04: Coplanar Loft-Body Union Outcome](../specifications/fix-04-coplanar-loft-body-union-outcome-v1_0.md)
 - [ ] [Fix 04 Test](../test-specifications/fix-04-coplanar-loft-body-union-outcome-v1_0.md)
 
