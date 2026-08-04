@@ -15,10 +15,6 @@ separate completion state.
 - [x] [Fix 12 Test](../test-specifications/fix-12-documentation-policy-test-migration-v1_0.md)
 - [x] [Fix 08: Safe Documentation Archive Extraction](../specifications/fix-08-safe-docs-archive-extraction-v1_0.md)
 - [x] [Fix 08 Test](../test-specifications/fix-08-safe-docs-archive-extraction-v1_0.md)
-- [ ] [Fix 13A: Release Artifact Build and Qualification](../specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
-- [ ] [Fix 13A Test](../test-specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
-- [ ] [Fix 13B: Qualified Prerelease Publication](../specifications/fix-13b-qualified-prerelease-publication-v1_0.md)
-- [ ] [Fix 13B Test](../test-specifications/fix-13b-qualified-prerelease-publication-v1_0.md)
 - [ ] [Fix 07: Reference Review Linux Lifecycle](../specifications/fix-07-reference-review-linux-lifecycle-v1_0.md)
 - [ ] [Fix 07 Test](../test-specifications/fix-07-reference-review-linux-lifecycle-v1_0.md)
 
@@ -43,6 +39,13 @@ separate completion state.
 - [ ] [Fix 05 Test](../test-specifications/fix-05-multi-opening-loft-wall-integrity-v1_0.md)
 - [ ] [Fix 04: Coplanar Loft-Body Union Outcome](../specifications/fix-04-coplanar-loft-body-union-outcome-v1_0.md)
 - [ ] [Fix 04 Test](../test-specifications/fix-04-coplanar-loft-body-union-outcome-v1_0.md)
+
+## Final Artifact Qualification And Publication Readiness
+
+- [ ] [Fix 13A: Release Artifact Build and Qualification](../specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
+- [ ] [Fix 13A Test](../test-specifications/fix-13a-release-artifact-build-qualification-v1_0.md)
+- [ ] [Fix 13B: Qualified Prerelease Publication](../specifications/fix-13b-qualified-prerelease-publication-v1_0.md)
+- [ ] [Fix 13B Test](../test-specifications/fix-13b-qualified-prerelease-publication-v1_0.md)
 
 ## Review Score Summary
 

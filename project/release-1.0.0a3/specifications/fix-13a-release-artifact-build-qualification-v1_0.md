@@ -8,7 +8,9 @@ Source artifact: `fix-13-release-workflow-artifact-qualification-v1_0.md`
 Split provenance: `fix-13-release-workflow-artifact-qualification-v1_0.md`
 Canonical status: `Canonical`
 Prerequisites:
-- `none` - qualification workflow code can land before candidate feature completion.
+- `../planning/progression.md` - workflow code may land early, but qualification
+  cannot complete until every non-publication a3 implementation and verification
+  leaf is complete.
 
 ## Review Score
 
@@ -120,8 +122,10 @@ Does not own:
 - Architecture feedback artifacts/status: none; not applicable.
 - Already implemented prerequisites: CI tests and docs packager.
 - Missing prerequisite architecture/specifications: none.
-- Unimplemented prerequisite specifications: none for workflow code.
-- Progression handling: current item precedes Fix 13B.
+- Unimplemented prerequisite specifications: the remaining a3 candidate leaves must
+  be completed before the exact installed-artifact smoke can pass.
+- Progression handling: implement the workflow early if useful, but verify and check
+  this leaf only after all non-publication candidate leaves; Fix 13B remains after it.
 
 ## Application Integration
 
