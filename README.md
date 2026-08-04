@@ -147,11 +147,11 @@ Overrides:
 - `IMPRESSION_RECREATE_VENV=1` to delete/recreate the venv if the version mismatches.
 - `IMPRESSION_MANIFOLD_MODE=auto|source|skip` to control manifold install behavior (`auto` prefers wheels, then falls back to source).
 
-CAD-backed modeling experiments are available under `examples/`, including:
+Modeling examples are available under `examples/`, including:
 
 ```bash
-impression preview examples/half_pipe.py
-impression export examples/half_pipe.py --output artifacts/half_pipe.stl --overwrite
+impression preview examples/hello_cube.py
+impression export examples/hello_cube.py --output artifacts/hello_cube.stl --overwrite
 ```
 
 ## Contributing

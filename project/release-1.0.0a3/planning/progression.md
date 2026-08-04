@@ -9,8 +9,8 @@ separate completion state.
 
 ## Release Hygiene And Safety
 
-- [ ] [Fix 06: Remove Accidental Half-Pipe Release Payload](../specifications/fix-06-remove-accidental-half-pipe-release-payload-v1_0.md)
-- [ ] [Fix 06 Test](../test-specifications/fix-06-remove-accidental-half-pipe-release-payload-v1_0.md)
+- [x] [Fix 06: Remove Accidental Half-Pipe Release Payload](../specifications/fix-06-remove-accidental-half-pipe-release-payload-v1_0.md)
+- [x] [Fix 06 Test](../test-specifications/fix-06-remove-accidental-half-pipe-release-payload-v1_0.md)
 - [ ] [Fix 12: Documentation Policy Test Migration](../specifications/fix-12-documentation-policy-test-migration-v1_0.md)
 - [ ] [Fix 12 Test](../test-specifications/fix-12-documentation-policy-test-migration-v1_0.md)
 - [ ] [Fix 08: Safe Documentation Archive Extraction](../specifications/fix-08-safe-docs-archive-extraction-v1_0.md)

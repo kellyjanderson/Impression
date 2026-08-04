@@ -29,3 +29,15 @@ def test_shelved_sdf_endcap_experiment_is_not_packaged() -> None:
         dependency.lower().startswith("scikit-image")
         for dependency in metadata["project"]["dependencies"]
     )
+
+
+def test_experimental_half_pipe_payload_is_not_packaged() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    metadata = tomllib.loads((project_root / "pyproject.toml").read_text())
+
+    assert not (project_root / "examples" / "half_pipe.py").exists()
+    assert not (project_root / "src" / "impression" / "cad.py").exists()
+    assert all(
+        "build123d" not in dependency.lower()
+        for dependency in metadata["project"]["dependencies"]
+    )
