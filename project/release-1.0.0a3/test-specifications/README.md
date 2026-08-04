@@ -21,5 +21,7 @@ fixtures, failure behavior, and observable results.
 14. [Fix 13B Test](fix-13b-qualified-prerelease-publication-v1_0.md)
 15. [Fix 14 Test](fix-14-archive-retired-modeling-experiments-v1_0.md)
 16. [Fix 15 Test](fix-15-preview-png-export-v1_0.md)
+17. [Fix 16 Test](fix-16-preview-sharp-edge-normals-v1_0.md)
+18. [Fix 17 Test](fix-17-pointed-cone-shell-connectivity-v1_0.md)
 
 Superseded split provenance: [Fix 13 parent test](fix-13-release-workflow-artifact-qualification-v1_0.md).

@@ -26,10 +26,10 @@ built artifacts, clean-install behavior, and test-modeling reproductions agree.
 
 ## Planned Specifications
 
-The release contains 15 canonical implementation leaves and 15 paired verification
+The release contains 18 canonical implementation leaves and 18 paired verification
 leaves. Each implementation leaf carries the complete current Review Score. The
 original Fix 13 scored 26 and was split into canonical Fix 13A and Fix 13B leaves;
-seven canonical scores in the 16-24 band include explicit cohesion decisions. The
+eight canonical scores in the 16-24 band include explicit cohesion decisions. The
 indexed lists live in [Specifications](specifications/README.md) and
 [Test Specifications](test-specifications/README.md); execution order lives in
 [Progression](planning/progression.md).

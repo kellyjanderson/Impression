@@ -797,6 +797,8 @@ def test_private_surface_builders_and_ops_cover_validation_branches() -> None:
     with pytest.raises(ValueError, match="At least one of bottom_diameter or top_diameter must be > 0"):
         make_surface_cone(bottom_diameter=0.0, top_diameter=0.0)
     assert make_surface_cone(bottom_diameter=0.0, top_diameter=1.0).shells[0].connected is True
+    assert make_surface_cone(bottom_diameter=1.0, top_diameter=0.0).shells[0].connected is True
+    assert make_surface_cone(bottom_diameter=1.0, top_diameter=1.0).shells[0].connected is False
 
     with pytest.raises(ValueError, match="base_size must be positive"):
         make_surface_prism(base_size=(0.0, 1.0))

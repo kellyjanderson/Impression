@@ -347,24 +347,26 @@ def ensure_reference_review_runtime(
     return False
 
 
+_QT_APPLICATION: object | None = None
+
+
 def _ensure_qt_app(argv: Sequence[str], *, offscreen: bool, widgets: bool = False) -> object:
+    global _QT_APPLICATION
     if offscreen:
         _configure_reference_review_platform((*argv, "--offscreen"))
-    if widgets:
-        os.environ.setdefault("QT_OPENGL", "desktop")
-        from PySide6.QtWidgets import QApplication
+    os.environ.setdefault("QT_OPENGL", "desktop")
+    from PySide6.QtWidgets import QApplication
 
-        app = QApplication.instance()
-        if app is not None:
-            return app
-        configure_qt_preview_surface_format()
-        return QApplication(list(argv))
-    from PySide6.QtGui import QGuiApplication
-
-    app = QGuiApplication.instance()
+    app = QApplication.instance()
     if app is not None:
+        if not isinstance(app, QApplication):
+            raise RuntimeError("reference-review-requires-qapplication")
+        _QT_APPLICATION = app
         return app
-    return QGuiApplication(list(argv))
+    if widgets:
+        configure_qt_preview_surface_format()
+    _QT_APPLICATION = QApplication(list(argv))
+    return _QT_APPLICATION
 
 
 class _RootObjectAdapter:

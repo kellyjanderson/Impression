@@ -327,6 +327,8 @@ class PreviewSceneController:
                     rgb=rgb_mode,
                     rgba=rgba_mode,
                     smooth_shading=smooth_shading,
+                    split_sharp_edges=smooth_shading,
+                    feature_angle=style.feature_edge_angle,
                     lighting=lighting,
                     specular=specular,
                 )
@@ -355,6 +357,8 @@ class PreviewSceneController:
                 color=color,
                 opacity=opacity,
                 smooth_shading=smooth_shading,
+                split_sharp_edges=smooth_shading,
+                feature_angle=style.feature_edge_angle,
                 lighting=lighting,
                 specular=specular,
             )

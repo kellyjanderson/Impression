@@ -261,6 +261,34 @@ def test_shell_construction_failure_leaves_no_owned_window(
     assert set(app.topLevelWidgets()) == before
 
 
+def test_widget_application_lifetime_survives_launch_cleanup_and_collection() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+    result = launch_workbench(offscreen=True)
+    app = QApplication.instance()
+    assert app is not None
+    result.close()
+    del result
+    gc.collect()
+
+    assert QApplication.instance() is app
+    assert shell._QT_APPLICATION is app
+
+
+def test_qml_launch_keeps_widget_workbench_available_in_same_process() -> None:
+    qml_launch = launch_workbench(
+        qml_path=Path("src/impression/devtools/reference_review/ui/qml/ComponentGallery.qml"),
+        offscreen=True,
+    )
+    assert qml_launch.launched
+    qml_launch.close()
+
+    widget_launch = launch_workbench(offscreen=True)
+    assert widget_launch.launched
+    assert isinstance(QApplication.instance(), QApplication)
+    widget_launch.close()
+
+
 def test_window_close_cancels_pending_work_before_renderer_shutdown(tmp_path: Path) -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     artifact = _write_empty_stl(tmp_path / "part.stl")

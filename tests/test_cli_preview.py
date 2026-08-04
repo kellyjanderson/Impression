@@ -211,6 +211,13 @@ def test_preview_screenshot_command_writes_decodable_png(tmp_path: Path) -> None
     control_file.write_text(control_contents)
     env = os.environ.copy()
     env["PYVISTA_OFF_SCREEN"] = "true"
+    source_root = Path(__file__).resolve().parents[1] / "src"
+    inherited_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        str(source_root)
+        if not inherited_pythonpath
+        else os.pathsep.join((str(source_root), inherited_pythonpath))
+    )
 
     result = subprocess.run(
         [

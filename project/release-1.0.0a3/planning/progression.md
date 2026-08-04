@@ -17,7 +17,7 @@ separate completion state.
 - [x] [Fix 08 Test](../test-specifications/fix-08-safe-docs-archive-extraction-v1_0.md)
 - [x] [Fix 14: Archive Retired Modeling Experiments](../specifications/fix-14-archive-retired-modeling-experiments-v1_0.md)
 - [x] [Fix 14 Test](../test-specifications/fix-14-archive-retired-modeling-experiments-v1_0.md)
-- [ ] [Fix 07: Reference Review Linux Lifecycle](../specifications/fix-07-reference-review-linux-lifecycle-v1_0.md)
+- [x] [Fix 07: Reference Review Linux Lifecycle](../specifications/fix-07-reference-review-linux-lifecycle-v1_0.md)
 - [ ] [Fix 07 Test](../test-specifications/fix-07-reference-review-linux-lifecycle-v1_0.md)
 
 ## Runtime, Preview, And Export
@@ -38,6 +38,24 @@ separate completion state.
 - [x] Validate the installed CLI route with a live preview control file present and inspect the generated PNG.
   - Test specification: [Fix 15 Test](../test-specifications/fix-15-preview-png-export-v1_0.md)
 - [x] Update CLI documentation and mark Fix 15 status only after route validation.
+
+### Fix 16: Preview Sharp-Edge Normals
+
+- [x] Add sharp-edge vertex splitting to smooth uniform-color and per-face-color preview actors.
+  - Specification: [Fix 16](../specifications/fix-16-preview-sharp-edge-normals-v1_0.md)
+- [x] Route the split threshold through the existing preview feature-edge angle and disable it for flat shading.
+  - Specification: [Fix 16](../specifications/fix-16-preview-sharp-edge-normals-v1_0.md)
+- [x] Render and inspect the original, loft, and diagonal audio-cube assemblies through `preview --screenshot`.
+  - Test specification: [Fix 16 Test](../test-specifications/fix-16-preview-sharp-edge-normals-v1_0.md)
+- [x] Update release documentation and progression after the three-model route passes.
+
+### Fix 17: Pointed Cone Shell Connectivity
+
+- [x] Correct pointed-cone connectivity without changing frustum cap-adjacency status.
+  - Specification: [Fix 17](../specifications/fix-17-pointed-cone-shell-connectivity-v1_0.md)
+- [x] Cover both apex orientations and the two-radius frustum contrast.
+  - Test specification: [Fix 17 Test](../test-specifications/fix-17-pointed-cone-shell-connectivity-v1_0.md)
+- [x] Confirm the corrected constructor in the terminal full release suite.
 
 ## Test-Modeling Loft And Boolean Corrections
 
@@ -80,6 +98,8 @@ separate completion state.
 | 13B | 16 | Retain after explicit split review: one external publication transaction |
 | 14 | 13 | Cohesive leaf: archive-before-removal transaction for retired experiment ownership |
 | 15 | 16 | Retain after explicit split review: help, routing, and rendering are one `--screenshot` command contract |
+| 16 | 10 | Cohesive leaf: one shared preview actor-normal policy |
+| 17 | 5.5 | Cohesive leaf: one primitive connectivity signal |
 
 - Forced splits (`25+`): Fix 13, completed into Fix 13A and Fix 13B.
 - Readiness blockers and unresolved parent coverage: none.
@@ -87,3 +107,5 @@ separate completion state.
 - Fix 14 terminal review: [ledger](spec-review-ledger-20260804-071535.md) pass 1, new leaves `none`.
 - Fix 15 terminal review: [ledger](spec-review-ledger-20260804-preview-png.md) pass 1, new leaves `none`.
 - Fix 15 help-surface review: [ledger](spec-review-ledger-20260804-preview-png-help.md) pass 1, new leaves `none`.
+- Fix 16 terminal review: [ledger](spec-review-ledger-20260804-preview-sharp-edges.md) pass 1, new leaves `none`.
+- Fix 17 terminal review: [ledger](spec-review-ledger-20260804-pointed-cone.md) pass 1, new leaves `none`.
