@@ -26,7 +26,8 @@ import os
 import re
 import stat
 
-from impression.io import write_stl
+from impression.io import write_stl_atomically
+from impression.mesh import Mesh, MeshAnalysis, analyze_mesh
 from impression import __version__
 from impression.preview import PyVistaPreviewer, PreviewBackendError
 
@@ -40,6 +41,23 @@ _USER_MODEL_OWNED_MODULE_PATHS: dict[str, pathlib.Path] = {}
 class PreviewOptions:
     watch: bool
     target_fps: int
+
+
+def _validate_manufacturing_mesh(mesh: Mesh) -> MeshAnalysis:
+    """Require the default STL contract before any output-path mutation."""
+
+    analysis = analyze_mesh(mesh)
+    issues: list[str] = []
+    if analysis.n_vertices == 0:
+        issues.append("empty mesh (0 vertices)")
+    if analysis.n_faces == 0:
+        issues.append("empty mesh (0 faces)")
+    issues.extend(analysis.issues())
+    if issues:
+        raise PreviewBackendError(
+            "Manufacturing STL integrity check failed: " + "; ".join(issues) + "."
+        )
+    return analysis
 
 
 def _log_active_units(previewer: PyVistaPreviewer) -> None:
@@ -791,12 +809,12 @@ def export(
             tessellation_request=export_tessellation_request(),
         )
         merged = previewer.combine_to_mesh(datasets)
+        _validate_manufacturing_mesh(merged)
     except PreviewBackendError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
-    final_output.parent.mkdir(parents=True, exist_ok=True)
     try:
-        write_stl(merged, final_output, ascii=ascii)
+        write_stl_atomically(merged, final_output, ascii=ascii)
     except Exception as exc:  # pragma: no cover - STL I/O failure
         raise typer.BadParameter(f"Failed to export STL: {exc}") from exc
 
