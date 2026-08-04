@@ -31,7 +31,7 @@ Render a model and optionally watch it for changes.
 
 - `--watch / --no-watch` (default: `--watch`): enable file watching for hot reload.
 - `--target-fps INTEGER` (default: `60`): polling frequency for watch mode.
-- `--screenshot PATH`: render off-screen and save a PNG instead of opening a window.
+- `--screenshot PATH`: render once off-screen, save a PNG, and exit instead of opening or redirecting a watched preview. Screenshot mode does not modify an existing live preview session.
 - `--show-edges / --hide-edges` (default: `--hide-edges`): draw every triangle edge (useful for mesh debugging).
 - `--face-edges / --no-face-edges` (default: `--no-face-edges`): overlay feature edges for crisp object outlines without the full triangle soup.
 - Camera defaults: +Z up, +X right, +Y toward the camera. Resetting the scene (reload/first render) keeps this orientation consistent.

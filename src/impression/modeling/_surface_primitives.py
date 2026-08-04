@@ -411,7 +411,7 @@ def make_surface_cone(
 
     shell = make_surface_shell(
         tuple(patches),
-        connected=False if bottom_radius > 0.0 or top_radius > 0.0 else True,
+        connected=not (bottom_radius > 0.0 and top_radius > 0.0),
         seams=seams,
         metadata={"kernel": {"primitive_family": "cone"}},
     )

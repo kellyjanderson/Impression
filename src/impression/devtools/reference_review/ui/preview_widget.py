@@ -255,6 +255,7 @@ class PreviewRendererLifecycleWidget(QWidget):
         self._display_options = PreviewDisplayOptions()
         self._render_queue = PreviewRenderCommandQueue()
         self._render_drain_scheduled = False
+        self._lifecycle_closed = False
 
     @property
     def renderer_state(self) -> PreviewRendererLifecycleState:
@@ -292,6 +293,13 @@ class PreviewRendererLifecycleWidget(QWidget):
         self,
         command: PreviewRenderCommand,
     ) -> PreviewRenderCommandResult:
+        if self._lifecycle_closed:
+            return PreviewRenderCommandResult(
+                command=command,
+                accepted=False,
+                status="closed",
+                diagnostic="preview-renderer-closed",
+            )
         result = self._render_queue.enqueue(command)
         if not self._render_drain_scheduled:
             self._render_drain_scheduled = True
@@ -300,6 +308,9 @@ class PreviewRendererLifecycleWidget(QWidget):
 
     def _drain_preview_render_queue(self) -> None:
         self._render_drain_scheduled = False
+        if self._lifecycle_closed:
+            self._render_queue.clear()
+            return
         command = self._render_queue.pop_next()
         if command is not None:
             result = self._apply_render_command(command)
@@ -506,12 +517,21 @@ class PreviewRendererLifecycleWidget(QWidget):
         return record
 
     def dispose_renderer(self) -> None:
+        if self._lifecycle_closed:
+            return
+        self._lifecycle_closed = True
         self._render_queue.clear()
         self._render_drain_scheduled = False
         if self._plotter is not None:
-            self._plotter.close()
+            close = getattr(self._plotter, "close", None)
+            if callable(close):
+                close()
             self._plotter = None
         self._renderer_state = PreviewRendererLifecycleState(disposed=True)
+
+    def closeEvent(self, event) -> None:
+        self.dispose_renderer()
+        super().closeEvent(event)
 
     def _fail_payload(self, payload: PreviewPayload, diagnostic: str) -> PreviewWidgetPayloadState:
         sanitized = sanitize_error_text(diagnostic)

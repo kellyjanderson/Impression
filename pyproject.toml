@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "impression"
-version = "1.0.0a2"
+version = "1.0.0a3"
 description = "Parametric modeling playground with real-time preview and STL export goals."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,7 +16,6 @@ dependencies = [
     "rich>=13.7.0",
     "pyvista>=0.43.0",
     "watchfiles>=0.21.0",
-    "build123d>=0.4.0",
     "manifold3d>=3.3.2",
     "mapbox_earcut>=2.0.0",
     "pyclipper>=1.3.0",
