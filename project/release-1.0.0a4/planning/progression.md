@@ -247,13 +247,16 @@ prerequisites are complete; the whole preceding wave need not finish first.
 
 ### Fix 07B: Surface Boolean Docs And Package Contract
 
-- [ ] Implement documentation, example, inventory-guard, and clean-package conformance for the surface-only API.
+- [x] Implement documentation, example, inventory-guard, and clean-package conformance for the surface-only API.
   - Specification: [Fix 07B](../specifications/fix-07b-surface-boolean-docs-package-contract-v1_0.md)
   - Prerequisite: [Fix 07A](../specifications/fix-07a-surface-only-boolean-runtime-api-v1_0.md)
-- [ ] Wire the public contract through installed-package docs, tutorials, and examples.
-- [ ] Validate documentation assertions and clean-wheel smoke against the runtime API.
+- [x] Wire the public contract through installed-package docs, tutorials, and examples.
+- [x] Validate documentation assertions and clean-wheel smoke against the runtime API.
   - Test specification: [Fix 07B Test](../test-specifications/fix-07b-surface-boolean-docs-package-contract-v1_0.md)
-- [ ] Update release docs, progression, and surface-boolean ACD status after route validation.
+- [x] Update release docs, progression, and surface-boolean ACD status after route validation.
+  - All 19 canonical implementation leaves and their paired test contracts are
+    now complete; release-candidate qualification remains a separate release
+    gate.
 
 ## Specification Canonicalization
 

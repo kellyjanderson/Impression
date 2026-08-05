@@ -1,7 +1,7 @@
 # Impression v1.0.0a4 Corrective Release Definition
 
 Date: 2026-08-04
-Status: Proposed
+Status: Implementation Complete; Release Qualification Pending
 Issue set: [#242](https://github.com/kellyjanderson/Impression/issues/242) through [#248](https://github.com/kellyjanderson/Impression/issues/248)
 Base release: `v1.0.0a3`
 
@@ -91,4 +91,13 @@ The release candidate may be tagged only after:
 This release has 19 cohesive canonical leaves with 100% issue responsibility
 coverage and a [dependency-ordered implementation progression](planning/progression.md).
 
-Exact next workflow action: implement the progression from Wave 1 prerequisites.
+All 19 canonical implementation leaves and their paired test contracts are
+complete on the a4 integration branch. The source/docs/export inventory, primary
+surface CSG examples, and an isolated clean-wheel runtime smoke agree on the
+surface-only boolean contract. The full local repository suite passed 1,781
+tests on macOS on 2026-08-05.
+
+Exact next workflow action: perform release-candidate qualification against the
+remaining version-level gates, including the complete test-model reproduction,
+supported Linux lane, one-time wheel/sdist/docs artifact build, clean-install
+qualification of those exact artifacts, and prerelease publication approval.

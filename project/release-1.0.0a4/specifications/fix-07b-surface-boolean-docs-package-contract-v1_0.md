@@ -1,7 +1,7 @@
 # Fix 07B: Surface Boolean Docs And Package Contract
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Primary ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Source artifact: [Split parent](./fix-07-surface-only-public-boolean-api-v1_0.md)
@@ -111,13 +111,13 @@ Pass 4 split decision: retained. Cohesion reason: one source/docs/wheel conforma
 - Architecture feedback status:
   - tracked in active ACD
 - Already implemented prerequisites:
-  - existing records/routes named under Dependencies And Routes
+  - Fix 07a runtime API
 - Missing prerequisite architecture:
   - none
 - Missing prerequisite specifications:
   - none
 - Unimplemented prerequisite specifications:
-  - Fix 07a runtime API
+  - none
 - Progression handling:
   - prerequisites listed above run first; otherwise this child may proceed after canonical review
 
@@ -178,6 +178,9 @@ App-type-specific proof:
 ## Error And State Behavior
 
 - stale mesh signature/example or package mismatch fails validation
+- clean-wheel validation asserts the imported module originates inside the
+  isolated installation target, preventing an editable source checkout from
+  satisfying package acceptance accidentally
 
 ## Test Strategy
 
@@ -192,6 +195,29 @@ App-type-specific proof:
   - installed package, API documentation, tutorials, and examples must exercise consistent source/docs/wheel contract and migration guidance
 - Production-data rule:
   - deterministic project fixtures and temporary directories only
+
+## Implementation Evidence
+
+- `docs/modeling/csg.md` now defines only `SurfaceBody` operands and
+  `SurfaceBooleanResult` returns for public modeling booleans, including result
+  statuses, migration errors, supported exact scope, and preview/export
+  consumption.
+- The getting-started and serious-modeling tutorials now return accepted
+  surfaced bodies and route retained mesh operations through
+  `impression.modeling.mesh_tools`.
+- The primary union, difference, and intersection examples execute the public
+  surfaced API and produce bodies consumable by preview and export
+  tessellation. Retained mesh-union examples import the separate tool boundary.
+- The source/docs/export inventory guard rejects stale parameter names,
+  mesh-primary prose, top-level mesh-union exports, and mesh operands in the
+  primary public boolean examples.
+- The clean-wheel smoke builds the wheel, installs it into an isolated target,
+  proves imports originate there, and validates signatures, exports, surfaced
+  execution, and actionable mesh rejection.
+- Validation on 2026-08-05: the paired Fix 07B contract passed 7 tests; the
+  focused release-contract group passed 284 tests; the full repository suite
+  passed 1,781 tests. The published union example also produced a non-empty
+  offscreen preview PNG and a non-empty binary STL through the real CLI.
 
 ## Acceptance Criteria
 
