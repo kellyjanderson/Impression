@@ -134,13 +134,13 @@ prerequisites are complete; the whole preceding wave need not finish first.
 
 ### Fix 05A: Count-Changing Exact Region Pairing
 
-- [ ] Implement exact identity pairing plus explicit residual birth/death classification.
+- [x] Implement exact identity pairing plus explicit residual birth/death classification.
   - Specification: [Fix 05A](../specifications/fix-05a-count-changing-exact-region-pairing-v1_0.md)
   - Prerequisite: [Fix 03](../specifications/fix-03-named-hole-identity-pairing-v1_0.md)
-- [ ] Wire exact pairing into the public loft-planning route.
-- [ ] Validate identity-first count-changing planning and conflict diagnostics.
+- [x] Wire exact pairing into the public loft-planning route.
+- [x] Validate identity-first count-changing planning and conflict diagnostics.
   - Test specification: [Fix 05A Test](../test-specifications/fix-05a-count-changing-exact-region-pairing-v1_0.md)
-- [ ] Update progression and loft ACD status after route validation.
+- [x] Update progression and loft ACD status after route validation.
 
 ### Fix 09B: Difference Public Success Gate
 

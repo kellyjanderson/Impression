@@ -1,7 +1,7 @@
 # Fix 05A Test: Count-Changing Exact Region Pairing
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Feature spec: [Fix 05A: Count-Changing Exact Region Pairing](../specifications/fix-05a-count-changing-exact-region-pairing-v1_0.md)
 Feature spec canonical status: Canonical
 Architecture ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
@@ -58,6 +58,6 @@ This canonical paired contract verifies the complete retained split-child bounda
 ## Acceptance
 
 - [x] Feature child is canonical.
-- [ ] Route-level proof exists for library-only.
-- [ ] Helper-only tests cannot satisfy the contract.
-- [ ] Observable results and failure behavior are asserted.
+- [x] Route-level proof exists for library-only.
+- [x] Helper-only tests cannot satisfy the contract.
+- [x] Observable results and failure behavior are asserted.

@@ -1,7 +1,7 @@
 # Fix 05A: Count-Changing Exact Region Pairing
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Primary ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 Architecture ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 Source artifact: [Split parent](./fix-05-count-changing-region-identity-preservation-v1_0.md)

@@ -87,6 +87,21 @@ internal resets.
 - Integration validation: public planner/executor tests plus the published
   split/merge example and audio-cube rail-pair reproduction.
 
+## Count-Changing Exact Region Pairing Boundary
+
+For every identity-bearing interval, the planner builds unique source and
+target identity indexes in linear time and emits source-ordered exact pairs
+before any geometric search. Only regions that are anonymous on both sides may
+enter the bounded geometric assignment. Named source residue becomes explicit
+death records and named target residue becomes explicit birth records; geometry
+cannot repurpose either one as a continuation.
+
+The public plan preserves one canonical transition-resolution payload per
+identity-bearing interval: exact pairs, anonymous geometric pairs, unnamed
+candidate indexes, births, and deaths. This allows a net expanding interval to
+contain both named deaths and births without losing authored identity. Fix 05B
+owns propagation of those identities through later synthetic stations.
+
 ## Specification Sources
 
 - Fix 03: named hole identity preservation and assignment.
@@ -116,6 +131,7 @@ internal resets.
 
 - [ ] Implementation conforms to the target architecture.
 - [x] Fix 03 named-hole identity resolution conforms through public planning and execution routes.
+- [x] Fix 05A exact region identities resolve before anonymous residue and publish explicit count-changing births/deaths.
 - [x] Fix 06 immutable planner configuration propagates through direct, expanded, and nested pairing routes.
 - [x] Final leaves are independently reviewed and canonicalized.
 - [x] Paired test specs point to canonical leaves.
@@ -136,6 +152,9 @@ through public routes with closed-valid surface output.
 
 ## Change History
 
+- 2026-08-04 - Completed Fix 05A. Reason: count-changing public plans now
+  preserve exact region IDs, restrict geometric assignment to anonymous
+  residue, and record named births/deaths explicitly.
 - 2026-08-04 - Completed Fix 06 and reconciled canonical loft correspondence
   architecture. Reason: public planner settings now become one immutable options
   value consumed by direct, expanded, and synthetic transition pairing; branch
