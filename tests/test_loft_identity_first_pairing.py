@@ -5,12 +5,37 @@ from dataclasses import FrozenInstanceError
 import numpy as np
 import pytest
 
-from impression.modeling import Loft, LoftPlannerOptions, Loop, Region, Section, Station, SurfaceBody, TopologyPath
+from impression.modeling import (
+    ExactRegionIdentityPair,
+    Loft,
+    LoftPlannerOptions,
+    Loop,
+    Region,
+    RegionIdentityTransitionResolution,
+    Section,
+    Station,
+    SurfaceBody,
+    TopologyPath,
+)
 from impression.modeling.loft import LoftPlanningBlockedError, loft_plan_sections
 
 
 def _region() -> Region:
     return Region(Loop(np.asarray(((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)))))
+
+
+def _region_at(center_x: float) -> Region:
+    return Region(
+        Loop(
+            np.asarray(
+                (
+                    (center_x - 0.5, -0.5),
+                    (center_x + 0.5, -0.5),
+                    (center_x, 0.5),
+                )
+            )
+        )
+    )
 
 
 def _stations(
@@ -42,6 +67,38 @@ def _stations(
         predecessor_ids=tuple(target_ids[index] for index in order),
     )
     return source, target, source_section, target_section
+
+
+def _count_changing_stations(
+    source_ids: tuple[tuple[str, ...], ...],
+    target_ids: tuple[tuple[str, ...], ...],
+    *,
+    source_centers: tuple[float, ...],
+    target_centers: tuple[float, ...],
+) -> tuple[Station, Station]:
+    source_section = Section(tuple(_region_at(center) for center in source_centers))
+    target_section = Section(tuple(_region_at(center) for center in target_centers))
+    frame = {
+        "u": (1.0, 0.0, 0.0),
+        "v": (0.0, 1.0, 0.0),
+        "n": (0.0, 0.0, 1.0),
+    }
+    return (
+        Station(
+            t=0.0,
+            section=source_section,
+            origin=(0.0, 0.0, 0.0),
+            successor_ids=source_ids,
+            **frame,
+        ),
+        Station(
+            t=1.0,
+            section=target_section,
+            origin=(0.0, 0.0, 1.0),
+            predecessor_ids=target_ids,
+            **frame,
+        ),
+    )
 
 
 @pytest.mark.parametrize("count", [1, 64, 65, 80])
@@ -89,6 +146,142 @@ def test_identity_pairing_is_source_ordered_when_target_is_shuffled() -> None:
     assert tuple(pair.curr_region_ref.index for pair in plan.transitions[0].region_pairs) == tuple(
         inverse[index] for index in range(8)
     )
+
+
+def test_two_to_three_regions_pair_exact_ids_before_geometry_and_report_birth() -> None:
+    source, target = _count_changing_stations(
+        (("a",), ("b",)),
+        (("b",), ("a",), ("c",)),
+        source_centers=(-10.0, 10.0),
+        target_centers=(-10.0, 10.0, 0.0),
+    )
+
+    plan = loft_plan_sections((source, target), samples=8, ambiguity_max_branches=1)
+    transition = plan.transitions[0]
+    resolution = plan.metadata["identity_transition_resolutions"][0]
+
+    assert transition.topology_case == "many_to_many_expand"
+    actual_pairs = tuple(
+        (pair.prev_region_ref.index, pair.curr_region_ref.index)
+        for pair in transition.region_pairs
+        if pair.prev_region_ref.kind == "actual" and pair.curr_region_ref.kind == "actual"
+    )
+    birth_indices = tuple(
+        pair.curr_region_ref.index
+        for pair in transition.region_pairs
+        if pair.prev_region_ref.kind == "synthetic"
+    )
+    assert actual_pairs == resolution["actual_pairs"]
+    assert birth_indices == resolution["birth_curr_region_indices"]
+    assert tuple(pair.action for pair in transition.region_pairs) == (
+        "split_match",
+        "split_match",
+        "split_birth",
+    )
+    assert tuple(pair["identity"] for pair in resolution["exact_pairs"]) == ("a", "b")
+    assert len(resolution["birth_curr_region_indices"]) == 1
+    assert resolution["death_prev_region_indices"] == ()
+    assert plan.metadata["ambiguity_resolved_intervals_count"] == 0
+
+
+def test_count_change_keeps_unmatched_named_regions_as_explicit_births_and_deaths() -> None:
+    source, target = _count_changing_stations(
+        (("stable",), ("retired",)),
+        (("stable",), ("new-left",), ("new-right",)),
+        source_centers=(0.0, 10.0),
+        target_centers=(0.0, 10.0, 11.0),
+    )
+
+    plan = loft_plan_sections((source, target), samples=8, ambiguity_max_branches=1)
+    transition = plan.transitions[0]
+    resolution = plan.metadata["identity_transition_resolutions"][0]
+
+    assert resolution["geometric_pairs"] == ()
+    assert resolution["death_prev_region_indices"] == (1,)
+    assert resolution["birth_curr_region_indices"] == (1, 2)
+    assert tuple(pair.action for pair in transition.region_pairs).count("split_match") == 1
+    assert tuple(pair.action for pair in transition.region_pairs).count("merge_death") == 1
+    assert tuple(pair.action for pair in transition.region_pairs).count("split_birth") == 2
+    assert (
+        sum(
+            pair.prev_region_ref.kind == "actual" and pair.curr_region_ref.kind == "actual"
+            for pair in transition.region_pairs
+        )
+        == 1
+    )
+
+    body = Loft(
+        (0.0, 1.0),
+        (source, target),
+        (source.section, target.section),
+        samples=8,
+        ambiguity_max_branches=1,
+    )
+    assert isinstance(body, SurfaceBody)
+    body_resolution = body.kernel_metadata()["identity_transition_resolutions"][0]
+    assert body_resolution["death_prev_region_indices"] == resolution["death_prev_region_indices"]
+    assert body_resolution["birth_curr_region_indices"] == resolution["birth_curr_region_indices"]
+
+
+def test_only_anonymous_count_changing_residue_enters_geometry_assignment() -> None:
+    source, target = _count_changing_stations(
+        (("stable",), ()),
+        (("stable",), (), ("born",)),
+        source_centers=(0.0, 20.0),
+        target_centers=(0.0, 20.0, -20.0),
+    )
+
+    plan = loft_plan_sections((source, target), samples=8, ambiguity_max_branches=1)
+    resolution = plan.metadata["identity_transition_resolutions"][0]
+
+    unnamed_prev = resolution["unnamed_prev_region_indices"]
+    unnamed_curr = resolution["unnamed_curr_region_indices"]
+    assert len(unnamed_prev) == len(unnamed_curr) == 1
+    assert resolution["geometric_pairs"] == ((unnamed_prev[0], unnamed_curr[0]),)
+    assert len(resolution["birth_curr_region_indices"]) == 1
+    assert resolution["death_prev_region_indices"] == ()
+    assert plan.metadata["identity_resolved_pair_count"] == 1
+    assert plan.metadata["identity_residual_region_count"] == 1
+
+
+def test_collapsing_count_change_can_record_named_birth_and_deaths_together() -> None:
+    source, target = _count_changing_stations(
+        (("stable",), ("old-left",), ("old-right",)),
+        (("stable",), ("new",)),
+        source_centers=(0.0, -10.0, 10.0),
+        target_centers=(0.0, 10.0),
+    )
+
+    plan = loft_plan_sections((source, target), samples=8, ambiguity_max_branches=1)
+    transition = plan.transitions[0]
+    resolution = plan.metadata["identity_transition_resolutions"][0]
+    actions = tuple(pair.action for pair in transition.region_pairs)
+
+    assert transition.topology_case == "many_to_many_collapse"
+    assert len(resolution["death_prev_region_indices"]) == 2
+    assert len(resolution["birth_curr_region_indices"]) == 1
+    assert actions.count("merge_match") == 1
+    assert actions.count("merge_death") == 2
+    assert actions.count("split_birth") == 1
+
+
+def test_exact_pair_and_residual_transition_records_are_frozen_and_canonical() -> None:
+    pair = ExactRegionIdentityPair(identity="stable", prev_region_index=2, curr_region_index=0)
+    resolution = RegionIdentityTransitionResolution(
+        exact_pairs=(pair,),
+        geometric_pairs=((1, 1),),
+        unnamed_prev_region_indices=(1,),
+        unnamed_curr_region_indices=(1,),
+        birth_curr_region_indices=(2,),
+        death_prev_region_indices=(),
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        pair.identity = "changed"  # type: ignore[misc]
+    with pytest.raises(FrozenInstanceError):
+        resolution.birth_curr_region_indices = ()  # type: ignore[misc]
+    assert resolution.actual_pairs == ((1, 1), (2, 0))
+    assert resolution.canonical_payload()["residual_candidate_count"] == 1
 
 
 def test_duplicate_and_contradictory_region_ids_are_named_invalid_inputs() -> None:

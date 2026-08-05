@@ -1631,6 +1631,108 @@ class LoftManyToManyCandidateSet:
 
 
 @dataclass(frozen=True)
+class ExactRegionIdentityPair:
+    """One source-ordered exact region identity match."""
+
+    identity: str
+    prev_region_index: int
+    curr_region_index: int
+
+    def __post_init__(self) -> None:
+        identity = str(self.identity).strip()
+        if not identity:
+            raise ValueError("Exact region identity pairs require a non-empty identity.")
+        if self.prev_region_index < 0 or self.curr_region_index < 0:
+            raise ValueError("Exact region identity pair indexes must be non-negative.")
+        object.__setattr__(self, "identity", identity)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "identity": self.identity,
+            "prev_region_index": self.prev_region_index,
+            "curr_region_index": self.curr_region_index,
+        }
+
+
+@dataclass(frozen=True)
+class RegionIdentityTransitionResolution:
+    """Exact pairs plus explicit anonymous residue, births, and deaths."""
+
+    exact_pairs: tuple[ExactRegionIdentityPair, ...]
+    geometric_pairs: tuple[tuple[int, int], ...]
+    unnamed_prev_region_indices: tuple[int, ...]
+    unnamed_curr_region_indices: tuple[int, ...]
+    birth_curr_region_indices: tuple[int, ...]
+    death_prev_region_indices: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        tuple_fields = (
+            "exact_pairs",
+            "geometric_pairs",
+            "unnamed_prev_region_indices",
+            "unnamed_curr_region_indices",
+            "birth_curr_region_indices",
+            "death_prev_region_indices",
+        )
+        for field_name in tuple_fields:
+            object.__setattr__(self, field_name, tuple(getattr(self, field_name)))
+        exact_identities = tuple(pair.identity for pair in self.exact_pairs)
+        exact_prev = tuple(pair.prev_region_index for pair in self.exact_pairs)
+        exact_curr = tuple(pair.curr_region_index for pair in self.exact_pairs)
+        geometric_prev = tuple(pair[0] for pair in self.geometric_pairs)
+        geometric_curr = tuple(pair[1] for pair in self.geometric_pairs)
+        paired_prev = (*exact_prev, *geometric_prev)
+        paired_curr = (*exact_curr, *geometric_curr)
+        if len(set(exact_identities)) != len(exact_identities):
+            raise ValueError("Exact region identity resolution contains duplicate identities.")
+        if len(set(paired_prev)) != len(paired_prev):
+            raise ValueError("Region identity resolution reuses a source region.")
+        if len(set(paired_curr)) != len(paired_curr):
+            raise ValueError("Region identity resolution reuses a target region.")
+        if not set(geometric_prev).issubset(self.unnamed_prev_region_indices):
+            raise ValueError("Geometric source residue must be anonymous.")
+        if not set(geometric_curr).issubset(self.unnamed_curr_region_indices):
+            raise ValueError("Geometric target residue must be anonymous.")
+        if set(self.death_prev_region_indices) & set(paired_prev):
+            raise ValueError("A paired source region cannot also be a death.")
+        if set(self.birth_curr_region_indices) & set(paired_curr):
+            raise ValueError("A paired target region cannot also be a birth.")
+        all_indexes = (
+            *exact_prev,
+            *exact_curr,
+            *geometric_prev,
+            *geometric_curr,
+            *self.unnamed_prev_region_indices,
+            *self.unnamed_curr_region_indices,
+            *self.birth_curr_region_indices,
+            *self.death_prev_region_indices,
+        )
+        if any(index < 0 for index in all_indexes):
+            raise ValueError("Region identity transition indexes must be non-negative.")
+
+    @property
+    def actual_pairs(self) -> tuple[tuple[int, int], ...]:
+        exact = tuple((pair.prev_region_index, pair.curr_region_index) for pair in self.exact_pairs)
+        return tuple(sorted((*exact, *self.geometric_pairs), key=lambda pair: (pair[0], pair[1])))
+
+    @property
+    def residual_candidate_count(self) -> int:
+        return max(len(self.unnamed_prev_region_indices), len(self.unnamed_curr_region_indices))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "exact_pairs": tuple(pair.canonical_payload() for pair in self.exact_pairs),
+            "geometric_pairs": self.geometric_pairs,
+            "unnamed_prev_region_indices": self.unnamed_prev_region_indices,
+            "unnamed_curr_region_indices": self.unnamed_curr_region_indices,
+            "birth_curr_region_indices": self.birth_curr_region_indices,
+            "death_prev_region_indices": self.death_prev_region_indices,
+            "actual_pairs": self.actual_pairs,
+            "residual_candidate_count": self.residual_candidate_count,
+        }
+
+
+@dataclass(frozen=True)
 class LoftManyToManyDecomposability:
     continues_automatically: bool
     gate_reached: bool
@@ -3317,6 +3419,7 @@ def loft_plan_sections(
     probabilistic_selected_candidate_ids: dict[str, str] = {}
     identity_resolved_pair_count = 0
     identity_residual_region_count = 0
+    identity_transition_resolutions: list[dict[str, object]] = []
     hole_identity_resolved_pair_count = 0
     previous_interval_vectors: dict[int, np.ndarray] | None = None
     for idx in range(len(planned_stations) - 1):
@@ -3338,11 +3441,7 @@ def loft_plan_sections(
             side="target",
         )
         try:
-            (
-                identity_assignment,
-                interval_identity_pairs,
-                interval_identity_residue,
-            ) = _identity_first_region_assignment(
+            identity_resolution = construct_residual_region_transition(
                 prev_station=effective_stations[idx],
                 curr_station=effective_stations[idx + 1],
                 prev_regions=prev_regions,
@@ -3352,6 +3451,12 @@ def loft_plan_sections(
                 fairness_mode=fairness_mode,
                 fairness_weight=fairness_weight,
                 fairness_iterations=fairness_iterations,
+            )
+            interval_identity_pairs = 0 if identity_resolution is None else len(identity_resolution.exact_pairs)
+            interval_identity_residue = (
+                min(len(prev_regions), len(curr_regions))
+                if identity_resolution is None
+                else identity_resolution.residual_candidate_count
             )
         except ValueError as exc:
             if "invalid_region_identity" in str(exc):
@@ -3367,7 +3472,13 @@ def loft_plan_sections(
             )
         identity_resolved_pair_count += interval_identity_pairs
         identity_residual_region_count += interval_identity_residue
-        if identity_assignment is not None:
+        if identity_resolution is not None:
+            identity_transition_resolutions.append(
+                {
+                    "interval": interval,
+                    **identity_resolution.canonical_payload(),
+                }
+            )
             ambiguity_class = "none"
         else:
             ambiguity_class = _classify_region_transition_ambiguity(
@@ -3376,16 +3487,20 @@ def loft_plan_sections(
                 ambiguity_max_branches=int(ambiguity_max_branches),
                 ambiguity_cost_profile=ambiguity_cost_profile,
             )
-        selected_region_assignment: tuple[int, ...] | None = identity_assignment
+        selected_region_assignment: tuple[int, ...] | None = None
         selected_hole_assignments: dict[tuple[str, int, str, int], tuple[int, ...]] = {}
-        ambiguity_candidates = _enumerate_region_ambiguity_candidates(
-            prev_regions=prev_regions,
-            curr_regions=curr_regions,
-            interval=interval,
-            topology_case=topology_case,
-            ambiguity_class=ambiguity_class,
-            ambiguity_cost_profile=ambiguity_cost_profile,
-            ambiguity_max_branches=int(ambiguity_max_branches),
+        ambiguity_candidates = (
+            ()
+            if identity_resolution is not None
+            else _enumerate_region_ambiguity_candidates(
+                prev_regions=prev_regions,
+                curr_regions=curr_regions,
+                interval=interval,
+                topology_case=topology_case,
+                ambiguity_class=ambiguity_class,
+                ambiguity_cost_profile=ambiguity_cost_profile,
+                ambiguity_max_branches=int(ambiguity_max_branches),
+            )
         )
         if split_merge_mode == "resolve" and resolved_ambiguity_mode == "fail" and ambiguity_class != "none":
             _raise_structured_ambiguity_error(
@@ -3442,7 +3557,7 @@ def loft_plan_sections(
             ambiguity_class_counts[ambiguity_class] = ambiguity_class_counts.get(ambiguity_class, 0) + 1
             ambiguity_resolved_intervals_count += 1
         region_order_override: tuple[int, ...] | None = None
-        if fairness_mode == "global" and topology_case == "one_to_one" and identity_assignment is None:
+        if fairness_mode == "global" and topology_case == "one_to_one" and identity_resolution is None:
             (
                 region_order_override,
                 interval_optimizer_ran,
@@ -3469,6 +3584,7 @@ def loft_plan_sections(
                 options=planner_options,
                 region_order_override=region_order_override,
                 many_to_many_assignment_override=selected_region_assignment,
+                region_identity_resolution=identity_resolution,
                 hole_assignment_overrides=selected_hole_assignments,
             )
         except ValueError as exc:
@@ -3510,6 +3626,7 @@ def loft_plan_sections(
                 options=planner_options,
                 region_order_override=region_order_override,
                 many_to_many_assignment_override=selected_region_assignment,
+                region_identity_resolution=identity_resolution,
                 hole_assignment_overrides=selected_hole_assignments,
             )
 
@@ -3587,6 +3704,7 @@ def loft_plan_sections(
                         options=planner_options,
                         region_order_override=region_order_override,
                         many_to_many_assignment_override=selected_region_assignment,
+                        region_identity_resolution=identity_resolution,
                         hole_assignment_overrides=selected_hole_assignments,
                     )
         previous_interval_vectors = _transition_curr_vectors(
@@ -3687,6 +3805,7 @@ def loft_plan_sections(
             "probabilistic_selected_candidate_ids": dict(probabilistic_selected_candidate_ids),
             "identity_resolved_pair_count": int(identity_resolved_pair_count),
             "identity_residual_region_count": int(identity_residual_region_count),
+            "identity_transition_resolutions": tuple(identity_transition_resolutions),
             "hole_identity_resolved_pair_count": int(hole_identity_resolved_pair_count),
             "region_topology_case_counts": _count_region_topology_cases(planned_transitions),
             "region_action_counts": _count_region_actions(planned_transitions),
@@ -4318,6 +4437,7 @@ def _loft_execute_plan_surface(
             "station_count": len(plan.stations),
             "identity_resolved_pair_count": plan.metadata.get("identity_resolved_pair_count", 0),
             "identity_residual_region_count": plan.metadata.get("identity_residual_region_count", 0),
+            "identity_transition_resolutions": plan.metadata.get("identity_transition_resolutions", ()),
             "hole_identity_resolved_pair_count": plan.metadata.get("hole_identity_resolved_pair_count", 0),
             "loft_boundary_graph": boundary_graph.canonical_payload(),
             "loft_cap_validity": cap_validity.canonical_payload(),
@@ -6286,93 +6406,126 @@ def _annotate_planned_hole_identities(
     return replace(region_pair, loop_pairs=tuple(loop_pairs))
 
 
-def _identity_first_region_assignment(
+def _region_identity_map(
+    groups: tuple[frozenset[str], ...],
+    *,
+    side: str,
+) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for region_index, identities in enumerate(groups):
+        if len(identities) > 1:
+            values = ",".join(sorted(identities))
+            raise ValueError(
+                "invalid_region_identity contradictory "
+                f"{side} region {region_index} declares multiple exact ids: {values}"
+            )
+        if not identities:
+            continue
+        identity = next(iter(identities))
+        if identity in result:
+            raise ValueError(
+                "invalid_region_identity duplicate "
+                f"{side} id {identity!r} on regions {result[identity]} and {region_index}"
+            )
+        result[identity] = region_index
+    return result
+
+
+def resolve_exact_region_identity_pairs(
+    prev_station: Station,
+    curr_station: Station,
+) -> tuple[ExactRegionIdentityPair, ...]:
+    """Resolve unique source-ordered exact pairs without geometric scoring."""
+
+    prev_by_id = _region_identity_map(prev_station.successor_ids, side="source")
+    curr_by_id = _region_identity_map(curr_station.predecessor_ids, side="target")
+    if len(prev_station.successor_ids) == len(curr_station.predecessor_ids) and set(prev_by_id) != set(curr_by_id):
+        missing_source = sorted(set(curr_by_id) - set(prev_by_id))
+        missing_target = sorted(set(prev_by_id) - set(curr_by_id))
+        raise ValueError(
+            "invalid_region_identity contradictory exact id sets "
+            f"missing_source={missing_source} missing_target={missing_target}"
+        )
+    return tuple(
+        ExactRegionIdentityPair(
+            identity=identity,
+            prev_region_index=prev_index,
+            curr_region_index=curr_by_id[identity],
+        )
+        for identity, prev_index in prev_by_id.items()
+        if identity in curr_by_id
+    )
+
+
+def construct_residual_region_transition(
     *,
     prev_station: Station,
     curr_station: Station,
     prev_regions: list[list[np.ndarray]],
     curr_regions: list[list[np.ndarray]],
-    ambiguity_cost_profile: str,
-    ambiguity_max_branches: int,
-    fairness_mode: str,
-    fairness_weight: float,
-    fairness_iterations: int,
-) -> tuple[tuple[int, ...] | None, int, int]:
-    """Resolve explicit directional region IDs before bounded geometric search."""
+    ambiguity_cost_profile: str = "balanced",
+    ambiguity_max_branches: int = 64,
+    fairness_mode: str = "local",
+    fairness_weight: float = 0.2,
+    fairness_iterations: int = 12,
+) -> RegionIdentityTransitionResolution | None:
+    """Pair only anonymous residue and classify every remaining region birth/death."""
 
-    if len(prev_regions) <= len(curr_regions):
-        source_regions = prev_regions
-        target_regions = curr_regions
-        source_groups = prev_station.successor_ids
-        target_groups = curr_station.predecessor_ids
-    else:
-        source_regions = curr_regions
-        target_regions = prev_regions
-        source_groups = curr_station.predecessor_ids
-        target_groups = prev_station.successor_ids
+    prev_by_id = _region_identity_map(prev_station.successor_ids, side="source")
+    curr_by_id = _region_identity_map(curr_station.predecessor_ids, side="target")
+    if not prev_by_id and not curr_by_id:
+        return None
+    exact_pairs = resolve_exact_region_identity_pairs(prev_station, curr_station)
+    exact_prev = {pair.prev_region_index for pair in exact_pairs}
+    exact_curr = {pair.curr_region_index for pair in exact_pairs}
+    named_prev = set(prev_by_id.values())
+    named_curr = set(curr_by_id.values())
+    unnamed_prev = tuple(index for index in range(len(prev_regions)) if index not in named_prev)
+    unnamed_curr = tuple(index for index in range(len(curr_regions)) if index not in named_curr)
 
-    def identity_map(groups: tuple[frozenset[str], ...], side: str) -> dict[str, int]:
-        result: dict[str, int] = {}
-        for region_index, identities in enumerate(groups):
-            if len(identities) > 1:
-                values = ",".join(sorted(identities))
-                raise ValueError(
-                    "invalid_region_identity contradictory "
-                    f"{side} region {region_index} declares multiple exact ids: {values}"
-                )
-            if not identities:
-                continue
-            identity = next(iter(identities))
-            if identity in result:
-                raise ValueError(
-                    "invalid_region_identity duplicate "
-                    f"{side} id {identity!r} on regions {result[identity]} and {region_index}"
-                )
-            result[identity] = region_index
-        return result
+    geometric_pairs: list[tuple[int, int]] = []
+    if unnamed_prev and unnamed_curr:
+        if len(unnamed_prev) <= len(unnamed_curr):
+            assignment = _minimum_cost_subset_assignment(
+                [prev_regions[index][0] for index in unnamed_prev],
+                [curr_regions[index][0] for index in unnamed_curr],
+                entity="region",
+                ambiguity_cost_profile=ambiguity_cost_profile,
+                ambiguity_max_branches=ambiguity_max_branches,
+                fairness_mode=fairness_mode,
+                fairness_weight=fairness_weight,
+                fairness_iterations=fairness_iterations,
+            )
+            geometric_pairs.extend(
+                (unnamed_prev[source_offset], unnamed_curr[target_offset])
+                for source_offset, target_offset in enumerate(assignment)
+            )
+        else:
+            assignment = _minimum_cost_subset_assignment(
+                [curr_regions[index][0] for index in unnamed_curr],
+                [prev_regions[index][0] for index in unnamed_prev],
+                entity="region",
+                ambiguity_cost_profile=ambiguity_cost_profile,
+                ambiguity_max_branches=ambiguity_max_branches,
+                fairness_mode=fairness_mode,
+                fairness_weight=fairness_weight,
+                fairness_iterations=fairness_iterations,
+            )
+            geometric_pairs.extend(
+                (unnamed_prev[target_offset], unnamed_curr[source_offset])
+                for source_offset, target_offset in enumerate(assignment)
+            )
 
-    source_by_id = identity_map(source_groups, "source")
-    target_by_id = identity_map(target_groups, "target")
-    if not source_by_id and not target_by_id:
-        return None, 0, min(len(source_regions), len(target_regions))
-    if len(source_regions) == len(target_regions) and set(source_by_id) != set(target_by_id):
-        missing_source = sorted(set(target_by_id) - set(source_by_id))
-        missing_target = sorted(set(source_by_id) - set(target_by_id))
-        raise ValueError(
-            "invalid_region_identity contradictory exact id sets "
-            f"missing_source={missing_source} missing_target={missing_target}"
-        )
-
-    matched_ids = tuple(identity for identity in source_by_id if identity in target_by_id)
-    if not matched_ids:
-        raise ValueError(
-            "invalid_region_identity contradictory exact ids have no source/target matches "
-            f"source={sorted(source_by_id)} target={sorted(target_by_id)}"
-        )
-    assignment: list[int | None] = [None] * len(source_regions)
-    for identity in matched_ids:
-        assignment[source_by_id[identity]] = target_by_id[identity]
-
-    used_targets = {index for index in assignment if index is not None}
-    residual_source = [index for index, target_index in enumerate(assignment) if target_index is None]
-    residual_target = [index for index in range(len(target_regions)) if index not in used_targets]
-    if residual_source:
-        residual_assignment = _minimum_cost_subset_assignment(
-            [source_regions[index][0] for index in residual_source],
-            [target_regions[index][0] for index in residual_target],
-            entity="region",
-            ambiguity_cost_profile=ambiguity_cost_profile,
-            ambiguity_max_branches=ambiguity_max_branches,
-            fairness_mode=fairness_mode,
-            fairness_weight=fairness_weight,
-            fairness_iterations=fairness_iterations,
-        )
-        for source_offset, target_offset in enumerate(residual_assignment):
-            assignment[residual_source[source_offset]] = residual_target[target_offset]
-
-    if any(index is None for index in assignment):
-        raise ValueError("invalid_region_identity unresolved source region after identity reduction")
-    return tuple(int(index) for index in assignment), len(matched_ids), len(residual_source)
+    paired_prev = exact_prev | {prev_index for prev_index, _curr_index in geometric_pairs}
+    paired_curr = exact_curr | {curr_index for _prev_index, curr_index in geometric_pairs}
+    return RegionIdentityTransitionResolution(
+        exact_pairs=exact_pairs,
+        geometric_pairs=tuple(sorted(geometric_pairs, key=lambda pair: (pair[0], pair[1]))),
+        unnamed_prev_region_indices=unnamed_prev,
+        unnamed_curr_region_indices=unnamed_curr,
+        birth_curr_region_indices=tuple(index for index in range(len(curr_regions)) if index not in paired_curr),
+        death_prev_region_indices=tuple(index for index in range(len(prev_regions)) if index not in paired_prev),
+    )
 
 
 def _pair_sections_for_transition(
@@ -6382,6 +6535,7 @@ def _pair_sections_for_transition(
     options: LoftPlannerOptions,
     region_order_override: tuple[int, ...] | None = None,
     many_to_many_assignment_override: tuple[int, ...] | None = None,
+    region_identity_resolution: RegionIdentityTransitionResolution | None = None,
     hole_assignment_overrides: dict[tuple[str, int, str, int], tuple[int, ...]] | None = None,
 ) -> list[_PairedSectionTransition]:
     split_merge_mode = options.split_merge_mode
@@ -6399,6 +6553,69 @@ def _pair_sections_for_transition(
 
     prev_refs = [_RegionRef("actual", i) for i in range(prev_count)]
     curr_refs = [_RegionRef("actual", i) for i in range(curr_count)]
+
+    if region_identity_resolution is not None:
+        for prev_idx, curr_idx in region_identity_resolution.actual_pairs:
+            paired = _pair_region_loops_for_transition(
+                prev_regions[prev_idx],
+                curr_regions[curr_idx],
+                options=options,
+                hole_assignment_override=hole_assignment_overrides.get(
+                    ("actual", prev_idx, "actual", curr_idx)
+                ),
+            )
+            transitions.append(
+                _PairedSectionTransition(
+                    prev_region_ref=prev_refs[prev_idx],
+                    curr_region_ref=curr_refs[curr_idx],
+                    region=paired,
+                    region_closures=(),
+                    action=(
+                        "stable"
+                        if prev_count == curr_count
+                        else "split_match"
+                        if prev_count < curr_count
+                        else "merge_match"
+                    ),
+                )
+            )
+        for prev_idx in region_identity_resolution.death_prev_region_indices:
+            synthetic_curr = _shrunken_region(
+                prev_regions[prev_idx],
+                scale=_synthetic_seed_scale(split_merge_steps, split_merge_bias),
+            )
+            transitions.append(
+                _PairedSectionTransition(
+                    prev_region_ref=prev_refs[prev_idx],
+                    curr_region_ref=_RegionRef("synthetic", prev_idx),
+                    region=_pair_region_loops_for_transition(
+                        prev_regions[prev_idx],
+                        synthetic_curr,
+                        options=options,
+                    ),
+                    region_closures=("curr",),
+                    action="merge_death",
+                )
+            )
+        for curr_idx in region_identity_resolution.birth_curr_region_indices:
+            synthetic_prev = _shrunken_region(
+                curr_regions[curr_idx],
+                scale=_synthetic_seed_scale(split_merge_steps, split_merge_bias),
+            )
+            transitions.append(
+                _PairedSectionTransition(
+                    prev_region_ref=_RegionRef("synthetic", curr_idx),
+                    curr_region_ref=curr_refs[curr_idx],
+                    region=_pair_region_loops_for_transition(
+                        synthetic_prev,
+                        curr_regions[curr_idx],
+                        options=options,
+                    ),
+                    region_closures=("prev",),
+                    action="split_birth",
+                )
+            )
+        return transitions
 
     if prev_count == curr_count:
         if region_order_override is not None:
@@ -7917,6 +8134,8 @@ def _expected_region_pair_action(
             return "split_match"
         if prev_ref.kind == "synthetic" and curr_ref.kind == "actual":
             return "split_birth"
+        if prev_ref.kind == "actual" and curr_ref.kind == "synthetic":
+            return "merge_death"
         raise ValueError(
             "Invalid loft plan region refs for expanding transition: "
             f"prev={prev_ref.kind!r} curr={curr_ref.kind!r}."
@@ -7926,6 +8145,8 @@ def _expected_region_pair_action(
             return "merge_match"
         if prev_ref.kind == "actual" and curr_ref.kind == "synthetic":
             return "merge_death"
+        if prev_ref.kind == "synthetic" and curr_ref.kind == "actual":
+            return "split_birth"
         raise ValueError(
             "Invalid loft plan region refs for collapsing transition: "
             f"prev={prev_ref.kind!r} curr={curr_ref.kind!r}."
