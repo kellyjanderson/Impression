@@ -115,6 +115,7 @@ internal resets.
 ## Conformance Checklist
 
 - [ ] Implementation conforms to the target architecture.
+- [x] Fix 03 named-hole identity resolution conforms through public planning and execution routes.
 - [x] Final leaves are independently reviewed and canonicalized.
 - [x] Paired test specs point to canonical leaves.
 - [x] Final progression preserves prerequisite order.
@@ -134,6 +135,9 @@ through public routes with closed-valid surface output.
 
 ## Change History
 
+- 2026-08-04 - Completed Fix 03 and reconciled canonical loft correspondence
+  architecture. Reason: named holes now resolve before anonymous geometric
+  residue and execution consumes the resolved plan.
 - 2026-08-04 - Linked the final dependency-ordered progression. Reason: preserve identity, lineage, junction-plan, and execution prerequisites.
 - 2026-08-04 - Recorded the six canonical loft leaves and archived split parents after fixed-point review.
 - 2026-08-04 - Linked the full-template Fix 03-06 and paired test drafts. Reason: complete the `do specs` creation handoff.

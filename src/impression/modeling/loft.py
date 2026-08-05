@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Iterable, Mapping, Sequence
 
@@ -831,6 +831,8 @@ class PlannedLoopRef:
 
     kind: str  # actual | synthetic
     index: int
+    identity: str | None = None
+    topology_path: TopologyPath | None = None
 
 
 @dataclass(frozen=True)
@@ -3274,6 +3276,7 @@ def loft_plan_sections(
     probabilistic_selected_candidate_ids: dict[str, str] = {}
     identity_resolved_pair_count = 0
     identity_residual_region_count = 0
+    hole_identity_resolved_pair_count = 0
     previous_interval_vectors: dict[int, np.ndarray] | None = None
     for idx in range(len(planned_stations) - 1):
         prev_station = planned_stations[idx]
@@ -3285,6 +3288,14 @@ def loft_plan_sections(
             len(curr_regions),
         )
         interval = (idx, idx + 1)
+        prev_hole_identity_index = _section_hole_identity_index(
+            effective_stations[idx].section,
+            side="source",
+        )
+        curr_hole_identity_index = _section_hole_identity_index(
+            effective_stations[idx + 1].section,
+            side="target",
+        )
         try:
             (
                 identity_assignment,
@@ -3442,6 +3453,43 @@ def loft_plan_sections(
                 detail=message,
             )
 
+        for region_pair in tuple(
+            _as_planned_region_pair(transition, interval=interval, pair_index=pair_index)
+            for pair_index, transition in enumerate(transitions)
+        ):
+            if region_pair.prev_region_ref.kind != "actual" or region_pair.curr_region_ref.kind != "actual":
+                continue
+            prev_region_index = region_pair.prev_region_ref.index
+            curr_region_index = region_pair.curr_region_ref.index
+            assignment, resolved_count = _identity_first_hole_assignment(
+                list(prev_regions[prev_region_index][1:]),
+                list(curr_regions[curr_region_index][1:]),
+                prev_hole_identity_index[prev_region_index],
+                curr_hole_identity_index[curr_region_index],
+            )
+            if assignment is None:
+                continue
+            selected_hole_assignments[_transition_hole_assignment_key(region_pair)] = assignment
+            hole_identity_resolved_pair_count += resolved_count
+        if selected_hole_assignments:
+            transitions = _pair_sections_for_transition(
+                prev_regions,
+                curr_regions,
+                split_merge_mode=split_merge_mode,
+                split_merge_steps=split_merge_steps,
+                split_merge_bias=split_merge_bias,
+                ambiguity_mode=resolved_ambiguity_mode,
+                ambiguity_cost_profile=ambiguity_cost_profile,
+                ambiguity_max_branches=int(ambiguity_max_branches),
+                fairness_mode=fairness_mode,
+                fairness_weight=fairness_weight,
+                skeleton_mode=skeleton_mode,
+                fairness_iterations=fairness_iterations,
+                region_order_override=region_order_override,
+                many_to_many_assignment_override=selected_region_assignment,
+                hole_assignment_overrides=selected_hole_assignments,
+            )
+
         if ambiguity_class == "none":
             hole_candidate_reports: list[LoftAmbiguityCandidate] = []
             for region_pair in tuple(
@@ -3449,6 +3497,8 @@ def loft_plan_sections(
                 for pair_index, transition in enumerate(transitions)
             ):
                 if region_pair.prev_region_ref.kind != "actual" or region_pair.curr_region_ref.kind != "actual":
+                    continue
+                if _transition_hole_assignment_key(region_pair) in selected_hole_assignments:
                     continue
                 prev_region = prev_regions[region_pair.prev_region_ref.index]
                 curr_region = curr_regions[region_pair.curr_region_ref.index]
@@ -3531,10 +3581,18 @@ def loft_plan_sections(
             transitions=transitions,
         )
         planned_pairs = tuple(
-            _as_planned_region_pair(
-                transition,
-                interval=interval,
-                pair_index=pair_index,
+            _annotate_planned_hole_identities(
+                _as_planned_region_pair(
+                    transition,
+                    interval=interval,
+                    pair_index=pair_index,
+                ),
+                prev_hole_identity_index[
+                    transition.prev_region_ref.index
+                ] if transition.prev_region_ref.kind == "actual" else (),
+                curr_hole_identity_index[
+                    transition.curr_region_ref.index
+                ] if transition.curr_region_ref.kind == "actual" else (),
             )
             for pair_index, transition in enumerate(transitions)
         )
@@ -3614,6 +3672,7 @@ def loft_plan_sections(
             "probabilistic_selected_candidate_ids": dict(probabilistic_selected_candidate_ids),
             "identity_resolved_pair_count": int(identity_resolved_pair_count),
             "identity_residual_region_count": int(identity_residual_region_count),
+            "hole_identity_resolved_pair_count": int(hole_identity_resolved_pair_count),
             "region_topology_case_counts": _count_region_topology_cases(planned_transitions),
             "region_action_counts": _count_region_actions(planned_transitions),
             "fairness_mode": fairness_mode,
@@ -4238,6 +4297,7 @@ def _loft_execute_plan_surface(
             "station_count": len(plan.stations),
             "identity_resolved_pair_count": plan.metadata.get("identity_resolved_pair_count", 0),
             "identity_residual_region_count": plan.metadata.get("identity_residual_region_count", 0),
+            "hole_identity_resolved_pair_count": plan.metadata.get("hole_identity_resolved_pair_count", 0),
             "loft_boundary_graph": boundary_graph.canonical_payload(),
             "loft_cap_validity": cap_validity.canonical_payload(),
             "loft_closure_evidence": closure_evidence.canonical_payload(),
@@ -6070,6 +6130,120 @@ def _loop_sort_key(loop: np.ndarray) -> tuple[float, ...]:
     # Rounded coordinates keep deterministic ordering while avoiding noise-level drift.
     signature = tuple(np.round(anchor.reshape(-1), decimals=9).tolist())
     return (float(centroid[0]), float(centroid[1]), area, perimeter, *signature)
+
+
+def _section_hole_identity_index(
+    section: Section,
+    *,
+    side: str,
+) -> tuple[tuple[tuple[str | None, TopologyPath | None], ...], ...]:
+    """Map authored topology paths onto canonical hole-loop slots."""
+
+    canonical = _canonicalize_section_for_loft(section)
+    assert isinstance(canonical, Section)
+    indexed: list[list[tuple[str | None, TopologyPath | None]]] = [
+        [(None, None) for _hole in region.holes]
+        for region in canonical.regions
+    ]
+    candidates = tuple(
+        (region_index, hole_index, _loop_sort_key(hole.points)[:4])
+        for region_index, region in enumerate(canonical.regions)
+        for hole_index, hole in enumerate(region.holes)
+    )
+    identities: dict[str, tuple[int, int]] = {}
+    for path in tuple(section.metadata.get("topology_paths", ())):
+        if not isinstance(path, TopologyPath):
+            continue
+        path_key = _loop_sort_key(path.to_section_loop().points)[:4]
+        matches = tuple(
+            (region_index, hole_index)
+            for region_index, hole_index, hole_key in candidates
+            if np.allclose(path_key, hole_key, atol=1e-8, rtol=0.0)
+        )
+        if not matches:
+            continue
+        if len(matches) != 1:
+            raise ValueError(
+                f"invalid_hole_identity contradictory path {path.id!r} matches multiple normalized holes"
+            )
+        slot = matches[0]
+        identity = str(path.id).strip()
+        if not identity:
+            raise ValueError("invalid_hole_identity authored hole id must be non-empty")
+        if identity in identities:
+            raise ValueError(
+                f"invalid_hole_identity duplicate {side} id {identity!r} on holes "
+                f"{identities[identity]} and {slot}"
+            )
+        if indexed[slot[0]][slot[1]][0] is not None:
+            raise ValueError(f"invalid_hole_identity contradictory paths map to hole {slot}")
+        identities[identity] = slot
+        indexed[slot[0]][slot[1]] = (identity, path)
+    return tuple(tuple(region) for region in indexed)
+
+
+def _identity_first_hole_assignment(
+    prev_holes: list[np.ndarray],
+    curr_holes: list[np.ndarray],
+    prev_identity_slots: tuple[tuple[str | None, TopologyPath | None], ...],
+    curr_identity_slots: tuple[tuple[str | None, TopologyPath | None], ...],
+) -> tuple[tuple[int, ...] | None, int]:
+    """Resolve matching named holes before assigning anonymous residue geometrically."""
+
+    if len(prev_holes) != len(curr_holes):
+        return None, 0
+    prev_by_id = {
+        identity: index
+        for index, (identity, _path) in enumerate(prev_identity_slots)
+        if identity is not None
+    }
+    curr_by_id = {
+        identity: index
+        for index, (identity, _path) in enumerate(curr_identity_slots)
+        if identity is not None
+    }
+    if not prev_by_id and not curr_by_id:
+        return None, 0
+    if set(prev_by_id) != set(curr_by_id):
+        raise ValueError(
+            "invalid_hole_identity contradictory exact id sets "
+            f"source={tuple(sorted(prev_by_id))} target={tuple(sorted(curr_by_id))}"
+        )
+    assignment: list[int | None] = [None] * len(prev_holes)
+    for identity in sorted(prev_by_id):
+        assignment[prev_by_id[identity]] = curr_by_id[identity]
+    prev_residue = tuple(index for index, value in enumerate(assignment) if value is None)
+    used_targets = {value for value in assignment if value is not None}
+    curr_residue = tuple(index for index in range(len(curr_holes)) if index not in used_targets)
+    if len(prev_residue) != len(curr_residue):
+        raise ValueError("invalid_hole_identity named pairing left contradictory anonymous residue")
+    if prev_residue:
+        residue_order = _minimum_cost_hole_assignment(
+            [prev_holes[index] for index in prev_residue],
+            [curr_holes[index] for index in curr_residue],
+        )
+        for source_offset, target_offset in enumerate(residue_order):
+            assignment[prev_residue[source_offset]] = curr_residue[target_offset]
+    return tuple(int(value) for value in assignment if value is not None), len(prev_by_id)
+
+
+def _annotate_planned_hole_identities(
+    region_pair: PlannedRegionPair,
+    prev_identity_slots: tuple[tuple[str | None, TopologyPath | None], ...],
+    curr_identity_slots: tuple[tuple[str | None, TopologyPath | None], ...],
+) -> PlannedRegionPair:
+    loop_pairs: list[PlannedLoopPair] = []
+    for loop_pair in region_pair.loop_pairs:
+        prev_ref = loop_pair.prev_loop_ref
+        curr_ref = loop_pair.curr_loop_ref
+        if prev_ref.kind == "actual" and prev_ref.index > 0 and prev_ref.index - 1 < len(prev_identity_slots):
+            identity, path = prev_identity_slots[prev_ref.index - 1]
+            prev_ref = replace(prev_ref, identity=identity, topology_path=path)
+        if curr_ref.kind == "actual" and curr_ref.index > 0 and curr_ref.index - 1 < len(curr_identity_slots):
+            identity, path = curr_identity_slots[curr_ref.index - 1]
+            curr_ref = replace(curr_ref, identity=identity, topology_path=path)
+        loop_pairs.append(replace(loop_pair, prev_loop_ref=prev_ref, curr_loop_ref=curr_ref))
+    return replace(region_pair, loop_pairs=tuple(loop_pairs))
 
 
 def _identity_first_region_assignment(
