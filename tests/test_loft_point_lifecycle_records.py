@@ -5,7 +5,10 @@ import pytest
 from impression.modeling.loft import (
     PointLifecycleEvent,
     PointLifecycleState,
+    SyntheticRegionLineage,
+    SyntheticStationLineage,
     SyntheticSupportReference,
+    TopologyPath,
     validate_point_lifecycle_event,
     validate_point_lifecycle_events,
 )
@@ -100,4 +103,83 @@ def test_synthetic_support_reference_validates_and_normalizes() -> None:
             span_ref=("left", "right"),
             span_parameter=1.5,
             coordinates=(0.25, 0.0),
+        )
+
+
+def test_synthetic_station_lineage_is_frozen_complete_and_canonical() -> None:
+    path = TopologyPath.from_points(((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)), id="shell-outer")
+    region = SyntheticRegionLineage(
+        identity="shell",
+        prev_region_ref=("actual", 0),
+        curr_region_ref=("actual", 1),
+        predecessor_ids=frozenset({"shell"}),
+        successor_ids=frozenset({"shell"}),
+        loop_identities=("shell-outer",),
+        predecessor_loop_ids=("shell-outer",),
+        successor_loop_ids=("shell-outer",),
+    )
+    lineage = SyntheticStationLineage(
+        identity="synthetic-station-0-1-1-of-2",
+        source_interval=(0.0, 1.0),
+        stage_index=0,
+        stage_count=2,
+        station_t=0.4,
+        regions=(region,),
+        topology_paths=(path,),
+    )
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        lineage.stage_index = 1  # type: ignore[misc]
+    assert lineage.canonical_payload()["topology_path_ids"] == ("shell-outer",)
+    assert lineage.canonical_payload()["regions"][0]["identity"] == "shell"
+
+
+def test_synthetic_station_lineage_rejects_missing_and_conflicting_loop_paths() -> None:
+    region = SyntheticRegionLineage(
+        identity="shell",
+        prev_region_ref=("actual", 0),
+        curr_region_ref=("actual", 0),
+        predecessor_ids=frozenset({"shell"}),
+        successor_ids=frozenset({"shell"}),
+        loop_identities=("shell-outer",),
+        predecessor_loop_ids=("shell-outer",),
+        successor_loop_ids=("shell-outer",),
+    )
+
+    with pytest.raises(ValueError, match="topology paths do not cover every loop"):
+        SyntheticStationLineage(
+            identity="missing-path",
+            source_interval=(0.0, 1.0),
+            stage_index=0,
+            stage_count=1,
+            station_t=0.5,
+            regions=(region,),
+            topology_paths=(),
+        )
+
+    other_path = TopologyPath.from_points(
+        ((2.0, 0.0), (3.0, 0.0), (2.0, 1.0)),
+        id="other-outer",
+    )
+    conflicting_region = dataclasses.replace(
+        region,
+        loop_identities=("other-outer",),
+        predecessor_loop_ids=("other-outer",),
+        successor_loop_ids=("other-outer",),
+    )
+    with pytest.raises(ValueError, match="duplicate region identity"):
+        SyntheticStationLineage(
+            identity="duplicate-region",
+            source_interval=(0.0, 1.0),
+            stage_index=0,
+            stage_count=1,
+            station_t=0.5,
+            regions=(region, conflicting_region),
+            topology_paths=(
+                TopologyPath.from_points(
+                    ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)),
+                    id="shell-outer",
+                ),
+                other_path,
+            ),
         )

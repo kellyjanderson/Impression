@@ -176,13 +176,13 @@ prerequisites are complete; the whole preceding wave need not finish first.
 
 ### Fix 05B: Synthetic Station Identity Lineage
 
-- [ ] Implement deterministic synthetic IDs plus predecessor/successor identity lineage.
+- [x] Implement deterministic synthetic IDs plus predecessor/successor identity lineage.
   - Specification: [Fix 05B](../specifications/fix-05b-synthetic-station-identity-lineage-v1_0.md)
   - Prerequisite: [Fix 05A](../specifications/fix-05a-count-changing-exact-region-pairing-v1_0.md)
-- [ ] Wire lineage-bearing expanded plans into `Loft(...)` surface execution.
-- [ ] Validate lifecycle records and the rail-pair regression through public loft routes.
+- [x] Wire lineage-bearing expanded plans into `Loft(...)` surface execution.
+- [x] Validate lifecycle records and the rail-pair regression through public loft routes.
   - Test specification: [Fix 05B Test](../test-specifications/fix-05b-synthetic-station-identity-lineage-v1_0.md)
-- [ ] Update progression and loft ACD status after route validation.
+- [x] Update progression and loft ACD status after route validation.
 
 ## Wave 4: Junction And Branch Planning
 

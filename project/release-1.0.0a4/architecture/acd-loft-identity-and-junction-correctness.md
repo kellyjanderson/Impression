@@ -102,6 +102,23 @@ candidate indexes, births, and deaths. This allows a net expanding interval to
 contain both named deaths and births without losing authored identity. Fix 05B
 owns propagation of those identities through later synthetic stations.
 
+## Synthetic Station Identity Lineage Boundary
+
+Split/merge expansion consumes the exact transition resolution before it emits
+staged geometry. Every inserted station carries an immutable lineage record for
+each region and loop: a direction-independent identity, predecessor and
+successor references, directional region IDs, loop endpoint IDs, and a complete
+set of synthetic `TopologyPath` records. Authored identities remain authoritative;
+anonymous geometry receives deterministic planner-local lineage without being
+promoted into authored exact correspondence.
+
+The staged `Station` records expose authored directional IDs on both sides of
+each inserted station, so the first, intermediate, and last expanded intervals
+all resolve without anonymous rebuilding. Reversing the transition swaps source
+and target refs while preserving region and loop identity. The plan and surfaced
+`Loft(...)` result publish both immutable records and canonical diagnostic
+payloads, and incomplete or duplicate derived lineage fails before execution.
+
 ## Specification Sources
 
 - Fix 03: named hole identity preservation and assignment.
@@ -132,6 +149,7 @@ owns propagation of those identities through later synthetic stations.
 - [ ] Implementation conforms to the target architecture.
 - [x] Fix 03 named-hole identity resolution conforms through public planning and execution routes.
 - [x] Fix 05A exact region identities resolve before anonymous residue and publish explicit count-changing births/deaths.
+- [x] Fix 05B synthetic stations preserve deterministic region/loop lineage through public planning and execution.
 - [x] Fix 06 immutable planner configuration propagates through direct, expanded, and nested pairing routes.
 - [x] Final leaves are independently reviewed and canonicalized.
 - [x] Paired test specs point to canonical leaves.
@@ -152,6 +170,10 @@ through public routes with closed-valid surface output.
 
 ## Change History
 
+- 2026-08-04 - Completed Fix 05B. Reason: identity-aware expansion now carries
+  deterministic region and loop lineage through every synthetic station,
+  preserves topology paths in both directions, and reaches the public surface
+  executor without rebuilding an anonymous target.
 - 2026-08-04 - Completed Fix 05A. Reason: count-changing public plans now
   preserve exact region IDs, restrict geometric assignment to anonymous
   residue, and record named births/deaths explicitly.

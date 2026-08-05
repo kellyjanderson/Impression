@@ -1733,6 +1733,130 @@ class RegionIdentityTransitionResolution:
 
 
 @dataclass(frozen=True)
+class SyntheticRegionLineage:
+    """Stable region and loop identity carried by one staged region."""
+
+    identity: str
+    prev_region_ref: tuple[str, int]
+    curr_region_ref: tuple[str, int]
+    predecessor_ids: frozenset[str]
+    successor_ids: frozenset[str]
+    loop_identities: tuple[str, ...]
+    predecessor_loop_ids: tuple[str | None, ...]
+    successor_loop_ids: tuple[str | None, ...]
+
+    def __post_init__(self) -> None:
+        identity = str(self.identity).strip()
+        if not identity:
+            raise ValueError("invalid_synthetic_lineage region identity must be non-empty")
+        object.__setattr__(self, "identity", identity)
+        object.__setattr__(self, "predecessor_ids", frozenset(self.predecessor_ids))
+        object.__setattr__(self, "successor_ids", frozenset(self.successor_ids))
+        object.__setattr__(self, "loop_identities", tuple(self.loop_identities))
+        object.__setattr__(self, "predecessor_loop_ids", tuple(self.predecessor_loop_ids))
+        object.__setattr__(self, "successor_loop_ids", tuple(self.successor_loop_ids))
+        for field_name, ref in (
+            ("prev_region_ref", self.prev_region_ref),
+            ("curr_region_ref", self.curr_region_ref),
+        ):
+            if len(ref) != 2 or ref[0] not in {"actual", "synthetic"} or int(ref[1]) < 0:
+                raise ValueError(f"invalid_synthetic_lineage {field_name} is invalid")
+            object.__setattr__(self, field_name, (str(ref[0]), int(ref[1])))
+        for field_name, identities in (
+            ("predecessor_ids", self.predecessor_ids),
+            ("successor_ids", self.successor_ids),
+        ):
+            if len(identities) > 1 or any(not str(value).strip() for value in identities):
+                raise ValueError(
+                    f"invalid_synthetic_lineage {field_name} must contain at most one non-empty id"
+                )
+        loop_count = len(self.loop_identities)
+        if loop_count == 0:
+            raise ValueError("invalid_synthetic_lineage region requires at least one loop")
+        if len(set(self.loop_identities)) != loop_count:
+            raise ValueError("invalid_synthetic_lineage duplicate loop identity")
+        if any(not str(value).strip() for value in self.loop_identities):
+            raise ValueError("invalid_synthetic_lineage loop identity must be non-empty")
+        if (
+            len(self.predecessor_loop_ids) != loop_count
+            or len(self.successor_loop_ids) != loop_count
+        ):
+            raise ValueError("invalid_synthetic_lineage loop lineage length mismatch")
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "identity": self.identity,
+            "prev_region_ref": self.prev_region_ref,
+            "curr_region_ref": self.curr_region_ref,
+            "predecessor_ids": tuple(sorted(self.predecessor_ids)),
+            "successor_ids": tuple(sorted(self.successor_ids)),
+            "loop_identities": self.loop_identities,
+            "predecessor_loop_ids": self.predecessor_loop_ids,
+            "successor_loop_ids": self.successor_loop_ids,
+        }
+
+
+@dataclass(frozen=True)
+class SyntheticStationLineage:
+    """Immutable identity handoff for one inserted split/merge station."""
+
+    identity: str
+    source_interval: tuple[float, float]
+    stage_index: int
+    stage_count: int
+    station_t: float
+    regions: tuple[SyntheticRegionLineage, ...]
+    topology_paths: tuple[TopologyPath, ...]
+
+    def __post_init__(self) -> None:
+        identity = str(self.identity).strip()
+        if not identity:
+            raise ValueError("invalid_synthetic_lineage station identity must be non-empty")
+        object.__setattr__(self, "identity", identity)
+        interval = tuple(float(value) for value in self.source_interval)
+        if len(interval) != 2 or not all(np.isfinite(interval)) or not interval[0] < interval[1]:
+            raise ValueError("invalid_synthetic_lineage source interval must be increasing")
+        object.__setattr__(self, "source_interval", interval)
+        object.__setattr__(self, "stage_index", int(self.stage_index))
+        object.__setattr__(self, "stage_count", int(self.stage_count))
+        object.__setattr__(self, "station_t", float(self.station_t))
+        object.__setattr__(self, "regions", tuple(self.regions))
+        object.__setattr__(self, "topology_paths", tuple(self.topology_paths))
+        validate_synthetic_station_lineage(self)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "identity": self.identity,
+            "source_interval": self.source_interval,
+            "stage_index": self.stage_index,
+            "stage_count": self.stage_count,
+            "station_t": self.station_t,
+            "regions": tuple(region.canonical_payload() for region in self.regions),
+            "topology_path_ids": tuple(path.id for path in self.topology_paths),
+        }
+
+
+def validate_synthetic_station_lineage(lineage: SyntheticStationLineage) -> None:
+    """Fail incomplete or conflicting derived lineage before surface execution."""
+
+    if lineage.stage_count < 1 or not 0 <= lineage.stage_index < lineage.stage_count:
+        raise ValueError("invalid_synthetic_lineage stage index is outside the staged interval")
+    if not lineage.source_interval[0] < lineage.station_t < lineage.source_interval[1]:
+        raise ValueError("invalid_synthetic_lineage station t is outside the source interval")
+    region_ids = tuple(region.identity for region in lineage.regions)
+    if len(set(region_ids)) != len(region_ids):
+        raise ValueError("invalid_synthetic_lineage duplicate region identity")
+    loop_ids = tuple(loop_id for region in lineage.regions for loop_id in region.loop_identities)
+    if len(set(loop_ids)) != len(loop_ids):
+        raise ValueError("invalid_synthetic_lineage duplicate loop identity across regions")
+    path_ids = tuple(path.id for path in lineage.topology_paths)
+    if len(set(path_ids)) != len(path_ids):
+        raise ValueError("invalid_synthetic_lineage duplicate topology path identity")
+    if set(path_ids) != set(loop_ids):
+        raise ValueError("invalid_synthetic_lineage topology paths do not cover every loop")
+
+
+@dataclass(frozen=True)
 class LoftManyToManyDecomposability:
     continues_automatically: bool
     gate_reached: bool
@@ -3776,6 +3900,13 @@ def loft_plan_sections(
         for station in effective_stations
         if station.section is not None
     )
+    synthetic_station_lineage_records = tuple(
+        lineage
+        for station in effective_stations
+        if station.section is not None
+        for lineage in (station.section.metadata.get("synthetic_station_lineage"),)
+        if isinstance(lineage, SyntheticStationLineage)
+    )
     plan = LoftPlan(
         samples=samples,
         stations=tuple(planned_stations),
@@ -3822,6 +3953,11 @@ def loft_plan_sections(
             "fairness_diagnostics": fairness_diagnostics,
             "fairness_optimization_convergence_status": fairness_convergence_status,
             "source_topology_paths": source_topology_paths,
+            "synthetic_station_lineages": tuple(
+                lineage.canonical_payload()
+                for lineage in synthetic_station_lineage_records
+            ),
+            "synthetic_station_lineage_records": synthetic_station_lineage_records,
         },
     )
     _validate_loft_plan(plan)
@@ -4444,6 +4580,11 @@ def _loft_execute_plan_surface(
             "loft_closure_evidence": closure_evidence.canonical_payload(),
             "loft_seam_coverage": seam_coverage.canonical_payload(),
             "source_topology_paths": plan.metadata.get("source_topology_paths", ()),
+            "synthetic_station_lineages": plan.metadata.get("synthetic_station_lineages", ()),
+            "synthetic_station_lineage_records": plan.metadata.get(
+                "synthetic_station_lineage_records",
+                (),
+            ),
         },
     }
     shell = make_surface_shell(
@@ -6158,6 +6299,265 @@ def _canonicalize_section_for_loft(
     return canonical
 
 
+def _section_loop_topology_paths(
+    section: Section,
+) -> tuple[tuple[TopologyPath | None, ...], ...]:
+    """Locate topology paths for every canonical outer and hole loop."""
+
+    canonical = _canonicalize_section_for_loft(section)
+    assert isinstance(canonical, Section)
+    slots: list[list[TopologyPath | None]] = [
+        [None] * (1 + len(region.holes))
+        for region in canonical.regions
+    ]
+    candidates_by_key: dict[tuple[float, ...], list[tuple[int, int]]] = {}
+    for region_index, region in enumerate(canonical.regions):
+        for loop_index, loop in enumerate(
+            (region.outer.points, *(hole.points for hole in region.holes))
+        ):
+            key = tuple(round(value, 8) for value in _loop_sort_key(loop)[:4])
+            candidates_by_key.setdefault(key, []).append((region_index, loop_index))
+    for path in tuple(section.metadata.get("topology_paths", ())):
+        if not isinstance(path, TopologyPath):
+            continue
+        path_key = tuple(
+            round(value, 8)
+            for value in _loop_sort_key(path.to_section_loop().points)[:4]
+        )
+        matches = tuple(candidates_by_key.get(path_key, ()))
+        if len(matches) > 1:
+            raise ValueError(
+                f"invalid_synthetic_lineage topology path {path.id!r} matches multiple loops"
+            )
+        if not matches:
+            continue
+        region_index, loop_index = matches[0]
+        existing = slots[region_index][loop_index]
+        if existing is not None and existing.id != path.id:
+            raise ValueError(
+                "invalid_synthetic_lineage conflicting topology paths "
+                f"{existing.id!r} and {path.id!r} map to one loop"
+            )
+        slots[region_index][loop_index] = path
+    return tuple(tuple(region_slots) for region_slots in slots)
+
+
+def _stable_lineage_token(value: float) -> str:
+    return format(float(value), ".12g").replace("-", "m").replace(".", "p")
+
+
+def _derived_region_lineage_identity(
+    prev: Station,
+    curr: Station,
+    transition: _PairedSectionTransition,
+) -> str:
+    refs = sorted(
+        (
+            f"{transition.prev_region_ref.kind}-{transition.prev_region_ref.index}",
+            f"{transition.curr_region_ref.kind}-{transition.curr_region_ref.index}",
+        )
+    )
+    return (
+        "synthetic-region-"
+        f"{_stable_lineage_token(prev.t)}-{_stable_lineage_token(curr.t)}-"
+        f"{refs[0]}-{refs[1]}"
+    )
+
+
+def _transition_region_identity(
+    prev: Station,
+    curr: Station,
+    transition: _PairedSectionTransition,
+) -> tuple[str, frozenset[str]]:
+    prev_ids = (
+        prev.successor_ids[transition.prev_region_ref.index]
+        if transition.prev_region_ref.kind == "actual"
+        else frozenset()
+    )
+    curr_ids = (
+        curr.predecessor_ids[transition.curr_region_ref.index]
+        if transition.curr_region_ref.kind == "actual"
+        else frozenset()
+    )
+    explicit_ids = prev_ids | curr_ids
+    if len(explicit_ids) > 1:
+        raise ValueError(
+            "invalid_synthetic_lineage conflicting region ids "
+            f"source={tuple(sorted(prev_ids))} target={tuple(sorted(curr_ids))}"
+        )
+    if explicit_ids:
+        return next(iter(explicit_ids)), explicit_ids
+    return _derived_region_lineage_identity(prev, curr, transition), frozenset()
+
+
+def _transition_loop_path(
+    paths: tuple[tuple[TopologyPath | None, ...], ...],
+    region_ref: _RegionRef,
+    loop_ref: _LoopRef,
+) -> TopologyPath | None:
+    if region_ref.kind != "actual" or loop_ref.kind != "actual":
+        return None
+    region_paths = paths[region_ref.index]
+    return region_paths[loop_ref.index] if loop_ref.index < len(region_paths) else None
+
+
+def _derived_loop_lineage_identity(
+    region_identity: str,
+    prev_ref: _LoopRef,
+    curr_ref: _LoopRef,
+    prev_path: TopologyPath | None,
+    curr_path: TopologyPath | None,
+) -> str:
+    path_ids = sorted(
+        path.id
+        for path in (prev_path, curr_path)
+        if path is not None
+    )
+    if path_ids and len(set(path_ids)) == 1:
+        return path_ids[0]
+    if path_ids:
+        return f"{region_identity}-loop-{'--'.join(path_ids)}"
+    refs = sorted((f"{prev_ref.kind}-{prev_ref.index}", f"{curr_ref.kind}-{curr_ref.index}"))
+    return f"{region_identity}-loop-{refs[0]}-{refs[1]}"
+
+
+def _lineage_topology_path(
+    identity: str,
+    loop: np.ndarray,
+    *,
+    lineage_only: bool,
+) -> TopologyPath:
+    named_points = tuple(
+        (f"{identity}-sample-{index}", tuple(float(value) for value in point))
+        for index, point in enumerate(np.asarray(loop, dtype=float))
+    )
+    path = TopologyPath.from_points(named_points, id=identity)
+    return replace(
+        path,
+        metadata={
+            **path.metadata,
+            "synthetic_lineage": True,
+            "synthetic_lineage_only": bool(lineage_only),
+        },
+    )
+
+
+def _synthetic_station_from_transition_lineage(
+    *,
+    prev: Station,
+    curr: Station,
+    u: float,
+    stage_index: int,
+    stage_count: int,
+    staged_region_loops: list[list[np.ndarray]],
+    transitions: list[_PairedSectionTransition],
+) -> Station:
+    prev_paths = _section_loop_topology_paths(prev.section) if prev.section is not None else ()
+    curr_paths = _section_loop_topology_paths(curr.section) if curr.section is not None else ()
+    staged_section = _section_from_region_loops(staged_region_loops, color=curr.section.color)
+    _canonical, region_order = _canonicalize_section_for_loft(staged_section, return_region_order=True)
+
+    unordered_regions: list[SyntheticRegionLineage] = []
+    unordered_paths: list[tuple[TopologyPath, ...]] = []
+    for transition, loops in zip(transitions, staged_region_loops, strict=True):
+        region_identity, directional_ids = _transition_region_identity(prev, curr, transition)
+        loop_identities: list[str] = []
+        predecessor_loop_ids: list[str | None] = []
+        successor_loop_ids: list[str | None] = []
+        generated_paths: list[TopologyPath] = []
+        for loop, prev_loop_ref, curr_loop_ref in zip(
+            loops,
+            transition.region.prev_sources,
+            transition.region.curr_sources,
+            strict=True,
+        ):
+            prev_path = _transition_loop_path(
+                prev_paths,
+                transition.prev_region_ref,
+                prev_loop_ref,
+            )
+            curr_path = _transition_loop_path(
+                curr_paths,
+                transition.curr_region_ref,
+                curr_loop_ref,
+            )
+            loop_identity = _derived_loop_lineage_identity(
+                region_identity,
+                prev_loop_ref,
+                curr_loop_ref,
+                prev_path,
+                curr_path,
+            )
+            loop_identities.append(loop_identity)
+            predecessor_loop_ids.append(None if prev_path is None else prev_path.id)
+            successor_loop_ids.append(None if curr_path is None else curr_path.id)
+            generated_paths.append(
+                _lineage_topology_path(
+                    loop_identity,
+                    loop,
+                    lineage_only=prev_path is None and curr_path is None,
+                )
+            )
+        unordered_regions.append(
+            SyntheticRegionLineage(
+                identity=region_identity,
+                prev_region_ref=(
+                    transition.prev_region_ref.kind,
+                    transition.prev_region_ref.index,
+                ),
+                curr_region_ref=(
+                    transition.curr_region_ref.kind,
+                    transition.curr_region_ref.index,
+                ),
+                predecessor_ids=directional_ids,
+                successor_ids=directional_ids,
+                loop_identities=tuple(loop_identities),
+                predecessor_loop_ids=tuple(predecessor_loop_ids),
+                successor_loop_ids=tuple(successor_loop_ids),
+            )
+        )
+        unordered_paths.append(tuple(generated_paths))
+
+    regions = tuple(unordered_regions[index] for index in region_order)
+    region_paths = tuple(unordered_paths[index] for index in region_order)
+    topology_paths = tuple(paths[0] for paths in region_paths) + tuple(
+        path
+        for paths in region_paths
+        for path in paths[1:]
+    )
+    station_t = (1.0 - float(u)) * prev.t + float(u) * curr.t
+    lineage = SyntheticStationLineage(
+        identity=(
+            "synthetic-station-"
+            f"{_stable_lineage_token(prev.t)}-{_stable_lineage_token(curr.t)}-"
+            f"{stage_index + 1}-of-{stage_count}"
+        ),
+        source_interval=(prev.t, curr.t),
+        stage_index=stage_index,
+        stage_count=stage_count,
+        station_t=station_t,
+        regions=regions,
+        topology_paths=topology_paths,
+    )
+    section = Section(
+        tuple(_canonical.regions),
+        color=_canonical.color,
+        metadata={
+            **_canonical.metadata,
+            "topology_paths": topology_paths,
+            "synthetic_station_lineage": lineage,
+        },
+    )
+    return _interpolate_station(
+        prev,
+        curr,
+        float(u),
+        section,
+        predecessor_ids=tuple(region.predecessor_ids for region in regions),
+        successor_ids=tuple(region.successor_ids for region in regions),
+    )
+
+
 def _expand_split_merge_stations(
     *,
     stations: list[Station],
@@ -6183,10 +6583,22 @@ def _expand_split_merge_stations(
             continue
 
         try:
+            identity_resolution = construct_residual_region_transition(
+                prev_station=prev,
+                curr_station=curr,
+                prev_regions=prev_regions,
+                curr_regions=curr_regions,
+                ambiguity_cost_profile=options.ambiguity_cost_profile,
+                ambiguity_max_branches=options.ambiguity_max_branches,
+                fairness_mode=options.fairness_mode,
+                fairness_weight=options.fairness_weight,
+                fairness_iterations=options.fairness_iterations,
+            )
             transitions = _pair_sections_for_transition(
                 prev_regions,
                 curr_regions,
                 options=options,
+                region_identity_resolution=identity_resolution,
             )
         except ValueError as exc:
             detail = str(exc)
@@ -6212,7 +6624,7 @@ def _expand_split_merge_stations(
         if u1 <= u0:
             u0, u1 = 0.25, 0.75
         u_values = np.linspace(u0, u1, split_merge_steps + 2, dtype=float)[1:-1]
-        for u in u_values:
+        for stage_index, u in enumerate(u_values):
             alpha = (float(u) - u0) / (u1 - u0)
             staged_region_loops: list[list[np.ndarray]] = []
             for transition in transitions:
@@ -6224,8 +6636,17 @@ def _expand_split_merge_stations(
                 ):
                     region_loops.append((1.0 - alpha) * prev_loop + alpha * curr_loop)
                 staged_region_loops.append(region_loops)
-            staged_section = _section_from_region_loops(staged_region_loops, color=curr.section.color)
-            expanded.append(_interpolate_station(prev, curr, float(u), staged_section))
+            expanded.append(
+                _synthetic_station_from_transition_lineage(
+                    prev=prev,
+                    curr=curr,
+                    u=float(u),
+                    stage_index=stage_index,
+                    stage_count=len(u_values),
+                    staged_region_loops=staged_region_loops,
+                    transitions=transitions,
+                )
+            )
         expanded.append(curr)
     return expanded
 
@@ -6270,7 +6691,15 @@ def _section_from_region_loops(
     return Section(tuple(region_objs), color=color).normalized()
 
 
-def _interpolate_station(prev: Station, curr: Station, u: float, section: Section) -> Station:
+def _interpolate_station(
+    prev: Station,
+    curr: Station,
+    u: float,
+    section: Section,
+    *,
+    predecessor_ids: tuple[frozenset[str], ...] = (),
+    successor_ids: tuple[frozenset[str], ...] = (),
+) -> Station:
     u = float(np.clip(u, 0.0, 1.0))
     t = (1.0 - u) * prev.t + u * curr.t
     origin = (1.0 - u) * prev.origin + u * curr.origin
@@ -6278,7 +6707,16 @@ def _interpolate_station(prev: Station, curr: Station, u: float, section: Sectio
     v_vec = (1.0 - u) * prev.v + u * curr.v
     n_vec = (1.0 - u) * prev.n + u * curr.n
     fu, fv, fn = _orthonormalize_frame(u_vec, v_vec, n_vec)
-    return Station(t=t, origin=origin, u=fu, v=fv, n=fn, section=section)
+    return Station(
+        t=t,
+        origin=origin,
+        u=fu,
+        v=fv,
+        n=fn,
+        section=section,
+        predecessor_ids=predecessor_ids,
+        successor_ids=successor_ids,
+    )
 
 
 def _loop_sort_key(loop: np.ndarray) -> tuple[float, ...]:
@@ -6313,6 +6751,8 @@ def _section_hole_identity_index(
     identities: dict[str, tuple[int, int]] = {}
     for path in tuple(section.metadata.get("topology_paths", ())):
         if not isinstance(path, TopologyPath):
+            continue
+        if bool(path.metadata.get("synthetic_lineage_only", False)):
             continue
         path_key = _loop_sort_key(path.to_section_loop().points)[:4]
         matches = tuple(
