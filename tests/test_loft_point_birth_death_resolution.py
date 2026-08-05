@@ -1,8 +1,15 @@
+import numpy as np
 import pytest
 
 from impression.modeling.loft import (
+    PlannedClosure,
+    PlannedLoopPair,
+    PlannedLoopRef,
+    PlannedRegionPair,
+    PlannedRegionRef,
     PointLifecycleEvent,
     SyntheticSupportReference,
+    derive_loft_junction_boundary_inputs,
     locate_parent_span,
     resolve_authored_rails,
     resolve_point_birth_death_events,
@@ -21,6 +28,43 @@ def _path(points: tuple[tuple[str, tuple[float, float], str], ...]) -> TopologyP
     for name, coordinates, correspondence_id in points:
         builder.point(name, coordinates, correspond=correspondence_id)
     return builder.build()
+
+
+def test_hole_junction_boundary_input_derivation_marks_birth_as_interior() -> None:
+    outer = np.asarray(((0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)))
+    hole = np.asarray(((1.0, 1.0), (2.0, 1.0), (2.0, 2.0), (1.0, 2.0)))
+    pair = PlannedRegionPair(
+        prev_region_ref=PlannedRegionRef("actual", 0),
+        curr_region_ref=PlannedRegionRef("actual", 0),
+        loop_pairs=(
+            PlannedLoopPair(
+                PlannedLoopRef("actual", 0),
+                PlannedLoopRef("actual", 0),
+                outer,
+                outer,
+                "stable",
+            ),
+            PlannedLoopPair(
+                PlannedLoopRef("synthetic", 1),
+                PlannedLoopRef("actual", 1, identity="new-hole"),
+                hole * 0.1,
+                hole,
+                "synthetic_birth",
+            ),
+        ),
+        closures=(PlannedClosure("prev", "loop", 1),),
+        action="stable",
+        branch_id="i0_1:p0:stable:actual0_to_actual0",
+    )
+
+    rings = derive_loft_junction_boundary_inputs(pair, station_interval=(0, 1))
+
+    assert tuple((ring.side, ring.role) for ring in rings) == (
+        ("prev", "synthetic_support"),
+        ("curr", "born"),
+    )
+    assert all(ring.surface_role == "interior_junction" for ring in rings)
+    assert all(ring.loop_identity == "new-hole" for ring in rings)
 
 
 def test_rectangle_to_rounded_l_like_extra_points_create_birth_events() -> None:

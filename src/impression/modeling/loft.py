@@ -1499,6 +1499,109 @@ class PlannedRegionPair:
 
 
 @dataclass(frozen=True)
+class LoftJunctionBoundaryRingInput:
+    """Immutable planner input for one side of an interior hole junction."""
+
+    station_index: int
+    side: str  # prev | curr
+    role: str  # continuing | born | closing | synthetic_support
+    loop_identity: str
+    region_ref: PlannedRegionRef
+    loop_ref: PlannedLoopRef
+    points: tuple[tuple[float, float], ...]
+    surface_role: str = "interior_junction"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "station_index", int(self.station_index))
+        object.__setattr__(self, "side", str(self.side))
+        object.__setattr__(self, "role", str(self.role))
+        object.__setattr__(self, "loop_identity", str(self.loop_identity))
+        object.__setattr__(
+            self,
+            "points",
+            tuple(tuple(float(value) for value in point) for point in self.points),
+        )
+        object.__setattr__(self, "surface_role", str(self.surface_role))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "station_index": int(self.station_index),
+            "side": self.side,
+            "role": self.role,
+            "loop_identity": self.loop_identity,
+            "region_ref": {
+                "kind": self.region_ref.kind,
+                "index": int(self.region_ref.index),
+            },
+            "loop_ref": {
+                "kind": self.loop_ref.kind,
+                "index": int(self.loop_ref.index),
+                "identity": self.loop_ref.identity,
+            },
+            "points": self.points,
+            "surface_role": self.surface_role,
+        }
+
+
+@dataclass(frozen=True)
+class LoftJunctionEvent:
+    """Identity-bearing one-to-many or many-to-one hole-junction plan record."""
+
+    id: str
+    station_interval: tuple[int, int]
+    branch_id: str
+    direction: str  # one_to_many | many_to_one
+    continuing_loop_ids: tuple[str, ...]
+    born_loop_ids: tuple[str, ...]
+    closing_loop_ids: tuple[str, ...]
+    boundary_rings: tuple[LoftJunctionBoundaryRingInput, ...]
+    surface_role: str = "interior_junction"
+    terminal_cap_allowed: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", str(self.id))
+        object.__setattr__(
+            self,
+            "station_interval",
+            tuple(int(index) for index in self.station_interval),
+        )
+        object.__setattr__(self, "branch_id", str(self.branch_id))
+        object.__setattr__(self, "direction", str(self.direction))
+        object.__setattr__(
+            self,
+            "continuing_loop_ids",
+            tuple(str(identity) for identity in self.continuing_loop_ids),
+        )
+        object.__setattr__(
+            self,
+            "born_loop_ids",
+            tuple(str(identity) for identity in self.born_loop_ids),
+        )
+        object.__setattr__(
+            self,
+            "closing_loop_ids",
+            tuple(str(identity) for identity in self.closing_loop_ids),
+        )
+        object.__setattr__(self, "boundary_rings", tuple(self.boundary_rings))
+        object.__setattr__(self, "surface_role", str(self.surface_role))
+        object.__setattr__(self, "terminal_cap_allowed", bool(self.terminal_cap_allowed))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "station_interval": self.station_interval,
+            "branch_id": self.branch_id,
+            "direction": self.direction,
+            "continuing_loop_ids": self.continuing_loop_ids,
+            "born_loop_ids": self.born_loop_ids,
+            "closing_loop_ids": self.closing_loop_ids,
+            "boundary_rings": tuple(ring.canonical_payload() for ring in self.boundary_rings),
+            "surface_role": self.surface_role,
+            "terminal_cap_allowed": self.terminal_cap_allowed,
+        }
+
+
+@dataclass(frozen=True)
 class LoftSuggestedAuthoredRail:
     """Non-mutating advice for resolving an authored topology ambiguity."""
 
@@ -2014,6 +2117,7 @@ class PlannedTransition:
     ambiguity_class: str = "none"  # none | permutation | containment | symmetry | closure
     prev_region_count: int = 0
     curr_region_count: int = 0
+    junction_events: tuple[LoftJunctionEvent, ...] = ()
 
     @property
     def planned_state_indices(self) -> tuple[int, int]:
@@ -3852,15 +3956,19 @@ def loft_plan_sections(
             )
             for pair_index, transition in enumerate(transitions)
         )
+        planned_transition = PlannedTransition(
+            interval=interval,
+            region_pairs=planned_pairs,
+            branch_order=tuple(pair.branch_id for pair in planned_pairs),
+            topology_case=topology_case,
+            ambiguity_class=ambiguity_class,
+            prev_region_count=len(prev_regions),
+            curr_region_count=len(curr_regions),
+        )
         planned_transitions.append(
-            PlannedTransition(
-                interval=interval,
-                region_pairs=planned_pairs,
-                branch_order=tuple(pair.branch_id for pair in planned_pairs),
-                topology_case=topology_case,
-                ambiguity_class=ambiguity_class,
-                prev_region_count=len(prev_regions),
-                curr_region_count=len(curr_regions),
+            replace(
+                planned_transition,
+                junction_events=build_loft_junction_events(planned_transition),
             )
         )
 
@@ -3906,6 +4014,11 @@ def loft_plan_sections(
         if station.section is not None
         for lineage in (station.section.metadata.get("synthetic_station_lineage"),)
         if isinstance(lineage, SyntheticStationLineage)
+    )
+    junction_event_records = tuple(
+        event
+        for transition in planned_transitions
+        for event in transition.junction_events
     )
     plan = LoftPlan(
         samples=samples,
@@ -3958,6 +4071,10 @@ def loft_plan_sections(
                 for lineage in synthetic_station_lineage_records
             ),
             "synthetic_station_lineage_records": synthetic_station_lineage_records,
+            "loft_junction_events": tuple(
+                event.canonical_payload() for event in junction_event_records
+            ),
+            "loft_junction_event_records": junction_event_records,
         },
     )
     _validate_loft_plan(plan)
@@ -4299,6 +4416,12 @@ def _loft_execute_plan_surface(
 
     _validate_loft_plan(plan)
     plan.require_executable()
+    junction_event_records = tuple(
+        event for transition in plan.transitions for event in transition.junction_events
+    )
+    junction_event_payloads = tuple(
+        event.canonical_payload() for event in junction_event_records
+    )
 
     patches: list[object] = []
     seams: list[SurfaceSeam] = []
@@ -4585,6 +4708,8 @@ def _loft_execute_plan_surface(
                 "synthetic_station_lineage_records",
                 (),
             ),
+            "loft_junction_events": junction_event_payloads,
+            "loft_junction_event_records": junction_event_records,
         },
     }
     shell = make_surface_shell(
@@ -5204,6 +5329,279 @@ def _to_planned_region_ref(ref: _RegionRef) -> PlannedRegionRef:
     return PlannedRegionRef(kind=ref.kind, index=ref.index)
 
 
+def _junction_loop_identity(
+    loop_ref: PlannedLoopRef,
+    *,
+    branch_id: str,
+    loop_pair_index: int,
+) -> str:
+    if loop_ref.identity is not None and str(loop_ref.identity).strip():
+        return str(loop_ref.identity).strip()
+    if loop_ref.topology_path is not None and str(loop_ref.topology_path.id).strip():
+        return str(loop_ref.topology_path.id).strip()
+    return f"{branch_id}:hole-{loop_pair_index}"
+
+
+def derive_loft_junction_boundary_inputs(
+    region_pair: PlannedRegionPair,
+    *,
+    station_interval: tuple[int, int],
+) -> tuple[LoftJunctionBoundaryRingInput, ...]:
+    """Derive deterministic boundary-ring inputs for a hole-junction event."""
+
+    prev_idx, curr_idx = station_interval
+    rings: list[LoftJunctionBoundaryRingInput] = []
+    for loop_pair_index, loop_pair in enumerate(region_pair.loop_pairs):
+        if (
+            loop_pair.role == "stable"
+            and loop_pair.prev_loop_ref.kind == "actual"
+            and loop_pair.prev_loop_ref.index == 0
+            and loop_pair.curr_loop_ref.kind == "actual"
+            and loop_pair.curr_loop_ref.index == 0
+        ):
+            continue
+        if loop_pair.role == "synthetic_birth":
+            identity = _junction_loop_identity(
+                loop_pair.curr_loop_ref,
+                branch_id=region_pair.branch_id,
+                loop_pair_index=loop_pair_index,
+            )
+            roles = ("synthetic_support", "born")
+        elif loop_pair.role == "synthetic_death":
+            identity = _junction_loop_identity(
+                loop_pair.prev_loop_ref,
+                branch_id=region_pair.branch_id,
+                loop_pair_index=loop_pair_index,
+            )
+            roles = ("closing", "synthetic_support")
+        else:
+            prev_identity = loop_pair.prev_loop_ref.identity
+            curr_identity = loop_pair.curr_loop_ref.identity
+            if prev_identity and curr_identity and prev_identity != curr_identity:
+                raise ValueError(
+                    "invalid_loft_junction_lineage continuing hole identities disagree "
+                    f"on branch {region_pair.branch_id!r}: {prev_identity!r} != {curr_identity!r}"
+                )
+            identity = _junction_loop_identity(
+                loop_pair.prev_loop_ref if prev_identity else loop_pair.curr_loop_ref,
+                branch_id=region_pair.branch_id,
+                loop_pair_index=loop_pair_index,
+            )
+            roles = ("continuing", "continuing")
+        for station_index, side, role, region_ref, loop_ref, points in (
+            (
+                prev_idx,
+                "prev",
+                roles[0],
+                region_pair.prev_region_ref,
+                loop_pair.prev_loop_ref,
+                loop_pair.prev_loop,
+            ),
+            (
+                curr_idx,
+                "curr",
+                roles[1],
+                region_pair.curr_region_ref,
+                loop_pair.curr_loop_ref,
+                loop_pair.curr_loop,
+            ),
+        ):
+            rings.append(
+                LoftJunctionBoundaryRingInput(
+                    station_index=station_index,
+                    side=side,
+                    role=role,
+                    loop_identity=identity,
+                    region_ref=region_ref,
+                    loop_ref=loop_ref,
+                    points=tuple(tuple(float(value) for value in point) for point in points),
+                )
+            )
+    return tuple(rings)
+
+
+def build_loft_junction_events(
+    transition: PlannedTransition,
+) -> tuple[LoftJunctionEvent, ...]:
+    """Build one explicit junction event for each count-changing hole branch."""
+
+    events: list[LoftJunctionEvent] = []
+    for region_pair in transition.region_pairs:
+        birth_pairs = tuple(
+            pair for pair in region_pair.loop_pairs if pair.role == "synthetic_birth"
+        )
+        death_pairs = tuple(
+            pair for pair in region_pair.loop_pairs if pair.role == "synthetic_death"
+        )
+        if not birth_pairs and not death_pairs:
+            continue
+        if birth_pairs and death_pairs:
+            raise ValueError(
+                "invalid_loft_junction_lineage branch contains both born and closing holes "
+                f"({region_pair.branch_id!r})"
+            )
+        direction = "one_to_many" if birth_pairs else "many_to_one"
+        continuing: list[str] = []
+        born: list[str] = []
+        closing: list[str] = []
+        for loop_pair_index, loop_pair in enumerate(region_pair.loop_pairs):
+            if loop_pair.role == "stable":
+                if loop_pair.prev_loop_ref.index == 0 and loop_pair.curr_loop_ref.index == 0:
+                    continue
+                identity = _junction_loop_identity(
+                    loop_pair.prev_loop_ref
+                    if loop_pair.prev_loop_ref.identity
+                    else loop_pair.curr_loop_ref,
+                    branch_id=region_pair.branch_id,
+                    loop_pair_index=loop_pair_index,
+                )
+                continuing.append(identity)
+            elif loop_pair.role == "synthetic_birth":
+                born.append(
+                    _junction_loop_identity(
+                        loop_pair.curr_loop_ref,
+                        branch_id=region_pair.branch_id,
+                        loop_pair_index=loop_pair_index,
+                    )
+                )
+            elif loop_pair.role == "synthetic_death":
+                closing.append(
+                    _junction_loop_identity(
+                        loop_pair.prev_loop_ref,
+                        branch_id=region_pair.branch_id,
+                        loop_pair_index=loop_pair_index,
+                    )
+                )
+        event = LoftJunctionEvent(
+            id=f"{region_pair.branch_id}:hole-junction:{direction}",
+            station_interval=transition.interval,
+            branch_id=region_pair.branch_id,
+            direction=direction,
+            continuing_loop_ids=tuple(continuing),
+            born_loop_ids=tuple(born),
+            closing_loop_ids=tuple(closing),
+            boundary_rings=derive_loft_junction_boundary_inputs(
+                region_pair,
+                station_interval=transition.interval,
+            ),
+        )
+        validate_loft_junction_event(event)
+        events.append(event)
+    return tuple(events)
+
+
+def validate_loft_junction_event(event: LoftJunctionEvent) -> LoftJunctionEvent:
+    """Validate one immutable junction event and return it unchanged."""
+
+    if not event.id or not event.branch_id:
+        raise ValueError("invalid_loft_junction_lineage event id and branch_id must be non-empty")
+    if (
+        len(event.station_interval) != 2
+        or event.station_interval[1] != event.station_interval[0] + 1
+    ):
+        raise ValueError("invalid_loft_junction_lineage station_interval must be consecutive")
+    if event.direction not in {"one_to_many", "many_to_one"}:
+        raise ValueError(
+            "invalid_loft_junction_lineage direction must be one_to_many or many_to_one"
+        )
+    if event.surface_role != "interior_junction" or event.terminal_cap_allowed:
+        raise ValueError(
+            "invalid_loft_junction_lineage hole change must be an interior junction and not a terminal cap"
+        )
+    identity_groups = (
+        event.continuing_loop_ids,
+        event.born_loop_ids,
+        event.closing_loop_ids,
+    )
+    identities = tuple(identity for group in identity_groups for identity in group)
+    if any(not str(identity).strip() for identity in identities) or len(set(identities)) != len(
+        identities
+    ):
+        raise ValueError(
+            "invalid_loft_junction_lineage loop identities must be non-empty and unique"
+        )
+    if event.direction == "one_to_many" and (not event.born_loop_ids or event.closing_loop_ids):
+        raise ValueError("invalid_loft_junction_lineage one_to_many requires born loops only")
+    if event.direction == "many_to_one" and (not event.closing_loop_ids or event.born_loop_ids):
+        raise ValueError("invalid_loft_junction_lineage many_to_one requires closing loops only")
+    if not event.boundary_rings:
+        raise ValueError("invalid_loft_junction_lineage boundary rings are required")
+    valid_roles = {"continuing", "born", "closing", "synthetic_support"}
+    ring_coverage: set[tuple[str, str, str]] = set()
+    for ring in event.boundary_rings:
+        if ring.side not in {"prev", "curr"} or ring.role not in valid_roles:
+            raise ValueError("invalid_loft_junction_lineage boundary ring side or role is invalid")
+        if ring.station_index not in event.station_interval:
+            raise ValueError("invalid_loft_junction_lineage boundary ring station is outside interval")
+        expected_station = (
+            event.station_interval[0]
+            if ring.side == "prev"
+            else event.station_interval[1]
+        )
+        if ring.station_index != expected_station:
+            raise ValueError(
+                "invalid_loft_junction_lineage boundary ring side does not match station"
+            )
+        points = np.asarray(ring.points, dtype=float)
+        if (
+            points.ndim != 2
+            or points.shape[0] < 3
+            or points.shape[1] != 2
+            or not np.all(np.isfinite(points))
+        ):
+            raise ValueError("invalid_loft_junction_lineage boundary ring points must be finite Nx2")
+        if ring.surface_role != "interior_junction" or not ring.loop_identity:
+            raise ValueError(
+                "invalid_loft_junction_lineage boundary ring intent or identity is incomplete"
+            )
+        if ring.loop_identity not in identities:
+            raise ValueError(
+                "invalid_loft_junction_lineage boundary ring references unknown loop identity"
+            )
+        coverage_key = (ring.loop_identity, ring.side, ring.role)
+        if coverage_key in ring_coverage:
+            raise ValueError(
+                "invalid_loft_junction_lineage duplicate boundary ring role ownership"
+            )
+        ring_coverage.add(coverage_key)
+    expected_ring_coverage = {
+        (identity, side, "continuing")
+        for identity in event.continuing_loop_ids
+        for side in ("prev", "curr")
+    }
+    expected_ring_coverage.update(
+        (identity, side, role)
+        for identity in event.born_loop_ids
+        for side, role in (("prev", "synthetic_support"), ("curr", "born"))
+    )
+    expected_ring_coverage.update(
+        (identity, side, role)
+        for identity in event.closing_loop_ids
+        for side, role in (("prev", "closing"), ("curr", "synthetic_support"))
+    )
+    if ring_coverage != expected_ring_coverage:
+        raise ValueError(
+            "invalid_loft_junction_lineage boundary rings do not exactly cover loop roles"
+        )
+    return event
+
+
+def validate_loft_junction_events(
+    transition: PlannedTransition,
+) -> tuple[LoftJunctionEvent, ...]:
+    """Validate coverage and deterministic ownership for one transition."""
+
+    expected = build_loft_junction_events(replace(transition, junction_events=()))
+    actual = tuple(validate_loft_junction_event(event) for event in transition.junction_events)
+    if tuple(event.canonical_payload() for event in actual) != tuple(
+        event.canonical_payload() for event in expected
+    ):
+        raise ValueError(
+            "invalid_loft_junction_lineage transition junction events do not exactly cover planned hole changes"
+        )
+    return actual
+
+
 def _validate_loft_plan(plan: LoftPlan) -> None:
     if plan.samples < 3:
         raise ValueError("Invalid loft plan: samples must be >= 3.")
@@ -5629,6 +6027,28 @@ def _validate_loft_plan(plan: LoftPlan) -> None:
             raise ValueError(
                 f"Invalid loft plan transition interval {expected_interval}: "
                 "branch_order must match region_pairs emission order."
+            )
+        validate_loft_junction_events(transition)
+
+    junction_event_records = tuple(
+        event for transition in plan.transitions for event in transition.junction_events
+    )
+    junction_event_payloads = tuple(
+        event.canonical_payload() for event in junction_event_records
+    )
+    if "loft_junction_events" in plan.metadata and tuple(
+        plan.metadata["loft_junction_events"]
+    ) != junction_event_payloads:
+        raise ValueError(
+            "invalid_loft_junction_lineage plan metadata does not match transition events"
+        )
+    if "loft_junction_event_records" in plan.metadata:
+        metadata_records = tuple(plan.metadata["loft_junction_event_records"])
+        if not all(isinstance(event, LoftJunctionEvent) for event in metadata_records) or tuple(
+            event.canonical_payload() for event in metadata_records
+        ) != junction_event_payloads:
+            raise ValueError(
+                "invalid_loft_junction_lineage plan record metadata is incomplete or stale"
             )
 
 
@@ -8786,6 +9206,8 @@ __all__ = [
     "PlannedLoopPair",
     "PlannedClosure",
     "PlannedRegionPair",
+    "LoftJunctionBoundaryRingInput",
+    "LoftJunctionEvent",
     "PlannedTransition",
     "InferenceCandidateScore",
     "InferenceRefusalDiagnostic",
@@ -8831,6 +9253,7 @@ __all__ = [
     "build_loft_ambiguity_record",
     "build_loft_boundary_graph",
     "build_loft_closure_evidence",
+    "build_loft_junction_events",
     "loft_patch_family_selection_records",
     "classify_loft_cap_validity",
     "classify_loft_seam_coverage",
@@ -8849,10 +9272,13 @@ __all__ = [
     "validate_mesh_executor_correspondence_input",
     "validate_rail_priority",
     "validate_loft_ambiguity_locators",
+    "validate_loft_junction_event",
+    "validate_loft_junction_events",
     "validate_sample_correspondence",
     "validate_surface_executor_correspondence_input",
     "check_executed_loft_self_intersection_validity",
     "detect_loft_plan_self_intersections",
+    "derive_loft_junction_boundary_inputs",
     "summarize_loft_shell_validity",
     "loft_profiles",
     "loft",

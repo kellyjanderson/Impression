@@ -1,7 +1,7 @@
 # Fix 04A: Hole Junction Plan Records
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Primary ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 Architecture ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 Source artifact: [Split parent](./fix-04-hole-split-merge-junction-surfaces-v1_0.md)
@@ -111,14 +111,15 @@ Pass 4 split decision: retained. Cohesion reason: one junction planning record a
 - Architecture feedback status:
   - tracked in active ACD
 - Already implemented prerequisites:
+  - Fix 03 named hole identity pairing
+  - Fix 05b synthetic-station lineage
   - existing records/routes named under Dependencies And Routes
 - Missing prerequisite architecture:
   - none
 - Missing prerequisite specifications:
   - none
 - Unimplemented prerequisite specifications:
-  - Fix 03 named hole identity pairing
-  - Fix 05b synthetic-station lineage
+  - none; Fix 03 named hole identity pairing and Fix 05b synthetic-station lineage are implemented
 - Progression handling:
   - prerequisites listed above run first; otherwise this child may proceed after canonical review
 

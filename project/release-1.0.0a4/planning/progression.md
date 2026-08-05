@@ -188,13 +188,13 @@ prerequisites are complete; the whole preceding wave need not finish first.
 
 ### Fix 04A: Hole Junction Plan Records
 
-- [ ] Implement validated junction direction, lineage, boundary inputs, and stable diagnostics.
+- [x] Implement validated junction direction, lineage, boundary inputs, and stable diagnostics.
   - Specification: [Fix 04A](../specifications/fix-04a-hole-junction-plan-records-v1_0.md)
   - Prerequisites: [Fix 03](../specifications/fix-03-named-hole-identity-pairing-v1_0.md), [Fix 05B](../specifications/fix-05b-synthetic-station-identity-lineage-v1_0.md)
-- [ ] Wire junction-event records from loft planning into the surface executor boundary.
-- [ ] Validate birth/death resolution and lifecycle records through planner-consumer routes.
+- [x] Wire junction-event records from loft planning into the surface executor boundary.
+- [x] Validate birth/death resolution and lifecycle records through planner-consumer routes.
   - Test specification: [Fix 04A Test](../test-specifications/fix-04a-hole-junction-plan-records-v1_0.md)
-- [ ] Update progression and loft ACD status after route validation.
+- [x] Update progression and loft ACD status after route validation.
 
 ### Fix 08B: Loft Difference Branch Decomposition
 
