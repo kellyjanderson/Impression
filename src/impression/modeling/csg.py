@@ -10735,6 +10735,28 @@ class _SurfaceCSGRectangularOverlapEvidence:
     boundary_curve_ids: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class CoincidentPatchContact:
+    """Exact opposite-oriented coincident patch-domain evidence."""
+
+    first_patch: SurfaceBooleanPatchRef
+    second_patch: SurfaceBooleanPatchRef
+    orientation: Literal["opposite"]
+    trimmed_domains_match: bool
+    tolerance: float
+    max_residual: float
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "first_patch": _surface_boolean_patch_ref_payload(self.first_patch),
+            "second_patch": _surface_boolean_patch_ref_payload(self.second_patch),
+            "orientation": self.orientation,
+            "trimmed_domains_match": self.trimmed_domains_match,
+            "tolerance": self.tolerance,
+            "max_residual": self.max_residual,
+        }
+
+
 def _surface_csg_rectangular_patch_frame(
     patch: SurfacePatch,
     *,
@@ -10860,6 +10882,60 @@ def _surface_csg_rectangular_overlap_evidence(
         partial=partial,
         boundary_curve_ids=boundary_curve_ids,
     )
+
+
+def classify_coincident_patch_contacts(
+    operands: SurfaceBooleanOperands,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> tuple[CoincidentPatchContact, ...]:
+    """Classify full-domain, opposite-oriented coincident patch pairs."""
+
+    if operands.operand_count != 2:
+        return ()
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    contacts: list[CoincidentPatchContact] = []
+    first_patches = operands.bodies[0].iter_patches(world=True)
+    second_patches = operands.bodies[1].iter_patches(world=True)
+    for first_index, first_patch in enumerate(first_patches):
+        first_bounds = first_patch.bounds_estimate()
+        for second_index, second_patch in enumerate(second_patches):
+            second_bounds = second_patch.bounds_estimate()
+            if _surface_boolean_bounds_gap(first_bounds, second_bounds) > normalized_policy.equality_tolerance:
+                continue
+            evidence = _surface_csg_rectangular_overlap_evidence(
+                first_patch,
+                second_patch,
+                policy=normalized_policy,
+            )
+            cap_roles = {
+                first_patch.kernel_metadata().get("surface_role"),
+                second_patch.kernel_metadata().get("surface_role"),
+            }
+            opposite_orientation = (
+                evidence is not None
+                and (
+                    evidence.second_orientation == "reversed"
+                    or cap_roles == {"start-cap", "end-cap"}
+                )
+            )
+            if (
+                evidence is None
+                or evidence.partial
+                or not opposite_orientation
+                or evidence.max_residual > normalized_policy.equality_tolerance
+            ):
+                continue
+            contacts.append(
+                CoincidentPatchContact(
+                    first_patch=SurfaceBooleanPatchRef(0, first_index),
+                    second_patch=SurfaceBooleanPatchRef(1, second_index),
+                    orientation="opposite",
+                    trimmed_domains_match=True,
+                    tolerance=normalized_policy.equality_tolerance,
+                    max_residual=evidence.max_residual,
+                )
+            )
+    return tuple(contacts)
 
 
 def detect_spline_nurbs_coincident_regions(
@@ -14834,6 +14910,136 @@ def _loft_pair_result_metadata(
     return metadata
 
 
+def _surface_body_is_axis_aligned_rectangular_loft(
+    body: SurfaceBody,
+    *,
+    tolerance: float,
+) -> bool:
+    """Return whether a loft exactly represents one unholed orthogonal box."""
+
+    if _surface_body_loft_provenance(body) is None or body.shell_count != 1 or body.patch_count != 3:
+        return False
+    patches = body.iter_patches(world=True)
+    ruled_patches = tuple(patch for patch in patches if isinstance(patch, RuledSurfacePatch))
+    cap_patches = tuple(patch for patch in patches if isinstance(patch, PlanarSurfacePatch))
+    if len(ruled_patches) != 1 or len(cap_patches) != 2 or ruled_patches[0].trim_loops:
+        return False
+    if any(len(patch.trim_loops) != 1 or patch.trim_loops[0].category != "outer" for patch in cap_patches):
+        return False
+
+    body_bounds = body.bounds_estimate()
+    cap_axes: list[int] = []
+    cap_positions: list[float] = []
+    for patch in cap_patches:
+        patch_bounds = patch.bounds_estimate()
+        spans = np.asarray(_bounds_size(patch_bounds), dtype=float)
+        zero_axes = tuple(index for index, span in enumerate(spans) if abs(float(span)) <= tolerance)
+        if len(zero_axes) != 1:
+            return False
+        cap_axis = zero_axes[0]
+        projected_axes = tuple(index for index in range(3) if index != cap_axis)
+        expected_spans = tuple(body_bounds[index * 2 + 1] - body_bounds[index * 2] for index in projected_axes)
+        if not np.allclose(spans[list(projected_axes)], expected_spans, atol=tolerance, rtol=0.0):
+            return False
+
+        trim = patch.trim_loops[0]
+        world_points = tuple(patch.point_at(float(u), float(v)) for u, v in trim.points_uv)
+        projected = np.asarray([[point[index] for index in projected_axes] for point in world_points], dtype=float)
+        projected_bounds = (
+            float(projected[:, 0].min()),
+            float(projected[:, 0].max()),
+            float(projected[:, 1].min()),
+            float(projected[:, 1].max()),
+        )
+        expected_projected_bounds = (
+            body_bounds[projected_axes[0] * 2],
+            body_bounds[projected_axes[0] * 2 + 1],
+            body_bounds[projected_axes[1] * 2],
+            body_bounds[projected_axes[1] * 2 + 1],
+        )
+        if not np.allclose(projected_bounds, expected_projected_bounds, atol=tolerance, rtol=0.0):
+            return False
+        on_rectangle_boundary = (
+            np.isclose(projected[:, 0], projected_bounds[0], atol=tolerance, rtol=0.0)
+            | np.isclose(projected[:, 0], projected_bounds[1], atol=tolerance, rtol=0.0)
+            | np.isclose(projected[:, 1], projected_bounds[2], atol=tolerance, rtol=0.0)
+            | np.isclose(projected[:, 1], projected_bounds[3], atol=tolerance, rtol=0.0)
+        )
+        if not bool(np.all(on_rectangle_boundary)):
+            return False
+        next_projected = np.roll(projected, -1, axis=0)
+        polygon_area = abs(
+            float(
+                np.sum(
+                    projected[:, 0] * next_projected[:, 1]
+                    - next_projected[:, 0] * projected[:, 1]
+                )
+                * 0.5
+            )
+        )
+        rectangle_area = (projected_bounds[1] - projected_bounds[0]) * (
+            projected_bounds[3] - projected_bounds[2]
+        )
+        if not np.isclose(polygon_area, rectangle_area, atol=tolerance, rtol=0.0):
+            return False
+        cap_axes.append(cap_axis)
+        cap_positions.append(float(patch_bounds[cap_axis * 2]))
+
+    if cap_axes[0] != cap_axes[1]:
+        return False
+    axis = cap_axes[0]
+    return np.allclose(
+        sorted(cap_positions),
+        (body_bounds[axis * 2], body_bounds[axis * 2 + 1]),
+        atol=tolerance,
+        rtol=0.0,
+    )
+
+
+def _execute_orthogonal_coplanar_loft_union(
+    operands: SurfaceBooleanOperands,
+    route: LoftCSGOperationRouteRecord,
+    relation: SurfaceBooleanBodyRelation,
+) -> SurfaceBooleanResult | None:
+    """Fuse two exact rectangular loft solids through the surface shell assembler."""
+
+    if operands.operation != "union" or relation not in {"touching", "overlap"}:
+        return None
+    tolerance = DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.equality_tolerance
+    if not all(
+        _surface_body_is_axis_aligned_rectangular_loft(body, tolerance=tolerance)
+        for body in operands.bodies
+    ):
+        return None
+    left_bounds, right_bounds = (body.bounds_estimate() for body in operands.bodies)
+    metadata = _loft_pair_result_metadata(operands, route, relation)
+    merge_evidence = {
+        "contact_kind": "coplanar-face-overlap",
+        "coincident_patch_contacts": tuple(
+            contact.canonical_payload()
+            for contact in classify_coincident_patch_contacts(operands)
+        ),
+        "operand_bounds": (left_bounds, right_bounds),
+        "solver_path": "orthogonal-coplanar-shell-merge",
+        "tolerance": tolerance,
+        "no_mesh_fallback": True,
+    }
+    for metadata_kind in ("kernel", "consumer"):
+        route_metadata = dict(metadata[metadata_kind]["loft_pair_csg"])
+        route_metadata.update(merge_evidence)
+        metadata[metadata_kind]["loft_pair_csg"] = route_metadata
+        metadata[metadata_kind]["boolean_surface_route"] = "surface-csg.loft-orthogonal-coplanar-union"
+    body = _surface_orthogonal_box_boolean_body(
+        left_bounds,
+        right_bounds,
+        operation="union",
+        metadata=metadata,
+    )
+    if body is None:
+        return None
+    return _surface_boolean_finalize_body_result("union", operands, body)
+
+
 def execute_loft_pair_csg(operands: SurfaceBooleanOperands) -> SurfaceBooleanResult | None:
     """Execute eligible single-shell loft/loft CSG routes without mesh fallback."""
 
@@ -14851,6 +15057,9 @@ def execute_loft_pair_csg(operands: SurfaceBooleanOperands) -> SurfaceBooleanRes
             status="succeeded",
             classification="empty",
         )
+    coplanar_union = _execute_orthogonal_coplanar_loft_union(operands, route, relation)
+    if coplanar_union is not None:
+        return coplanar_union
     metadata = _loft_pair_result_metadata(operands, route, relation)
     if operands.operation == "union":
         body = _combine_surface_bodies_with_metadata(operands.bodies, metadata=metadata)

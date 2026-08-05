@@ -62,13 +62,13 @@ prerequisites are complete; the whole preceding wave need not finish first.
 
 ### Fix 02: Coplanar Loft Face-Touch Union
 
-- [ ] Implement coincident contact classification, interior-pair removal, and one-shell union assembly.
+- [x] Implement coincident contact classification, interior-pair removal, and one-shell union assembly.
   - Specification: [Fix 02](../specifications/fix-02-coplanar-loft-face-touch-union-v1_0.md)
   - Prerequisites: none
-- [ ] Wire the corrected executor into the public `boolean_union` library route used by preview and export.
-- [ ] Validate public union fixtures and composed-enclosure preview/export consumption.
+- [x] Wire the corrected executor into the public `boolean_union` library route used by preview and export.
+- [x] Validate public union fixtures and composed-enclosure preview/export consumption.
   - Test specification: [Fix 02 Test](../test-specifications/fix-02-coplanar-loft-face-touch-union-v1_0.md)
-- [ ] Update progression and surface-boolean ACD status after route validation.
+- [x] Update progression and surface-boolean ACD status after route validation.
 
 ### Fix 03: Named Hole Identity Pairing
 
