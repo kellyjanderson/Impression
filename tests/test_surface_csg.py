@@ -33,6 +33,8 @@ from impression.modeling import (
     ImplicitCompositionOperandSignPolicy,
     ImplicitCompositionResult,
     ImplicitOperandFieldAdapterRecord,
+    GeometryChangeWitness,
+    NormalizedDifferenceEvidence,
     NURBSSurfacePatch,
     Path3D,
     PlanarSurfacePatch,
@@ -315,6 +317,7 @@ from impression.modeling import (
     make_sphere,
     make_surface_body,
     make_surface_shell,
+    normalize_surface_difference_evidence,
     normalize_surface_csg_operand_ordering,
     orient_surface_csg_selected_fragment,
     orient_surface_csg_selected_fragments,
@@ -5158,6 +5161,243 @@ def test_surface_boolean_result_supports_overlapping_box_difference_with_side_sl
     )
 
 
+@pytest.mark.parametrize(
+    ("case", "base", "cutter", "comparison", "executor_id", "witness_kind"),
+    (
+        (
+            "proven-disjoint",
+            make_box(),
+            make_box(center=(4.0, 4.0, 4.0)),
+            "unchanged",
+            "surface-csg.trivial",
+            None,
+        ),
+        (
+            "analytic-cut",
+            make_box(),
+            make_box(size=(0.5, 0.5, 0.5), center=(0.4, 0.0, 0.0)),
+            "changed",
+            "surface-csg.analytic-box",
+            "changed-topology",
+        ),
+        (
+            "empty-cut",
+            make_box(),
+            make_sphere(radius=2.0),
+            "changed",
+            "surface-csg.trivial",
+            "removed-base-domain",
+        ),
+        (
+            "implicit-cut",
+            make_sphere(radius=1.0),
+            make_box(size=(0.5, 0.5, 0.5)),
+            "changed",
+            "surface-csg.primitive-implicit",
+            "changed-topology",
+        ),
+    ),
+)
+def test_difference_executor_matrix_emits_normalized_geometry_change_evidence(
+    case: str,
+    base: SurfaceBody,
+    cutter: SurfaceBody,
+    comparison: str,
+    executor_id: str,
+    witness_kind: str | None,
+) -> None:
+    result = surface_boolean_result(
+        "difference",
+        prepare_surface_boolean_difference_operands(base, [cutter]),
+    )
+
+    assert case
+    assert isinstance(result.difference_evidence, NormalizedDifferenceEvidence)
+    assert result.difference_evidence.executor_id == executor_id
+    assert result.difference_evidence.comparison == comparison
+    assert result.difference_evidence.no_mesh_fallback is True
+    assert result.difference_evidence.diagnostics == ()
+    if witness_kind is None:
+        assert result.difference_evidence.witnesses == ()
+        assert result.difference_evidence.cutter_interaction is False
+    else:
+        assert witness_kind in {witness.kind for witness in result.difference_evidence.witnesses}
+        assert result.difference_evidence.cutter_interaction is True
+
+
+def test_difference_evidence_ignores_clone_identity_and_body_metadata() -> None:
+    base = make_box()
+    cutter = make_box(center=(4.0, 4.0, 4.0))
+    operands = prepare_surface_boolean_difference_operands(base, [cutter])
+    clone = make_surface_body(base.iter_shells(world=True), metadata={"kernel": {"clone_id": "different"}})
+    result = SurfaceBooleanResult(
+        operation="difference",
+        operands=operands,
+        status="succeeded",
+        body=clone,
+        classification="closed",
+    )
+
+    evidence = normalize_surface_difference_evidence(result, executor_id="test.clone")
+
+    assert clone.stable_identity != base.stable_identity
+    assert evidence.comparison == "unchanged"
+    assert evidence.witnesses == ()
+    assert evidence.localized_patch_comparisons == base.patch_count
+
+
+def test_difference_evidence_marks_unverified_provenance_as_ambiguous() -> None:
+    base = make_box()
+    cutter = make_box(size=(0.5, 0.5, 0.5))
+    operands = prepare_surface_boolean_difference_operands(base, [cutter])
+    shell = base.iter_shells(world=False)[0]
+    source_patch = shell.patches[0]
+    metadata = dict(source_patch.metadata)
+    kernel = dict(source_patch.kernel_metadata())
+    kernel.update({"source_operand_index": 1, "cut_curve_ids": ("curve:test",)})
+    metadata["kernel"] = kernel
+    claimed_patch = replace(source_patch, metadata=metadata)
+    claimed_shell = replace(shell, patches=(claimed_patch, *shell.patches[1:]))
+    claimed_clone = make_surface_body((claimed_shell,), metadata=base.metadata)
+    result = SurfaceBooleanResult(
+        operation="difference",
+        operands=operands,
+        status="succeeded",
+        body=claimed_clone,
+        classification="closed",
+    )
+
+    evidence = normalize_surface_difference_evidence(result, executor_id="test.contradictory")
+
+    assert evidence.comparison == "ambiguous"
+    assert {witness.kind for witness in evidence.witnesses} == {
+        "cutter-derived-result-patch",
+        "new-intersection-boundary",
+    }
+    assert evidence.diagnostics == ("contradictory-provenance-with-unchanged-geometry",)
+
+
+def test_difference_evidence_uses_bounded_local_tolerance_comparison() -> None:
+    base = make_box()
+    cutter = make_box(size=(0.5, 0.5, 0.5))
+    operands = prepare_surface_boolean_difference_operands(base, [cutter])
+
+    def translated_result(offset: float) -> SurfaceBooleanResult:
+        matrix = np.eye(4, dtype=float)
+        matrix[0, 3] = offset
+        return SurfaceBooleanResult(
+            operation="difference",
+            operands=operands,
+            status="succeeded",
+            body=base.with_transform(matrix),
+            classification="closed",
+        )
+
+    within = normalize_surface_difference_evidence(
+        translated_result(5e-5),
+        executor_id="test.tolerance-within",
+        policy={"equality_tolerance": 1e-4},
+    )
+    above = normalize_surface_difference_evidence(
+        translated_result(2e-4),
+        executor_id="test.tolerance-above",
+        policy={"equality_tolerance": 1e-4},
+    )
+
+    assert within.comparison == "unchanged"
+    assert within.localized_patch_comparisons == base.patch_count
+    assert above.comparison == "changed"
+    assert {witness.kind for witness in above.witnesses} == {"localized-geometry-change"}
+    assert above.localized_patch_comparisons == base.patch_count
+
+
+def test_public_difference_recomputes_evidence_with_caller_tolerance(monkeypatch: pytest.MonkeyPatch) -> None:
+    base = make_box()
+    cutter = make_box(size=(0.5, 0.5, 0.5))
+
+    def translated_executor_result(
+        operation: str,
+        operands: SurfaceBooleanOperands,
+    ) -> SurfaceBooleanResult:
+        assert operation == "difference"
+        matrix = np.eye(4, dtype=float)
+        matrix[0, 3] = 5e-5
+        return SurfaceBooleanResult(
+            operation="difference",
+            operands=operands,
+            status="succeeded",
+            body=operands.bodies[0].with_transform(matrix),
+            classification="closed",
+        )
+
+    monkeypatch.setattr(csg_module, "surface_boolean_result", translated_executor_result)
+
+    within = boolean_difference(base, [cutter], tolerance=1e-4)
+    above = boolean_difference(base, [cutter], tolerance=1e-6)
+
+    assert isinstance(within, SurfaceBooleanResult)
+    assert within.difference_evidence is not None
+    assert within.difference_evidence.comparison == "unchanged"
+    assert isinstance(above, SurfaceBooleanResult)
+    assert above.difference_evidence is not None
+    assert above.difference_evidence.comparison == "changed"
+
+
+def test_difference_evidence_detects_changed_patch_domain_before_local_sampling() -> None:
+    base = make_box()
+    cutter = make_box(size=(0.5, 0.5, 0.5))
+    operands = prepare_surface_boolean_difference_operands(base, [cutter])
+    shell = base.iter_shells(world=False)[0]
+    source_patch = shell.patches[0]
+    changed_domain = replace(source_patch.domain, u_range=(source_patch.domain.u_range[0], 1.1))
+    changed_patch = replace(source_patch, domain=changed_domain)
+    changed_shell = replace(shell, patches=(changed_patch, *shell.patches[1:]))
+    result = SurfaceBooleanResult(
+        operation="difference",
+        operands=operands,
+        status="succeeded",
+        body=make_surface_body((changed_shell,), metadata=base.metadata),
+        classification="closed",
+    )
+
+    evidence = normalize_surface_difference_evidence(result, executor_id="test.domain-change")
+
+    assert evidence.comparison == "changed"
+    assert {witness.kind for witness in evidence.witnesses} == {"changed-base-domain"}
+    assert evidence.localized_patch_comparisons == 0
+
+
+def test_difference_route_attaches_ambiguous_evidence_to_structured_refusal() -> None:
+    body = _small_capped_loft_body()
+    cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
+
+    result = surface_boolean_result(
+        "difference",
+        prepare_surface_boolean_difference_operands(body, [cutter]),
+    )
+
+    assert result.status == "unsupported"
+    assert isinstance(result.difference_evidence, NormalizedDifferenceEvidence)
+    assert result.difference_evidence.executor_id == "surface-csg.loft-primitive-trim"
+    assert result.difference_evidence.comparison == "ambiguous"
+    assert result.difference_evidence.diagnostics == ("non-success-result",)
+    assert result.difference_evidence.witnesses == ()
+
+
+def test_geometry_change_witness_validation_requires_inspectable_evidence() -> None:
+    witness = GeometryChangeWitness(
+        kind="new-intersection-boundary",
+        operand_ids=(),
+        tolerance_evidence={"tolerance": 0.0},
+    )
+
+    assert set(csg_module.validate_geometry_change_witness(witness)) == {
+        "missing-operand-identity",
+        "missing-boundary-identity",
+        "invalid-tolerance-evidence",
+    }
+
+
 def test_surface_boolean_result_supports_difference_when_cutter_fully_contains_base() -> None:
     base = make_box(size=(1.0, 1.0, 1.0))
     cutter = make_sphere(radius=2.0)
@@ -5405,9 +5645,15 @@ def test_surface_csg_feature_gate_refuses_ruled_sphere_and_cylinder_cutters_with
     assert isinstance(sphere_result, SurfaceBooleanResult)
     assert sphere_result.status == "unsupported"
     assert "sphere cutter" in str(sphere_result.failure_reason)
+    assert sphere_result.difference_evidence is not None
+    assert sphere_result.difference_evidence.executor_id == "csg.boolean_difference.feature-gate"
+    assert sphere_result.difference_evidence.comparison == "ambiguous"
     assert isinstance(cylinder_result, SurfaceBooleanResult)
     assert cylinder_result.status == "unsupported"
     assert "cylinder cutter" in str(cylinder_result.failure_reason)
+    assert cylinder_result.difference_evidence is not None
+    assert cylinder_result.difference_evidence.executor_id == "csg.boolean_difference.feature-gate"
+    assert cylinder_result.difference_evidence.comparison == "ambiguous"
 
 
 def test_surface_boolean_result_refuses_prepared_ruled_unsupported_cutters_deterministically() -> None:
