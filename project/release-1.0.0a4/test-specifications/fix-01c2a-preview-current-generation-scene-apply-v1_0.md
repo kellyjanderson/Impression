@@ -1,7 +1,7 @@
 # Fix 01C2A Test: Preview Current-Generation Scene Apply
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Feature spec: [Fix 01C2A: Preview Current-Generation Scene Apply](../specifications/fix-01c2a-preview-current-generation-scene-apply-v1_0.md)
 Feature spec canonical status: Canonical
 Architecture ancestor: [Active ACD](../architecture/acd-preview-reload-coordination.md)
@@ -58,6 +58,6 @@ Canonical paired GUI-state contract for the retained Fix 01c2 split child.
 ## Acceptance
 
 - [x] Feature child is canonical.
-- [ ] GUI route proof exists.
-- [ ] Helper-only tests cannot satisfy the contract.
-- [ ] Observable and failure behavior is asserted.
+- [x] GUI route proof exists.
+- [x] Helper-only tests cannot satisfy the contract.
+- [x] Observable and failure behavior is asserted.

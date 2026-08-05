@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import io
 import numpy as np
+import threading
+import time
 from pathlib import Path
+from typing import Callable
+
+from rich.console import Console
+from watchfiles import Change
 
 from impression._config import UnitSettings
 from impression.mesh import Mesh, Polyline
 from impression.preview import (
     PreviewControllerOptions,
     PreviewInteractionPolicy,
+    PreviewReloadCoordinator,
+    ReloadReason,
     PreviewSceneApplyOptions,
     PreviewSceneController,
     PreviewStyle,
@@ -85,6 +94,31 @@ class FakePlotter:
         actor = FakeActor()
         self.actors.append(actor)
         return actor
+
+
+class FakeInteractivePreviewPlotter(FakePlotter):
+    def __init__(self, show_driver: Callable[["FakeInteractivePreviewPlotter"], None]) -> None:
+        super().__init__()
+        self.camera_position = ["original-camera"]
+        self.key_events: dict[str, Callable[[], None]] = {}
+        self.render_calls = 0
+        self.closed = False
+        self._show_driver = show_driver
+
+    def add_key_event(self, key: str, callback: Callable[[], None]) -> None:
+        self.key_events[key] = callback
+
+    def reset_camera_clipping_range(self) -> None:
+        return None
+
+    def render(self) -> None:
+        self.render_calls += 1
+
+    def show(self, **_kwargs: object) -> None:
+        self._show_driver(self)
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class FakeActor:
@@ -611,6 +645,397 @@ def test_preview_module_does_not_import_reference_review_ui() -> None:
 
     assert "impression.devtools.reference_review" not in preview_source
     assert "PySide6" not in preview_source
+
+
+def test_reload_coordinator_keeps_one_active_and_latest_forced_replacement(
+    tmp_path: Path,
+) -> None:
+    coordinator = PreviewReloadCoordinator()
+    model = tmp_path / "model.py"
+    helper = tmp_path / "helper.py"
+
+    first = coordinator.submit_reload(
+        ReloadReason.FILE_CHANGE,
+        changed_paths=(model,),
+    )
+    assert first is not None
+    assert coordinator.begin_next_build() == first
+
+    automatic = coordinator.submit_reload(
+        ReloadReason.FILE_CHANGE,
+        changed_paths=(helper,),
+    )
+    forced = coordinator.submit_reload(
+        ReloadReason.MANUAL_REFRESH,
+        force=True,
+        changed_paths=(model,),
+    )
+
+    assert automatic is not None
+    assert forced is not None
+    assert not coordinator.is_current(first.generation)
+    assert not coordinator.complete_build(forced.generation)
+    assert coordinator.complete_build(first.generation)
+
+    replacement = coordinator.begin_next_build()
+    assert replacement is not None
+    assert replacement.generation == forced.generation
+    assert replacement.reason == ReloadReason.MANUAL_REFRESH
+    assert replacement.force
+    assert replacement.changed_paths == (helper, model)
+    assert coordinator.is_current(replacement.generation)
+    assert coordinator.complete_build(replacement.generation)
+    assert coordinator.begin_next_build() is None
+
+
+def test_reload_coordinator_shutdown_rejects_new_and_pending_work() -> None:
+    coordinator = PreviewReloadCoordinator()
+    pending = coordinator.submit_reload(ReloadReason.ANIMATION)
+    assert pending is not None
+
+    coordinator.shutdown()
+
+    assert coordinator.begin_next_build() is None
+    assert coordinator.submit_reload(ReloadReason.MANUAL_REFRESH, force=True) is None
+    assert not coordinator.is_current(pending.generation)
+
+
+def test_model_watcher_uses_low_latency_coalescing(monkeypatch, tmp_path: Path) -> None:
+    model_path = tmp_path / "model.py"
+    model_path.write_text("def build():\n    return None\n")
+    submitted: list[tuple[ReloadReason, tuple[Path, ...]]] = []
+    watch_call: dict[str, object] = {}
+
+    def fake_watch(*paths, **kwargs):
+        watch_call["paths"] = paths
+        watch_call["kwargs"] = kwargs
+        yield {(Change.modified, str(model_path))}
+
+    monkeypatch.setattr("impression.preview.watch", fake_watch)
+    previewer = PyVistaPreviewer(console=None)
+    previewer._watch_model_file(
+        {"path": model_path},
+        lambda reason, paths: submitted.append((reason, paths)),
+        threading.Event(),
+        [tmp_path],
+        None,
+        watch_paths_getter=lambda: (model_path,),
+    )
+
+    assert watch_call["paths"] == (str(tmp_path),)
+    assert watch_call["kwargs"]["debounce"] == 50
+    assert watch_call["kwargs"]["step"] == 10
+    assert submitted == [(ReloadReason.FILE_CHANGE, (model_path.resolve(),))]
+
+
+def test_model_watcher_delivers_real_filesystem_change_within_budget(tmp_path: Path) -> None:
+    model_path = tmp_path / "model.py"
+    model_path.write_text("def build():\n    return None\n")
+    submitted = threading.Event()
+    observed: list[tuple[ReloadReason, tuple[Path, ...], float]] = []
+    stop_event = threading.Event()
+    previewer = PyVistaPreviewer(console=Console(file=io.StringIO()))
+
+    def capture(reason: ReloadReason, paths: tuple[Path, ...]) -> None:
+        observed.append((reason, paths, time.monotonic()))
+        submitted.set()
+
+    watcher = threading.Thread(
+        target=previewer._watch_model_file,
+        args=(
+            {"path": model_path},
+            capture,
+            stop_event,
+            [tmp_path],
+            None,
+        ),
+        kwargs={"watch_paths_getter": lambda: (model_path,)},
+        daemon=True,
+    )
+    watcher.start()
+    time.sleep(0.05)
+    changed_at = time.monotonic()
+    model_path.write_text("def build():\n    return 1\n")
+
+    try:
+        assert submitted.wait(timeout=0.25)
+        assert observed[0][0] == ReloadReason.FILE_CHANGE
+        assert observed[0][1] == (model_path.resolve(),)
+        assert observed[0][2] - changed_at <= 0.25
+    finally:
+        stop_event.set()
+        watcher.join(timeout=1.0)
+
+
+def test_preview_filesystem_change_reaches_build_submission_within_budget(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    model_path = tmp_path / "model.py"
+    model_path.write_text("def build():\n    return None\n")
+    initial = Mesh(
+        vertices=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]]),
+        faces=np.array([[0, 1, 2]]),
+    )
+    rebuilt = Mesh(
+        vertices=np.array([[0, 0, 0], [2, 0, 0], [0, 1, 0]]),
+        faces=np.array([[0, 1, 2]]),
+    )
+    output = io.StringIO()
+    timer_callback: dict[str, Callable[[], None]] = {}
+    build_started: list[float] = []
+    applied: list[list[Mesh | Polyline]] = []
+    changed_at = 0.0
+
+    def drive_preview(plotter: FakeInteractivePreviewPlotter) -> None:
+        nonlocal changed_at
+        time.sleep(0.05)
+        changed_at = time.monotonic()
+        model_path.write_text("def build():\n    return 1\n")
+        callback = timer_callback["callback"]
+        for _ in range(250):
+            callback()
+            if len(applied) == 2:
+                return
+            time.sleep(0.001)
+        raise AssertionError("filesystem change did not rebuild the preview")
+
+    plotter = FakeInteractivePreviewPlotter(drive_preview)
+
+    class FakeBackend:
+        @staticmethod
+        def Plotter(**_kwargs: object) -> FakeInteractivePreviewPlotter:
+            return plotter
+
+    previewer = PyVistaPreviewer(console=Console(file=output, force_terminal=False))
+    monkeypatch.setattr(previewer, "_ensure_backend", lambda: FakeBackend())
+    monkeypatch.setattr(previewer, "_configure_plotter", lambda *_args, **_kwargs: None)
+
+    def apply_scene(_plotter, datasets, **_kwargs: object) -> None:
+        applied.append(list(datasets))
+
+    monkeypatch.setattr(previewer, "_apply_scene", apply_scene)
+
+    def install_timer(_plotter, callback: Callable[[], None], _interval: float):
+        timer_callback["callback"] = callback
+        return lambda: None
+
+    monkeypatch.setattr(previewer, "_install_timer_callback", install_timer)
+
+    def scene_factory() -> Mesh:
+        build_started.append(time.monotonic())
+        return rebuilt
+
+    previewer.show(
+        scene_factory=scene_factory,
+        initial_scene=initial,
+        model_path=model_path,
+        watch_files=True,
+        target_fps=60,
+        watch_paths_getter=lambda: (model_path,),
+    )
+
+    assert build_started
+    assert build_started[0] - changed_at <= 0.25
+    assert applied[0][0] is initial
+    assert applied[1][0] is rebuilt
+
+
+def test_preview_r_route_retains_last_good_scene_camera_and_recovers(monkeypatch, tmp_path: Path) -> None:
+    model_path = tmp_path / "model.py"
+    model_path.write_text("def build():\n    return None\n")
+    initial = Mesh(
+        vertices=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]]),
+        faces=np.array([[0, 1, 2]]),
+    )
+    recovered = Mesh(
+        vertices=np.array([[0, 0, 0], [2, 0, 0], [0, 1, 0]]),
+        faces=np.array([[0, 1, 2]]),
+    )
+    output = io.StringIO()
+    console = Console(file=output, force_terminal=False)
+    timer_callback: dict[str, object] = {}
+    applied: list[list[Mesh | Polyline]] = []
+    force_calls: list[str] = []
+    build_results: list[object] = [RuntimeError("broken model"), recovered]
+
+    def drive_preview(plotter: FakeInteractivePreviewPlotter) -> None:
+        callback = timer_callback["callback"]
+        plotter.key_events["r"]()
+        for _ in range(200):
+            callback()
+            if "Preview rebuild failed" in output.getvalue():
+                break
+            time.sleep(0.001)
+        else:
+            raise AssertionError("forced failure did not reach the preview route")
+
+        assert len(applied) == 1
+        assert plotter.camera_position == ["original-camera"]
+
+        plotter.key_events["r"]()
+        for _ in range(200):
+            callback()
+            if "Preview recovered after rebuild failure" in output.getvalue():
+                break
+            time.sleep(0.001)
+        else:
+            raise AssertionError("recovery did not reach the preview route")
+
+    plotter = FakeInteractivePreviewPlotter(drive_preview)
+
+    class FakeBackend:
+        @staticmethod
+        def Plotter(**_kwargs: object) -> FakeInteractivePreviewPlotter:
+            return plotter
+
+    previewer = PyVistaPreviewer(console=console)
+    monkeypatch.setattr(previewer, "_ensure_backend", lambda: FakeBackend())
+    monkeypatch.setattr(previewer, "_configure_plotter", lambda *_args, **_kwargs: None)
+
+    def apply_scene(_plotter, datasets, **_kwargs: object) -> None:
+        applied.append(list(datasets))
+        _plotter.camera_position = (
+            ["original-camera"]
+            if len(applied) == 1
+            else ["renderer-mutated-camera"]
+        )
+
+    monkeypatch.setattr(previewer, "_apply_scene", apply_scene)
+
+    def install_timer(_plotter, callback, _interval: float):
+        timer_callback["callback"] = callback
+        return lambda: None
+
+    monkeypatch.setattr(previewer, "_install_timer_callback", install_timer)
+
+    def idle_watcher(
+        _model_state,
+        _submit_reload,
+        watcher_stop_event: threading.Event,
+        _watch_roots,
+        _control_path,
+        **_kwargs: object,
+    ) -> None:
+        watcher_stop_event.wait(timeout=1.0)
+
+    monkeypatch.setattr(previewer, "_watch_model_file", idle_watcher)
+
+    def scene_factory() -> object:
+        result = build_results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    previewer.show(
+        scene_factory=scene_factory,
+        initial_scene=initial,
+        model_path=model_path,
+        watch_files=True,
+        target_fps=60,
+        force_scene_reload=lambda: force_calls.append("forced"),
+    )
+
+    assert len(applied) == 2
+    assert applied[0] == [initial]
+    assert applied[1] == [recovered]
+    assert force_calls == ["forced", "forced"]
+    assert plotter.camera_position == ["original-camera"]
+    assert plotter.render_calls == 1
+    assert plotter.closed
+
+
+def test_preview_discards_stale_build_before_renderer_mutation(monkeypatch, tmp_path: Path) -> None:
+    model_path = tmp_path / "model.py"
+    model_path.write_text("def build():\n    return None\n")
+    initial = Mesh(
+        vertices=np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]]),
+        faces=np.array([[0, 1, 2]]),
+    )
+    stale = Mesh(
+        vertices=np.array([[0, 0, 0], [2, 0, 0], [0, 1, 0]]),
+        faces=np.array([[0, 1, 2]]),
+    )
+    current = Mesh(
+        vertices=np.array([[0, 0, 0], [3, 0, 0], [0, 1, 0]]),
+        faces=np.array([[0, 1, 2]]),
+    )
+    timer_callback: dict[str, Callable[[], None]] = {}
+    applied: list[list[Mesh | Polyline]] = []
+    first_started = threading.Event()
+    release_first = threading.Event()
+    build_count = 0
+
+    def drive_preview(plotter: FakeInteractivePreviewPlotter) -> None:
+        callback = timer_callback["callback"]
+        plotter.key_events["r"]()
+        callback()
+        assert first_started.wait(timeout=0.25)
+        plotter.key_events["r"]()
+        callback()
+        release_first.set()
+        for _ in range(250):
+            callback()
+            if len(applied) == 2:
+                return
+            time.sleep(0.001)
+        raise AssertionError("latest build did not reach renderer mutation")
+
+    plotter = FakeInteractivePreviewPlotter(drive_preview)
+
+    class FakeBackend:
+        @staticmethod
+        def Plotter(**_kwargs: object) -> FakeInteractivePreviewPlotter:
+            return plotter
+
+    previewer = PyVistaPreviewer(console=Console(file=io.StringIO(), force_terminal=False))
+    monkeypatch.setattr(previewer, "_ensure_backend", lambda: FakeBackend())
+    monkeypatch.setattr(previewer, "_configure_plotter", lambda *_args, **_kwargs: None)
+
+    def apply_scene(_plotter, datasets, **_kwargs: object) -> None:
+        applied.append(list(datasets))
+
+    monkeypatch.setattr(previewer, "_apply_scene", apply_scene)
+
+    def install_timer(_plotter, callback: Callable[[], None], _interval: float):
+        timer_callback["callback"] = callback
+        return lambda: None
+
+    monkeypatch.setattr(previewer, "_install_timer_callback", install_timer)
+
+    def idle_watcher(
+        _model_state,
+        _submit_reload,
+        watcher_stop_event: threading.Event,
+        _watch_roots,
+        _control_path,
+        **_kwargs: object,
+    ) -> None:
+        watcher_stop_event.wait(timeout=1.0)
+
+    monkeypatch.setattr(previewer, "_watch_model_file", idle_watcher)
+
+    def scene_factory() -> Mesh:
+        nonlocal build_count
+        build_count += 1
+        if build_count == 1:
+            first_started.set()
+            assert release_first.wait(timeout=0.25)
+            return stale
+        return current
+
+    previewer.show(
+        scene_factory=scene_factory,
+        initial_scene=initial,
+        model_path=model_path,
+        watch_files=True,
+        target_fps=60,
+    )
+
+    assert build_count == 2
+    assert applied[0][0] is initial
+    assert applied[1][0] is current
+    assert all(batch[0] is not stale for batch in applied)
 
 
 def test_qt_preview_surface_config_has_workbench_defaults() -> None:

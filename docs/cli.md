@@ -40,7 +40,11 @@ Environment tip: set `PYVISTA_OFF_SCREEN=true` when running in a headless enviro
 
 **Hot reload controls**
 
-- Press `r` in the preview window to force a reload.
+- Saving the entry model or an imported project-local Python module schedules a
+  rebuild promptly; repeated saves are coalesced to the latest requested build.
+- Press `r` in the preview window to force cache invalidation and rebuild the
+  entry model plus its imported project-local modules, even when file timestamps
+  are unchanged.
 - Press `v` to reset the camera.
 - Send `SIGUSR1` to the preview process to force a reload (macOS/Linux):
 
@@ -70,6 +74,10 @@ echo "/absolute/path/to/other_model.py" > ./.impression-preview
 ```
 
 The preview will reload automatically; you can also send `SIGUSR1` to force it.
+
+Only the newest requested build may update the window. A failed rebuild leaves
+the last good scene and camera visible, reports the error, and automatically
+recovers after the next successful save or forced refresh.
 
 **Mesh analysis on demand**
 

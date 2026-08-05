@@ -1,7 +1,7 @@
 # Fix 01C2A: Preview Current-Generation Scene Apply
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Primary ancestor: [Active ACD](../architecture/acd-preview-reload-coordination.md)
 Architecture ancestor: [Active ACD](../architecture/acd-preview-reload-coordination.md)
 Source artifact: [Fix 01c2 split parent](./fix-01c2-preview-scene-state-application-v1_0.md)

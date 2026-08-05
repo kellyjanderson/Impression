@@ -52,13 +52,13 @@ prerequisites are complete; the whole preceding wave need not finish first.
 
 ### Fix 01A: Preview Watch Request Coordination
 
-- [ ] Implement bounded latest-request coordination and watcher delivery behavior.
+- [x] Implement bounded latest-request coordination and watcher delivery behavior.
   - Specification: [Fix 01A](../specifications/fix-01a-preview-watch-request-coordination-v1_0.md)
   - Prerequisites: none
-- [ ] Wire coordination into the preview watcher and build-scheduler library route consumed by `PyVistaPreviewer`.
-- [ ] Validate real filesystem delivery, burst coalescing, and scheduler behavior.
+- [x] Wire coordination into the preview watcher and build-scheduler library route consumed by `PyVistaPreviewer`.
+- [x] Validate real filesystem delivery, burst coalescing, and scheduler behavior.
   - Test specification: [Fix 01A Test](../test-specifications/fix-01a-preview-watch-request-coordination-v1_0.md)
-- [ ] Update progression and preview ACD status after route validation.
+- [x] Update progression and preview ACD status after route validation.
 
 ### Fix 02: Coplanar Loft Face-Touch Union
 
@@ -114,23 +114,23 @@ prerequisites are complete; the whole preceding wave need not finish first.
 
 ### Fix 01B: Preview Module Cache Invalidation
 
-- [ ] Implement generation-based entry/transitive user-module invalidation.
+- [x] Implement generation-based entry/transitive user-module invalidation.
   - Specification: [Fix 01B](../specifications/fix-01b-preview-module-cache-invalidation-v1_0.md)
   - Prerequisite: [Fix 01A](../specifications/fix-01a-preview-watch-request-coordination-v1_0.md)
-- [ ] Wire forced intent from preview coordination into the CLI scene-factory cache boundary.
-- [ ] Validate mtime-neutral refresh and dependency rediscovery through the live-preview loader route.
+- [x] Wire forced intent from preview coordination into the CLI scene-factory cache boundary.
+- [x] Validate mtime-neutral refresh and dependency rediscovery through the live-preview loader route.
   - Test specification: [Fix 01B Test](../test-specifications/fix-01b-preview-module-cache-invalidation-v1_0.md)
-- [ ] Update progression and preview ACD status after route validation.
+- [x] Update progression and preview ACD status after route validation.
 
 ### Fix 01C2A: Preview Current-Generation Scene Apply
 
-- [ ] Implement current-generation admission, UI-thread scene apply, and stale/post-shutdown rejection.
+- [x] Implement current-generation admission, UI-thread scene apply, and stale/post-shutdown rejection.
   - Specification: [Fix 01C2A](../specifications/fix-01c2a-preview-current-generation-scene-apply-v1_0.md)
   - Prerequisite: [Fix 01A](../specifications/fix-01a-preview-watch-request-coordination-v1_0.md)
-- [ ] Wire admitted build results into the preview-window renderer-thread state handler.
-- [ ] Validate generation/state behavior and offscreen scene application.
+- [x] Wire admitted build results into the preview-window renderer-thread state handler.
+- [x] Validate generation/state behavior and offscreen scene application.
   - Test specification: [Fix 01C2A Test](../test-specifications/fix-01c2a-preview-current-generation-scene-apply-v1_0.md)
-- [ ] Update progression and preview ACD status after route validation.
+- [x] Update progression and preview ACD status after route validation.
 
 ### Fix 05A: Count-Changing Exact Region Pairing
 
@@ -156,23 +156,23 @@ prerequisites are complete; the whole preceding wave need not finish first.
 
 ### Fix 01C1: Preview Refresh Input Wiring
 
-- [ ] Implement saved-file and `R` input normalization with preserved forced-refresh intent.
+- [x] Implement saved-file and `R` input normalization with preserved forced-refresh intent.
   - Specification: [Fix 01C1](../specifications/fix-01c1-preview-refresh-input-wiring-v1_0.md)
   - Prerequisites: [Fix 01A](../specifications/fix-01a-preview-watch-request-coordination-v1_0.md), [Fix 01B](../specifications/fix-01b-preview-module-cache-invalidation-v1_0.md)
-- [ ] Wire filesystem events and the existing preview-window `R` binding into coordination and cache generations.
-- [ ] Validate save and key-event routes through controller, CLI callback, and offscreen/real-command smoke.
+- [x] Wire filesystem events and the existing preview-window `R` binding into coordination and cache generations.
+- [x] Validate save and key-event routes through controller, CLI callback, and offscreen/real-command smoke.
   - Test specification: [Fix 01C1 Test](../test-specifications/fix-01c1-preview-refresh-input-wiring-v1_0.md)
-- [ ] Update preview docs, progression, and ACD status after route validation.
+- [x] Update preview docs, progression, and ACD status after route validation.
 
 ### Fix 01C2B: Preview Last-Good Camera And Error State
 
-- [ ] Implement camera preservation, last-good scene retention, error display, and recovery behavior.
+- [x] Implement camera preservation, last-good scene retention, error display, and recovery behavior.
   - Specification: [Fix 01C2B](../specifications/fix-01c2b-preview-last-good-camera-error-state-v1_0.md)
   - Prerequisite: [Fix 01C2A](../specifications/fix-01c2a-preview-current-generation-scene-apply-v1_0.md)
-- [ ] Wire failure/recovery state into the preview-window renderer-thread handler.
-- [ ] Validate camera/error/recovery behavior with offscreen preview failure and recovery smoke.
+- [x] Wire failure/recovery state into the preview-window renderer-thread handler.
+- [x] Validate camera/error/recovery behavior with offscreen preview failure and recovery smoke.
   - Test specification: [Fix 01C2B Test](../test-specifications/fix-01c2b-preview-last-good-camera-error-state-v1_0.md)
-- [ ] Update preview docs, progression, and ACD status after route validation.
+- [x] Update preview docs, progression, and ACD status after route validation.
 
 ### Fix 05B: Synthetic Station Identity Lineage
 
