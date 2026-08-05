@@ -1491,7 +1491,66 @@ def test_loft_plan_sections_records_explicit_ambiguity_controls_in_metadata():
     assert plan.metadata["ambiguity_mode"] == "fail"
     assert plan.metadata["ambiguity_cost_profile"] == "distance_first"
     assert plan.metadata["ambiguity_max_branches"] == 17
+    assert plan.metadata["planner_options"]["ambiguity_max_branches"] == 17
     assert "ambiguity_class_counts" in plan.metadata
+
+
+def test_staged_one_to_four_to_seven_propagates_exact_branch_cap() -> None:
+    def multi_region_section(center_xs: tuple[float, ...]) -> Section:
+        return Section(
+            tuple(
+                as_section(make_rect(size=(0.5, 0.5), center=(center_x, 0.0))).regions[0]
+                for center_x in center_xs
+            )
+        )
+
+    stations = tuple(
+        Station(
+            t=t,
+            section=multi_region_section(center_xs),
+            origin=(0.0, 0.0, t),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            n=(0.0, 0.0, 1.0),
+        )
+        for t, center_xs in (
+            (0.0, (0.0,)),
+            (0.5, (-3.0, -1.0, 1.0, 3.0)),
+            (1.0, (-4.0, -2.7, -1.3, 0.0, 1.3, 2.7, 4.0)),
+        )
+    )
+
+    with pytest.raises(ValueError) as small_exc:
+        loft_plan_sections(
+            stations,
+            samples=8,
+            split_merge_mode="resolve",
+            ambiguity_max_branches=3,
+        )
+    assert "ambiguity_max_branches=3" in str(small_exc.value)
+    assert "planner_location=split_merge_expansion:0->1" in str(small_exc.value)
+    assert "'ambiguity_max_branches': 3" in str(small_exc.value)
+
+    with pytest.raises(LoftPlanningBlockedError) as large_exc:
+        loft_plan_sections(
+            stations,
+            samples=8,
+            split_merge_mode="resolve",
+            ambiguity_max_branches=4096,
+        )
+    assert "interval 10->11" in str(large_exc.value)
+    assert "ambiguity_max_branches=4096" in str(large_exc.value)
+    assert "ambiguity_max_branches=64" not in str(large_exc.value)
+
+    for sufficient_cap in (5040, 6000):
+        plan = loft_plan_sections(
+            stations,
+            samples=8,
+            split_merge_mode="resolve",
+            ambiguity_max_branches=sufficient_cap,
+        )
+        assert len(plan.stations) == 19
+        assert plan.metadata["planner_options"]["ambiguity_max_branches"] == sufficient_cap
 
 
 def test_loft_plan_sections_records_explicit_fairness_controls_in_metadata():

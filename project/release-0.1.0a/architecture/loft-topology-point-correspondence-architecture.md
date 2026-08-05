@@ -2931,8 +2931,25 @@ Split decision:
 - Cohesion reason: helper methods should be specified together as one public
   authoring surface over the same topology path record family.
 
+## Planner Configuration Propagation
+
+Public loft planning constructs one immutable `LoftPlannerOptions` value after
+boundary validation. Direct transition pairing, split/merge station expansion,
+synthetic region/loop pairing, and ambiguity-report pairing all consume that
+same value; nested helpers do not define planner-policy defaults. In particular,
+`ambiguity_max_branches` remains a hard caller-owned candidate bound throughout
+the call graph.
+
+The plan stores the effective options as canonical metadata. Candidate-limit
+refusals report the effective cap and transition location, including whether the
+limit was reached during original-station expansion or a later expanded-plan
+interval. This makes configuration drift observable without changing existing
+public argument names or defaults.
+
 ## Change History
 
+- 2026-08-04: Added the implemented immutable planner-options boundary and
+  direct/nested/synthetic propagation contract.
 - 2026-08-04: Added the implemented identity-first named-hole planner boundary
   and executor handoff contract.
 - 2026-05-27: Critically reviewed active manifest candidates beyond score
