@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import FrozenInstanceError, replace
 import json
 import impression.modeling.csg as csg_module
 import numpy as np
@@ -16,6 +16,10 @@ from tests.csg_reference_fixtures import (
     make_box_with_higher_order_front_wall,
     make_box_with_sweep_front_wall,
     surface_body_section_loops,
+)
+from tests.reference_review_fixtures.stl_review_sources import (
+    build_loft_cylinder_correspondence,
+    build_loft_matrix_tapered_circle,
 )
 from tests.reference_images import (
     ExpectedDiagnosticKeyRecord,
@@ -46,6 +50,7 @@ from impression.modeling import (
     SurfaceBooleanOperands,
     SurfaceBooleanPatchRef,
     SurfaceBooleanResult,
+    SurfaceDifferenceGateDecision,
     SurfaceBooleanSplitRecord,
     SurfaceBooleanTrimmedPatchFragment,
     SurfacePatch,
@@ -221,6 +226,7 @@ from impression.modeling import (
     SweepSurfacePatch,
     TrimLoop,
     assert_surface_csg_solver_registry_complete,
+    assert_surface_difference_success_gate,
     assert_no_hidden_surface_csg_mesh_fallback,
     assert_loft_primitive_no_hidden_mesh_fallback,
     assert_sampled_implicit_no_mesh_fallback_evidence_gate,
@@ -230,6 +236,7 @@ from impression.modeling import (
     boolean_difference,
     boolean_intersection,
     boolean_union,
+    apply_surface_difference_success_gate,
     build_surface_csg_solver_registry,
     assemble_surface_csg_result_shells,
     assemble_surface_csg_shells_from_fragments,
@@ -2722,9 +2729,11 @@ def test_surface_csg_executes_exact_loft_primitive_difference_without_mesh_fallb
 
     result = surface_boolean_result("difference", operands)
 
-    assert result.status == "succeeded"
+    assert result.status == "no-cut"
     assert result.classification == "closed"
     assert result.body is not None
+    assert result.difference_gate is not None
+    assert result.difference_gate.classification == "no-cut"
     assert result.body.patch_count == body.patch_count
     _assert_loft_primitive_result_metadata(result)
 
@@ -2777,7 +2786,13 @@ def test_surface_csg_executes_loft_pair_routes_without_mesh_fallback(operation: 
     assert route.loft_operand_indices == (0, 1)
     assert direct is not None
     assert direct.status == "succeeded"
-    assert result.status == "succeeded"
+    assert result.status == ("invalid" if operation == "difference" else "succeeded")
+    if operation == "difference":
+        assert result.difference_gate is not None
+        assert result.difference_gate.classification == "invalid"
+        assert result.classification is None
+        assert result.body is None
+        return
     assert result.classification == "closed"
     assert result.body is not None
     metadata = result.body.kernel_metadata()["loft_pair_csg"]
@@ -4927,7 +4942,9 @@ def test_public_surface_boolean_returns_structured_result_without_deprecation() 
     assert difference_result.operation == "difference"
     assert intersection_result.operation == "intersection"
     assert union_result.status == "succeeded"
-    assert difference_result.status == "succeeded"
+    assert difference_result.status == "no-cut"
+    assert difference_result.difference_gate is not None
+    assert difference_result.difference_gate.classification == "no-cut"
     assert intersection_result.status == "succeeded"
     assert union_result.classification == "closed"
     assert difference_result.classification == "closed"
@@ -5162,7 +5179,16 @@ def test_surface_boolean_result_supports_overlapping_box_difference_with_side_sl
 
 
 @pytest.mark.parametrize(
-    ("case", "base", "cutter", "comparison", "executor_id", "witness_kind"),
+    (
+        "case",
+        "base",
+        "cutter",
+        "comparison",
+        "executor_id",
+        "witness_kind",
+        "expected_status",
+        "gate_classification",
+    ),
     (
         (
             "proven-disjoint",
@@ -5171,6 +5197,8 @@ def test_surface_boolean_result_supports_overlapping_box_difference_with_side_sl
             "unchanged",
             "surface-csg.trivial",
             None,
+            "no-cut",
+            "no-cut",
         ),
         (
             "analytic-cut",
@@ -5179,6 +5207,8 @@ def test_surface_boolean_result_supports_overlapping_box_difference_with_side_sl
             "changed",
             "surface-csg.analytic-box",
             "changed-topology",
+            "succeeded",
+            "success",
         ),
         (
             "empty-cut",
@@ -5187,6 +5217,8 @@ def test_surface_boolean_result_supports_overlapping_box_difference_with_side_sl
             "changed",
             "surface-csg.trivial",
             "removed-base-domain",
+            "succeeded",
+            "success",
         ),
         (
             "implicit-cut",
@@ -5195,6 +5227,8 @@ def test_surface_boolean_result_supports_overlapping_box_difference_with_side_sl
             "changed",
             "surface-csg.primitive-implicit",
             "changed-topology",
+            "succeeded",
+            "success",
         ),
     ),
 )
@@ -5205,6 +5239,8 @@ def test_difference_executor_matrix_emits_normalized_geometry_change_evidence(
     comparison: str,
     executor_id: str,
     witness_kind: str | None,
+    expected_status: str,
+    gate_classification: str,
 ) -> None:
     result = surface_boolean_result(
         "difference",
@@ -5213,6 +5249,10 @@ def test_difference_executor_matrix_emits_normalized_geometry_change_evidence(
 
     assert case
     assert isinstance(result.difference_evidence, NormalizedDifferenceEvidence)
+    assert isinstance(result.difference_gate, SurfaceDifferenceGateDecision)
+    assert assert_surface_difference_success_gate(result) is result
+    assert result.status == expected_status
+    assert result.difference_gate.classification == gate_classification
     assert result.difference_evidence.executor_id == executor_id
     assert result.difference_evidence.comparison == comparison
     assert result.difference_evidence.no_mesh_fallback is True
@@ -5277,6 +5317,160 @@ def test_difference_evidence_marks_unverified_provenance_as_ambiguous() -> None:
     assert evidence.diagnostics == ("contradictory-provenance-with-unchanged-geometry",)
 
 
+@pytest.mark.parametrize(
+    ("cutter", "expected_classification"),
+    (
+        (make_box(size=(0.5, 0.5, 0.5)), "invalid"),
+        (make_box(size=(1.0, 1.0, 1.0), center=(1.5, 0.0, 0.0)), "invalid"),
+        (make_box(size=(1.0, 1.0, 1.0), center=(4.0, 0.0, 0.0)), "no-cut"),
+    ),
+)
+def test_difference_gate_classifies_unchanged_overlap_tangent_and_disjoint_results(
+    cutter: SurfaceBody,
+    expected_classification: str,
+) -> None:
+    base = make_box(size=(2.0, 2.0, 2.0))
+    operands = prepare_surface_boolean_difference_operands(base, [cutter])
+    unchanged = SurfaceBooleanResult(
+        operation="difference",
+        operands=operands,
+        status="succeeded",
+        body=make_surface_body(base.iter_shells(world=True), metadata={"clone": True}),
+        classification="closed",
+    )
+
+    result = apply_surface_difference_success_gate(
+        unchanged,
+        executor_id="test.unchanged-matrix",
+    )
+
+    assert result.difference_gate is not None
+    assert result.difference_gate.classification == expected_classification
+    assert result.status == expected_classification
+    assert assert_surface_difference_success_gate(result) is result
+
+
+def test_difference_gate_rejects_ambiguous_provenance_and_detects_bypass() -> None:
+    base = make_box()
+    cutter = make_box(size=(0.5, 0.5, 0.5))
+    operands = prepare_surface_boolean_difference_operands(base, [cutter])
+    shell = base.iter_shells(world=False)[0]
+    source_patch = shell.patches[0]
+    metadata = dict(source_patch.metadata)
+    metadata["kernel"] = {
+        **source_patch.kernel_metadata(),
+        "source_operand_index": 1,
+        "cut_curve_ids": ("curve:unverified",),
+    }
+    claimed_clone = make_surface_body(
+        (replace(shell, patches=(replace(source_patch, metadata=metadata), *shell.patches[1:])),),
+        metadata=base.metadata,
+    )
+    raw = SurfaceBooleanResult(
+        operation="difference",
+        operands=operands,
+        status="succeeded",
+        body=claimed_clone,
+        classification="closed",
+    )
+
+    with pytest.raises(ValueError, match="bypassed the public success gate"):
+        assert_surface_difference_success_gate(raw)
+    result = apply_surface_difference_success_gate(raw, executor_id="test.ambiguous")
+    assert result.status == "invalid"
+    assert result.difference_evidence is not None
+    assert result.difference_evidence.comparison == "ambiguous"
+    assert result.difference_gate is not None
+    assert result.difference_gate.classification == "invalid"
+
+
+def test_difference_gate_decision_is_frozen_and_canonical() -> None:
+    decision = SurfaceDifferenceGateDecision(
+        classification="success",
+        executor_id="test.executor",
+        operand_ids=("base", "cutter"),
+        comparison="changed",
+        cutter_interaction=True,
+        reason="validated change",
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        decision.classification = "invalid"  # type: ignore[misc]
+    assert decision.canonical_payload() == {
+        "classification": "success",
+        "executor_id": "test.executor",
+        "operand_ids": ("base", "cutter"),
+        "comparison": "changed",
+        "cutter_interaction": True,
+        "reason": "validated change",
+        "gate_id": "surface-difference-public-success-gate-v1",
+        "no_mesh_fallback": True,
+    }
+
+
+def test_rotated_snap_groove_clone_cannot_cross_public_difference_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = make_box(size=(2.0, 2.0, 1.0))
+    angle = np.deg2rad(35.0)
+    transform = np.eye(4, dtype=float)
+    transform[0, 0] = np.cos(angle)
+    transform[0, 1] = -np.sin(angle)
+    transform[1, 0] = np.sin(angle)
+    transform[1, 1] = np.cos(angle)
+    transform[:3, 3] = (0.85, 0.0, 0.0)
+    rounded_tab_proxy = make_box(size=(0.8, 0.3, 0.4)).with_transform(transform)
+
+    def unchanged_executor(
+        operation: str,
+        operands: SurfaceBooleanOperands,
+        **_kwargs: object,
+    ) -> SurfaceBooleanResult:
+        assert operation == "difference"
+        return SurfaceBooleanResult(
+            operation="difference",
+            operands=operands,
+            status="succeeded",
+            body=make_surface_body(operands.bodies[0].iter_shells(world=True)),
+            classification="closed",
+        )
+
+    monkeypatch.setattr(csg_module, "surface_boolean_result", unchanged_executor)
+    result = boolean_difference(base, [rounded_tab_proxy])
+
+    assert isinstance(result, SurfaceBooleanResult)
+    assert result.status == "invalid"
+    assert result.body is None
+    assert result.difference_evidence is not None
+    assert result.difference_evidence.cutter_interaction is True
+    assert result.difference_evidence.comparison == "unchanged"
+    assert result.difference_gate is not None
+    assert result.difference_gate.classification == "invalid"
+
+
+def test_unchanged_coincident_face_and_shared_station_references_are_refusals() -> None:
+    coincident_base = make_box(size=(1.0, 1.0, 1.0))
+    coincident_cutter = make_box(size=(1.0, 1.0, 1.0), center=(1.0, 0.0, 0.0))
+    coincident = boolean_difference(coincident_base, [coincident_cutter])
+
+    loft_base = build_loft_cylinder_correspondence()
+    loft_cutter = build_loft_matrix_tapered_circle()
+    shared_station = surface_boolean_result(
+        "difference",
+        prepare_surface_boolean_difference_operands(loft_base, [loft_cutter]),
+    )
+
+    for result, relation in ((coincident, "touching"), (shared_station, "overlap")):
+        assert isinstance(result, SurfaceBooleanResult)
+        assert result.status == "invalid"
+        assert result.body is None
+        assert result.difference_evidence is not None
+        assert result.difference_evidence.comparison == "unchanged"
+        assert result.difference_evidence.cutter_relations == (relation,)
+        assert result.difference_gate is not None
+        assert result.difference_gate.classification == "invalid"
+
+
 def test_difference_evidence_uses_bounded_local_tolerance_comparison() -> None:
     base = make_box()
     cutter = make_box(size=(0.5, 0.5, 0.5))
@@ -5318,6 +5512,7 @@ def test_public_difference_recomputes_evidence_with_caller_tolerance(monkeypatch
     def translated_executor_result(
         operation: str,
         operands: SurfaceBooleanOperands,
+        **_kwargs: object,
     ) -> SurfaceBooleanResult:
         assert operation == "difference"
         matrix = np.eye(4, dtype=float)
@@ -5337,10 +5532,16 @@ def test_public_difference_recomputes_evidence_with_caller_tolerance(monkeypatch
 
     assert isinstance(within, SurfaceBooleanResult)
     assert within.difference_evidence is not None
+    assert within.status == "invalid"
     assert within.difference_evidence.comparison == "unchanged"
+    assert within.difference_gate is not None
+    assert within.difference_gate.classification == "invalid"
     assert isinstance(above, SurfaceBooleanResult)
+    assert above.status == "succeeded"
     assert above.difference_evidence is not None
     assert above.difference_evidence.comparison == "changed"
+    assert above.difference_gate is not None
+    assert above.difference_gate.classification == "success"
 
 
 def test_difference_evidence_detects_changed_patch_domain_before_local_sampling() -> None:

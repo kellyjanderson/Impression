@@ -82,7 +82,8 @@ from .surface_intersections import (
 
 SurfaceBooleanOperation = Literal["union", "difference", "intersection"]
 SURFACE_BOOLEAN_OPERATIONS: tuple[SurfaceBooleanOperation, ...] = ("union", "difference", "intersection")
-SurfaceBooleanStatus = Literal["succeeded", "invalid", "unsupported"]
+SurfaceBooleanStatus = Literal["succeeded", "no-cut", "invalid", "unsupported"]
+SurfaceDifferenceGateClassification = Literal["success", "no-cut", "invalid", "unsupported"]
 SurfaceBooleanClassification = Literal["open", "closed", "empty"]
 SurfaceBooleanBodyRelation = Literal["disjoint", "touching", "overlap", "containment", "equal"]
 SurfaceCSGContactKind = Literal[
@@ -3928,6 +3929,46 @@ class NormalizedDifferenceEvidence:
 
 
 @dataclass(frozen=True)
+class SurfaceDifferenceGateDecision:
+    """Public postcondition decision shared by every surface difference route."""
+
+    classification: SurfaceDifferenceGateClassification
+    executor_id: str
+    operand_ids: tuple[str, ...]
+    comparison: Literal["changed", "unchanged", "ambiguous"]
+    cutter_interaction: bool
+    reason: str
+    gate_id: str = "surface-difference-public-success-gate-v1"
+    no_mesh_fallback: bool = True
+
+    def __post_init__(self) -> None:
+        if self.classification not in {"success", "no-cut", "invalid", "unsupported"}:
+            raise ValueError("Surface difference gate classification is unsupported.")
+        if not self.executor_id.strip() or not self.gate_id.strip() or not self.reason.strip():
+            raise ValueError("Surface difference gate decision requires executor, gate, and reason.")
+        if self.classification == "success" and (
+            self.comparison != "changed" or not self.cutter_interaction
+        ):
+            raise ValueError("Surface difference success requires changed interacting evidence.")
+        if self.classification == "no-cut" and (
+            self.comparison != "unchanged" or self.cutter_interaction
+        ):
+            raise ValueError("Surface difference no-cut requires unchanged non-interacting evidence.")
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "classification": self.classification,
+            "executor_id": self.executor_id,
+            "operand_ids": self.operand_ids,
+            "comparison": self.comparison,
+            "cutter_interaction": self.cutter_interaction,
+            "reason": self.reason,
+            "gate_id": self.gate_id,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceBooleanResult:
     """Structured surfaced boolean result contract."""
 
@@ -3938,6 +3979,7 @@ class SurfaceBooleanResult:
     classification: SurfaceBooleanClassification | None = None
     failure_reason: str | None = None
     difference_evidence: NormalizedDifferenceEvidence | None = None
+    difference_gate: SurfaceDifferenceGateDecision | None = None
 
     def __post_init__(self) -> None:
         if self.difference_evidence is not None:
@@ -3947,6 +3989,23 @@ class SurfaceBooleanResult:
                 raise ValueError("Difference evidence operand IDs must match the result operands.")
             if self.difference_evidence.result_status != self.status:
                 raise ValueError("Difference evidence status must match the result status.")
+        if self.difference_gate is not None:
+            if self.operation != "difference":
+                raise ValueError("Only difference results may carry difference_gate.")
+            if self.difference_gate.operand_ids != self.operands.body_ids:
+                raise ValueError("Difference gate operand IDs must match the result operands.")
+            if self.difference_evidence is None:
+                raise ValueError("Difference gate decisions require normalized evidence.")
+            if self.difference_gate.executor_id != self.difference_evidence.executor_id:
+                raise ValueError("Difference gate executor must match normalized evidence.")
+            expected_gate_classification = {
+                "succeeded": "success",
+                "no-cut": "no-cut",
+                "invalid": "invalid",
+                "unsupported": "unsupported",
+            }[self.status]
+            if self.difference_gate.classification != expected_gate_classification:
+                raise ValueError("Difference gate classification must match the result status.")
         if self.status == "succeeded":
             if self.classification is None:
                 raise ValueError("Succeeded surface boolean results require classification.")
@@ -3957,6 +4016,15 @@ class SurfaceBooleanResult:
                 raise ValueError("Non-empty succeeded surface boolean results require body.")
             if self.failure_reason is not None:
                 raise ValueError("Succeeded surface boolean results may not carry failure_reason.")
+        elif self.status == "no-cut":
+            if self.operation != "difference":
+                raise ValueError("Only difference results may use no-cut status.")
+            if self.body is None or self.classification != "closed":
+                raise ValueError("No-cut difference results require the unchanged closed base body.")
+            if self.failure_reason is not None:
+                raise ValueError("No-cut difference results may not carry failure_reason.")
+            if self.difference_gate is not None and self.difference_gate.classification != "no-cut":
+                raise ValueError("No-cut result status requires a no-cut gate decision.")
         else:
             if self.body is not None or self.classification is not None:
                 raise ValueError("Invalid or unsupported surface boolean results may not carry body or classification.")
@@ -16839,7 +16907,7 @@ def normalize_surface_difference_evidence(
         result.operands,
         tolerance=normalized_policy.equality_tolerance,
     )
-    if result.status != "succeeded":
+    if result.status not in {"succeeded", "no-cut"}:
         return NormalizedDifferenceEvidence(
             executor_id=executor_id,
             operand_ids=result.operands.body_ids,
@@ -16877,25 +16945,137 @@ def normalize_surface_difference_evidence(
             cutter_relations=relations,
             diagnostics=("missing-result-body",),
         )
-    return compare_surface_difference_geometry(
+    evidence = compare_surface_difference_geometry(
         result.operands,
         result.body,
         executor_id=executor_id,
         policy=normalized_policy,
     )
+    return replace(evidence, result_status=result.status)
 
 
-def _surface_boolean_result_with_difference_evidence(
+def classify_surface_difference_no_cut(evidence: NormalizedDifferenceEvidence) -> bool:
+    """Return true only for a proven disjoint, unchanged difference."""
+
+    return bool(evidence.cutter_relations) and all(
+        relation == "disjoint"
+        for relation in evidence.cutter_relations
+    ) and evidence.comparison == "unchanged" and not evidence.witnesses and not evidence.diagnostics
+
+
+def apply_surface_difference_success_gate(
     result: SurfaceBooleanResult,
     *,
     executor_id: str,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
 ) -> SurfaceBooleanResult:
+    """Apply the one public success/no-cut postcondition for surface differences."""
+
     if result.operation != "difference":
         return result
-    return replace(
+    evidence = normalize_surface_difference_evidence(
         result,
-        difference_evidence=normalize_surface_difference_evidence(result, executor_id=executor_id),
+        executor_id=executor_id,
+        policy=policy,
     )
+    if result.status == "unsupported":
+        decision = SurfaceDifferenceGateDecision(
+            classification="unsupported",
+            executor_id=executor_id,
+            operand_ids=result.operands.body_ids,
+            comparison=evidence.comparison,
+            cutter_interaction=evidence.cutter_interaction,
+            reason="The selected surfaced difference executor is unsupported.",
+        )
+        return replace(result, difference_evidence=evidence, difference_gate=decision)
+    if result.status == "invalid":
+        decision = SurfaceDifferenceGateDecision(
+            classification="invalid",
+            executor_id=executor_id,
+            operand_ids=result.operands.body_ids,
+            comparison=evidence.comparison,
+            cutter_interaction=evidence.cutter_interaction,
+            reason="The surfaced difference executor returned an invalid result.",
+        )
+        return replace(result, difference_evidence=evidence, difference_gate=decision)
+    if result.status == "succeeded" and evidence.changed and evidence.cutter_interaction:
+        decision = SurfaceDifferenceGateDecision(
+            classification="success",
+            executor_id=executor_id,
+            operand_ids=result.operands.body_ids,
+            comparison=evidence.comparison,
+            cutter_interaction=True,
+            reason="Validated cutter interaction and geometry-change witnesses permit success.",
+        )
+        return replace(result, difference_evidence=evidence, difference_gate=decision)
+    if classify_surface_difference_no_cut(evidence):
+        no_cut_evidence = replace(evidence, result_status="no-cut")
+        decision = SurfaceDifferenceGateDecision(
+            classification="no-cut",
+            executor_id=executor_id,
+            operand_ids=result.operands.body_ids,
+            comparison=no_cut_evidence.comparison,
+            cutter_interaction=False,
+            reason="All cutters are proven disjoint and the base geometry is unchanged.",
+        )
+        return SurfaceBooleanResult(
+            operation="difference",
+            operands=result.operands,
+            status="no-cut",
+            body=result.body if result.body is not None else result.operands.bodies[0],
+            classification="closed",
+            difference_evidence=no_cut_evidence,
+            difference_gate=decision,
+        )
+
+    invalid_reason = (
+        "Surface difference invalid-result classification: cutter interaction produced no "
+        "validated geometry change."
+        if evidence.comparison == "unchanged"
+        else "Surface difference invalid-result classification: geometry-change evidence is ambiguous."
+        if evidence.comparison == "ambiguous"
+        else "Surface difference invalid-result classification: geometry changed without validated cutter interaction."
+    )
+    invalid_evidence = replace(evidence, result_status="invalid")
+    decision = SurfaceDifferenceGateDecision(
+        classification="invalid",
+        executor_id=executor_id,
+        operand_ids=result.operands.body_ids,
+        comparison=invalid_evidence.comparison,
+        cutter_interaction=invalid_evidence.cutter_interaction,
+        reason=invalid_reason,
+    )
+    return SurfaceBooleanResult(
+        operation="difference",
+        operands=result.operands,
+        status="invalid",
+        failure_reason=invalid_reason,
+        difference_evidence=invalid_evidence,
+        difference_gate=decision,
+    )
+
+
+def assert_surface_difference_success_gate(result: SurfaceBooleanResult) -> SurfaceBooleanResult:
+    """Assert that a difference result cannot bypass the registry-wide gate."""
+
+    if result.operation != "difference":
+        return result
+    if result.difference_evidence is None or result.difference_gate is None:
+        raise ValueError("Surface difference executor bypassed the public success gate.")
+    expected = {
+        "succeeded": "success",
+        "no-cut": "no-cut",
+        "invalid": "invalid",
+        "unsupported": "unsupported",
+    }[result.status]
+    if result.difference_gate.classification != expected:
+        raise ValueError("Surface difference result status conflicts with its gate decision.")
+    if result.status == "succeeded" and (
+        not result.difference_evidence.changed
+        or not result.difference_evidence.cutter_interaction
+    ):
+        raise ValueError("Surface difference success lacks changed interacting evidence.")
+    return result
 
 
 def _surface_body_primitive_family(body: SurfaceBody) -> str | None:
@@ -19724,14 +19904,27 @@ def prepare_surface_boolean_difference_operands(
     return SurfaceBooleanOperands(operation="difference", bodies=(canonical_base, *canonical_cutters))
 
 
-def surface_boolean_result(operation: SurfaceBooleanOperation, operands: SurfaceBooleanOperands) -> SurfaceBooleanResult:
+def surface_boolean_result(
+    operation: SurfaceBooleanOperation,
+    operands: SurfaceBooleanOperands,
+    *,
+    difference_policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> SurfaceBooleanResult:
     """Return the structured surfaced boolean result for the current v1 implementation."""
 
     if operands.operation != operation:
         raise ValueError("Surface boolean result operation must match prepared operands.")
 
     def finish(result: SurfaceBooleanResult, executor_id: str) -> SurfaceBooleanResult:
-        return _surface_boolean_result_with_difference_evidence(result, executor_id=executor_id)
+        if result.operation != "difference":
+            return result
+        return assert_surface_difference_success_gate(
+            apply_surface_difference_success_gate(
+                result,
+                executor_id=executor_id,
+                policy=difference_policy,
+            )
+        )
 
     bspline_nurbs_result = _surface_boolean_bspline_nurbs_body_route_result(operands)
     if bspline_nurbs_result is not None:
@@ -19834,7 +20027,7 @@ def _surface_boolean_result_after_family_gate(
         status="unsupported",
         failure_reason=gate.reason,
     )
-    return _surface_boolean_result_with_difference_evidence(
+    return apply_surface_difference_success_gate(
         result,
         executor_id=f"{caller_id}.feature-gate",
     )
@@ -19982,11 +20175,19 @@ def boolean_difference(
         caller_id="csg.boolean_difference",
     )  # type: ignore[arg-type]
     if gated is not None:
-        return gated
+        return assert_surface_difference_success_gate(gated)
     operands = prepare_surface_boolean_difference_operands(base, cutter_tuple)  # type: ignore[arg-type]
+    difference_policy = {
+        "equality_tolerance": tolerance,
+        "domain_tolerance": min(tolerance, DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.domain_tolerance),
+    }
     raw_result = assert_no_hidden_surface_csg_mesh_fallback(
         "csg.boolean_difference",
-        surface_boolean_result("difference", operands),
+        surface_boolean_result(
+            "difference",
+            operands,
+            difference_policy=difference_policy,
+        ),
     )
     if not isinstance(raw_result, SurfaceBooleanResult):
         raise BooleanOperationError("csg.boolean_difference did not return a structured SurfaceBooleanResult.")
@@ -19995,15 +20196,13 @@ def boolean_difference(
         if raw_result.difference_evidence is not None
         else "csg.boolean_difference"
     )
-    evidence = normalize_surface_difference_evidence(
-        raw_result,
-        executor_id=executor_id,
-        policy={
-            "equality_tolerance": tolerance,
-            "domain_tolerance": min(tolerance, DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.domain_tolerance),
-        },
-    )
-    return replace(raw_result, difference_evidence=evidence)
+    if raw_result.difference_gate is None:
+        raw_result = apply_surface_difference_success_gate(
+            raw_result,
+            executor_id=executor_id,
+            policy=difference_policy,
+        )
+    return assert_surface_difference_success_gate(raw_result)
 
 
 def boolean_intersection(

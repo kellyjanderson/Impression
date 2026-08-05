@@ -43,8 +43,9 @@ refused before decomposition. Public boolean annotations still mix `Mesh`,
   bounded sub-body cuts, and recomposes one surface body only when provenance
   and seam validity are complete.
 - A public postcondition compares modeled surface evidence before and after a
-  difference. Verified overlap plus unchanged geometry returns `invalid` with a
-  no-cut diagnostic, never `succeeded`.
+  difference. Verified overlap plus unchanged geometry returns `invalid`, while
+  proven disjoint unchanged geometry returns explicit `no-cut`; neither may
+  report `succeeded`.
 - Public `boolean_union`, `boolean_difference`, and `boolean_intersection`
   accept `SurfaceBody` operands and return `SurfaceBooleanResult`. Mesh utilities
   remain available only through explicitly non-modeling boundaries.
@@ -89,8 +90,9 @@ surface union/difference correction so callers have a complete surfaced route.
   executor -> postcondition/validity gate -> `SurfaceBooleanResult` -> consumer.
 - Wiring owner/module: `src/impression/modeling/csg.py` and public exports in
   `src/impression/modeling/__init__.py`.
-- Observable result: one closed surfaced body, an explicitly empty result, or a
-  structured unsupported/invalid result; never unchanged false success.
+- Observable result: one changed closed surfaced body, an explicitly empty or
+  disjoint no-cut result, or a structured unsupported/invalid result; never
+  unchanged false success.
 - Integration validation: minimal fixtures, audio-cube compositions, public API
   signature tests, and preview/export consumer smoke.
 
@@ -110,6 +112,24 @@ shared tolerance policy. Explicit cutter-patch and cut-boundary provenance is
 retained as inspectable evidence, but provenance that contradicts unchanged
 geometry is refused as ambiguous. Fix 09B owns the later public success/no-cut
 classification that consumes this record.
+
+## Difference Public Success Gate Boundary
+
+Every dispatcher exit for a surfaced difference passes through one public
+postcondition after evidence normalization. A result may retain `succeeded`
+only when validated witnesses prove modeled geometry changed and the cutter
+relations prove overlap, containment, or equality. An unchanged result whose
+cutters are all proven disjoint becomes the explicit `no-cut` status and keeps
+its closed unchanged body; it is distinct from both a fabricated cut and an
+error.
+
+Unchanged touching or interacting inputs are `invalid`, as are ambiguous
+comparisons and geometry changes without validated cutter interaction.
+Unsupported executor routes remain `unsupported`. Every outcome publishes an
+immutable `SurfaceDifferenceGateDecision` naming the executor, comparison,
+interaction state, reason, and shared gate ID. The public assertion rejects any
+difference result missing normalized evidence or this decision, preventing a
+registered executor or monkeypatched public route from bypassing the gate.
 
 ## Specification Sources
 
@@ -145,6 +165,7 @@ classification that consumes this record.
 - [x] Fix 02 rectangular-loft face-touch/overlap merger conforms and passes the public preview/export route.
 - [x] Fix 08A bounds-pruned loft difference intersections produce closed provenance-bearing trim fragments or precise refusal.
 - [x] Fix 09A normalizes every surfaced difference result into validated changed, unchanged, or ambiguous evidence.
+- [x] Fix 09B gates every surfaced difference dispatcher outcome as success, no-cut, invalid, or unsupported.
 - [x] Final leaves are independently reviewed and canonicalized.
 - [x] Paired test specs point to canonical leaves.
 - [x] Final progression preserves no-op gate and API migration prerequisites.
@@ -164,6 +185,10 @@ architecture records the conformed solver and compatibility boundaries.
 
 ## Change History
 
+- 2026-08-04 - Completed Fix 09B. Reason: the shared public difference gate now
+  requires changed interacting evidence for success, reports proven disjoint
+  clones as explicit no-cut, and rejects unchanged overlap, tangent, ambiguous,
+  and rotated snap-groove false-success results.
 - 2026-08-04 - Completed Fix 09A. Reason: every surfaced difference dispatcher
   outcome now carries executor-neutral cutter relations and validated
   topology/domain/local-geometry witnesses without treating clones or metadata

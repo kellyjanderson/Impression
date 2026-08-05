@@ -82,7 +82,6 @@ from tests.reference_review_fixtures.stl_review_sources import (
     build_loft_csg_rt_loft_csg_008_branch_intersection_cutter_window_reference,
     build_loft_csg_rt_loft_csg_009_loft_union_loft_overlapping_ruled,
     build_loft_csg_rt_loft_csg_010_loft_intersection_loft_crossing_axes,
-    build_loft_csg_rt_loft_csg_011_loft_difference_loft_shared_station,
     build_loft_csg_rt_loft_csg_012_authored_color_preserved,
     build_loft_csg_rt_loft_csg_013_section_evidence_reference,
     build_loft_csg_reference_geometry_handoff,
@@ -802,12 +801,6 @@ def _surface_box_difference_shallow_step() -> SurfaceBody:
     return _surface_boolean_body(boolean_difference(base, [cutter]))
 
 
-def _surface_box_difference_coincident_face() -> SurfaceBody:
-    base = make_box(size=(1.0, 1.0, 1.0))
-    cutter = make_box(size=(1.0, 1.0, 1.0), center=(1.0, 0.0, 0.0))
-    return _surface_boolean_body(boolean_difference(base, [cutter]))
-
-
 def _surface_box_union_disjoint() -> SurfaceBody:
     left = make_box(size=(0.8, 0.8, 0.8), center=(-0.6, 0.0, 0.0))
     right = make_box(size=(0.6, 0.6, 0.6), center=(0.55, 0.0, 0.0))
@@ -1137,7 +1130,6 @@ def test_surface_primitive_reference_stls(
         ("surfacebody/csg/box_difference_side_recess", _surface_box_difference_side_recess, 20),
         ("surfacebody/csg/box_difference_top_pocket", _surface_box_difference_top_pocket, 40),
         ("surfacebody/csg/box_difference_shallow_step", _surface_box_difference_shallow_step, 12),
-        ("surfacebody/csg/box_difference_coincident_face", _surface_box_difference_coincident_face, 12),
         ("surfacebody/csg/box_union_disjoint", _surface_box_union_disjoint, 24),
         ("surfacebody/csg/mixed_family_disjoint_union", _surface_mixed_family_disjoint_union, 100),
         ("surfacebody/csg/rt_csg_001_cube_union_sphere", _surface_rt_csg_001_cube_union_sphere, 60),
@@ -1169,7 +1161,6 @@ def test_surface_primitive_reference_stls(
         ("surfacebody/csg/sampled_implicit_promotion_bspline", _surface_sampled_implicit_promotion_bspline, 2),
         ("loft/csg/rt_loft_csg_009_loft_union_loft_overlapping_ruled", build_loft_csg_rt_loft_csg_009_loft_union_loft_overlapping_ruled, 12),
         ("loft/csg/rt_loft_csg_010_loft_intersection_loft_crossing_axes", build_loft_csg_rt_loft_csg_010_loft_intersection_loft_crossing_axes, 12),
-        ("loft/csg/rt_loft_csg_011_loft_difference_loft_shared_station", build_loft_csg_rt_loft_csg_011_loft_difference_loft_shared_station, 12),
         ("loft/csg/rt_loft_csg_012_authored_color_preserved", build_loft_csg_rt_loft_csg_012_authored_color_preserved, 12),
     ],
 )
