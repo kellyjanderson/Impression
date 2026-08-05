@@ -1,7 +1,7 @@
 # Fix 05B: Synthetic Station Identity Lineage
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Primary ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 Architecture ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 Source artifact: [Split parent](./fix-05-count-changing-region-identity-preservation-v1_0.md)
@@ -118,7 +118,7 @@ Pass 4 split decision: retained. Cohesion reason: one synthetic-lineage construc
 - Missing prerequisite specifications:
   - none
 - Unimplemented prerequisite specifications:
-  - Fix 05a exact region pairing
+  - none; Fix 05a exact region pairing is implemented
 - Progression handling:
   - prerequisites listed above run first; otherwise this child may proceed after canonical review
 
