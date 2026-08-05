@@ -1,7 +1,7 @@
 # Fix 01B Test: Preview Module Cache Invalidation
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Feature spec: [Fix 01B: Preview Module Cache Invalidation](../specifications/fix-01b-preview-module-cache-invalidation-v1_0.md)
 Feature spec canonical status: Canonical
 Architecture ancestor: [Active ACD](../architecture/acd-preview-reload-coordination.md)
@@ -60,6 +60,6 @@ This canonical paired contract verifies the complete retained split-child bounda
 ## Acceptance
 
 - [x] Feature child is canonical.
-- [ ] Route-level proof exists for library-only.
-- [ ] Helper-only tests cannot satisfy the contract.
-- [ ] Observable results and failure behavior are asserted.
+- [x] Route-level proof exists for library-only.
+- [x] Helper-only tests cannot satisfy the contract.
+- [x] Observable results and failure behavior are asserted.

@@ -143,6 +143,125 @@ def test_preview_scene_factory_manual_reload_bypasses_unchanged_mtime(tmp_path: 
     assert reloaded_scene.vertices[1, 0] == 2.0
 
 
+def test_preview_scene_factory_failed_generation_retries_until_success(tmp_path: Path) -> None:
+    source = tmp_path / "retry_model.py"
+    source.write_text("def build():\n    return 1\n")
+    reload_generation = 0
+    factory = _scene_factory_from_path(
+        source,
+        cache_module=True,
+        reload_generation_getter=lambda: reload_generation,
+    )
+    assert factory() == 1
+
+    original_mtime = source.stat().st_mtime_ns
+    reload_generation += 1
+    source.write_text("def build(:\n    return 2\n")
+    os.utime(source, ns=(original_mtime, original_mtime))
+    with pytest.raises(SyntaxError):
+        factory()
+
+    source.write_text("def build():\n    return 2\n")
+    os.utime(source, ns=(original_mtime, original_mtime))
+
+    assert factory() == 2
+
+
+def test_preview_scene_factory_forced_reload_rediscovers_transitive_watch_paths(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "rediscover_model.py"
+    first_helper = tmp_path / "rediscover_first.py"
+    second_helper = tmp_path / "rediscover_second.py"
+    first_helper.write_text("value = 1\n")
+    second_helper.write_text("value = 2\n")
+    source.write_text(
+        "from rediscover_first import value\n\n"
+        "def build():\n"
+        "    return value\n"
+    )
+    watched: list[tuple[Path, ...]] = []
+    reload_generation = 0
+    factory = _scene_factory_from_path(
+        source,
+        cache_module=True,
+        reload_generation_getter=lambda: reload_generation,
+        on_watch_paths_changed=watched.append,
+    )
+    assert factory() == 1
+
+    original_mtime = source.stat().st_mtime_ns
+    source.write_text(
+        "from rediscover_second import value\n\n"
+        "def build():\n"
+        "    return value\n"
+    )
+    os.utime(source, ns=(original_mtime, original_mtime))
+    reload_generation += 1
+
+    assert factory() == 2
+    assert second_helper.resolve() in watched[-1]
+    assert first_helper.resolve() not in watched[-1]
+
+
+def test_preview_command_wires_forced_reload_generation_into_live_scene_factory(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "command_model.py"
+    helper = tmp_path / "command_helper.py"
+    control_file = tmp_path / "preview.control"
+    helper.write_text("value = 1\n")
+    source.write_text(
+        "from command_helper import value\n\n"
+        "def build():\n"
+        "    return value\n"
+    )
+    observed: dict[str, object] = {}
+
+    class FakePreviewer:
+        unit_scale_to_mm = 1.0
+        unit_name = "millimeters"
+        unit_label = "mm"
+
+        def __init__(self, console) -> None:
+            self.console = console
+
+        def show(self, **kwargs: object) -> None:
+            scene_factory = kwargs["scene_factory"]
+            force_scene_reload = kwargs["force_scene_reload"]
+            watch_paths_getter = kwargs["watch_paths_getter"]
+            assert callable(scene_factory)
+            assert callable(force_scene_reload)
+            assert callable(watch_paths_getter)
+            original_mtime = helper.stat().st_mtime_ns
+            helper.write_text("value = 2\n")
+            os.utime(helper, ns=(original_mtime, original_mtime))
+            observed["cached"] = scene_factory()
+            force_scene_reload()
+            observed["forced"] = scene_factory()
+            observed["watched"] = watch_paths_getter()
+
+    monkeypatch.setattr(cli, "PyVistaPreviewer", FakePreviewer)
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "preview",
+            str(source),
+            "--control-file",
+            str(control_file),
+            "--force-window",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert observed["cached"] == 1
+    assert observed["forced"] == 2
+    assert helper.resolve() in observed["watched"]
+
+
 def _write_triangle_model(path: Path) -> None:
     path.write_text(
         "import numpy as np\n"

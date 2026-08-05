@@ -33,7 +33,9 @@ impression preview examples/hello_impression.py
 ```
 
 The preview window supports orbit, pan, and zoom. The file is watched by default, so
-saving changes hot reloads the preview.
+saving the model or an imported project-local module promptly reloads the preview.
+Press `r` to force a cache-invalidating rebuild. If a rebuild fails, the last good
+scene remains visible while the error is reported.
 
 ## 3) Export to STL
 

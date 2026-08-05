@@ -1,7 +1,7 @@
 # Preview Reload Coordination Architectural Change Document
 
 Date: 2026-08-04
-Status: In Progress
+Status: Complete
 Canonical architecture targets:
 
 - `project/release-0.1.0a/architecture/reference-review-preview-engine-sharing-architecture.md`
@@ -111,11 +111,11 @@ reload unless a manual or file-change request also arrives.
 
 ## Conformance Checklist
 
-- [ ] Implementation conforms to the target architecture.
+- [x] Implementation conforms to the target architecture.
 - [x] Final leaves are independently reviewed and canonicalized.
 - [x] Paired test specs point to the canonical leaves.
 - [x] Final progression points to the canonical leaves.
-- [ ] Canonical preview architecture is reconciled after implementation.
+- [x] Canonical preview architecture is reconciled after implementation.
 
 ## Closure Criteria
 
@@ -125,12 +125,17 @@ artifacts no longer depend on this ACD.
 
 ## Closure Notes
 
-- Canonical architecture updated: none yet.
+- Canonical architecture updated:
+  `project/release-0.1.0a/architecture/reference-review-preview-engine-sharing-architecture.md`.
 - Archived or removed scaffolding: none.
 - Follow-up ACDs: none.
 
 ## Change History
 
+- 2026-08-04 - Closed after implementation and route validation. Reason: the
+  bounded coordinator, forced transitive invalidation, current-generation scene
+  admission, camera/error preservation, and canonical architecture reconciliation
+  are complete.
 - 2026-08-04 - Linked the final dependency-ordered progression. Reason: make the canonical preview leaves executable without routing archived parents.
 - 2026-08-04 - Recorded the five canonical preview leaves and archived split parents after fixed-point review.
 - 2026-08-04 - Linked the full-template Fix 01 and paired test drafts. Reason: complete the `do specs` creation handoff.

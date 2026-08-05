@@ -1,7 +1,7 @@
 # Fix 01B: Preview Module Cache Invalidation
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Primary ancestor: [Active ACD](../architecture/acd-preview-reload-coordination.md)
 Architecture ancestor: [Active ACD](../architecture/acd-preview-reload-coordination.md)
 Source artifact: [Split parent](./fix-01-preview-watch-and-forced-refresh-v1_0.md)

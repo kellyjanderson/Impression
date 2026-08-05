@@ -1,7 +1,7 @@
 # Fix 01C1 Test: Preview Refresh Input Wiring
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Feature spec: [Fix 01C1: Preview Refresh Input Wiring](../specifications/fix-01c1-preview-refresh-input-wiring-v1_0.md)
 Feature spec canonical status: Canonical
 Architecture ancestor: [Active ACD](../architecture/acd-preview-reload-coordination.md)
@@ -58,6 +58,6 @@ Canonical paired contract for the retained Fix 01c split child.
 ## Acceptance
 
 - [x] Feature child is canonical.
-- [ ] Route-level proof exists.
-- [ ] Helper-only tests cannot satisfy the contract.
-- [ ] Observable and failure behavior is asserted.
+- [x] Route-level proof exists.
+- [x] Helper-only tests cannot satisfy the contract.
+- [x] Observable and failure behavior is asserted.
