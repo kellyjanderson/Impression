@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, replace
+import inspect
 import json
+from typing import Iterable, get_type_hints
+import warnings
+
+import impression.modeling as modeling_module
 import impression.modeling.csg as csg_module
 import numpy as np
 import pytest
-import warnings
 
 from impression.mesh import Mesh
 from impression.modeling.drawing2d import make_circle, make_rect
@@ -5095,6 +5099,84 @@ def test_public_surface_boolean_returns_structured_result_without_deprecation() 
     assert intersection_result.body is not None
     assert len(union_result.operands.body_ids) == 2
     assert not [item for item in caught if issubclass(item.category, DeprecationWarning)]
+
+
+def test_public_surface_boolean_signature_matrix_is_surface_only() -> None:
+    expected = {
+        boolean_union: (("bodies", "tolerance"), Iterable[SurfaceBody]),
+        boolean_difference: (("base", "cutters", "tolerance"), SurfaceBody),
+        boolean_intersection: (("bodies", "tolerance"), Iterable[SurfaceBody]),
+    }
+
+    for function, (parameter_names, first_parameter_type) in expected.items():
+        signature = inspect.signature(function)
+        hints = get_type_hints(function)
+        assert tuple(signature.parameters) == parameter_names
+        assert hints[parameter_names[0]] == first_parameter_type
+        assert hints["tolerance"] is float
+        assert hints["return"] is SurfaceBooleanResult
+
+    difference_hints = get_type_hints(boolean_difference)
+    assert difference_hints["cutters"] == Iterable[SurfaceBody]
+
+
+@pytest.mark.parametrize(
+    ("function_name", "invoke", "parameter_label", "received_type"),
+    (
+        ("boolean_union", lambda mesh: boolean_union([mesh]), "bodies[0]", "Mesh"),
+        (
+            "boolean_union",
+            lambda mesh: boolean_union([csg_module.MeshGroup([mesh])]),
+            "bodies[0]",
+            "MeshGroup",
+        ),
+        ("boolean_difference", lambda mesh: boolean_difference(mesh, [make_box()]), "base", "Mesh"),
+        (
+            "boolean_difference",
+            lambda mesh: boolean_difference(make_box(), [mesh]),
+            "cutters[0]",
+            "Mesh",
+        ),
+        (
+            "boolean_intersection",
+            lambda mesh: boolean_intersection([make_box(), mesh]),
+            "bodies[1]",
+            "Mesh",
+        ),
+    ),
+)
+def test_public_surface_boolean_rejects_mesh_operands_before_kernel_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    function_name: str,
+    invoke,
+    parameter_label: str,
+    received_type: str,
+) -> None:
+    mesh = make_box_mesh(size=(1.0, 1.0, 1.0))
+
+    def unexpected_dispatch(*_args, **_kwargs):
+        pytest.fail("mesh operands reached surface CSG family dispatch")
+
+    monkeypatch.setattr(csg_module, "_surface_boolean_result_after_family_gate", unexpected_dispatch)
+
+    with pytest.raises(TypeError) as exc_info:
+        invoke(mesh)
+
+    message = str(exc_info.value)
+    assert f"{function_name}() accepts only SurfaceBody operands" in message
+    assert parameter_label in message
+    assert f"received {received_type}" in message
+    assert "impression.modeling.mesh_tools" in message
+    assert "union_meshes" in message
+
+
+def test_mesh_union_is_exported_only_from_explicit_mesh_tool_boundary() -> None:
+    from impression.modeling import mesh_tools
+
+    assert "union_meshes" not in modeling_module.__all__
+    assert not hasattr(modeling_module, "union_meshes")
+    assert callable(mesh_tools.union_meshes)
+    assert mesh_tools.union_meshes is csg_module.union_meshes
 
 
 def test_surface_boolean_result_contract_supports_partial_box_sphere_union() -> None:

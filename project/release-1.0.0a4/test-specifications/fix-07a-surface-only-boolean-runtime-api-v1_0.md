@@ -1,7 +1,7 @@
 # Fix 07A Test: Surface-Only Boolean Runtime API
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Feature spec: [Fix 07A: Surface-Only Boolean Runtime API](../specifications/fix-07a-surface-only-boolean-runtime-api-v1_0.md)
 Feature spec canonical status: Canonical
 Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
@@ -59,6 +59,21 @@ This canonical paired contract verifies the complete retained split-child bounda
 ## Acceptance
 
 - [x] Feature child is canonical.
-- [ ] Route-level proof exists for library-only.
-- [ ] Helper-only tests cannot satisfy the contract.
-- [ ] Observable results and failure behavior are asserted.
+- [x] Route-level proof exists for library-only.
+- [x] Helper-only tests cannot satisfy the contract.
+- [x] Observable results and failure behavior are asserted.
+
+## Validation Evidence
+
+- Runtime introspection asserts all three public parameter names, surfaced
+  operand annotations, tolerance annotations, and the uniform
+  `SurfaceBooleanResult` return annotation.
+- Calls imported through `impression.modeling` prove valid surfaced operands
+  still reach the real boolean routes and return structured results.
+- Mesh, `MeshGroup`, base, cutter, and mixed-collection controls prove
+  actionable `TypeError` occurs before family-gate dispatch.
+- Export inspection proves `union_meshes` is absent from top-level modeling and
+  available through `impression.modeling.mesh_tools`.
+- Focused runtime/signature/export matrix: 8 passed.
+- Surface CSG and retained mesh-tool group: 262 passed.
+- Full repository suite: 1,778 passed.

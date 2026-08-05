@@ -235,13 +235,15 @@ prerequisites are complete; the whole preceding wave need not finish first.
 
 ### Fix 07A: Surface-Only Boolean Runtime API
 
-- [ ] Implement surface-only public signatures, runtime guards, exports, and result types while separating mesh utilities.
+- [x] Implement surface-only public signatures, runtime guards, exports, and result types while separating mesh utilities.
   - Specification: [Fix 07A](../specifications/fix-07a-surface-only-boolean-runtime-api-v1_0.md)
   - Prerequisites: [Fix 02](../specifications/fix-02-coplanar-loft-face-touch-union-v1_0.md), [Fix 08C](../specifications/fix-08c-loft-difference-result-shell-reconstruction-v1_0.md), [Fix 09B](../specifications/fix-09b-difference-public-success-gate-v1_0.md)
-- [ ] Wire the runtime contract through public `impression.modeling` exports and boolean functions.
-- [ ] Validate the public signature/runtime matrix and actionable mesh-operand errors.
+- [x] Wire the runtime contract through public `impression.modeling` exports and boolean functions.
+- [x] Validate the public signature/runtime matrix and actionable mesh-operand errors.
   - Test specification: [Fix 07A Test](../test-specifications/fix-07a-surface-only-boolean-runtime-api-v1_0.md)
-- [ ] Update progression and surface-boolean ACD status after route validation.
+- [x] Update progression and surface-boolean ACD status after route validation.
+  - Documentation, examples, inventory guards, and installed-wheel conformance
+    remain owned by the following Fix 07B leaf.
 
 ### Fix 07B: Surface Boolean Docs And Package Contract
 

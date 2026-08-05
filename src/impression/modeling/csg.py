@@ -20498,17 +20498,44 @@ def _validate_public_surface_union_result(
     )
 
 
+def _require_public_surface_boolean_body(
+    function_name: str,
+    parameter_name: str,
+    operand: object,
+) -> SurfaceBody:
+    if isinstance(operand, SurfaceBody):
+        return operand
+    raise TypeError(
+        f"{function_name}() accepts only SurfaceBody operands; "
+        f"{parameter_name} received {type(operand).__name__}. "
+        "Mesh and MeshGroup are terminal/tool representations, not modeling operands. "
+        "Use impression.modeling.mesh_tools for explicit mesh analysis and repair; "
+        "union_meshes(...) there is the separate standalone mesh-union utility."
+    )
+
+
+def _require_public_surface_boolean_bodies(
+    function_name: str,
+    parameter_name: str,
+    operands: Iterable[object],
+) -> tuple[SurfaceBody, ...]:
+    return tuple(
+        _require_public_surface_boolean_body(function_name, f"{parameter_name}[{index}]", operand)
+        for index, operand in enumerate(operands)
+    )
+
+
 def boolean_union(
-    meshes: Iterable[Mesh | MeshGroup | SurfaceBody],
+    bodies: Iterable[SurfaceBody],
     tolerance: float = 1e-4,
-) -> Mesh | SurfaceBooleanResult:
+) -> SurfaceBooleanResult:
     if tolerance <= 0:
         raise ValueError("tolerance must be positive.")
-    bodies = tuple(meshes)
-    gated = _surface_boolean_result_after_family_gate("union", bodies, caller_id="csg.boolean_union")  # type: ignore[arg-type]
+    body_tuple = _require_public_surface_boolean_bodies("boolean_union", "bodies", bodies)
+    gated = _surface_boolean_result_after_family_gate("union", body_tuple, caller_id="csg.boolean_union")
     if gated is not None:
         return _validate_public_surface_union_result(gated, tolerance=tolerance)
-    operands = prepare_surface_boolean_operands("union", bodies)  # type: ignore[arg-type]
+    operands = prepare_surface_boolean_operands("union", body_tuple)
     raw_result = assert_no_hidden_surface_csg_mesh_fallback(
         "csg.boolean_union",
         surface_boolean_result("union", operands),
@@ -20519,21 +20546,22 @@ def boolean_union(
 
 
 def boolean_difference(
-    base: Mesh | MeshGroup | SurfaceBody,
-    cutters: Iterable[Mesh | MeshGroup | SurfaceBody],
+    base: SurfaceBody,
+    cutters: Iterable[SurfaceBody],
     tolerance: float = 1e-4,
-) -> Mesh | SurfaceBooleanResult:
+) -> SurfaceBooleanResult:
     if tolerance <= 0:
         raise ValueError("tolerance must be positive.")
-    cutter_tuple = tuple(cutters)
+    surface_base = _require_public_surface_boolean_body("boolean_difference", "base", base)
+    cutter_tuple = _require_public_surface_boolean_bodies("boolean_difference", "cutters", cutters)
     gated = _surface_boolean_result_after_family_gate(
         "difference",
-        (base, *cutter_tuple),
+        (surface_base, *cutter_tuple),
         caller_id="csg.boolean_difference",
-    )  # type: ignore[arg-type]
+    )
     if gated is not None:
         return assert_surface_difference_success_gate(gated)
-    operands = prepare_surface_boolean_difference_operands(base, cutter_tuple)  # type: ignore[arg-type]
+    operands = prepare_surface_boolean_difference_operands(surface_base, cutter_tuple)
     difference_policy = {
         "equality_tolerance": tolerance,
         "domain_tolerance": min(tolerance, DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.domain_tolerance),
@@ -20563,20 +20591,20 @@ def boolean_difference(
 
 
 def boolean_intersection(
-    meshes: Iterable[Mesh | MeshGroup | SurfaceBody],
+    bodies: Iterable[SurfaceBody],
     tolerance: float = 1e-4,
-) -> Mesh | SurfaceBooleanResult:
+) -> SurfaceBooleanResult:
     if tolerance <= 0:
         raise ValueError("tolerance must be positive.")
-    bodies = tuple(meshes)
+    body_tuple = _require_public_surface_boolean_bodies("boolean_intersection", "bodies", bodies)
     gated = _surface_boolean_result_after_family_gate(
         "intersection",
-        bodies,
+        body_tuple,
         caller_id="csg.boolean_intersection",
-    )  # type: ignore[arg-type]
+    )
     if gated is not None:
         return gated
-    operands = prepare_surface_boolean_operands("intersection", bodies)  # type: ignore[arg-type]
+    operands = prepare_surface_boolean_operands("intersection", body_tuple)
     return assert_no_hidden_surface_csg_mesh_fallback(
         "csg.boolean_intersection",
         surface_boolean_result("intersection", operands),

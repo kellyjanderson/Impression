@@ -696,7 +696,6 @@ from .csg import (
     surface_csg_selection_is_empty,
     validate_surface_csg_curve,
     validate_surface_csg_patch_local_curve_domain,
-    union_meshes,
 )
 from .paths import Path
 from .group import (
@@ -1768,7 +1767,6 @@ __all__ = [
     "surface_csg_selection_is_empty",
     "validate_surface_csg_curve",
     "validate_surface_csg_patch_local_curve_domain",
-    "union_meshes",
     "Path",
     "MESH_GROUP_COMPATIBILITY_BOUNDARY",
     "MESH_GROUP_COMPATIBILITY_CLASSIFICATION",

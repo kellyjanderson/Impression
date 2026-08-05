@@ -1,7 +1,7 @@
 # Fix 07A: Surface-Only Boolean Runtime API
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Primary ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Source artifact: [Split parent](./fix-07-surface-only-public-boolean-api-v1_0.md)
@@ -111,15 +111,15 @@ Pass 4 split decision: retained. Cohesion reason: one installed runtime represen
 - Architecture feedback status:
   - tracked in active ACD
 - Already implemented prerequisites:
-  - existing records/routes named under Dependencies And Routes
+  - Fix 02 surfaced union
+  - Fix 08c surfaced difference reconstruction
+  - Fix 09b public difference gate
 - Missing prerequisite architecture:
   - none
 - Missing prerequisite specifications:
   - none
 - Unimplemented prerequisite specifications:
-  - Fix 02 surfaced union
-  - Fix 08c surfaced difference reconstruction
-  - Fix 09b public difference gate
+  - none
 - Progression handling:
   - prerequisites listed above run first; otherwise this child may proceed after canonical review
 
@@ -179,6 +179,8 @@ App-type-specific proof:
 ## Error And State Behavior
 
 - mesh/mixed inputs identify the separate non-modeling utility
+- invalid representations raise `TypeError` before family-gate or kernel
+  dispatch and identify the offending public parameter/index
 
 ## Test Strategy
 
@@ -192,6 +194,22 @@ App-type-specific proof:
   - public `impression.modeling` boolean functions must exercise surfaced result or actionable representation error
 - Production-data rule:
   - deterministic project fixtures and temporary directories only
+
+## Implementation Evidence
+
+- `boolean_union(bodies, tolerance)`, `boolean_difference(base, cutters,
+  tolerance)`, and `boolean_intersection(bodies, tolerance)` now annotate only
+  `SurfaceBody` operands and consistently return `SurfaceBooleanResult`.
+- One shared public-boundary validator rejects `Mesh`, `MeshGroup`, mixed, and
+  other non-surface operands before the family gate, identifying the offending
+  parameter or collection index and directing callers to
+  `impression.modeling.mesh_tools`.
+- `union_meshes` is absent from the top-level `impression.modeling` export table
+  and is explicitly exported from `impression.modeling.mesh_tools` as the
+  retained standalone mesh-union utility.
+- Validation on 2026-08-05: the focused signature/runtime/export matrix passed
+  8 tests; the surface CSG plus retained mesh-tool group passed 262 tests; the
+  full repository suite passed 1,778 tests.
 
 ## Acceptance Criteria
 
