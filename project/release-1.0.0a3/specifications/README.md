@@ -1,0 +1,26 @@
+# v1.0.0a3 Final Fix Specifications
+
+All entries are canonical, independently deliverable leaves normalized and
+rescored with the current implementation-spec template. Numeric scores and split
+decisions are summarized in [progression](../planning/progression.md).
+
+1. [TopologyPath Loft Input Preservation](fix-01-topology-path-loft-input-preservation-v1_0.md)
+2. [Protected Loft Corner Tessellation](fix-02-protected-loft-corner-tessellation-v1_0.md)
+3. [Identity-First Stable Region Pairing](fix-03-identity-first-stable-region-pairing-v1_0.md)
+4. [Coplanar Loft-Body Union Outcome](fix-04-coplanar-loft-body-union-outcome-v1_0.md)
+5. [Multi-Opening Loft Wall Integrity](fix-05-multi-opening-loft-wall-integrity-v1_0.md)
+6. [Remove Accidental Half-Pipe Release Payload](fix-06-remove-accidental-half-pipe-release-payload-v1_0.md)
+7. [Reference Review Linux Lifecycle](fix-07-reference-review-linux-lifecycle-v1_0.md)
+8. [Safe Documentation Archive Extraction](fix-08-safe-docs-archive-extraction-v1_0.md)
+9. [User-Model Loader Module Identity](fix-09-user-model-loader-module-identity-v1_0.md)
+10. [SurfaceBody Preview and Export Consumption](fix-10-surfacebody-preview-export-consumption-v1_0.md)
+11. [Export Manufacturing Integrity Gate](fix-11-export-manufacturing-integrity-gate-v1_0.md)
+12. [Documentation Policy Test Migration](fix-12-documentation-policy-test-migration-v1_0.md)
+13. [Release Artifact Build and Qualification](fix-13a-release-artifact-build-qualification-v1_0.md)
+14. [Qualified Prerelease Publication](fix-13b-qualified-prerelease-publication-v1_0.md)
+15. [Archive Retired Modeling Experiments](fix-14-archive-retired-modeling-experiments-v1_0.md)
+16. [Preview PNG Export](fix-15-preview-png-export-v1_0.md)
+17. [Preview Sharp-Edge Normals](fix-16-preview-sharp-edge-normals-v1_0.md)
+18. [Pointed Cone Shell Connectivity](fix-17-pointed-cone-shell-connectivity-v1_0.md)
+
+Superseded split provenance: [Fix 13 parent](fix-13-release-workflow-artifact-qualification-v1_0.md).

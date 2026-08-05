@@ -11,7 +11,6 @@ from impression.io import ImpressFormatError, make_impress_document_payload
 from impression.mesh import Mesh
 from impression.modeling import (
     HeightmapMeshCompatibilityResult,
-    HingeSurfaceAssembly,
     BSplineSurfacePatch,
     SurfaceBody,
     SurfaceBooleanOperands,
@@ -31,7 +30,6 @@ from impression.modeling import (
     make_surface_shell,
     make_text,
     make_text_mesh_result,
-    make_traditional_hinge_pair,
     surface_boolean_result,
 )
 from impression.modeling.drawing2d import make_rect
@@ -109,7 +107,6 @@ def test_authored_surface_api_matrix_has_no_hidden_mesh_fallbacks() -> None:
         NoFallbackFixture("text", lambda: make_text(""), SurfaceBody),
         NoFallbackFixture("drafting", lambda: make_line((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)), SurfaceBody),
         NoFallbackFixture("heightmap-surface", lambda: heightmap(image), SurfaceBody),
-        NoFallbackFixture("hinge", lambda: make_traditional_hinge_pair(width=24.0, knuckle_count=5), HingeSurfaceAssembly),
     )
 
     for fixture in fixtures:
@@ -154,7 +151,7 @@ def test_surface_csg_unsupported_result_is_diagnostic_not_mesh_fallback() -> Non
     assert isinstance(result, SurfaceBooleanResult)
     assert result.status == "unsupported"
     assert result.body is None
-    assert "higher-order-exact-solver" in diagnostic.reason
+    assert "no mesh fallback was attempted" in diagnostic.reason
     assert diagnostic.canonical_payload()["boundary"] == "surface-boolean"
 
 

@@ -24,8 +24,10 @@ import urllib.error
 import zipfile
 import os
 import re
+import stat
 
-from impression.io import write_stl
+from impression.io import write_stl_atomically
+from impression.mesh import Mesh, MeshAnalysis, analyze_mesh
 from impression import __version__
 from impression.preview import PyVistaPreviewer, PreviewBackendError
 
@@ -33,12 +35,30 @@ console = Console()
 app = typer.Typer(help="Experiment with parametric models and preview pipelines.")
 WatchPathsCallback = Callable[[tuple[pathlib.Path, ...]], None]
 ReloadGenerationGetter = Callable[[], int]
+_USER_MODEL_OWNED_MODULE_PATHS: dict[str, pathlib.Path] = {}
 
 
 @dataclass(frozen=True)
 class PreviewOptions:
     watch: bool
     target_fps: int
+
+
+def _validate_manufacturing_mesh(mesh: Mesh) -> MeshAnalysis:
+    """Require the default STL contract before any output-path mutation."""
+
+    analysis = analyze_mesh(mesh)
+    issues: list[str] = []
+    if analysis.n_vertices == 0:
+        issues.append("empty mesh (0 vertices)")
+    if analysis.n_faces == 0:
+        issues.append("empty mesh (0 faces)")
+    issues.extend(analysis.issues())
+    if issues:
+        raise PreviewBackendError(
+            "Manufacturing STL integrity check failed: " + "; ".join(issues) + "."
+        )
+    return analysis
 
 
 def _log_active_units(previewer: PyVistaPreviewer) -> None:
@@ -53,13 +73,40 @@ def _log_active_units(previewer: PyVistaPreviewer) -> None:
         )
 
 
+def _drop_owned_user_model_modules() -> None:
+    for name, owned_path in tuple(_USER_MODEL_OWNED_MODULE_PATHS.items()):
+        module = sys.modules.get(name)
+        module_file = getattr(module, "__file__", None) if module is not None else None
+        if module_file is not None:
+            try:
+                current_path = pathlib.Path(module_file).resolve()
+            except OSError:
+                current_path = None
+            if current_path == owned_path:
+                sys.modules.pop(name, None)
+                cached_path = getattr(module, "__cached__", None)
+                if cached_path:
+                    try:
+                        pathlib.Path(cached_path).unlink(missing_ok=True)
+                    except OSError:
+                        pass
+    _USER_MODEL_OWNED_MODULE_PATHS.clear()
+    importlib.invalidate_caches()
+
+
+def _record_user_model_modules(
+    model_path: pathlib.Path,
+    module_names: Iterable[str],
+) -> None:
+    _USER_MODEL_OWNED_MODULE_PATHS.update(
+        _tracked_preview_module_paths(model_path, module_names)
+    )
+
+
 def _load_module(path: pathlib.Path) -> ModuleType:
     module_name = "impression_user_model"
-    if module_name in sys.modules:
-        del sys.modules[module_name]
-    for name in list(sys.modules.keys()):
-        if name == "impression.modeling" or name.startswith("impression.modeling."):
-            del sys.modules[name]
+    _drop_owned_user_model_modules()
+    before_names = set(sys.modules)
 
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
@@ -74,12 +121,17 @@ def _load_module(path: pathlib.Path) -> ModuleType:
         sys.path.insert(0, model_dir)
     try:
         spec.loader.exec_module(module)
+    except BaseException:
+        _record_user_model_modules(path, set(sys.modules) - before_names | {module_name})
+        _drop_owned_user_model_modules()
+        raise
     finally:
         if added_model_dir:
             try:
                 sys.path.remove(model_dir)
             except ValueError:
                 pass
+    _record_user_model_modules(path, set(sys.modules) - before_names | {module_name})
     return module
 
 
@@ -146,45 +198,118 @@ def _format_exception(exc: BaseException) -> str:
     return "".join(traceback.format_exception(exc))
 
 
-def _extract_docs_archive(data: bytes, destination: pathlib.Path, clean: bool) -> None:
-    if clean and destination.exists():
-        shutil.rmtree(destination)
-    destination.mkdir(parents=True, exist_ok=True)
+@dataclass(frozen=True)
+class _ValidatedArchiveMember:
+    info: zipfile.ZipInfo
+    parts: tuple[str, ...]
+    is_directory: bool
 
+
+def _validate_archive_member(member: zipfile.ZipInfo) -> _ValidatedArchiveMember:
+    raw_name = member.orig_filename
+    if "\x00" in raw_name:
+        raise typer.BadParameter(f"Unsafe docs archive member: {raw_name!r} (NUL byte).")
+
+    normalized = raw_name.replace("\\", "/")
+    if (
+        normalized.startswith("/")
+        or normalized.startswith("//")
+        or re.match(r"^[A-Za-z]:", normalized)
+    ):
+        raise typer.BadParameter(f"Unsafe docs archive member: {raw_name!r} (absolute path).")
+
+    parts = tuple(part for part in pathlib.PurePosixPath(normalized).parts if part not in {"", "."})
+    if not parts or ".." in parts:
+        raise typer.BadParameter(f"Unsafe docs archive member: {raw_name!r} (invalid path).")
+
+    unix_mode = member.external_attr >> 16
+    file_type = stat.S_IFMT(unix_mode)
+    if file_type not in {0, stat.S_IFREG, stat.S_IFDIR}:
+        raise typer.BadParameter(f"Unsafe docs archive member: {raw_name!r} (link-like type).")
+
+    is_directory = member.is_dir() or file_type == stat.S_IFDIR
+    return _ValidatedArchiveMember(member, parts, is_directory)
+
+
+def _replace_directory_atomically(staged: pathlib.Path, destination: pathlib.Path) -> None:
+    backup: pathlib.Path | None = None
+    if destination.exists():
+        backup = pathlib.Path(
+            tempfile.mkdtemp(prefix=f".{destination.name}.backup-", dir=destination.parent)
+        )
+        backup.rmdir()
+        os.replace(destination, backup)
+    try:
+        os.replace(staged, destination)
+    except BaseException:
+        if backup is not None and not destination.exists():
+            os.replace(backup, destination)
+        raise
+    if backup is not None:
+        shutil.rmtree(backup)
+
+
+def _extract_docs_archive(data: bytes, destination: pathlib.Path, clean: bool) -> None:
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        names = archive.namelist()
-        if not names:
+        members = tuple(_validate_archive_member(member) for member in archive.infolist())
+        if not members:
             raise typer.BadParameter("Downloaded archive is empty.")
 
-        prefixes: list[str] = []
-        for name in names:
-            if name.startswith("docs/"):
-                prefixes.append("docs/")
-            idx = name.find("/docs/")
-            if idx != -1:
-                prefixes.append(name[: idx + len("/docs/")])
+        prefixes: list[tuple[str, ...]] = []
+        for member in members:
+            for index, part in enumerate(member.parts):
+                if part == "docs" and (index < len(member.parts) - 1 or member.is_directory):
+                    prefixes.append(member.parts[: index + 1])
+                    break
         if not prefixes:
             raise typer.BadParameter("Docs folder not found in the downloaded archive.")
-        docs_prefix = min(prefixes, key=len)
+        docs_prefix = min(prefixes, key=lambda prefix: (len(prefix), prefix))
 
-        extracted = False
-        for member in archive.infolist():
-            if not member.filename.startswith(docs_prefix):
-                continue
-            rel_path = pathlib.Path(member.filename[len(docs_prefix):])
-            if not rel_path.parts:
-                continue
-            target_path = destination / rel_path
-            if member.is_dir():
-                target_path.mkdir(parents=True, exist_ok=True)
-                continue
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            with archive.open(member) as src, open(target_path, "wb") as dst:
-                shutil.copyfileobj(src, dst)
-            extracted = True
+        destination = destination.expanduser()
+        if destination.is_symlink() or (destination.exists() and not destination.is_dir()):
+            raise typer.BadParameter(f"Docs destination is not a directory: {destination}")
+        destination = destination.resolve(strict=False)
 
-    if not extracted:
-        raise typer.BadParameter("Docs folder not found in the downloaded archive.")
+        selected: list[tuple[_ValidatedArchiveMember, pathlib.Path]] = []
+        for member in members:
+            if member.parts[: len(docs_prefix)] != docs_prefix:
+                continue
+            relative_parts = member.parts[len(docs_prefix):]
+            if not relative_parts:
+                continue
+            target = destination.joinpath(*relative_parts).resolve(strict=False)
+            if not _path_is_relative_to(target, destination):
+                raise typer.BadParameter(
+                    f"Unsafe docs archive member: {member.info.orig_filename!r} (outside destination)."
+                )
+            selected.append((member, target))
+
+        if not any(not member.is_directory for member, _ in selected):
+            raise typer.BadParameter("Docs folder not found in the downloaded archive.")
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        staged = pathlib.Path(
+            tempfile.mkdtemp(prefix=f".{destination.name}.staged-", dir=destination.parent)
+        )
+        try:
+            if destination.exists() and not clean:
+                shutil.copytree(destination, staged, dirs_exist_ok=True, symlinks=True)
+
+            for member, intended_target in selected:
+                relative = intended_target.relative_to(destination)
+                staged_target = staged / relative
+                if member.is_directory:
+                    staged_target.mkdir(parents=True, exist_ok=True)
+                    continue
+                staged_target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(member.info) as source, staged_target.open("wb") as target_file:
+                    shutil.copyfileobj(source, target_file)
+
+            _replace_directory_atomically(staged, destination)
+        except BaseException:
+            if staged.exists():
+                shutil.rmtree(staged)
+            raise
     console.print(f"[green]Docs saved to {destination}[/green]")
 
 
@@ -360,7 +485,10 @@ def _scene_factory_from_module(
         if not cache_module:
             before_names = set(sys.modules)
             module = _load_module(model_path)
-            return _finish_module_load(module, set(sys.modules) - before_names)
+            return _finish_module_load(
+                module,
+                set(sys.modules) - before_names | set(_USER_MODEL_OWNED_MODULE_PATHS),
+            )
 
         current_mtimes = _watch_mtimes(cached_mtimes or [model_path])
         reload_generation = reload_generation_getter() if reload_generation_getter is not None else 0
@@ -373,7 +501,10 @@ def _scene_factory_from_module(
             _drop_cached_modules()
             before_names = set(sys.modules)
             cached_module = _load_module(model_path)
-            _finish_module_load(cached_module, set(sys.modules) - before_names)
+            _finish_module_load(
+                cached_module,
+                set(sys.modules) - before_names | set(_USER_MODEL_OWNED_MODULE_PATHS),
+            )
             loaded_reload_generation = reload_generation
         return cached_module
 
@@ -465,7 +596,9 @@ def preview(
         help="Force a new preview window even if a live control file exists.",
     ),
     screenshot: pathlib.Path | None = typer.Option(
-        None, "--screenshot", help="Optional path to save a screenshot of the preview."
+        None,
+        "--screenshot",
+        help="Render once off-screen, save a PNG, and exit without redirecting a running preview.",
     ),
     show_edges: bool = typer.Option(False, "--show-edges/--hide-edges", help="Toggle triangle edge rendering."),
     face_edges: bool = typer.Option(
@@ -475,13 +608,16 @@ def preview(
     ),
 ) -> None:
     """
-    Load a Python model module or .impress document and open an interactive preview window.
+    Load a Python model module or .impress document, then open an interactive
+    preview or write a one-shot PNG with --screenshot.
     """
 
     if not model.exists():
         raise typer.BadParameter(f"Model path {model} does not exist.")
 
     opts = PreviewOptions(watch=watch, target_fps=target_fps)
+    screenshot_mode = screenshot is not None
+    effective_watch = opts.watch and not screenshot_mode
 
     model_state = {"path": model}
     auto_rebuild_state: dict[str, float | None] = {"interval": None}
@@ -612,7 +748,7 @@ def preview(
     try:
         initial_scene = scene_factory()
     except Exception as exc:
-        if opts.watch:
+        if effective_watch:
             panel = Panel.fit(_format_exception(exc), title="Initial build failed — watching for changes", style="red")
             console.print(panel)
             initial_scene = None
@@ -622,7 +758,7 @@ def preview(
     console.rule("Impression Preview")
     console.print(f"Using model [green]{model}[/green]")
     control_path: pathlib.Path | None = None
-    if opts.watch:
+    if effective_watch:
         console.print("[cyan]Watching for changes — save to hot reload, close the window to stop.[/cyan]")
         control_path = _ensure_control_file()
         if control_path is not None:
@@ -641,7 +777,7 @@ def preview(
             initial_scene=initial_scene,
             model_path=model,
             model_path_state=model_state,
-            watch_files=opts.watch,
+            watch_files=effective_watch,
             target_fps=opts.target_fps,
             screenshot_path=screenshot,
             show_edges=show_edges,
@@ -653,6 +789,8 @@ def preview(
             force_scene_reload=_force_scene_reload,
             auto_rebuild_interval_getter=lambda: auto_rebuild_state["interval"],
         )
+        if screenshot is not None:
+            console.print(f"[green]Saved preview PNG to {screenshot.resolve()}[/green]")
     except PreviewBackendError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
@@ -695,14 +833,19 @@ def export(
     previewer = PyVistaPreviewer(console=console)
     _log_active_units(previewer)
     try:
-        datasets = previewer.collect_datasets(initial_scene)
+        from impression.modeling import export_tessellation_request
+
+        datasets = previewer.collect_datasets(
+            initial_scene,
+            tessellation_request=export_tessellation_request(),
+        )
         merged = previewer.combine_to_mesh(datasets)
+        _validate_manufacturing_mesh(merged)
     except PreviewBackendError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
-    final_output.parent.mkdir(parents=True, exist_ok=True)
     try:
-        write_stl(merged, final_output, ascii=ascii)
+        write_stl_atomically(merged, final_output, ascii=ascii)
     except Exception as exc:  # pragma: no cover - STL I/O failure
         raise typer.BadParameter(f"Failed to export STL: {exc}") from exc
 

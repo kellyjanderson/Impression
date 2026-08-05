@@ -8,6 +8,7 @@ from fontTools.ttLib import TTFont, TTLibFileIsCollectionError
 TEXT_GLYPH_FONT_CANDIDATES = (
     Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
     Path("/System/Library/Fonts/Supplemental/Helvetica.ttc"),
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
 )
 
 

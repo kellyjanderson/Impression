@@ -83,14 +83,6 @@ Read:
 
 - `docs/modeling/threading.md`
 
-### Hinges
-
-Use for traditional, living, and bistable hinge outputs.
-
-Read:
-
-- `docs/modeling/hinges.md`
-
 ### Drafting
 
 Use for surfaced drafting helpers and 2.5D annotation geometry.

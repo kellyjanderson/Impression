@@ -62,7 +62,7 @@ def _bbox(points_xy: np.ndarray) -> tuple[float, float, float, float]:
 
 def _roundness_ratio(points_xy: np.ndarray) -> float:
     centered = np.asarray(points_xy, dtype=float).reshape(-1, 2)
-    centered = centered - centered.mean(axis=0, keepdims=True)
+    centered = centered - _loop_centroid(centered)
     radii = np.linalg.norm(centered, axis=1)
     mean_radius = float(radii.mean())
     if mean_radius == 0.0:
@@ -124,7 +124,19 @@ def _actual_closed_loops_xy(mesh: Mesh, z_value: float) -> tuple[list[np.ndarray
 
 
 def _loop_centroid(points_xy: np.ndarray) -> np.ndarray:
-    return np.asarray(points_xy, dtype=float).reshape(-1, 2).mean(axis=0)
+    points = np.asarray(points_xy, dtype=float).reshape(-1, 2)
+    following = np.roll(points, -1, axis=0)
+    cross = points[:, 0] * following[:, 1] - following[:, 0] * points[:, 1]
+    signed_area_twice = float(cross.sum())
+    if abs(signed_area_twice) <= 1e-12:
+        return points.mean(axis=0)
+    return np.asarray(
+        [
+            np.sum((points[:, 0] + following[:, 0]) * cross),
+            np.sum((points[:, 1] + following[:, 1]) * cross),
+        ],
+        dtype=float,
+    ) / (3.0 * signed_area_twice)
 
 
 def _assert_station_slice_matches_expected_loops(
@@ -162,7 +174,7 @@ def _assert_station_slice_matches_input(
 
     assert result.closed_count == 1
     assert result.polyline_count == 1
-    assert np.allclose(actual_loop.mean(axis=0), expected_loop.mean(axis=0), atol=1e-3)
+    assert np.allclose(_loop_centroid(actual_loop), _loop_centroid(expected_loop), atol=1e-3)
     assert np.allclose(_bbox(actual_loop), _bbox(expected_loop), atol=2e-3)
     assert _polygon_area(actual_loop) == pytest.approx(_polygon_area(expected_loop), rel=2e-3)
     assert _polygon_perimeter(actual_loop) == pytest.approx(_polygon_perimeter(expected_loop), rel=1e-2)

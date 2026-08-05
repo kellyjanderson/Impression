@@ -1062,12 +1062,16 @@ class Region:
 
     def is_valid(self) -> bool:
         normalized = self.normalized()
-        for hole in normalized.holes:
-            if hole.points.shape[0] < 3:
-                return False
-            if not point_in_polygon(hole.points[0], normalized.outer.points):
-                return False
-        return normalized.outer.points.shape[0] >= 3
+        if normalized.outer.points.shape[0] < 3 or any(hole.points.shape[0] < 3 for hole in normalized.holes):
+            return False
+        try:
+            classify_loops(
+                [normalized.outer.points, *(hole.points for hole in normalized.holes)],
+                expected_holes=len(normalized.holes),
+            )
+        except ValueError:
+            return False
+        return True
 
 @dataclass(frozen=True)
 class Section:
@@ -1094,7 +1098,7 @@ class Section:
 
 
 def as_section(
-    shape: Section | Region | Path2D | object,
+    shape: Section | Region | Path2D | TopologyPath | object,
     *,
     segments_per_circle: int = 64,
     bezier_samples: int = 32,
@@ -1105,6 +1109,16 @@ def as_section(
         return shape.normalized()
     if isinstance(shape, Region):
         return Section((shape.normalized(),))
+    if isinstance(shape, TopologyPath):
+        if not shape.closed:
+            raise ValueError("TopologyPath must be closed for loft and planar solid operations.")
+        loop = shape.to_section_loop()
+        if loop.points.shape[0] < 3:
+            raise ValueError("Closed TopologyPath must resolve to at least three loop points.")
+        return Section(
+            (Region(outer=Loop(ensure_winding(loop.points, clockwise=False))),),
+            metadata={"topology_paths": (shape,), "topology_source": "TopologyPath"},
+        ).normalized()
     if isinstance(shape, Path2D):
         if not shape.closed:
             raise ValueError("Path2D must be closed for planar solid operations.")
@@ -1139,7 +1153,10 @@ def as_section(
         color = getattr(shape, "color", None)
         metadata = dict(getattr(shape, "metadata", {}) or {})
         return Section((region,), color=color, metadata=metadata)
-    raise TypeError("Expected Section, Region, closed Path2D, or shape with .outer/.holes Path2D loops.")
+    raise TypeError(
+        "Expected Section, Region, closed TopologyPath, closed Path2D, "
+        "or shape with .outer/.holes Path2D loops."
+    )
 
 
 def as_sections(
@@ -1255,7 +1272,67 @@ def triangulate_loops(loops: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
         jittered_vertices = _jitter_vertices_for_triangulation(normalized_loops)
         indices = earcut.triangulate_float32(jittered_vertices, ring_end_indices)
         faces = np.asarray(indices, dtype=np.int64).reshape(-1, 3)
+    faces = _repair_collinear_boundary_triangulation(vertices.astype(float), faces)
     return vertices.astype(float), faces
+
+
+def _repair_collinear_boundary_triangulation(vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:
+    """Split an adjacent triangle through collinear boundary vertices."""
+
+    repaired = [tuple(int(value) for value in face) for face in np.asarray(faces, dtype=int)]
+    removed: set[int] = set()
+    replacements: dict[int, tuple[tuple[int, int, int], tuple[int, int, int]]] = {}
+    span = np.ptp(np.asarray(vertices, dtype=float), axis=0)
+    area_epsilon = max(float(np.max(span)) ** 2 * 1e-9, 1e-12)
+
+    def signed_area(face: tuple[int, int, int]) -> float:
+        a, b, c = (vertices[index] for index in face)
+        ab = b - a
+        ac = c - a
+        return float(ab[0] * ac[1] - ab[1] * ac[0])
+
+    for face_index, face in enumerate(repaired):
+        if face_index in removed or abs(signed_area(face)) > area_epsilon:
+            continue
+        pairs = ((face[0], face[1], face[2]), (face[0], face[2], face[1]), (face[1], face[2], face[0]))
+        endpoint_a, endpoint_b, middle = max(
+            pairs,
+            key=lambda item: float(np.linalg.norm(vertices[item[1]] - vertices[item[0]])),
+        )
+        adjacent_index = next(
+            (
+                index
+                for index, candidate in enumerate(repaired)
+                if index != face_index
+                and index not in removed
+                and endpoint_a in candidate
+                and endpoint_b in candidate
+                and abs(signed_area(candidate)) > area_epsilon
+            ),
+            None,
+        )
+        if adjacent_index is None:
+            continue
+        adjacent = repaired[adjacent_index]
+        opposite = next(index for index in adjacent if index not in {endpoint_a, endpoint_b})
+        orientation = np.sign(signed_area(adjacent))
+        first = (endpoint_a, middle, opposite)
+        second = (middle, endpoint_b, opposite)
+        if np.sign(signed_area(first)) != orientation:
+            first = (middle, endpoint_a, opposite)
+        if np.sign(signed_area(second)) != orientation:
+            second = (endpoint_b, middle, opposite)
+        removed.add(face_index)
+        removed.add(adjacent_index)
+        replacements[adjacent_index] = (first, second)
+
+    output: list[tuple[int, int, int]] = []
+    for index, face in enumerate(repaired):
+        if index in replacements:
+            output.extend(replacements[index])
+        elif index not in removed:
+            output.append(face)
+    return np.asarray(output, dtype=np.int64).reshape(-1, 3)
 
 
 def _triangulation_covers_loop_boundaries(
@@ -1402,14 +1479,57 @@ def classify_loops(loops: list[np.ndarray], expected_holes: int | None = None) -
         raise ValueError("classify_loops requires at least one loop.")
     outer = largest_loop(loops)
     holes = [loop for loop in loops if loop is not outer]
-    for hole in holes:
-        if not point_in_polygon(_normalize_loop_points(hole)[0], outer):
+    normalized_outer = _normalize_loop_points(outer)
+    normalized_holes = [_normalize_loop_points(hole) for hole in holes]
+    for hole in normalized_holes:
+        if not point_in_polygon(hole[0], normalized_outer) or _loop_boundaries_intersect(hole, normalized_outer):
             raise ValueError("Loop set contains disconnected geometry.")
+    for first_index, first in enumerate(normalized_holes):
+        for second_index, second in enumerate(normalized_holes[first_index + 1 :], start=first_index + 1):
+            if (
+                _loop_boundaries_intersect(first, second)
+                or point_in_polygon(first[0], second)
+                or point_in_polygon(second[0], first)
+            ):
+                raise ValueError(
+                    "Loop set contains overlapping or nested holes "
+                    f"(hole {first_index} and hole {second_index})."
+                )
     outer = ensure_winding(outer, clockwise=False)
-    holes = [ensure_winding(hole, clockwise=True) for hole in holes]
+    holes = [ensure_winding(hole, clockwise=True) for hole in normalized_holes]
     if expected_holes is not None and len(holes) != expected_holes:
         raise ValueError("Loop classification changed hole count.")
     return outer, holes
+
+
+def _loop_boundaries_intersect(first: np.ndarray, second: np.ndarray, *, epsilon: float = 1e-12) -> bool:
+    def orientation(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
+        return float((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))
+
+    def on_segment(a: np.ndarray, b: np.ndarray, point: np.ndarray) -> bool:
+        return bool(
+            min(a[0], b[0]) - epsilon <= point[0] <= max(a[0], b[0]) + epsilon
+            and min(a[1], b[1]) - epsilon <= point[1] <= max(a[1], b[1]) + epsilon
+        )
+
+    def segments_intersect(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray) -> bool:
+        values = (orientation(a, b, c), orientation(a, b, d), orientation(c, d, a), orientation(c, d, b))
+        if values[0] * values[1] < 0.0 and values[2] * values[3] < 0.0:
+            return True
+        return bool(
+            (abs(values[0]) <= epsilon and on_segment(a, b, c))
+            or (abs(values[1]) <= epsilon and on_segment(a, b, d))
+            or (abs(values[2]) <= epsilon and on_segment(c, d, a))
+            or (abs(values[3]) <= epsilon and on_segment(c, d, b))
+        )
+
+    first_points = _normalize_loop_points(first)
+    second_points = _normalize_loop_points(second)
+    return any(
+        segments_intersect(a, b, c, d)
+        for a, b in zip(first_points, np.roll(first_points, -1, axis=0), strict=True)
+        for c, d in zip(second_points, np.roll(second_points, -1, axis=0), strict=True)
+    )
 
 
 def inset_profile_loops(

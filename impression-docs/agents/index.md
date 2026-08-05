@@ -38,8 +38,6 @@ folder and the project workspace under [`project/`](../../project/README.md).
   - glyph outlines, surfaced text bodies, and text sections
 - [`../modeling/threading.md`](../modeling/threading.md)
   - surfaced thread operands and assemblies
-- [`../modeling/hinges.md`](../modeling/hinges.md)
-  - traditional, living, and bistable hinge outputs
 - [`../modeling/csg.md`](../modeling/csg.md)
   - boolean helpers and the current surfaced CSG posture
 

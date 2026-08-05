@@ -26,6 +26,20 @@ from impression.modeling._color import get_mesh_color
 from impression.modeling.group import MeshGroup
 from impression.modeling.drawing2d import Path2D
 from impression.modeling.path3d import Path3D
+from impression.modeling.surface import SurfaceBody
+from impression.modeling.surface_scene import (
+    SurfaceComposition,
+    SurfaceSceneGroup,
+    SurfaceSceneNode,
+    surface_composition_to_consumer_collection,
+)
+from impression.modeling.tessellation import (
+    NormalizedTessellationRequest,
+    SurfaceConsumerCollection,
+    TessellationRequest,
+    preview_tessellation_request,
+    tessellate_surface_body,
+)
 from impression.modeling.topology import Region, Section
 
 
@@ -313,6 +327,8 @@ class PreviewSceneController:
                     rgb=rgb_mode,
                     rgba=rgba_mode,
                     smooth_shading=smooth_shading,
+                    split_sharp_edges=smooth_shading,
+                    feature_angle=style.feature_edge_angle,
                     lighting=lighting,
                     specular=specular,
                 )
@@ -341,6 +357,8 @@ class PreviewSceneController:
                 color=color,
                 opacity=opacity,
                 smooth_shading=smooth_shading,
+                split_sharp_edges=smooth_shading,
+                feature_angle=style.feature_edge_angle,
                 lighting=lighting,
                 specular=specular,
             )
@@ -625,8 +643,13 @@ def _format_exception(exc: BaseException) -> str:
     return "".join(traceback.format_exception(exc))
 
 
-def _collect_datasets_from_scene(scene: object) -> List[Mesh | Polyline]:
+def _collect_datasets_from_scene(
+    scene: object,
+    *,
+    tessellation_request: TessellationRequest | NormalizedTessellationRequest | None = None,
+) -> List[Mesh | Polyline]:
     datasets: List[Mesh | Polyline] = []
+    request = tessellation_request or preview_tessellation_request(require_watertight=False)
 
     def _loop_to_polyline(loop_points: np.ndarray) -> Polyline:
         pts = np.asarray(loop_points, dtype=float).reshape(-1, 2)
@@ -643,20 +666,39 @@ def _collect_datasets_from_scene(scene: object) -> List[Mesh | Polyline]:
         if item is None:
             return
 
+        if isinstance(item, SurfaceBody):
+            datasets.append(tessellate_surface_body(item, request).mesh)
+            return
+
+        if isinstance(item, SurfaceConsumerCollection):
+            for surface_item in item.items:
+                visit(surface_item.body)
+            return
+
+        if isinstance(item, SurfaceComposition):
+            visit(surface_composition_to_consumer_collection(item))
+            return
+
+        if isinstance(item, SurfaceSceneNode):
+            if item.visible:
+                visit(item.resolved_body())
+            return
+
+        if isinstance(item, SurfaceSceneGroup):
+            for child in item.children:
+                visit(child)
+            return
+
         if isinstance(item, MeshGroup) or (hasattr(item, "to_meshes") and callable(getattr(item, "to_meshes"))):
             for mesh in item.to_meshes():
                 visit(mesh)
             return
 
         if isinstance(item, Mesh):
-            if item.n_faces == 0 or item.n_vertices == 0:
-                return
             datasets.append(item)
             return
 
         if isinstance(item, Polyline):
-            if item.points.size == 0:
-                return
             datasets.append(item)
             return
 
@@ -687,12 +729,13 @@ def _collect_datasets_from_scene(scene: object) -> List[Mesh | Polyline]:
             return
 
         raise PreviewBackendError(
-            "Model build() must return internal meshes (e.g., impression.modeling primitives or a list of them)."
+            "Unsupported scene value "
+            f"{type(item).__name__}; expected SurfaceBody, Mesh, Polyline, or a supported group."
         )
 
     visit(scene)
     if not datasets:
-        raise PreviewBackendError("Scene did not produce any meshes.")
+        raise PreviewBackendError("Scene did not produce any preview/export datasets.")
     return datasets
 
 
@@ -745,7 +788,7 @@ class PyVistaPreviewer:
                     raise
 
         pv = self._ensure_backend()
-        plotter = pv.Plotter(window_size=(1280, 800))
+        plotter = pv.Plotter(window_size=(1280, 800), off_screen=screenshot_path is not None)
         self._configure_plotter(plotter, show_bounds=show_bounds, show_axes=show_axes)
         if datasets:
             self._apply_scene(
@@ -760,7 +803,12 @@ class PyVistaPreviewer:
 
         if screenshot_path is not None:
             screenshot_path.parent.mkdir(parents=True, exist_ok=True)
-            plotter.show(title="Impression Preview", auto_close=True, screenshot=str(screenshot_path))
+            plotter.show(
+                title="Impression Preview",
+                auto_close=True,
+                interactive=False,
+                screenshot=str(screenshot_path),
+            )
             plotter.close()
             return
 
@@ -1078,10 +1126,18 @@ class PyVistaPreviewer:
             self._pv = pv
         return self._pv
 
-    def collect_datasets(self, scene: object) -> List[Mesh | Polyline]:
+    def collect_datasets(
+        self,
+        scene: object,
+        *,
+        tessellation_request: TessellationRequest | NormalizedTessellationRequest | None = None,
+    ) -> List[Mesh | Polyline]:
         """Return all meshes contained within a scene object."""
 
-        datasets = _collect_datasets_from_scene(scene)
+        datasets = _collect_datasets_from_scene(
+            scene,
+            tessellation_request=tessellation_request,
+        )
         self._log_mesh_analysis(datasets)
         return datasets
 

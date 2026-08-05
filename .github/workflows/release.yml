@@ -6,39 +6,160 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-release:
-    runs-on: ubuntu-latest
+  test:
+    runs-on: macos-14
     env:
       CMAKE_ARGS: "-DMANIFOLD_PAR=OFF"
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      PYTHONPATH: "src"
+      PYVISTA_OFF_SCREEN: "true"
+      QT_OPENGL: "software"
+      QT_QPA_PLATFORM: "offscreen"
     steps:
-      - name: Checkout
+      - name: Checkout candidate
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
 
-      - name: Install build tools
+      - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --upgrade build
+          python -m pip install -r requirements.txt
 
-      - name: Build package artifacts
-        run: |
-          python -m build
+      - name: Run full candidate suite
+        run: python -m pytest
 
-      - name: Package docs zip
-        run: |
-          python scripts/release/package_docs_zip.py --ref "${GITHUB_REF_NAME}"
-
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v2
+  qualify:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      CMAKE_ARGS: "-DMANIFOLD_PAR=OFF"
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
         with:
-          files: |
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install build and qualification tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade build packaging
+
+      - name: Build package artifacts once
+        run: python -m build
+
+      - name: Package docs ZIP once
+        run: python scripts/release/package_docs_zip.py --ref "${GITHUB_REF_NAME}"
+
+      - name: Smoke exact wheel in a fresh environment
+        run: |
+          python -m venv "${RUNNER_TEMP}/wheel-smoke"
+          "${RUNNER_TEMP}/wheel-smoke/bin/python" -m pip install --upgrade pip
+          "${RUNNER_TEMP}/wheel-smoke/bin/python" -m pip install dist/*.whl
+          "${RUNNER_TEMP}/wheel-smoke/bin/python" scripts/release/smoke_installed_candidate.py \
+            --expected-version "${GITHUB_REF_NAME#v}" \
+            --docs-archive "dist/impression-docs-${GITHUB_REF_NAME}.zip"
+          "${RUNNER_TEMP}/wheel-smoke/bin/python" -m pip check
+
+      - name: Smoke exact sdist in a separate fresh environment
+        run: |
+          python -m venv "${RUNNER_TEMP}/sdist-smoke"
+          "${RUNNER_TEMP}/sdist-smoke/bin/python" -m pip install --upgrade pip
+          "${RUNNER_TEMP}/sdist-smoke/bin/python" -m pip install dist/*.tar.gz
+          "${RUNNER_TEMP}/sdist-smoke/bin/python" scripts/release/smoke_installed_candidate.py \
+            --expected-version "${GITHUB_REF_NAME#v}" \
+            --docs-archive "dist/impression-docs-${GITHUB_REF_NAME}.zip"
+          "${RUNNER_TEMP}/sdist-smoke/bin/python" -m pip check
+
+      - name: Emit qualified immutable manifest
+        run: |
+          python scripts/release/artifact_manifest.py create \
+            --tag "${GITHUB_REF_NAME}" \
+            --manifest dist/qualified-artifacts.json
+          python scripts/release/artifact_manifest.py verify \
+            --tag "${GITHUB_REF_NAME}" \
+            --manifest dist/qualified-artifacts.json
+
+      - name: Transfer only qualified release inputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: qualified-release-assets
+          path: |
             dist/*.whl
             dist/*.tar.gz
             dist/impression-docs-${{ github.ref_name }}.zip
+            dist/qualified-artifacts.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: qualify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Download qualified release inputs
+        uses: actions/download-artifact@v4
+        with:
+          name: qualified-release-assets
+          path: dist
+
+      - name: Verify manifest, tag, version, assets, and hashes
+        id: verify
+        run: |
+          python -m pip install --upgrade packaging
+          python scripts/release/artifact_manifest.py verify \
+            --tag "${GITHUB_REF_NAME}" \
+            --manifest dist/qualified-artifacts.json \
+            --github-output "${GITHUB_OUTPUT}"
+
+      - name: Publish qualified release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ steps.verify.outputs.prerelease }}
+          files: ${{ steps.verify.outputs.files }}
+          fail_on_unmatched_files: true
+
+      - name: Verify published release metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_PRERELEASE: ${{ steps.verify.outputs.prerelease }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" > "${RUNNER_TEMP}/release.json"
+          python - "dist/qualified-artifacts.json" "${RUNNER_TEMP}/release.json" <<'PY'
+          import json
+          import os
+          import sys
+
+          manifest = json.load(open(sys.argv[1]))
+          release = json.load(open(sys.argv[2]))
+          expected_names = sorted(item["name"] for item in manifest["artifacts"])
+          actual_names = sorted(item["name"] for item in release["assets"])
+          expected_prerelease = os.environ["EXPECTED_PRERELEASE"] == "true"
+          assert release["tag_name"] == manifest["tag"]
+          assert release["prerelease"] is expected_prerelease
+          assert actual_names == expected_names
+          PY

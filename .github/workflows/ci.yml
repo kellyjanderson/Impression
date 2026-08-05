@@ -4,14 +4,46 @@ on:
   push:
     branches: [ main ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, working ]
 
 jobs:
+  candidate-suite:
+    runs-on: macos-14
+    env:
+      CMAKE_ARGS: "-DMANIFOLD_PAR=OFF"
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      PYTHONPATH: "src"
+      PYVISTA_OFF_SCREEN: "true"
+      QT_OPENGL: "software"
+      QT_QPA_PLATFORM: "offscreen"
+    steps:
+      - name: Checkout exact reference artifacts
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install candidate dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run full candidate suite
+        run: python -m pytest
+
   build-test:
     runs-on: ubuntu-latest
     env:
       CMAKE_ARGS: "-DMANIFOLD_PAR=OFF"
+      LIBGL_ALWAYS_SOFTWARE: "1"
       PYTHONPATH: "src"
+      PYVISTA_OFF_SCREEN: "true"
+      QT_OPENGL: "software"
+      QT_QPA_PLATFORM: "offscreen"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,8 +86,21 @@ jobs:
       - name: Run tests
         run: |
           python -m pytest \
-            tests/test_sdf.py \
+            tests/test_release_metadata.py \
             tests/test_reference_review_preview_payload.py \
             tests/test_reference_review_preview_payload_controller.py \
-            tests/test_reference_review_ui_shell.py \
-            tests/test_reference_review_ui_workflow.py
+            tests/test_reference_review_ui_workflow.py \
+            tests/test_reference_review_ui_shell.py
+
+      - name: Repeat Linux reference-review UI lifecycle with crash diagnostics
+        run: |
+          timeout 120s python -X faulthandler -m pytest tests/test_reference_review_ui_shell.py -q
+
+      - name: Smoke test clean installer and CLI entrypoints
+        run: |
+          scripts/dev/install_impression.sh \
+            --from-local \
+            --venv "${RUNNER_TEMP}/impression-release-smoke"
+          "${RUNNER_TEMP}/impression-release-smoke/bin/python" -m impression.cli --version
+          "${RUNNER_TEMP}/impression-release-smoke/bin/impression" --version
+          "${RUNNER_TEMP}/impression-release-smoke/bin/python" -m pip check
