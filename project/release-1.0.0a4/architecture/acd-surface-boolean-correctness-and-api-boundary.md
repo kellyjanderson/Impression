@@ -1,7 +1,7 @@
 # Surface Boolean Correctness And API Boundary Architectural Change Document
 
 Date: 2026-08-04
-Status: In Progress
+Status: Implementation Complete; Canonical Reconciliation Pending
 Canonical architecture targets:
 
 - `project/release-0.1.0a/architecture/csg-coincident-contact-architecture.md`
@@ -197,7 +197,8 @@ yet reconstruct exactly.
 
 ## Conformance Checklist
 
-- [ ] Implementation conforms to the target architecture.
+- [x] Implementation conforms to the target architecture within the declared
+  bounded exact-support and truthful-refusal envelope.
 - [x] Fix 02 rectangular-loft face-touch/overlap merger conforms and passes the public preview/export route.
 - [x] Fix 08A bounds-pruned loft difference intersections produce closed provenance-bearing trim fragments or precise refusal.
 - [x] Fix 09A normalizes every surfaced difference result into validated changed, unchanged, or ambiguous evidence.
@@ -205,6 +206,9 @@ yet reconstruct exactly.
 - [x] Final leaves are independently reviewed and canonicalized.
 - [x] Paired test specs point to canonical leaves.
 - [x] Final progression preserves no-op gate and API migration prerequisites.
+- [x] Fix 07A and Fix 07B align runtime signatures, top-level exports,
+  documentation, tutorials, executable examples, preview/export consumption,
+  and the isolated clean-wheel contract.
 - [ ] Canonical CSG/API architecture is reconciled after implementation.
 
 ## Closure Criteria
@@ -221,6 +225,12 @@ architecture records the conformed solver and compatibility boundaries.
 
 ## Change History
 
+- 2026-08-05 - Completed Fix 07A and Fix 07B. Reason: the public modeling
+  boolean boundary now accepts only `SurfaceBody`, returns
+  `SurfaceBooleanResult`, rejects mesh representations before dispatch, keeps
+  mesh union under `impression.modeling.mesh_tools`, and is consistent across
+  source, reference docs, tutorials, executable examples, preview/export
+  consumers, and an isolated installed wheel.
 - 2026-08-04 - Completed Fix 09B. Reason: the shared public difference gate now
   requires changed interacting evidence for success, reports proven disjoint
   clones as explicit no-cut, and rejects unchanged overlap, tangent, ambiguous,

@@ -1,216 +1,204 @@
-# Modeling — CSG Helpers
+# Modeling — Surface Booleans
 
-Mesh compatibility helpers are imported from `impression.modeling`:
+Impression's public modeling booleans operate on `SurfaceBody` geometry. They
+never accept triangle meshes as modeling operands and never convert meshes back
+into surface truth.
 
 ```python
 from impression.modeling import (
-    boolean_union,
+    SurfaceBooleanResult,
     boolean_difference,
     boolean_intersection,
-    make_box_mesh,
-    make_cylinder_mesh,
-    union_meshes,
-)
-```
-
-Booleans propagate per-object colors onto result faces. Union/intersection faces keep the originating mesh color; difference assigns new cut faces to the cutter’s color.
-If no input colors are provided, the result uses the default preview color.
-
-The mesh-lane helpers operate on internal triangle meshes and use `manifold3d`
-for robust, watertight-aware booleans. Feed them mesh-specific inputs such as
-`make_*_mesh(...)` or a mesh produced by an explicit tessellation boundary. Do
-not treat public `make_*` primitives as mesh constructors; those return
-`SurfaceBody` by default.
-Install requirement: `pip install manifold3d`.
-
-## Surface-First Status
-
-Surface-body booleans are still in migration, so the public boolean execution helpers remain mesh-primary for now. The surfaced work that is ready today is the canonical input-preparation layer:
-
-```python
-from impression.modeling import (
+    boolean_union,
     make_box,
-    prepare_surface_boolean_difference_operands,
-    prepare_surface_boolean_operands,
-    surface_boolean_overlap_fragments,
-    surface_boolean_intersection_stage,
-)
-
-left = make_box(size=(1.0, 1.0, 1.0))
-right = make_box(size=(1.0, 1.0, 1.0), center=(0.25, 0.0, 0.0))
-
-prepared_union = prepare_surface_boolean_operands("union", [left, right])
-prepared_difference = prepare_surface_boolean_difference_operands(left, [right])
-intersection_stage = surface_boolean_intersection_stage(prepared_union)
-overlap_fragments = surface_boolean_overlap_fragments(
-    prepare_surface_boolean_operands("intersection", [left, right])
 )
 ```
 
-Current surfaced boolean eligibility rules are explicit and deterministic:
-
-- operands must be `SurfaceBody` instances
-- each operand must contain exactly one shell
-- each shell must be connected
-- each operand must be closed-valid under shell seam and boundary truth
-- canonical preparation bakes attached transforms into patch geometry before later execution
-
-This preparation layer exists so surfaced boolean execution can land on top of a stable input contract instead of silently falling back to mesh truth.
-
-The first bounded execution helper is also available now:
-
-- `surface_boolean_intersection_stage(...)`
-- `surface_boolean_overlap_fragments(...)` for the current overlap-intersection box slice
-
-That helper currently computes deterministic surfaced cut-curve and patch
-classification records, including bounded split-selection records, for the
-intentionally small initial scope:
-
-- exactly two operands
-- simple single-shell axis-aligned planar box-style operands without trims
-
-More general surfaced boolean execution is still tracked by the remaining open
-surface boolean execution leaves.
-
-The public boolean helpers are surfacebody-result APIs. Today that surfacebody route:
-
-- validates and canonicalizes `SurfaceBody` operands
-- can return a structured `SurfaceBooleanResult`
-- runs supported reconstructed outputs through a deterministic surfaced validity gate with bounded cleanup
-- never emits a legacy mesh deprecation warning
-- succeeds for a very small bounded initial scope:
-  - exact no-cut disjoint, touching, equal, and exact-containment cases in the current supported primitive families
-  - `intersection` of simple overlapping axis-aligned box-style operands
-  - `union` of simple overlapping axis-aligned box-style operands when the result stays a single connected orthogonal surfaced shell
-  - `difference` of simple overlapping axis-aligned box-style operands when the result stays a single connected orthogonal surfaced shell
-  - `union` of simple disjoint surfaced operands as a multi-shell surfaced result
-  - `union` when one bounded supported surfaced operand exactly contains the other or both are equal
-  - `difference` when the cutter is disjoint from the base, or fully removes it through an exact no-cut relation
-- remains explicitly unsupported for broader surfaced boolean cases
-
-That means callers can start moving onto the surfaced contract now without pretending the general surface boolean kernel is already finished.
-
-Within that surfaced lane, result posture is now explicit across three caller-facing outcomes:
-
-- `status="succeeded"` for accepted surfaced results
-- `status="invalid"` when bounded cleanup cannot make a reconstructed surfaced result pass the validity gate
-- `status="unsupported"` when the current surfaced execution slice does not implement the requested case yet
-
-## Migration Posture
-
-The public boolean APIs now separate surfacebody modeling from explicit mesh compatibility:
-
-- surfacebody-result APIs: public boolean helpers validate `SurfaceBody` operands and return `SurfaceBooleanResult`
-- explicit mesh compatibility: `union_meshes(...)` and `make_*_mesh(...)` stay behind mesh-named helpers
-
-The surfaced lane is the migration contract for downstream callers that want to stop depending on mesh-primary boolean truth. It is intentionally honest:
-
-- surfaced inputs are validated and canonicalized
-- surfaced results are explicit and structured
-- supported reconstructed results get only bounded deterministic cleanup such as duplicate seam-use removal and canonical ordering
-- invalid surfaced reconstruction remains explicit instead of silently falling back to mesh
-- unsupported execution stays surfaced and does not fall back to mesh
-- legacy mesh deprecation posture remains in place for the executable mesh lane
-
-If you need triangle output, tessellate accepted `SurfaceBody` results or use explicit mesh compatibility helpers at mesh-consumer boundaries.
-
-## Reference Readiness
-
-The surfaced CSG reference program has two representative overlap-evidence
-fixtures active today:
-
-- `surfacebody/csg_union_box_post`
-- `surfacebody/csg_difference_slot`
-
-Those active overlap fixtures carry:
-
-- dirty and clean reference images
-- dirty and clean reference STL files
-- triptych-style operand/result presentation so operand A, result, and operand
-  B stay visible in one deterministic render
-- canonical slice artifacts with an asymmetric edge-protrusion cue so rotated
-  section truth fails clearly
-
-The still-open initial matrix also includes:
-
-- `surfacebody/csg_intersection_box_sphere`
-
-That named intersection entry remains part of the required surfaced CSG
-promotion matrix, but it is still open because the bounded surfaced execution
-lane does not yet own a meaningful partial-overlap box/sphere result.
-
-Orientation-sensitive fixtures may carry canonical slice artifacts:
-
-- expected section bitmap
-- recovered section bitmap
-- visual diff bitmap
-
-Those slice checks classify whether the recovered section is the same shape with
-the same orientation, the same shape but rotated, or a different shape.
-
-## boolean_union(meshes, tolerance=1e-4)
-- Combine two or more meshes into a single body.
-- `meshes`: iterable of internal meshes (`Mesh`/`MeshGroup`).
-- `tolerance`: reserved for future mesh hygiene tuning.
-- Example: `docs/examples/csg/union_example.py` (blue box + orange cylinder)
-- Preview: `impression preview docs/examples/csg/union_example.py`
+All three functions return `SurfaceBooleanResult`. Inspect the result before
+passing its body to preview, export, or another modeling operation:
 
 ```python
-from impression.modeling import boolean_union, make_box_mesh, make_cylinder_mesh
+result = boolean_union(
+    [
+        make_box(size=(2, 2, 1), center=(-0.5, 0, 0)),
+        make_box(size=(2, 2, 1), center=(0.5, 0, 0)),
+    ]
+)
+
+if result.status != "succeeded" or result.body is None:
+    raise RuntimeError(result.failure_reason or "Surface union did not produce a body.")
+
+body = result.body
+```
+
+This explicit envelope keeps unsupported geometry, invalid reconstruction, and
+valid no-cut outcomes distinct from successful changed geometry.
+
+## Public Contract
+
+```text
+boolean_union(bodies: Iterable[SurfaceBody], tolerance: float = 1e-4) -> SurfaceBooleanResult
+boolean_difference(base: SurfaceBody, cutters: Iterable[SurfaceBody], tolerance: float = 1e-4) -> SurfaceBooleanResult
+boolean_intersection(bodies: Iterable[SurfaceBody], tolerance: float = 1e-4) -> SurfaceBooleanResult
+```
+
+The operand collection is named `bodies`, not `meshes`. Runtime validation
+happens before CSG family selection or kernel dispatch. Passing `Mesh`,
+`MeshGroup`, or a mixed collection raises `TypeError` and points to the separate
+mesh-tool namespace.
+
+Every surfaced operand must be closed-valid. Preparation bakes attached
+transforms into patch geometry and preserves the structured evidence used by
+the execution and validity gates.
+
+## Result Statuses
+
+- `succeeded`: the operation produced an accepted surfaced result.
+- `no-cut`: a difference was proven disjoint and retains the unchanged closed
+  base honestly.
+- `invalid`: the candidate contradicted the public result contract or failed
+  closure, seam, operand-witness, or change validation.
+- `unsupported`: the exact surface kernel does not implement the requested
+  geometry family or topology.
+
+Successful results provide `result.body`. Invalid and unsupported results do
+not expose partial geometry. Surface difference additionally publishes
+normalized geometry-change evidence and a public success-gate decision so an
+unchanged interacting result cannot be mislabeled as success.
+
+## `boolean_union(bodies, tolerance=1e-4)`
+
+Combine two or more closed surface bodies. Supported coincident-contact routes
+remove interior faces and validate the reconstructed shell before returning
+success.
+
+```python
+from impression.modeling import boolean_union, make_box
+
 
 def build():
-    box = make_box_mesh(size=(2, 2, 1))
-    cyl = make_cylinder_mesh(radius=0.6, height=1.5)
-    return boolean_union([box, cyl])
+    left = make_box(size=(2, 2, 1), center=(-0.5, 0, 0))
+    right = make_box(size=(2, 2, 1), center=(0.5, 0, 0))
+    result = boolean_union([left, right])
+    if result.status != "succeeded" or result.body is None:
+        raise RuntimeError(result.failure_reason or "Surface union failed.")
+    return result.body
 ```
+
+Example: `docs/examples/csg/union_example.py`
 
 ![Union CSG](../assets/previews/csg-union.png)
 
-You can also union a collection directly with `union_meshes`, which accepts either an iterable or a mapping (e.g., dict) of meshes:
+## `boolean_difference(base, cutters, tolerance=1e-4)`
+
+Subtract one or more closed surface cutters from a closed surface base.
+Successful interacting results must contain a real reconstructed cut and pass
+the shared difference success gate.
 
 ```python
-from impression.modeling import make_box_mesh, make_cylinder_mesh, union_meshes
+from impression.modeling import boolean_difference, make_box
+
 
 def build():
-    a = make_box_mesh(size=(2, 2, 1), color="#5A7BFF")
-    b = make_cylinder_mesh(radius=0.8, height=1.5, color="#FF7A18")
-    return union_meshes({"box": a, "cyl": b})
+    base = make_box(size=(3, 2, 2))
+    cutter = make_box(size=(1.5, 1, 3), center=(1, 0, 0))
+    result = boolean_difference(base, [cutter])
+    if result.status not in {"succeeded", "no-cut"} or result.body is None:
+        raise RuntimeError(result.failure_reason or "Surface difference failed.")
+    return result.body
 ```
 
-Example: `docs/examples/csg/union_meshes_example.py`
-
-`union_meshes(...)` is retained as an explicit standalone mesh tool. It is
-useful for analysis, repair, and debugging workflows, but it should not be read
-as canonical surfaced modeling truth.
-
-## boolean_difference(base, cutters, tolerance=1e-4)
-- Subtract one or more cutter meshes from `base`.
-- Example: `docs/examples/csg/difference_example.py`
-- Preview: `impression preview docs/examples/csg/difference_example.py`
-
-```python
-from impression.modeling import boolean_difference, make_box_mesh, make_cylinder_mesh
-
-def build():
-    base = make_box_mesh(size=(2, 2, 2))
-    cutter = make_cylinder_mesh(radius=0.4, height=2.5)
-    return boolean_difference(base, [cutter])
-```
+Example: `docs/examples/csg/difference_example.py`
 
 ![Difference CSG](../assets/previews/csg-difference.png)
 
-## boolean_intersection(meshes, tolerance=1e-4)
-- Keep only overlapping volume among provided meshes.
-- Example: `docs/examples/csg/intersection_example.py`
-- Preview: `impression preview docs/examples/csg/intersection_example.py`
+## `boolean_intersection(bodies, tolerance=1e-4)`
+
+Keep only the shared volume of two or more closed surface bodies.
 
 ```python
-from impression.modeling import boolean_intersection, make_box_mesh, make_sphere_mesh
+from impression.modeling import boolean_intersection, make_box
+
 
 def build():
-    box = make_box_mesh(size=(2, 2, 2))
-    sphere = make_sphere_mesh(radius=1.2)
-    return boolean_intersection([box, sphere])
+    left = make_box(size=(2, 2, 2), center=(-0.5, 0, 0))
+    right = make_box(size=(2, 2, 2), center=(0.5, 0, 0))
+    result = boolean_intersection([left, right])
+    if result.status != "succeeded" or result.body is None:
+        raise RuntimeError(result.failure_reason or "Surface intersection failed.")
+    return result.body
 ```
 
+Example: `docs/examples/csg/intersection_example.py`
+
 ![Intersection CSG](../assets/previews/csg-intersection.png)
+
+## Preview And Export
+
+Model modules should return the accepted `SurfaceBody`, not the result envelope.
+The preview and export commands tessellate that surface only at their consumer
+boundary:
+
+```bash
+impression preview docs/examples/csg/union_example.py
+impression export docs/examples/csg/union_example.py --output dist/union.stl --overwrite
+```
+
+Code that needs a mesh directly can use
+`tessellate_surface_body(body, export_tessellation_request())` after the boolean
+result has succeeded.
+
+## Explicit Mesh Tools
+
+Meshes remain useful for downstream analysis, repair, debugging, and terminal
+interchange. Those operations live in `impression.modeling.mesh_tools`, outside
+the public modeling boolean API:
+
+```python
+from impression.modeling import make_box_mesh, make_cylinder_mesh
+from impression.modeling.mesh_tools import union_meshes
+
+
+mesh = union_meshes(
+    {
+        "box": make_box_mesh(size=(2, 2, 1)),
+        "cylinder": make_cylinder_mesh(radius=0.8, height=1.5),
+    }
+)
+```
+
+`union_meshes(...)` is retained as an explicit standalone mesh tool. It is not
+canonical surfaced modeling truth and is intentionally absent from the
+top-level `impression.modeling` export table.
+
+Example: `docs/examples/csg/union_meshes_example.py`
+
+## Current Exact Scope
+
+The surface kernel supports bounded exact routes, including:
+
+- disjoint, touching, equal, and containment classifications for supported
+  primitive families;
+- overlapping axis-aligned box union, difference, and intersection;
+- coplanar loft-body contact union with interior-patch removal;
+- exact rectangular-loft/orthogonal-box difference reconstruction;
+- explicit structured refusal for unsupported higher-order or underconstrained
+  topology.
+
+Unsupported execution remains surfaced and does not fall back to mesh. Accepted
+reconstructed bodies pass deterministic seam, adjacency, closure, provenance,
+and operand-witness validation.
+
+## Reference Readiness
+
+The surfaced CSG reference program includes:
+
+- `surfacebody/csg_union_box_post`
+- `surfacebody/csg_difference_slot`
+- `surfacebody/csg_intersection_box_sphere`
+
+Reference cases carry dirty and clean reference images, dirty and clean
+reference STL files, and triptych-style operand/result presentation. Canonical
+slice artifacts use an asymmetric edge-protrusion cue and compare the expected
+section bitmap, recovered section bitmap, and visual diff bitmap, distinguishing
+the same shape from the same shape but rotated.

@@ -1,7 +1,7 @@
-"""Solid tombstone: box + rounded top, fused via boolean_union.
+"""Solid tombstone mesh tool: box + rounded top fused via union_meshes.
 
 Run with:
-  impression preview docs/examples/csg/tooth_example.py
+  impression preview docs/examples/csg/tooth_union_example.py
 """
 
 from __future__ import annotations
@@ -10,7 +10,8 @@ from pathlib import Path
 
 from impression.io import write_stl
 
-from impression.modeling import boolean_union, rotate, make_box_mesh, make_cylinder_mesh
+from impression.modeling import rotate, make_box_mesh, make_cylinder_mesh
+from impression.modeling.mesh_tools import union_meshes
 
 
 def build():
@@ -21,7 +22,7 @@ def build():
     cap = make_cylinder_mesh(radius=2.5, height=cap_height, center=(0.0, 0.0, 0.0), color=(0.5,0.5,0.5,1.0))
     rotate(cap, axis=(1.0, 0.0, 0.0), angle_deg=90)
     # Fuse into a single solid; tolerance kept small to avoid masking geometry issues.
-    mesh = boolean_union([body, cap], tolerance=1e-4)
+    mesh = union_meshes([body, cap], tolerance=1e-4)
 
     return mesh
 

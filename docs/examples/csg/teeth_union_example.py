@@ -11,7 +11,8 @@ from pathlib import Path
 
 from impression.io import write_stl
 
-from impression.modeling import make_cylinder_mesh, union_meshes
+from impression.modeling import make_cylinder_mesh
+from impression.modeling.mesh_tools import union_meshes
 
 
 def build():

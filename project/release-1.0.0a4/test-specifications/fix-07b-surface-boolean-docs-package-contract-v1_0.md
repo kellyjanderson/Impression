@@ -1,7 +1,7 @@
 # Fix 07B Test: Surface Boolean Docs And Package Contract
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Feature spec: [Fix 07B: Surface Boolean Docs And Package Contract](../specifications/fix-07b-surface-boolean-docs-package-contract-v1_0.md)
 Feature spec canonical status: Canonical
 Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
@@ -59,6 +59,25 @@ This canonical paired contract verifies the complete retained split-child bounda
 ## Acceptance
 
 - [x] Feature child is canonical.
-- [ ] Route-level proof exists for library-only.
-- [ ] Helper-only tests cannot satisfy the contract.
-- [ ] Observable results and failure behavior are asserted.
+- [x] Route-level proof exists for library-only.
+- [x] Helper-only tests cannot satisfy the contract.
+- [x] Observable results and failure behavior are asserted.
+
+## Validation Evidence
+
+- Documentation assertions cover all public signatures, statuses, result-body
+  consumption, early `TypeError`, exact support posture, and the explicit mesh
+  tool namespace.
+- The three primary examples execute through `impression.modeling` and their
+  accepted bodies tessellate for both preview and export consumers.
+- The real CLI rendered the union example to a non-empty offscreen preview PNG
+  and exported it to a non-empty binary STL.
+- AST and inventory guards prevent `union_meshes` from returning to the
+  top-level modeling export and prevent mesh constructors from entering the
+  surfaced boolean examples.
+- The wheel is built and installed into an isolated target; its module origin,
+  annotations, exports, successful surfaced call, and mesh refusal are checked
+  in a fresh subprocess outside the source checkout.
+- Paired Fix 07B contract: 7 passed.
+- Focused docs, CSG, mesh-tool, and preview group: 284 passed.
+- Full repository suite: 1,781 passed.
