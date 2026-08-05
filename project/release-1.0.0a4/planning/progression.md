@@ -220,13 +220,16 @@ prerequisites are complete; the whole preceding wave need not finish first.
 
 ### Fix 08C: Loft Difference Result-Shell Reconstruction
 
-- [ ] Implement retained-fragment classification, cutter-derived boundaries, seam rebuild, and closed result-shell validation.
+- [x] Implement retained-fragment classification, cutter-derived boundaries, seam rebuild, and closed result-shell validation.
   - Specification: [Fix 08C](../specifications/fix-08c-loft-difference-result-shell-reconstruction-v1_0.md)
   - Prerequisites: [Fix 08A](../specifications/fix-08a-loft-difference-trim-fragment-construction-v1_0.md), [Fix 08B](../specifications/fix-08b-loft-difference-branch-decomposition-v1_0.md), [Fix 09B](../specifications/fix-09b-difference-public-success-gate-v1_0.md)
-- [ ] Wire reconstructed results into public `boolean_difference` and preview/export consumers.
-- [ ] Validate public cut fixtures plus preview/export consumer smoke with truthful failure behavior.
+- [x] Wire reconstructed results into public `boolean_difference` and preview/export consumers.
+- [x] Validate public cut fixtures plus preview/export consumer smoke with truthful failure behavior.
   - Test specification: [Fix 08C Test](../test-specifications/fix-08c-loft-difference-result-shell-reconstruction-v1_0.md)
-- [ ] Update surface-boolean docs, progression, and ACD status after route validation.
+- [x] Update surface-boolean docs, progression, and ACD status after route validation.
+  - Exact rectangular-loft/axis-aligned-box cuts reconstruct a closed changed
+    surface shell; rotated and underconstrained branching candidates remain
+    precise no-mesh refusals.
 
 ## Wave 6: Public Boolean Contract
 

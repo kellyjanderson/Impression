@@ -9,6 +9,11 @@ import warnings
 
 from impression.mesh import Mesh
 from impression.modeling.drawing2d import make_circle, make_rect
+from impression.modeling.tessellation import (
+    export_tessellation_request,
+    preview_tessellation_request,
+    tessellate_surface_body,
+)
 from tests.csg_reference_fixtures import (
     build_csg_difference_slot_fixture,
     build_csg_union_box_post_fixture,
@@ -3927,7 +3932,8 @@ def test_loft_difference_executor_builds_bounds_pruned_closed_fragments_with_pro
     route = select_loft_csg_route(operands)
 
     construction = construct_loft_difference_trim_fragments(operands, route=route)
-    result = execute_loft_primitive_trim_fragment_csg(operands)
+    route_result = execute_loft_primitive_trim_fragment_csg(operands)
+    result = boolean_difference(body, [cutter])
 
     assert isinstance(construction, LoftDifferenceTrimFragmentConstructionRecord)
     assert construction.supported is True
@@ -3944,16 +3950,73 @@ def test_loft_difference_executor_builds_bounds_pruned_closed_fragments_with_pro
         for loop in fragment.trim_loops
     )
 
-    assert result is not None
-    assert result.status == "unsupported"
-    assert "result-shell reconstruction is owned by Fix 08C" in str(result.failure_reason)
-    payload = json.loads(str(result.failure_reason).split("loft_primitive_trim_adapter=", 1)[1])
+    assert route_result is not None
+    assert route_result.status == "succeeded"
+    assert route_result.body is not None
+    assert route_result.body.shell_count == 1
+    assert result.status == "succeeded"
+    assert result.classification == "closed"
+    assert result.body is not None
+    assert result.body.shell_count == 1
+    assert result.difference_evidence is not None
+    assert result.difference_evidence.changed is True
+    assert result.difference_evidence.cutter_interaction is True
+    assert result.difference_gate is not None
+    assert result.difference_gate.classification == "success"
+
+    payload = result.body.kernel_metadata()["loft_primitive_csg"]
     route_construction = payload["trim_fragment_construction"]
     assert route_construction["supported"] is True
     assert len(route_construction["candidate_pairs"]) == len(construction.candidate_pairs)
     assert len(route_construction["intersection_evidence"]) == len(construction.intersection_evidence)
     assert len(route_construction["base_fragments"]) == len(construction.base_fragments)
     assert len(route_construction["cutter_fragments"]) == len(construction.cutter_fragments)
+    reconstruction = payload["result_shell_reconstruction"]
+    assert reconstruction["supported"] is True
+    assert reconstruction["retained_base_fragment_ids"]
+    assert reconstruction["retained_cutter_fragment_ids"]
+    assert reconstruction["cutter_boundary_orientation"] == "reversed-for-difference"
+    assert reconstruction["closed_shell_required"] is True
+    assert reconstruction["no_mesh_fallback"] is True
+
+    patch_roles = {
+        patch.kernel_metadata()["generated_role"]
+        for patch in result.body.iter_patches(world=True)
+    }
+    assert patch_roles == {
+        "loft_difference_retained_base_fragment",
+        "loft_difference_reversed_cutter_boundary",
+    }
+    for request in (preview_tessellation_request(), export_tessellation_request(require_watertight=True)):
+        tessellation = tessellate_surface_body(result.body, request)
+        assert len(tessellation.mesh.vertices) > 0
+        assert len(tessellation.mesh.faces) > 0
+
+
+def test_loft_difference_result_shell_precisely_refuses_unvalidated_rotated_box_reconstruction() -> None:
+    body = loft(
+        [make_rect(size=(2.0, 2.0)), make_rect(size=(2.0, 2.0))],
+        path=[(0.0, 0.0, -1.0), (0.0, 0.0, 1.0)],
+        cap_ends=True,
+        samples=8,
+    )
+    angle = np.deg2rad(20.0)
+    transform = np.eye(4, dtype=float)
+    transform[0, 0] = np.cos(angle)
+    transform[0, 1] = -np.sin(angle)
+    transform[1, 0] = np.sin(angle)
+    transform[1, 1] = np.cos(angle)
+    transform[2, 3] = 1.0
+    cutter = make_box(size=(0.6, 0.6, 1.0)).with_transform(transform)
+
+    result = boolean_difference(body, [cutter])
+
+    assert isinstance(result, SurfaceBooleanResult)
+    assert result.status == "unsupported"
+    assert result.body is None
+    assert result.failure_reason is not None
+    assert "result-shell reconstruction refused" in result.failure_reason
+    assert "no_mesh_fallback=True" in result.failure_reason
 
 
 @pytest.mark.parametrize("operation", ("union", "intersection"))
