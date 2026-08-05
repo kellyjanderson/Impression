@@ -6,8 +6,8 @@ Primary ancestor: [Active ACD](../architecture/acd-preview-reload-coordination.m
 Architecture ancestor: [Active ACD](../architecture/acd-preview-reload-coordination.md)
 Source artifact: [GitHub issue #242](https://github.com/kellyjanderson/Impression/issues/242)
 Split provenance: none
-Canonical status: Draft
-Review Score: pending independent review
+Canonical status: Archived
+Review Score: 41
 Prerequisites:
 - none - the current `impression preview` command and existing renderer-thread scene-application contract are the baseline
 
@@ -49,15 +49,25 @@ Restore the a3-missed live-preview contract by making filesystem delivery prompt
 
 ## Split Coverage
 
-- Parent spec: none
-- Parent coverage status: not applicable
-- Parent responsibilities owned by this child: not applicable
-- Parent responsibilities still missing from children: none
-- Issue-level split disposition: none
+- Split parent: this specification
+- Parent coverage status: 100% covered
+- Coverage matrix:
+  - `fix-01a-preview-watch-request-coordination-v1_0.md` - Covered: watcher normalization, bounded request state, event latency, and bursts.
+  - `fix-01b-preview-module-cache-invalidation-v1_0.md` - Covered: forced generation, entry/transitive cache eviction, mtime-neutral reload.
+  - `fix-01c1-preview-refresh-input-wiring-v1_0.md` - Covered: saved-file and `R` input wiring into request coordination and cache invalidation.
+  - `fix-01c2a-preview-current-generation-scene-apply-v1_0.md` - Covered: current-generation UI-thread scene application and stale-result rejection.
+  - `fix-01c2b-preview-last-good-camera-error-state-v1_0.md` - Covered: camera preservation, last-good scene retention, and error/recovery state.
+- Parent responsibilities still missing from children:
+  - none
+- Parent disposition: Archived after all five final descendants completed fresh review and canonicalization.
 
 ## Refinement History
 
-Not applicable before review. No request review ledger exists; this is a do-specs creation draft.
+| Request ledger | Latest pass | Active specs reviewed | New leaves created this round | Fixed-point status |
+|---|---:|---|---|---|
+| `../spec-refinement-history/a4-open-issues-20260804-165103.md` | 1 | Fixes 01-09 | Fix 01a, Fix 01b, and Fix 01c | continue |
+
+Pass 1 split decision: forced split into Fix 01a, Fix 01b, and Fix 01c.
 
 ## Implementation Routing
 
@@ -128,7 +138,7 @@ Not applicable before review. No request review ledger exists; this is a do-spec
 - Wiring owner/module: `src/impression/preview.py` with cache invalidation in `src/impression/cli.py`
 - Observable result: changed model appears after its real build time; errors remain visible without destroying the last good scene
 - Integration validation: real command smoke plus filesystem-event timing, transitive dependency, mtime-neutral `R`, burst, stale/failure, and camera assertions
-- Incomplete status risk: drafted and route-specified; implementation must prove both console and GUI portions
+- Incomplete status risk: completion requires the declared integrated route and prerequisite sequence to pass
 
 App-type-specific proof:
 
@@ -225,25 +235,25 @@ App-type-specific proof:
 ## Review Score Calculation
 
 - Template source: `/Users/k/Documents/Projects/.agents/process/templates/implementation-spec-template.md`
-- Prior recorded score: none
-- Adversarial rescore basis: pending independent `review specs`; this creation action does not count or certify categories.
-- Functions/methods: pending independent review
-- Data structures/models: pending independent review
-- Dependencies/services: pending independent review
-- Returns/outputs/signals: pending independent review
-- UI surfaces/components: pending independent review
-- UI fields/elements: pending independent review
-- Existing reusable code reused as-is: pending independent review
-- Adding code to an existing library/module: pending independent review
-- Creating a new reusable library/module: pending independent review
-- Database queries/tables/migrations: pending independent review
-- Async/concurrency behavior: pending independent review
-- Destructive/write behavior: pending independent review
-- Security/privacy-sensitive behavior: pending independent review
-- Performance-sensitive behavior: pending independent review
-- Cross-screen reusable behavior: pending independent review
-- Readiness blockers: pending independent review
-- Missing prerequisites: pending independent review
-- Unresolved deferral/gap markers: pending independent review
-- Total: pending independent review
-- If total matches prior score, adversarial survival reason: not applicable until independent review calculates a score.
+- Prior recorded score: pending independent review; rejected as nonnumeric creation placeholder.
+- Adversarial rescore basis: recounted every category from the current text; checked hidden route wiring, reuse, prerequisites, write behavior, concurrency, and performance.
+- Functions/methods: 4 x 2 = 8
+- Data structures/models: 2 x 1 = 2
+- Dependencies/services: 5 x 1 = 5
+- Returns/outputs/signals: 3 x 1 = 3
+- UI surfaces/components: 1 x 2 = 2
+- UI fields/elements: 1 x 1 = 1
+- Existing reusable code reused as-is: 6 x 0.5 = 3
+- Adding code to an existing library/module: 2 x 1 = 2
+- Creating a new reusable library/module: 0 x 3 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 3 x 3 = 9
+- Destructive/write behavior: 0 x 3 = 0
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 3 x 2 = 6
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 0 x 2 = 0
+- Missing prerequisites: 0 x 2 = 0
+- Unresolved deferral/gap markers: 0 x 100 = 0
+- Total: 41
+- If total matches prior score, adversarial survival reason: not applicable; prior score was nonnumeric.

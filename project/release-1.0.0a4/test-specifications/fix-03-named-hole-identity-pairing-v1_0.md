@@ -3,12 +3,12 @@
 Date: 2026-08-04
 Status: Proposed
 Feature spec: [Fix 03: Named Hole Identity Pairing](../specifications/fix-03-named-hole-identity-pairing-v1_0.md)
-Feature spec canonical status: Draft
+Feature spec canonical status: Canonical
 Architecture ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 
 ## Overview
 
-This paired contract verifies the complete draft feature boundary for Fix 03. It remains a draft until independent `review specs` canonicalizes the feature leaf.
+This canonical paired contract verifies the complete retained feature boundary for Fix 03.
 
 ## Application Integration Under Test
 
@@ -57,10 +57,9 @@ This paired contract verifies the complete draft feature boundary for Fix 03. It
 
 ## Acceptance
 
-- [ ] Feature spec is canonical, or this test spec remains explicitly temporary while review/split coverage is incomplete.
+- [x] Feature spec is canonical.
 - [ ] Route-level proof exists for the declared app type.
 - [ ] Helper-only tests cannot satisfy this contract.
 - [ ] Every observable result and feature acceptance criterion is asserted through the intended route.
 - [ ] Failure, stale-result, refusal, or no-cut behavior is covered where applicable.
 - [ ] Focused and full configured suites pass without mesh modeling fallback or test-model workaround geometry.
-

@@ -42,14 +42,13 @@ These ACDs describe desired architecture that is not yet true in `v1.0.0a3`.
 Canonical architecture remains unchanged until implementation conforms and an
 explicit reconciliation pass closes the ACDs.
 
-## Draft Specification Set
+## Canonical Specification Set
 
-Nine draft implementation leaves and nine paired test specifications are
-indexed under [Specifications](specifications/README.md) and
-[Test Specifications](test-specifications/README.md). Issues #246 and #248 are
-each split into two leaves because configuration propagation versus identity
-preservation, and cut execution versus no-op result validation, can fail and be
-delivered independently.
+Independent fixed-point review produced 19 canonical implementation leaves and
+19 paired canonical test specifications, indexed under
+[Specifications](specifications/README.md) and
+[Test Specifications](test-specifications/README.md). Eight superseded parent
+specifications remain archived for split provenance.
 
 The issue-to-leaf disposition is recorded in
 [Known-Issue Intake](planning/known-issue-intake.md).
@@ -58,8 +57,9 @@ The issue-to-leaf disposition is recorded in
 
 The release candidate may be tagged only after:
 
-1. Independent `review specs` reaches a fixed point, assigns valid Review
-   Scores, canonicalizes every retained leaf, and creates the final progression.
+1. Independent `review specs` has reached a fixed point, assigned valid Review
+   Scores, and canonicalized every retained leaf; the final progression must
+   route only these canonical leaves.
 2. Every canonical implementation leaf and paired test leaf is complete.
 3. The real filesystem watcher route meets the specified latency budget on a
    supported local filesystem, and the visible `R` route forces a fresh build.
@@ -88,8 +88,8 @@ The release candidate may be tagged only after:
 
 ## Planning State
 
-This release is specced in draft form. A dependency-ordered implementation
-progression must not be created until `review specs` confirms cohesive final
-leaves and 100% issue responsibility coverage.
+This release has 19 cohesive canonical leaves with 100% issue responsibility
+coverage. The next planning artifact is a dependency-ordered implementation
+progression over only those leaves; review did not create it implicitly.
 
-Exact next workflow command: `review specs`.
+Exact next workflow action: create the final a4 implementation progression.

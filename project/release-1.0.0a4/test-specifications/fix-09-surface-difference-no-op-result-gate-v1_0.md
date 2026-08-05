@@ -3,7 +3,7 @@
 Date: 2026-08-04
 Status: Proposed
 Feature spec: [Fix 09: Surface Difference No-Op Result Gate](../specifications/fix-09-surface-difference-no-op-result-gate-v1_0.md)
-Feature spec canonical status: Draft
+Feature spec canonical status: Archived
 Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 
 ## Overview
@@ -62,4 +62,3 @@ This paired contract verifies the complete draft feature boundary for Fix 09. It
 - [ ] Every observable result and feature acceptance criterion is asserted through the intended route.
 - [ ] Failure, stale-result, refusal, or no-cut behavior is covered where applicable.
 - [ ] Focused and full configured suites pass without mesh modeling fallback or test-model workaround geometry.
-

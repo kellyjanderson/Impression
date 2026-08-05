@@ -6,8 +6,8 @@ Primary ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-co
 Architecture ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 Source artifact: [GitHub issue #244](https://github.com/kellyjanderson/Impression/issues/244)
 Split provenance: none
-Canonical status: Draft
-Review Score: pending independent review
+Canonical status: Canonical
+Review Score: 15
 Prerequisites:
 - none - existing section `TopologyPath` metadata and loft planning records are the baseline
 
@@ -57,7 +57,11 @@ Make stable authored hole identities determine loft correspondence before geomet
 
 ## Refinement History
 
-Not applicable before review. No request review ledger exists; this is a do-specs creation draft.
+| Request ledger | Latest pass | Active specs reviewed | New leaves created this round | Fixed-point status |
+|---|---:|---|---|---|
+| `../spec-refinement-history/a4-open-issues-20260804-165103.md` | 4 | nineteen-leaf active set | none | reached |
+
+Pass 4 split decision: retained. Cohesion reason: identity-first loop pairing is one planner decision with one executor-agreement contract.
 
 ## Implementation Routing
 
@@ -126,7 +130,7 @@ Not applicable before review. No request review ledger exists; this is a do-spec
 - Wiring owner/module: `src/impression/modeling/loft.py`
 - Observable result: plan metadata and output surface follow the named hole paths
 - Integration validation: public planner and executor tests with crossed names and anonymous controls
-- Incomplete status risk: drafted; metadata-only proof is insufficient without executor agreement
+- Incomplete status risk: completion requires the declared integrated route and prerequisite sequence to pass
 
 App-type-specific proof:
 
@@ -203,45 +207,45 @@ App-type-specific proof:
 ## Readiness Checklist
 
 - [x] Primary ancestor and architecture ancestor are explicit.
-- [ ] Review Score appears in front matter and matches a completed independent calculation.
+- [x] Review Score appears in front matter and matches a completed independent calculation.
 - [x] Current implementation-spec template was loaded; its path is recorded below.
-- [ ] Independent adversarial recount completed.
+- [x] Independent adversarial recount completed.
 - [x] No unresolved placeholder is hidden as implementation-ready behavior.
 - [x] Source responsibilities are carried into durable sections.
-- [x] Canonical status is Draft.
+- [x] Canonical status is Canonical.
 - [x] Prerequisites are linked or marked not applicable.
 - [x] Missing/stale architecture is tracked in the active ACD.
 - [x] Missing prerequisite behavior is linked or marked not applicable.
 - [x] Split coverage is recorded for issue-level splits.
-- [x] Review ledger is marked not applicable before review.
+- [x] Review ledger records the completed request-scoped passes.
 - [x] Implementation owner/module and reuse/extraction decisions are named.
 - [x] UI fields/elements and concurrency are explicit or not applicable.
 - [x] Defaults, data ownership, app type, route, performance, privacy, and test strategy are explicit.
 - [x] Acceptance criteria are observable and testable.
-- [ ] Independent `review specs` confirms cohesion, scoring, canonical status, and final progression coverage.
+- [x] Independent `review specs` confirms cohesion, scoring, canonical status, and release responsibility coverage.
 
 ## Review Score Calculation
 
 - Template source: `/Users/k/Documents/Projects/.agents/process/templates/implementation-spec-template.md`
-- Prior recorded score: none
-- Adversarial rescore basis: pending independent `review specs`; this creation action does not count or certify categories.
-- Functions/methods: pending independent review
-- Data structures/models: pending independent review
-- Dependencies/services: pending independent review
-- Returns/outputs/signals: pending independent review
-- UI surfaces/components: pending independent review
-- UI fields/elements: pending independent review
-- Existing reusable code reused as-is: pending independent review
-- Adding code to an existing library/module: pending independent review
-- Creating a new reusable library/module: pending independent review
-- Database queries/tables/migrations: pending independent review
-- Async/concurrency behavior: pending independent review
-- Destructive/write behavior: pending independent review
-- Security/privacy-sensitive behavior: pending independent review
-- Performance-sensitive behavior: pending independent review
-- Cross-screen reusable behavior: pending independent review
-- Readiness blockers: pending independent review
-- Missing prerequisites: pending independent review
-- Unresolved deferral/gap markers: pending independent review
-- Total: pending independent review
-- If total matches prior score, adversarial survival reason: not applicable until independent review calculates a score.
+- Prior recorded score: 15; adversarial input, not trusted.
+- Adversarial rescore basis: fresh terminal recount checked split lineage, UI/control inventory, routes, reuse, prerequisites, writes, concurrency, performance, and deferral markers.
+- Functions/methods: 3 x 2 = 6
+- Data structures/models: 1 x 1 = 1
+- Dependencies/services: 3 x 1 = 3
+- Returns/outputs/signals: 1 x 1 = 1
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Existing reusable code reused as-is: 2 x 0.5 = 1
+- Adding code to an existing library/module: 1 x 1 = 1
+- Creating a new reusable library/module: 0 x 3 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Destructive/write behavior: 0 x 3 = 0
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 1 x 2 = 2
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 0 x 2 = 0
+- Missing prerequisites: 0 x 2 = 0
+- Unresolved deferral/gap markers: 0 x 100 = 0
+- Total: 15
+- If total matches prior score, adversarial survival reason: the score survived a complete terminal recount; no omitted responsibility, blocker, or route was found.

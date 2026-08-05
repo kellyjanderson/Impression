@@ -1,7 +1,7 @@
 # Surface Boolean Correctness And API Boundary Architectural Change Document
 
 Date: 2026-08-04
-Status: Drafting Specs
+Status: In Progress
 Canonical architecture targets:
 
 - `project/release-0.1.0a/architecture/csg-coincident-contact-architecture.md`
@@ -97,31 +97,35 @@ surface union/difference correction so callers have a complete surfaced route.
 ## Specification Sources
 
 - Fix 02: coincident classification and face-touch union shell merger.
-- Fix 07: surface-only public boolean signatures, runtime checks, docs/examples.
-- Fix 08: real loft cut reconstruction and validated branching decomposition.
-- Fix 09: geometry-change and operand-witness postcondition for difference.
+- Fix 07A and Fix 07B: surface-only runtime API plus docs/package conformance.
+- Fix 08A, Fix 08B, and Fix 08C: trim fragments, branch decomposition, and result-shell reconstruction.
+- Fix 09A and Fix 09B: geometry-change evidence and the public success gate.
 - Reuse existing tolerance policy, CSG route records, trim-fragment records,
   seam/adjacency rebuild, validity gate, result envelope, and no-mesh proof.
 
 ## Specification Conformance
 
-- Parent specs created or affected:
-  - [Fix 02 draft](../specifications/fix-02-coplanar-loft-face-touch-union-v1_0.md) - exact face-touch union.
-  - [Fix 07 draft](../specifications/fix-07-surface-only-public-boolean-api-v1_0.md) - public representation boundary.
-  - [Fix 08 draft](../specifications/fix-08-loft-surface-difference-cut-execution-v1_0.md) - real cut construction and branch handling.
-  - [Fix 09 draft](../specifications/fix-09-surface-difference-no-op-result-gate-v1_0.md) - shared success postcondition.
-- Canonical child specs: none yet; independent review is pending.
-- Paired test specs:
-  - [Fix 02 test draft](../test-specifications/fix-02-coplanar-loft-face-touch-union-v1_0.md)
-  - [Fix 07 test draft](../test-specifications/fix-07-surface-only-public-boolean-api-v1_0.md)
-  - [Fix 08 test draft](../test-specifications/fix-08-loft-surface-difference-cut-execution-v1_0.md)
-  - [Fix 09 test draft](../test-specifications/fix-09-surface-difference-no-op-result-gate-v1_0.md)
+- Archived split parents:
+  - [Fix 07](../specifications/fix-07-surface-only-public-boolean-api-v1_0.md)
+  - [Fix 08](../specifications/fix-08-loft-surface-difference-cut-execution-v1_0.md)
+  - [Fix 09](../specifications/fix-09-surface-difference-no-op-result-gate-v1_0.md)
+- Canonical specs:
+  - [Fix 02](../specifications/fix-02-coplanar-loft-face-touch-union-v1_0.md)
+  - [Fix 07A](../specifications/fix-07a-surface-only-boolean-runtime-api-v1_0.md)
+  - [Fix 07B](../specifications/fix-07b-surface-boolean-docs-package-contract-v1_0.md)
+  - [Fix 08A](../specifications/fix-08a-loft-difference-trim-fragment-construction-v1_0.md)
+  - [Fix 08B](../specifications/fix-08b-loft-difference-branch-decomposition-v1_0.md)
+  - [Fix 08C](../specifications/fix-08c-loft-difference-result-shell-reconstruction-v1_0.md)
+  - [Fix 09A](../specifications/fix-09a-difference-geometry-change-evidence-v1_0.md)
+  - [Fix 09B](../specifications/fix-09b-difference-public-success-gate-v1_0.md)
+- Paired canonical test specs use the matching filenames under
+  [test specifications](../test-specifications/README.md).
 
 ## Conformance Checklist
 
 - [ ] Implementation conforms to the target architecture.
-- [ ] Draft leaves are independently reviewed and canonicalized.
-- [ ] Paired test specs point to canonical leaves.
+- [x] Final leaves are independently reviewed and canonicalized.
+- [x] Paired test specs point to canonical leaves.
 - [ ] Final progression preserves no-op gate and API migration prerequisites.
 - [ ] Canonical CSG/API architecture is reconciled after implementation.
 
@@ -139,5 +143,6 @@ architecture records the conformed solver and compatibility boundaries.
 
 ## Change History
 
+- 2026-08-04 - Recorded the eight canonical surface-boolean leaves and archived split parents after fixed-point review.
 - 2026-08-04 - Linked the full-template Fix 02 and Fix 07-09 paired drafts. Reason: complete the `do specs` creation handoff.
 - 2026-08-04 - Initial draft. Reason: plan issues #243, #247, and #248 for `v1.0.0a4`.

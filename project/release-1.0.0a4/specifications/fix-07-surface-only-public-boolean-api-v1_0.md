@@ -6,8 +6,8 @@ Primary ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-a
 Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Source artifact: [GitHub issue #247](https://github.com/kellyjanderson/Impression/issues/247)
 Split provenance: none
-Canonical status: Draft
-Review Score: pending independent review
+Canonical status: Archived
+Review Score: 34
 Prerequisites:
 - `fix-02-coplanar-loft-face-touch-union-v1_0.md` - proves surfaced union replacement behavior
 - `fix-08-loft-surface-difference-cut-execution-v1_0.md` - proves surfaced cut behavior
@@ -51,15 +51,22 @@ Make public modeling booleans surface-only in annotations, runtime behavior, exp
 
 ## Split Coverage
 
-- Parent spec: none
-- Parent coverage status: not applicable
-- Parent responsibilities owned by this child: not applicable
-- Parent responsibilities still missing from children: none
-- Issue-level split disposition: none
+- Split parent: this specification
+- Parent coverage status: 100% covered
+- Coverage matrix:
+  - `fix-07a-surface-only-boolean-runtime-api-v1_0.md` - Covered: runtime signatures, guards, exports, result types, mesh separation.
+  - `fix-07b-surface-boolean-docs-package-contract-v1_0.md` - Covered: docs/examples migration, inventory guard, clean-wheel conformance.
+- Parent responsibilities still missing from children:
+  - none
+- Parent disposition: Archived after both children completed fresh review and canonicalization.
 
 ## Refinement History
 
-Not applicable before review. No request review ledger exists; this is a do-specs creation draft.
+| Request ledger | Latest pass | Active specs reviewed | New leaves created this round | Fixed-point status |
+|---|---:|---|---|---|
+| `../spec-refinement-history/a4-open-issues-20260804-165103.md` | 1 | Fixes 01-09 | Fix 07a and Fix 07b | continue |
+
+Pass 1 split decision: forced split into Fix 07a and Fix 07b.
 
 ## Implementation Routing
 
@@ -131,7 +138,7 @@ Not applicable before review. No request review ledger exists; this is a do-spec
 - Wiring owner/module: `src/impression/modeling/csg.py` and `src/impression/modeling/__init__.py`
 - Observable result: consistent surface-only signature/runtime behavior and actionable mesh migration error
 - Integration validation: source and clean-wheel signature/runtime matrix plus docs/example scan
-- Incomplete status risk: drafted but prerequisite-blocked
+- Incomplete status risk: completion requires the declared integrated route and prerequisite sequence to pass
 
 App-type-specific proof:
 
@@ -227,25 +234,25 @@ App-type-specific proof:
 ## Review Score Calculation
 
 - Template source: `/Users/k/Documents/Projects/.agents/process/templates/implementation-spec-template.md`
-- Prior recorded score: none
-- Adversarial rescore basis: pending independent `review specs`; this creation action does not count or certify categories.
-- Functions/methods: pending independent review
-- Data structures/models: pending independent review
-- Dependencies/services: pending independent review
-- Returns/outputs/signals: pending independent review
-- UI surfaces/components: pending independent review
-- UI fields/elements: pending independent review
-- Existing reusable code reused as-is: pending independent review
-- Adding code to an existing library/module: pending independent review
-- Creating a new reusable library/module: pending independent review
-- Database queries/tables/migrations: pending independent review
-- Async/concurrency behavior: pending independent review
-- Destructive/write behavior: pending independent review
-- Security/privacy-sensitive behavior: pending independent review
-- Performance-sensitive behavior: pending independent review
-- Cross-screen reusable behavior: pending independent review
-- Readiness blockers: pending independent review
-- Missing prerequisites: pending independent review
-- Unresolved deferral/gap markers: pending independent review
-- Total: pending independent review
-- If total matches prior score, adversarial survival reason: not applicable until independent review calculates a score.
+- Prior recorded score: pending independent review; rejected as nonnumeric creation placeholder.
+- Adversarial rescore basis: recounted every category from the current text; checked hidden route wiring, reuse, prerequisites, write behavior, concurrency, and performance.
+- Functions/methods: 4 x 2 = 8
+- Data structures/models: 2 x 1 = 2
+- Dependencies/services: 5 x 1 = 5
+- Returns/outputs/signals: 2 x 1 = 2
+- UI surfaces/components: 0 x 2 = 0
+- UI fields/elements: 0 x 1 = 0
+- Existing reusable code reused as-is: 4 x 0.5 = 2
+- Adding code to an existing library/module: 2 x 1 = 2
+- Creating a new reusable library/module: 0 x 3 = 0
+- Database queries/tables/migrations: 0 x 2 = 0
+- Async/concurrency behavior: 0 x 3 = 0
+- Destructive/write behavior: 1 x 3 = 3
+- Security/privacy-sensitive behavior: 0 x 3 = 0
+- Performance-sensitive behavior: 2 x 2 = 4
+- Cross-screen reusable behavior: 0 x 2 = 0
+- Readiness blockers: 0 x 2 = 0
+- Missing prerequisites: 3 x 2 = 6
+- Unresolved deferral/gap markers: 0 x 100 = 0
+- Total: 34
+- If total matches prior score, adversarial survival reason: not applicable; prior score was nonnumeric.

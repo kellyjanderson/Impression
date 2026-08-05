@@ -1,7 +1,7 @@
 # Loft Identity And Junction Correctness Architectural Change Document
 
 Date: 2026-08-04
-Status: Drafting Specs
+Status: In Progress
 Canonical architecture targets:
 
 - `project/release-0.1.0a/architecture/loft-topology-point-correspondence-architecture.md`
@@ -90,31 +90,32 @@ internal resets.
 ## Specification Sources
 
 - Fix 03: named hole identity preservation and assignment.
-- Fix 04: hole split/merge junction planning and surface execution.
-- Fix 05: count-changing region identity lineage through synthetic stations.
+- Fix 04A and Fix 04B: hole split/merge junction planning and surface execution.
+- Fix 05A and Fix 05B: exact count-changing pairing and synthetic identity lineage.
 - Fix 06: propagation of all caller planner configuration through expansion.
 - Reuse existing `Station`, `TopologyPath`, planned refs, ambiguity diagnostics,
   surface patch builders, seam graph, and closure evidence.
 
 ## Specification Conformance
 
-- Parent specs created or affected:
-  - [Fix 03 draft](../specifications/fix-03-named-hole-identity-pairing-v1_0.md) - named-hole identity pairing.
-  - [Fix 04 draft](../specifications/fix-04-hole-split-merge-junction-surfaces-v1_0.md) - junction surface execution.
-  - [Fix 05 draft](../specifications/fix-05-count-changing-region-identity-preservation-v1_0.md) - synthetic lineage.
-  - [Fix 06 draft](../specifications/fix-06-expanded-planner-configuration-propagation-v1_0.md) - planner configuration propagation.
-- Canonical child specs: none yet; independent review is pending.
-- Paired test specs:
-  - [Fix 03 test draft](../test-specifications/fix-03-named-hole-identity-pairing-v1_0.md)
-  - [Fix 04 test draft](../test-specifications/fix-04-hole-split-merge-junction-surfaces-v1_0.md)
-  - [Fix 05 test draft](../test-specifications/fix-05-count-changing-region-identity-preservation-v1_0.md)
-  - [Fix 06 test draft](../test-specifications/fix-06-expanded-planner-configuration-propagation-v1_0.md)
+- Archived split parents:
+  - [Fix 04](../specifications/fix-04-hole-split-merge-junction-surfaces-v1_0.md)
+  - [Fix 05](../specifications/fix-05-count-changing-region-identity-preservation-v1_0.md)
+- Canonical specs:
+  - [Fix 03](../specifications/fix-03-named-hole-identity-pairing-v1_0.md)
+  - [Fix 04A](../specifications/fix-04a-hole-junction-plan-records-v1_0.md)
+  - [Fix 04B](../specifications/fix-04b-hole-junction-surface-execution-v1_0.md)
+  - [Fix 05A](../specifications/fix-05a-count-changing-exact-region-pairing-v1_0.md)
+  - [Fix 05B](../specifications/fix-05b-synthetic-station-identity-lineage-v1_0.md)
+  - [Fix 06](../specifications/fix-06-expanded-planner-configuration-propagation-v1_0.md)
+- Paired canonical test specs use the matching filenames under
+  [test specifications](../test-specifications/README.md).
 
 ## Conformance Checklist
 
 - [ ] Implementation conforms to the target architecture.
-- [ ] Draft leaves are independently reviewed and canonicalized.
-- [ ] Paired test specs point to canonical leaves.
+- [x] Final leaves are independently reviewed and canonicalized.
+- [x] Paired test specs point to canonical leaves.
 - [ ] Final progression preserves prerequisite order.
 - [ ] Canonical loft architecture is reconciled after implementation.
 
@@ -132,5 +133,6 @@ through public routes with closed-valid surface output.
 
 ## Change History
 
+- 2026-08-04 - Recorded the six canonical loft leaves and archived split parents after fixed-point review.
 - 2026-08-04 - Linked the full-template Fix 03-06 and paired test drafts. Reason: complete the `do specs` creation handoff.
 - 2026-08-04 - Initial draft. Reason: plan issues #244-#246 for `v1.0.0a4`.

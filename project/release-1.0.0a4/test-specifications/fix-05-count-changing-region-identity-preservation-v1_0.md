@@ -3,7 +3,7 @@
 Date: 2026-08-04
 Status: Proposed
 Feature spec: [Fix 05: Count-Changing Region Identity Preservation](../specifications/fix-05-count-changing-region-identity-preservation-v1_0.md)
-Feature spec canonical status: Draft
+Feature spec canonical status: Archived
 Architecture ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 
 ## Overview
@@ -64,4 +64,3 @@ This paired contract verifies the complete draft feature boundary for Fix 05. It
 - [ ] Every observable result and feature acceptance criterion is asserted through the intended route.
 - [ ] Failure, stale-result, refusal, or no-cut behavior is covered where applicable.
 - [ ] Focused and full configured suites pass without mesh modeling fallback or test-model workaround geometry.
-

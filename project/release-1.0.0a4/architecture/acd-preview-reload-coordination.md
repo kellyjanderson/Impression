@@ -1,7 +1,7 @@
 # Preview Reload Coordination Architectural Change Document
 
 Date: 2026-08-04
-Status: Drafting Specs
+Status: In Progress
 Canonical architecture targets:
 
 - `project/release-0.1.0a/architecture/reference-review-preview-engine-sharing-architecture.md`
@@ -84,25 +84,35 @@ reload unless a manual or file-change request also arrives.
 
 ## Specification Sources
 
-- One implementation leaf owns request records, bounded coalescing, forced
-  cache generation, watcher timing, build replacement, and visible CLI wiring.
+- Fix 01A owns request records, bounded coalescing, watcher timing, and build replacement.
+- Fix 01B owns forced cache generation and transitive user-module invalidation.
+- Fix 01C1 owns save and `R` event wiring into those two boundaries.
+- Fix 01C2A owns current-generation renderer-thread scene application.
+- Fix 01C2B owns camera, error, recovery, and last-good-scene state.
 - Reuse the existing executor, timer handoff, tracked-module set, and scene
   application path; add coordination to existing modules rather than creating
   a parallel preview engine.
 
 ## Specification Conformance
 
-- Parent specs created or affected:
-  - [Fix 01 draft](../specifications/fix-01-preview-watch-and-forced-refresh-v1_0.md) - created from this ACD; independent review pending.
-- Canonical child specs: none yet.
-- Paired test specs:
-  - [Fix 01 test draft](../test-specifications/fix-01-preview-watch-and-forced-refresh-v1_0.md) - verifies the mixed CLI/GUI route.
+- Archived split parents:
+  - [Fix 01](../specifications/fix-01-preview-watch-and-forced-refresh-v1_0.md)
+  - [Fix 01C](../specifications/fix-01c-preview-refresh-route-integration-v1_0.md)
+  - [Fix 01C2](../specifications/fix-01c2-preview-scene-state-application-v1_0.md)
+- Canonical child specs:
+  - [Fix 01A](../specifications/fix-01a-preview-watch-request-coordination-v1_0.md)
+  - [Fix 01B](../specifications/fix-01b-preview-module-cache-invalidation-v1_0.md)
+  - [Fix 01C1](../specifications/fix-01c1-preview-refresh-input-wiring-v1_0.md)
+  - [Fix 01C2A](../specifications/fix-01c2a-preview-current-generation-scene-apply-v1_0.md)
+  - [Fix 01C2B](../specifications/fix-01c2b-preview-last-good-camera-error-state-v1_0.md)
+- Paired canonical test specs use the matching filenames under
+  [test specifications](../test-specifications/README.md).
 
 ## Conformance Checklist
 
 - [ ] Implementation conforms to the target architecture.
-- [ ] Draft leaf is independently reviewed and canonicalized.
-- [ ] Paired test spec points to the canonical leaf.
+- [x] Final leaves are independently reviewed and canonicalized.
+- [x] Paired test specs point to the canonical leaves.
 - [ ] Final progression points to the canonical leaf.
 - [ ] Canonical preview architecture is reconciled after implementation.
 
@@ -120,5 +130,6 @@ artifacts no longer depend on this ACD.
 
 ## Change History
 
+- 2026-08-04 - Recorded the five canonical preview leaves and archived split parents after fixed-point review.
 - 2026-08-04 - Linked the full-template Fix 01 and paired test drafts. Reason: complete the `do specs` creation handoff.
 - 2026-08-04 - Initial draft. Reason: plan issue #242 for `v1.0.0a4`.
