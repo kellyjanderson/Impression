@@ -264,6 +264,7 @@ from impression.modeling import (
     classify_loft_primitive_fragments,
     classify_surface_csg_loft_eligibility,
     close_loft_patch_local_cut_loops,
+    execute_branching_loft_difference_csg,
     execute_loft_pair_csg,
     execute_loft_primitive_trim_fragment_csg,
     execute_single_shell_loft_primitive_csg,
@@ -4084,6 +4085,7 @@ def test_surface_csg_loft_eligibility_refuses_underconstrained_branching_and_ris
 
 
 def test_loft_branch_graph_evidence_and_policy_classify_explicit_decomposition_route() -> None:
+    cutter = make_sphere(radius=0.25, center=(0.0, 0.0, 0.5))
     body = replace(
         make_box(size=(1.0, 1.0, 1.0)),
         metadata={
@@ -4111,7 +4113,7 @@ def test_loft_branch_graph_evidence_and_policy_classify_explicit_decomposition_r
 
     evidence = build_loft_branch_graph_evidence(body)
     policy = classify_branching_loft_csg_policy(body, "difference")
-    plan = plan_branch_subbody_csg(body, "difference")
+    plan = plan_branch_subbody_csg(body, "difference", cutter_bodies=(cutter,))
     invalid_recomposition = validate_branch_recomposition(plan)
     valid_recomposition = validate_branch_recomposition(
         plan,
@@ -4131,15 +4133,91 @@ def test_loft_branch_graph_evidence_and_policy_classify_explicit_decomposition_r
     assert plan.executable is True
     assert len(plan.subbody_plans) == 2
     assert all(isinstance(subplan, BranchSubBodyCSGPlan) for subplan in plan.subbody_plans)
+    assert tuple(subplan.subbody_id for subplan in plan.subbody_plans) == (
+        f"{body.stable_identity}:branch:left",
+        f"{body.stable_identity}:branch:right",
+    )
+    assert all(subplan.cutter_body_ids == (cutter.stable_identity,) for subplan in plan.subbody_plans)
+    assert all(subplan.source_branch_ids == (subplan.branch_id,) for subplan in plan.subbody_plans)
     assert isinstance(invalid_recomposition, BranchRecompositionRecord)
     assert invalid_recomposition.valid is False
     assert "subbody-result-count-mismatch" in invalid_recomposition.diagnostics
+    assert "missing-recomposition-seams" in invalid_recomposition.diagnostics
+    assert "open-recomposition-seam" in invalid_recomposition.diagnostics
     assert valid_recomposition.valid is True
     assert valid_recomposition.result_shape == "single-shell"
+    assert valid_recomposition.required_joint_ids == ("split-0",)
+    assert valid_recomposition.subbody_result_map == (
+        (plan.subbody_plans[0].subbody_id, "left-result"),
+        (plan.subbody_plans[1].subbody_id, "right-result"),
+    )
+    duplicate_recomposition = validate_branch_recomposition(
+        plan,
+        result_body_ids=("same-result", "same-result"),
+        recomposition_seams=("split-0:seam",),
+    )
+    assert duplicate_recomposition.valid is False
+    assert "duplicate-result-ownership" in duplicate_recomposition.diagnostics
     assert eligibility.supported is False
     assert eligibility.provenance["branching_loft_csg_policy"]["policy_class"] == "decomposition-required"
     assert eligibility.provenance["branch_decomposition_plan"]["executable"] is True
     assert "Surface Spec 410" in eligibility.message
+
+
+def test_branching_loft_difference_executor_publishes_bounded_decomposition_payload() -> None:
+    body = replace(
+        make_box(size=(1.0, 1.0, 1.0)),
+        metadata={
+            "kernel": {
+                "operation": "loft",
+                "executor": "surface",
+                "branch_count": 2,
+                "transition_count": 1,
+                "loft_branch_graph": {
+                    "source": "executor",
+                    "branch_ids": ("left", "right"),
+                    "joints": (
+                        {
+                            "joint_id": "split-0",
+                            "transition_interval": (0, 1),
+                            "branch_ids": ("left", "right"),
+                            "topology_case": "one_to_many",
+                            "owner": "station-1",
+                        },
+                    ),
+                },
+            }
+        },
+    )
+    cutter = make_sphere(radius=0.25, center=(0.0, 0.0, 0.5))
+    operands = SurfaceBooleanOperands(operation="difference", bodies=(body, cutter))
+
+    route_result = execute_branching_loft_difference_csg(operands)
+    public_result = boolean_difference(body, [cutter])
+
+    assert route_result is not None
+    assert route_result.status == "unsupported"
+    assert isinstance(public_result, SurfaceBooleanResult)
+    assert public_result.status == "unsupported"
+    assert "branch_decomposition_adapter=" in str(route_result.failure_reason)
+    assert "branch_decomposition_adapter=" in str(public_result.failure_reason)
+    payload = json.loads(str(route_result.failure_reason).split("branch_decomposition_adapter=", 1)[1])
+    public_payload = json.loads(str(public_result.failure_reason).split("branch_decomposition_adapter=", 1)[1])
+    plan_payload = payload["decomposition_plan"]
+
+    assert payload == public_payload
+    assert payload["route_id"] == "surface-csg.loft-branch-decomposition"
+    assert plan_payload["executable"] is True
+    assert plan_payload["cutter_body_ids"] == [cutter.stable_identity]
+    assert [subplan["branch_id"] for subplan in plan_payload["subbody_plans"]] == ["left", "right"]
+    assert all(subplan["cutter_body_ids"] == [cutter.stable_identity] for subplan in plan_payload["subbody_plans"])
+    assert payload["recomposition_record"]["valid"] is False
+    assert set(payload["recomposition_record"]["diagnostics"]) >= {
+        "subbody-result-count-mismatch",
+        "missing-recomposition-seams",
+        "open-recomposition-seam",
+    }
+    assert payload["no_mesh_fallback"] is True
 
 
 def test_surface_csg_feature_gate_reports_loft_specific_refusal_without_mesh_fallback() -> None:

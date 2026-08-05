@@ -1,7 +1,7 @@
 # Fix 08B: Loft Difference Branch Decomposition
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Primary ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Source artifact: [Split parent](./fix-08-loft-surface-difference-cut-execution-v1_0.md)
@@ -112,13 +112,14 @@ Pass 4 split decision: retained. Cohesion reason: one branch-plan decomposition 
 - Architecture feedback status:
   - tracked in active ACD
 - Already implemented prerequisites:
+  - Fix 05b synthetic station lineage
   - existing records/routes named under Dependencies And Routes
 - Missing prerequisite architecture:
   - none
 - Missing prerequisite specifications:
   - none
 - Unimplemented prerequisite specifications:
-  - Fix 05b synthetic station lineage
+  - none; Fix 05b synthetic station lineage is implemented
 - Progression handling:
   - prerequisites listed above run first; otherwise this child may proceed after canonical review
 

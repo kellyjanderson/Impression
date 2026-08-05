@@ -131,6 +131,16 @@ interaction state, reason, and shared gate ID. The public assertion rejects any
 difference result missing normalized evidence or this decision, preventing a
 registered executor or monkeypatched public route from bypassing the gate.
 
+## Branch Decomposition Boundary
+
+Branching loft difference now reaches a validated decomposition handoff before
+result-shell reconstruction. The CSG route records stable branch-local sub-body
+plans with source branch IDs, joint IDs, cutter body IDs, a bounded sub-body
+limit, and a deterministic recomposition map. Recomposition refuses duplicate
+result ownership, missing result bodies, and uncovered branch-joint seams. The
+route remains `unsupported` until Fix 08C consumes the handoff to reconstruct
+and validate the final result shell.
+
 ## Specification Sources
 
 - Fix 02: coincident classification and face-touch union shell merger.
