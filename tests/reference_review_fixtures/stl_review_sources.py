@@ -429,7 +429,7 @@ def build_loft_csg_reference_geometry_handoff(
 
 
 def build_loft_csg_reference_geometry_handoff_smoke_record() -> LoftCsgReferenceGeometryHandoffRecord:
-    """Build a real public loft CSG result and return its reference-STL handoff record."""
+    """Build the staged public loft CSG result and return its truthful handoff record."""
 
     body = loft(
         [make_circle(radius=0.2), make_circle(radius=0.24)],
@@ -449,7 +449,7 @@ def build_loft_csg_reference_geometry_handoff_smoke_record() -> LoftCsgReference
 
 
 def build_loft_csg_section_evidence_readiness_smoke_record():
-    """Build a real accepted loft CSG handoff and section-evidence readiness record."""
+    """Report section-evidence readiness against the staged loft CSG handoff."""
 
     handoff = build_loft_csg_reference_geometry_handoff_smoke_record()
     bundle = build_section_bundle_fixture_record(

@@ -92,13 +92,13 @@ prerequisites are complete; the whole preceding wave need not finish first.
 
 ### Fix 08A: Loft Difference Trim-Fragment Construction
 
-- [ ] Implement intersection-to-trim conversion, fragment construction, provenance, and precise refusal.
+- [x] Implement intersection-to-trim conversion, fragment construction, provenance, and precise refusal.
   - Specification: [Fix 08A](../specifications/fix-08a-loft-difference-trim-fragment-construction-v1_0.md)
   - Prerequisites: none
-- [ ] Wire trim-fragment construction into the loft surface-difference executor route.
-- [ ] Validate trim/fragment fixtures and project cutter references.
+- [x] Wire trim-fragment construction into the loft surface-difference executor route.
+- [x] Validate trim/fragment fixtures and project cutter references.
   - Test specification: [Fix 08A Test](../test-specifications/fix-08a-loft-difference-trim-fragment-construction-v1_0.md)
-- [ ] Update progression and surface-boolean ACD status after route validation.
+- [x] Update progression and surface-boolean ACD status after route validation.
 
 ### Fix 09A: Difference Geometry-Change Evidence
 

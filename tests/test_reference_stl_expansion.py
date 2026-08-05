@@ -140,7 +140,7 @@ def _surface_csg_success_body(result: object) -> SurfaceBody:
     return body
 
 
-def _accepted_loft_csg_public_result() -> SurfaceBooleanResult:
+def _staged_loft_csg_public_result() -> SurfaceBooleanResult:
     body = loft(
         [make_circle(radius=0.2), make_circle(radius=0.24)],
         path=[(0.0, 0.0, 0.0), (0.03, 0.01, 0.5)],
@@ -150,7 +150,7 @@ def _accepted_loft_csg_public_result() -> SurfaceBooleanResult:
     cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
     operands = prepare_surface_boolean_difference_operands(body, [cutter])
     result = surface_boolean_result("difference", operands)
-    assert result.status == "succeeded"
+    assert result.status == "unsupported"
     return result
 
 
@@ -218,8 +218,8 @@ def _thin_stable_primitives() -> SurfaceBody:
     return _combine_surface_bodies([wafer, pin, needle])
 
 
-def test_loft_csg_reference_handoff_accepts_public_result_geometry() -> None:
-    result = _accepted_loft_csg_public_result()
+def test_loft_csg_reference_handoff_refuses_until_result_shell_reconstruction() -> None:
+    result = _staged_loft_csg_public_result()
 
     handoff = build_loft_csg_reference_geometry_handoff(
         fixture_id="loft/csg/handoff",
@@ -228,18 +228,15 @@ def test_loft_csg_reference_handoff_accepts_public_result_geometry() -> None:
         result=result,
     )
 
-    assert handoff.accepted is True
-    assert handoff.dirty_stl_source_ready is True
-    assert handoff.accepted_body_identity == result.body.stable_identity
-    assert handoff.diagnostics == ()
-    assert handoff.result_metadata["boolean_surface_route"] == "surface-csg.loft-primitive"
-    assert handoff.result_metadata["loft_primitive_public_executor"]["execution_scope"]["accepted"] is True
-    assert handoff.canonical_payload()["accepted_body_identity"] == result.body.stable_identity
+    assert handoff.accepted is False
+    assert handoff.dirty_stl_source_ready is False
+    assert handoff.accepted_body_identity is None
+    assert {diagnostic.code for diagnostic in handoff.diagnostics} == {"non-success-result"}
+    assert handoff.result_metadata is None
 
 
 def test_loft_csg_reference_handoff_refuses_adapter_only_and_synthetic_payloads() -> None:
-    accepted = _accepted_loft_csg_public_result()
-    assert accepted.body is not None
+    accepted = _staged_loft_csg_public_result()
     synthetic_result = SurfaceBooleanResult(
         operation="difference",
         operands=accepted.operands,
@@ -280,8 +277,8 @@ def test_loft_csg_reference_handoff_refuses_adapter_only_and_synthetic_payloads(
     ).code == "non-success-result"
 
 
-def test_loft_csg_reference_handoff_smoke_writes_dirty_stl_from_accepted_body(tmp_path: Path) -> None:
-    result = _accepted_loft_csg_public_result()
+def test_loft_csg_reference_handoff_smoke_refuses_dirty_stl_before_fix08c() -> None:
+    result = _staged_loft_csg_public_result()
     handoff = build_loft_csg_reference_geometry_handoff(
         fixture_id="loft/csg/handoff-smoke",
         operation_id="RT-LOFT-CSG-HANDOFF",
@@ -289,12 +286,10 @@ def test_loft_csg_reference_handoff_smoke_writes_dirty_stl_from_accepted_body(tm
         result=result,
     )
 
-    assert handoff.dirty_stl_source_ready is True
-    assert build_loft_csg_reference_geometry_handoff_smoke_record().dirty_stl_source_ready is True
-    assert result.body is not None
-    stl_path = tmp_path / "loft-csg-handoff.stl"
-    write_surface_body_stl(result.body, stl_path)
-    _assert_stl_signal(stl_path, min_facets=8, min_vertices=8)
+    assert handoff.dirty_stl_source_ready is False
+    assert build_loft_csg_reference_geometry_handoff_smoke_record().dirty_stl_source_ready is False
+    assert result.body is None
+    assert {diagnostic.code for diagnostic in handoff.diagnostics} == {"non-success-result"}
 
 
 def _loft_csg_section_bundle(*, include_plane: bool = True):
@@ -322,7 +317,7 @@ def _loft_csg_section_bundle(*, include_plane: bool = True):
     )
 
 
-def test_loft_csg_section_evidence_readiness_accepts_handoff_and_declared_plane() -> None:
+def test_loft_csg_section_evidence_readiness_waits_for_result_shell_handoff() -> None:
     handoff = build_loft_csg_reference_geometry_handoff_smoke_record()
     bundle = _loft_csg_section_bundle()
 
@@ -333,12 +328,15 @@ def test_loft_csg_section_evidence_readiness_accepts_handoff_and_declared_plane(
         bundle=bundle,
     )
 
-    assert readiness.ready is True
-    assert readiness.accepted_body_identity == handoff.accepted_body_identity
-    assert readiness.diagnostics == ()
-    assert readiness.bundle_payload["bundle_id"] == "loft-csg-section"
-    assert readiness.section_plane_metadata == {"origin": [0.0, 0.0, 0.25], "normal": [0.0, 0.0, 1.0]}
-    assert readiness.canonical_payload()["ready"] is True
+    assert readiness.ready is False
+    assert readiness.accepted_body_identity is None
+    assert {diagnostic.code for diagnostic in readiness.diagnostics} == {"missing-handoff"}
+    assert readiness.bundle_payload is None
+    assert readiness.section_plane_metadata == {
+        "origin": [0.0, 0.0, 0.25],
+        "normal": [0.0, 0.0, 1.0],
+    }
+    assert readiness.canonical_payload()["ready"] is False
 
 
 def test_loft_csg_section_evidence_readiness_refuses_missing_plane_and_detached_evidence() -> None:
@@ -359,7 +357,10 @@ def test_loft_csg_section_evidence_readiness_refuses_missing_plane_and_detached_
     )
 
     assert missing_plane.ready is False
-    assert {diagnostic.code for diagnostic in missing_plane.diagnostics} == {"missing-section-plane"}
+    assert {diagnostic.code for diagnostic in missing_plane.diagnostics} == {
+        "missing-handoff",
+        "missing-section-plane",
+    }
     assert detached.ready is False
     assert {diagnostic.code for diagnostic in detached.diagnostics} == {"missing-handoff"}
     assert {
@@ -376,10 +377,14 @@ def test_loft_csg_section_evidence_readiness_refuses_missing_plane_and_detached_
 def test_loft_csg_section_evidence_readiness_fixture_source_smoke() -> None:
     readiness = build_loft_csg_section_evidence_readiness_smoke_record()
 
-    assert readiness.ready is True
-    assert readiness.accepted_body_identity
-    assert readiness.bundle_payload["evidence_kind"] == "loft-section"
-    assert readiness.bundle_payload["section_plane_metadata"]["normal"] == [0.0, 0.0, 1.0]
+    assert readiness.ready is False
+    assert readiness.accepted_body_identity is None
+    assert {diagnostic.code for diagnostic in readiness.diagnostics} == {"missing-handoff"}
+    assert readiness.bundle_payload is None
+    assert readiness.section_plane_metadata == {
+        "origin": [0.0, 0.0, 0.25],
+        "normal": [0.0, 0.0, 1.0],
+    }
 
 
 def _authored_color_primitive_smoke() -> SurfaceBody:
@@ -1282,9 +1287,10 @@ def test_loft_csg_section_evidence_reference_fixture_is_readiness_payload() -> N
     row = build_loft_csg_rt_loft_csg_013_section_evidence_reference()
 
     assert row["fixture_id"] == "loft/csg/rt_loft_csg_section_evidence_smoke"
-    assert row["ready"] is True
-    assert row["bundle_payload"]["evidence_kind"] == "loft-section"
-    assert row["accepted_body_identity"]
+    assert row["ready"] is False
+    assert row["bundle_payload"] == {}
+    assert row["accepted_body_identity"] is None
+    assert {diagnostic["code"] for diagnostic in row["diagnostics"]} == {"missing-handoff"}
 
 
 @pytest.mark.stl
