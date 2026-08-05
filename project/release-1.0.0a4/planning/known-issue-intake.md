@@ -53,5 +53,6 @@ records release disposition and canonical specification coverage.
 ## Progression Rule
 
 The 19 linked leaves are the only implementation anchors. The completed
-fixed-point review verified 100% responsibility coverage; the final progression
-must preserve their prerequisites and must not route archived split parents.
+fixed-point review verified 100% responsibility coverage; the
+[final progression](progression.md) preserves their prerequisites and does not
+route archived split parents.

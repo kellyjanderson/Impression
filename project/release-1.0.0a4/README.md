@@ -58,8 +58,8 @@ The issue-to-leaf disposition is recorded in
 The release candidate may be tagged only after:
 
 1. Independent `review specs` has reached a fixed point, assigned valid Review
-   Scores, and canonicalized every retained leaf; the final progression must
-   route only these canonical leaves.
+   Scores, and canonicalized every retained leaf; the
+   [final progression](planning/progression.md) routes only these canonical leaves.
 2. Every canonical implementation leaf and paired test leaf is complete.
 3. The real filesystem watcher route meets the specified latency budget on a
    supported local filesystem, and the visible `R` route forces a fresh build.
@@ -89,7 +89,6 @@ The release candidate may be tagged only after:
 ## Planning State
 
 This release has 19 cohesive canonical leaves with 100% issue responsibility
-coverage. The next planning artifact is a dependency-ordered implementation
-progression over only those leaves; review did not create it implicitly.
+coverage and a [dependency-ordered implementation progression](planning/progression.md).
 
-Exact next workflow action: create the final a4 implementation progression.
+Exact next workflow action: implement the progression from Wave 1 prerequisites.

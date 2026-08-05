@@ -120,13 +120,14 @@ surface union/difference correction so callers have a complete surfaced route.
   - [Fix 09B](../specifications/fix-09b-difference-public-success-gate-v1_0.md)
 - Paired canonical test specs use the matching filenames under
   [test specifications](../test-specifications/README.md).
+- Progression: [v1.0.0a4 corrective release progression](../planning/progression.md).
 
 ## Conformance Checklist
 
 - [ ] Implementation conforms to the target architecture.
 - [x] Final leaves are independently reviewed and canonicalized.
 - [x] Paired test specs point to canonical leaves.
-- [ ] Final progression preserves no-op gate and API migration prerequisites.
+- [x] Final progression preserves no-op gate and API migration prerequisites.
 - [ ] Canonical CSG/API architecture is reconciled after implementation.
 
 ## Closure Criteria
@@ -143,6 +144,7 @@ architecture records the conformed solver and compatibility boundaries.
 
 ## Change History
 
+- 2026-08-04 - Linked the final dependency-ordered progression. Reason: preserve the no-op gate and surfaced-executor prerequisites before API migration.
 - 2026-08-04 - Recorded the eight canonical surface-boolean leaves and archived split parents after fixed-point review.
 - 2026-08-04 - Linked the full-template Fix 02 and Fix 07-09 paired drafts. Reason: complete the `do specs` creation handoff.
 - 2026-08-04 - Initial draft. Reason: plan issues #243, #247, and #248 for `v1.0.0a4`.

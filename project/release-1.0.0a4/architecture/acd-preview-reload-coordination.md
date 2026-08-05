@@ -107,13 +107,14 @@ reload unless a manual or file-change request also arrives.
   - [Fix 01C2B](../specifications/fix-01c2b-preview-last-good-camera-error-state-v1_0.md)
 - Paired canonical test specs use the matching filenames under
   [test specifications](../test-specifications/README.md).
+- Progression: [v1.0.0a4 corrective release progression](../planning/progression.md).
 
 ## Conformance Checklist
 
 - [ ] Implementation conforms to the target architecture.
 - [x] Final leaves are independently reviewed and canonicalized.
 - [x] Paired test specs point to the canonical leaves.
-- [ ] Final progression points to the canonical leaf.
+- [x] Final progression points to the canonical leaves.
 - [ ] Canonical preview architecture is reconciled after implementation.
 
 ## Closure Criteria
@@ -130,6 +131,7 @@ artifacts no longer depend on this ACD.
 
 ## Change History
 
+- 2026-08-04 - Linked the final dependency-ordered progression. Reason: make the canonical preview leaves executable without routing archived parents.
 - 2026-08-04 - Recorded the five canonical preview leaves and archived split parents after fixed-point review.
 - 2026-08-04 - Linked the full-template Fix 01 and paired test drafts. Reason: complete the `do specs` creation handoff.
 - 2026-08-04 - Initial draft. Reason: plan issue #242 for `v1.0.0a4`.
