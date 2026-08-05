@@ -63,6 +63,7 @@ def test_perforated_vessel_showcase_handles_hole_birth_split_merge_and_death() -
         split_merge_steps=10,
         cap_ends=True,
     )
+    kernel = body.kernel_metadata()
     mesh = tessellate_surface_body(body, export_tessellation_request()).mesh
     assert mesh.n_vertices > 0
     assert mesh.n_faces > 0
@@ -70,6 +71,15 @@ def test_perforated_vessel_showcase_handles_hole_birth_split_merge_and_death() -
     assert (x_max - x_min) > 1.5
     assert (y_max - y_min) > 1.5
     assert (z_max - z_min) > 3.0
+    assert kernel["loft_cap_validity"]["valid"] is True
+    assert kernel["loft_cap_validity"]["cap_count"] == 2
+    assert kernel["loft_closure_evidence"]["closed_valid"] is True
+    junction_roles = {
+        patch.kernel_metadata().get("surface_role")
+        for patch in body.iter_patches(world=True)
+        if patch.kernel_metadata().get("surface_role")
+    }
+    assert {"interior_junction", "start-cap", "end-cap"} <= junction_roles
     _assert_mesh_quality(mesh)
 
 

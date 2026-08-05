@@ -2821,7 +2821,7 @@ def _loft_kernel_metadata_from_body(body: SurfaceBody) -> dict[str, object]:
 def _loft_expected_patch_boundary_refs(patch: object, patch_index: int) -> tuple[SurfaceBoundaryRef, ...]:
     kernel = dict(getattr(patch, "metadata", {}).get("kernel", {}))
     surface_role = kernel.get("surface_role")
-    if surface_role in {"closure-cap", "start-cap", "end-cap"}:
+    if surface_role in {"closure-cap", "start-cap", "end-cap", "interior_junction"}:
         trim_loops = tuple(getattr(patch, "trim_loops", ()) or ())
         if not trim_loops:
             return (SurfaceBoundaryRef(patch_index, "trim:outer"),)
@@ -2891,7 +2891,7 @@ def _loft_cap_patch_indices(patches: Sequence[object]) -> tuple[int, ...]:
         patch_index
         for patch_index, patch in enumerate(patches)
         if dict(getattr(patch, "metadata", {}).get("kernel", {})).get("surface_role")
-        in {"closure-cap", "start-cap", "end-cap"}
+        in {"start-cap", "end-cap"}
     )
 
 
@@ -4470,6 +4470,12 @@ def _loft_execute_plan_surface(
         prev_station = plan.stations[prev_idx]
         curr_station = plan.stations[curr_idx]
         region_pairs_by_branch = {pair.branch_id: pair for pair in transition.region_pairs}
+        junction_event_ids_by_branch = {
+            branch_id: tuple(
+                event.id for event in transition.junction_events if event.branch_id == branch_id
+            )
+            for branch_id in transition.branch_order
+        }
         family_selection = family_selection_by_interval.get(
             transition.interval,
             classify_loft_patch_family(transition).canonical_payload(),
@@ -4570,6 +4576,11 @@ def _loft_execute_plan_surface(
                     loop_ref = loop_pair.prev_loop_ref if closure.side == "prev" else loop_pair.curr_loop_ref
                     region_ref = region_pair.prev_region_ref if closure.side == "prev" else region_pair.curr_region_ref
                     patch_index = len(patches)
+                    closure_surface_role = (
+                        "interior_junction"
+                        if loop_pair.role in {"synthetic_birth", "synthetic_death"}
+                        else "closure-cap"
+                    )
                     patches.append(
                         _loft_planar_patch_from_station_loops(
                             station,
@@ -4578,11 +4589,12 @@ def _loft_execute_plan_surface(
                                 "kernel": {
                                     "operation": "loft",
                                     "executor": "surface",
-                                    "surface_role": "closure-cap",
+                                    "surface_role": closure_surface_role,
                                     "closure_scope": "loop",
                                     "closure_side": closure.side,
                                     "branch_id": branch_id,
                                     "loop_index": closure.loop_index,
+                                    "junction_event_ids": junction_event_ids_by_branch.get(branch_id, ()),
                                 }
                             },
                         )
@@ -4605,6 +4617,11 @@ def _loft_execute_plan_surface(
                         for loop_pair in region_pair.loop_pairs
                     )
                     patch_index = len(patches)
+                    closure_surface_role = (
+                        "interior_junction"
+                        if region_pair.action in {"split_birth", "merge_death"}
+                        else "closure-cap"
+                    )
                     patches.append(
                         _loft_planar_patch_from_station_loops(
                             station,
@@ -4613,10 +4630,11 @@ def _loft_execute_plan_surface(
                                 "kernel": {
                                     "operation": "loft",
                                     "executor": "surface",
-                                    "surface_role": "closure-cap",
+                                    "surface_role": closure_surface_role,
                                     "closure_scope": "region",
                                     "closure_side": closure.side,
                                     "branch_id": branch_id,
+                                    "junction_event_ids": junction_event_ids_by_branch.get(branch_id, ()),
                                 }
                             },
                         )

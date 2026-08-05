@@ -948,7 +948,7 @@ def test_private_surface_loft_executor_reuses_station_seams_across_adjacent_inte
     assert {(1, "bottom"), (1, "top")} in seam_pairs
 
 
-def test_private_surface_loft_executor_emits_loop_closure_cap_for_synthetic_hole_birth() -> None:
+def test_private_surface_loft_executor_emits_interior_junction_patch_for_synthetic_hole_birth() -> None:
     outer = make_rect(size=(1.2, 1.2)).outer
     hole = make_rect(size=(0.4, 0.4)).outer
     start = PlanarShape2D(outer=outer, holes=[])
@@ -968,10 +968,16 @@ def test_private_surface_loft_executor_emits_loop_closure_cap_for_synthetic_hole
         for patch in body.iter_patches(world=False)
         if patch.family == "planar"
     ]
-    assert planar_roles == ["closure-cap"]
+    assert planar_roles == ["interior_junction"]
+    planar_kernel = next(
+        patch.metadata.get("kernel", {})
+        for patch in body.iter_patches(world=False)
+        if patch.family == "planar"
+    )
+    assert planar_kernel.get("junction_event_ids")
 
 
-def test_private_surface_loft_executor_emits_region_closure_cap_for_region_death() -> None:
+def test_private_surface_loft_executor_emits_interior_junction_patch_for_region_death() -> None:
     base = as_section(make_rect(size=(1.0, 1.0)))
     extra = as_section(make_rect(size=(0.5, 0.5), center=(2.0, 0.0)))
     s0 = Section((base.regions[0], extra.regions[0]))
@@ -988,7 +994,7 @@ def test_private_surface_loft_executor_emits_region_closure_cap_for_region_death
     planar_patches = [patch for patch in body.iter_patches(world=False) if patch.family == "planar"]
     assert planar_patches
     assert any(
-        patch.metadata.get("kernel", {}).get("surface_role") == "closure-cap"
+        patch.metadata.get("kernel", {}).get("surface_role") == "interior_junction"
         and patch.metadata.get("kernel", {}).get("closure_scope") == "region"
         for patch in planar_patches
     )

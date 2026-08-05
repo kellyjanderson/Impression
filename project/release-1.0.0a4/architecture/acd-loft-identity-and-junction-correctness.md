@@ -151,6 +151,7 @@ payloads, and incomplete or duplicate derived lineage fails before execution.
 - [x] Fix 05A exact region identities resolve before anonymous residue and publish explicit count-changing births/deaths.
 - [x] Fix 05B synthetic stations preserve deterministic region/loop lineage through public planning and execution.
 - [x] Fix 04A count-changing holes publish validated interior-junction direction, lineage, and boundary inputs through planning and execution.
+- [x] Fix 04B count-changing holes execute as interior-junction patches with exact terminal-cap counting and closed-valid surface output.
 - [x] Fix 06 immutable planner configuration propagates through direct, expanded, and nested pairing routes.
 - [x] Final leaves are independently reviewed and canonicalized.
 - [x] Paired test specs point to canonical leaves.
@@ -174,6 +175,10 @@ through public routes with closed-valid surface output.
 - 2026-08-04 - Completed Fix 04A. Reason: hole births and deaths now publish
   immutable identity-bearing interior-junction events, deterministic boundary
   rings, and exact pre-execution lineage validation through the surface executor.
+- 2026-08-05 - Completed Fix 04B. Reason: split/merge hole closures now publish
+  interior-junction surface patches instead of terminal closure caps, preserve
+  junction-event linkage through execution, and restore exact two-cap
+  closed-valid surface output on the published split/merge route.
 - 2026-08-04 - Completed Fix 05B. Reason: identity-aware expansion now carries
   deterministic region and loop lineage through every synthetic station,
   preserves topology paths in both directions, and reaches the public surface
