@@ -94,6 +94,23 @@ surface union/difference correction so callers have a complete surfaced route.
 - Integration validation: minimal fixtures, audio-cube compositions, public API
   signature tests, and preview/export consumer smoke.
 
+## Difference Geometry-Change Evidence Boundary
+
+Every surfaced difference result passes through one executor-neutral evidence
+normalizer before it reaches the public result envelope. The normalized record
+names the selected executor, cutter relations, comparison state, validated
+geometry-change witnesses, precise diagnostics, and the number of bounded
+patch-local comparisons. Unsupported or contradictory evidence is ambiguous;
+it is never promoted to changed geometry.
+
+Comparison ignores object identity and result metadata. It checks shell, patch,
+and seam topology first, then patch domains and trims, and only when those are
+unchanged evaluates five deterministic local points per paired patch under the
+shared tolerance policy. Explicit cutter-patch and cut-boundary provenance is
+retained as inspectable evidence, but provenance that contradicts unchanged
+geometry is refused as ambiguous. Fix 09B owns the later public success/no-cut
+classification that consumes this record.
+
 ## Specification Sources
 
 - Fix 02: coincident classification and face-touch union shell merger.
@@ -127,6 +144,7 @@ surface union/difference correction so callers have a complete surfaced route.
 - [ ] Implementation conforms to the target architecture.
 - [x] Fix 02 rectangular-loft face-touch/overlap merger conforms and passes the public preview/export route.
 - [x] Fix 08A bounds-pruned loft difference intersections produce closed provenance-bearing trim fragments or precise refusal.
+- [x] Fix 09A normalizes every surfaced difference result into validated changed, unchanged, or ambiguous evidence.
 - [x] Final leaves are independently reviewed and canonicalized.
 - [x] Paired test specs point to canonical leaves.
 - [x] Final progression preserves no-op gate and API migration prerequisites.
@@ -146,6 +164,10 @@ architecture records the conformed solver and compatibility boundaries.
 
 ## Change History
 
+- 2026-08-04 - Completed Fix 09A. Reason: every surfaced difference dispatcher
+  outcome now carries executor-neutral cutter relations and validated
+  topology/domain/local-geometry witnesses without treating clones or metadata
+  as modeled change.
 - 2026-08-04 - Completed Fix 08A and reconciled the canonical lofted-body CSG
   architecture. Reason: the difference executor now exposes bounds-pruned
   analytic intersection evidence and closed base/cutter fragments, and refuses

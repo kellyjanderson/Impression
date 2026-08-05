@@ -102,13 +102,13 @@ prerequisites are complete; the whole preceding wave need not finish first.
 
 ### Fix 09A: Difference Geometry-Change Evidence
 
-- [ ] Implement normalized change witnesses and unchanged/ambiguous geometry comparison.
+- [x] Implement normalized change witnesses and unchanged/ambiguous geometry comparison.
   - Specification: [Fix 09A](../specifications/fix-09a-difference-geometry-change-evidence-v1_0.md)
   - Prerequisites: none
-- [ ] Wire evidence production into every surfaced difference executor.
-- [ ] Validate the witness/comparator matrix through registered difference routes.
+- [x] Wire evidence production into every surfaced difference executor.
+- [x] Validate the witness/comparator matrix through registered difference routes.
   - Test specification: [Fix 09A Test](../test-specifications/fix-09a-difference-geometry-change-evidence-v1_0.md)
-- [ ] Update progression and surface-boolean ACD status after route validation.
+- [x] Update progression and surface-boolean ACD status after route validation.
 
 ## Wave 2: First Derived Contracts
 

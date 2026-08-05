@@ -1,7 +1,7 @@
 # Fix 09A: Difference Geometry Change Evidence
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Primary ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Source artifact: [Split parent](./fix-09-surface-difference-no-op-result-gate-v1_0.md)
