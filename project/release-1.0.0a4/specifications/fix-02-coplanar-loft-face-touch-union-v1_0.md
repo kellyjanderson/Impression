@@ -1,7 +1,7 @@
 # Fix 02: Coplanar Loft Face-Touch Union
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Primary ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Source artifact: [GitHub issue #243](https://github.com/kellyjanderson/Impression/issues/243)

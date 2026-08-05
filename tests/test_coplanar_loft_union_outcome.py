@@ -13,9 +13,12 @@ from impression.modeling import (
     Station,
     SurfaceBooleanResult,
     boolean_union,
+    export_tessellation_request,
     make_box,
     make_box_mesh,
+    tessellate_surface_body,
 )
+from impression.preview import _collect_datasets_from_scene
 
 
 def _rectangle(*, center: tuple[float, float], size: tuple[float, float]) -> Loop:
@@ -113,7 +116,7 @@ def _audio_cube_shell_operands():
 
 
 @pytest.mark.parametrize("reverse", (False, True), ids=("floor-first", "wall-first"))
-def test_minimal_coplanar_loft_union_returns_typed_refusal_without_partial_body(reverse: bool) -> None:
+def test_minimal_coplanar_loft_union_returns_one_closed_surface_shell(reverse: bool) -> None:
     operands = (_floor(), _wall(normal_axis="x", normal_position=-15.2))
     if reverse:
         operands = tuple(reversed(operands))
@@ -121,12 +124,81 @@ def test_minimal_coplanar_loft_union_returns_typed_refusal_without_partial_body(
     result = boolean_union(operands)
 
     assert isinstance(result, SurfaceBooleanResult)
+    assert result.status == "succeeded"
+    assert result.classification == "closed"
+    assert result.body is not None
+    assert result.body.shell_count == 1
+    assert result.body.bounds_estimate() == pytest.approx((-16.0, 16.0, -16.0, 16.0, 0.0, 30.4))
+    assert result.body.patch_count == 14
+    shell = result.body.iter_shells(world=True)[0]
+    assert shell.connected
+    assert len(shell.seams) == result.body.patch_count * 2
+    route = result.body.kernel_metadata()["loft_pair_csg"]
+    assert route["solver_path"] == "orthogonal-coplanar-shell-merge"
+    assert route["no_mesh_fallback"] is True
+
+
+def test_full_face_touching_lofts_record_exact_coincident_patch_contact() -> None:
+    lower = _floor(z_min=0.0)
+    upper = _floor(z_min=1.6)
+
+    result = boolean_union((lower, upper))
+
+    assert isinstance(result, SurfaceBooleanResult)
+    assert result.status == "succeeded"
+    assert result.body is not None
+    assert result.body.shell_count == 1
+    assert result.body.patch_count == 10
+    contacts = result.body.kernel_metadata()["loft_pair_csg"]["coincident_patch_contacts"]
+    assert len(contacts) == 1
+    assert contacts[0]["orientation"] == "opposite"
+    assert contacts[0]["trimmed_domains_match"] is True
+
+
+def test_coplanar_loft_union_refuses_rectangular_operand_with_opening() -> None:
+    floor = _floor()
+    wall_with_opening = _wall(
+        normal_axis="x",
+        normal_position=-15.2,
+        openings=((0.0, 10.0, 4.0, 4.0),),
+    )
+
+    result = boolean_union((floor, wall_with_opening))
+
+    assert isinstance(result, SurfaceBooleanResult)
     assert result.status == "invalid"
     assert result.body is None
-    assert result.classification is None
-    assert "Coplanar loft-body union" in str(result.failure_reason)
-    assert "invalid-result classification" in str(result.failure_reason)
     assert "no partial result" in str(result.failure_reason)
+
+
+def test_near_coplanar_loft_union_does_not_take_shell_merge_route() -> None:
+    floor = _floor()
+    separated_wall = _wall(normal_axis="x", normal_position=-17.0002)
+
+    result = boolean_union((floor, separated_wall))
+
+    assert isinstance(result, SurfaceBooleanResult)
+    assert result.status == "succeeded"
+    assert result.body is not None
+    assert result.body.shell_count == 2
+    assert (
+        result.body.kernel_metadata()["loft_pair_csg"]["plan"]["solver_path"]
+        != "orthogonal-coplanar-shell-merge"
+    )
+
+
+def test_coplanar_loft_union_is_consumable_by_preview_and_export() -> None:
+    result = boolean_union((_floor(), _wall(normal_axis="x", normal_position=-15.2)))
+
+    assert isinstance(result, SurfaceBooleanResult)
+    assert result.body is not None
+    preview_datasets = _collect_datasets_from_scene(result.body)
+    exported = tessellate_surface_body(result.body, export_tessellation_request())
+
+    assert len(preview_datasets) == 1
+    assert exported.mesh.n_faces > 0
+    assert exported.analysis.boundary_edges == 0
+    assert exported.analysis.nonmanifold_edges == 0
 
 
 @pytest.mark.parametrize("reverse", (False, True), ids=("floor-first", "floor-last"))

@@ -74,6 +74,23 @@ output:
 - tolerance-ambiguous near contact
 - conflicting face normals or inverted source shells
 
+## Implemented Loft Contact Route
+
+The public `boolean_union` route recognizes closed, unholed, axis-aligned
+rectangular loft solids before the generic loft-pair shell combiner. Candidate
+patch pairs are pruned by bounds and full-domain coincident planar contacts are
+recorded with orientation and tolerance evidence. The orthogonal surface shell
+assembler then removes the internal volume/interface, reconstructs one
+deterministically ordered planar shell, rebuilds complete seams, and passes the
+shared result validity and operand-witness gates.
+
+The audio-cube floor/wall case includes the designed wall/floor thickness
+overlap, so its accepted route records coplanar overlap evidence and reconstructs
+the exact L-shaped union from the two rectangular loft bounds. Holed,
+non-rectangular, near-contact, and otherwise ambiguous lofts do not enter this
+specialized route. No tessellation occurs until an explicit preview or export
+consumer requests it.
+
 ## Data Flow
 
 ```text
@@ -293,6 +310,8 @@ Split decision:
 
 ## Change History
 
+- 2026-08-04: Recorded the implemented rectangular-loft coincident/overlap
+  merger used by the public union route and its explicit refusal boundary.
 - 2026-07-11: Completed five manifest review/update/rescore rounds. Context:
   coincident contact candidates remained below the split threshold after review.
 - 2026-07-11: Added coincident-contact architecture for `RT-CSG-009`.
