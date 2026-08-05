@@ -137,9 +137,20 @@ Branching loft difference now reaches a validated decomposition handoff before
 result-shell reconstruction. The CSG route records stable branch-local sub-body
 plans with source branch IDs, joint IDs, cutter body IDs, a bounded sub-body
 limit, and a deterministic recomposition map. Recomposition refuses duplicate
-result ownership, missing result bodies, and uncovered branch-joint seams. The
-route remains `unsupported` until Fix 08C consumes the handoff to reconstruct
-and validate the final result shell.
+result ownership, missing result bodies, and uncovered branch-joint seams.
+Fix 08C consumes validated trim fragments for the exact single-shell
+rectangular-loft/orthogonal-box envelope and reconstructs one closed changed
+surface shell from orthogonal surface cells. Each result preserves retained
+base-fragment and reversed cutter-boundary provenance and must pass the shared
+body-validity and public difference gates before success.
+
+Branch plans that do not yet provide executable branch-local surface bodies,
+rotated cutters, ambiguous fragment classifications, open seams, and unchanged
+interacting candidates remain `unsupported` or `invalid` as appropriate. They
+cannot fall back to tessellation or cross the public success gate. This bounded
+support envelope is intentional: Fix 08C makes accepted geometry real and
+closed while preserving truthful refusal for topology the surface kernel cannot
+yet reconstruct exactly.
 
 ## Specification Sources
 

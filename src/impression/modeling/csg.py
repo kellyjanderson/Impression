@@ -15572,6 +15572,181 @@ def _loft_primitive_cut_payload_supported(payload: dict[str, object]) -> bool:
     return True
 
 
+def _loft_primitive_result_patch_metadata(
+    source_patch,
+    *,
+    role: str,
+    operation: SurfaceBooleanOperation,
+    route_id: str,
+    source_patch_ref: SurfaceBooleanPatchRef,
+    cut_curve_ids: Sequence[str] = (),
+    cap_id: str | None = None,
+    provenance: Sequence[str] = (),
+):
+    metadata = dict(getattr(source_patch, "metadata", {}))
+    kernel = dict(source_patch.kernel_metadata()) if hasattr(source_patch, "kernel_metadata") else {}
+    consumer = dict(source_patch.consumer_metadata()) if hasattr(source_patch, "consumer_metadata") else {}
+    kernel.update(
+        {
+            "boolean_surface_route": route_id,
+            "boolean_operation": operation,
+            "generated_role": role,
+            "source_operand_index": source_patch_ref.operand_index,
+            "source_patch_index": source_patch_ref.patch_index,
+            "no_mesh_fallback": True,
+        }
+    )
+    if cut_curve_ids:
+        kernel["cut_curve_ids"] = tuple(sorted(str(item) for item in cut_curve_ids))
+    if cap_id is not None:
+        kernel["cap_id"] = str(cap_id)
+    if provenance:
+        kernel["provenance"] = tuple(str(item) for item in provenance)
+    metadata["kernel"] = kernel
+    if consumer:
+        metadata["consumer"] = consumer
+    return metadata
+
+
+def _assemble_loft_primitive_difference_result_body(
+    operands: SurfaceBooleanOperands,
+    *,
+    route: LoftCSGOperationRouteRecord,
+    payload: dict[str, object],
+) -> SurfaceBody:
+    construction = construct_loft_difference_trim_fragments(operands, route=route)
+    if not construction.supported:
+        diagnostic_codes = ", ".join(diagnostic.code for diagnostic in construction.diagnostics)
+        raise ValueError(
+            "Loft difference result-shell reconstruction requires supported Fix 08A trim fragments"
+            + (f": {diagnostic_codes}" if diagnostic_codes else ".")
+        )
+
+    base = operands.bodies[0]
+    primitive_index = 1 - route.loft_operand_indices[0]
+    cutter = operands.bodies[primitive_index]
+    tolerance = DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.equality_tolerance
+    if not _surface_body_is_axis_aligned_rectangular_loft(base, tolerance=tolerance):
+        raise ValueError(
+            "Loft difference result-shell reconstruction currently requires an exact axis-aligned rectangular loft base."
+        )
+    if not _surface_body_is_axis_aligned_orthogonal_box(cutter, tolerance=tolerance):
+        raise ValueError(
+            "Loft difference result-shell reconstruction currently requires an exact axis-aligned box cutter."
+        )
+
+    retained_base_fragment_ids = tuple(
+        fragment.fragment_id
+        for fragment in construction.base_fragments
+        if len(fragment.trim_loops) > 1
+        or classify_surface_csg_fragment_against_body(
+            fragment.source_patch,
+            _surface_csg_patch_for_ref(operands, fragment.source_patch),
+            cutter,
+            trim_loop=fragment.trim_loops[0],
+            cut_curve_ids=fragment.source_curve_ids,
+        ).relation
+        != "inside"
+    )
+    retained_cutter_fragment_ids = tuple(
+        fragment.fragment_id
+        for fragment in construction.cutter_fragments
+        if classify_surface_csg_fragment_against_body(
+            fragment.source_patch,
+            _surface_csg_patch_for_ref(operands, fragment.source_patch),
+            base,
+            trim_loop=fragment.trim_loops[0],
+            cut_curve_ids=fragment.source_curve_ids,
+        ).relation
+        in {"inside", "on"}
+    )
+    if not retained_base_fragment_ids or not retained_cutter_fragment_ids:
+        raise ValueError(
+            "Loft difference result-shell reconstruction could not classify both retained base and cutter boundaries."
+        )
+
+    reconstruction_payload = {
+        **payload,
+        "result_shell_reconstruction": {
+            "supported": True,
+            "retained_base_fragment_ids": retained_base_fragment_ids,
+            "retained_cutter_fragment_ids": retained_cutter_fragment_ids,
+            "solver_path": "orthogonal-surface-cell-reconstruction",
+            "cutter_boundary_orientation": "reversed-for-difference",
+            "closed_shell_required": True,
+            "no_mesh_fallback": True,
+        },
+    }
+    metadata = _loft_primitive_cut_executor_metadata(
+        operands,
+        route,
+        reconstruction_payload,
+        LoftPrimitiveExecutionScopeRecord(
+            operation=operands.operation,
+            route_id=str(route.route_id),
+            scope="result-shell-reconstruction",
+            status="succeeded",
+            accepted=True,
+        ),
+    )
+    reconstructed = _surface_orthogonal_box_boolean_body(
+        base.bounds_estimate(),
+        cutter.bounds_estimate(),
+        operation="difference",
+        metadata=metadata,
+    )
+    if reconstructed is None:
+        raise ValueError(
+            "Loft difference result-shell reconstruction could not assemble one connected orthogonal result shell."
+        )
+
+    base_bounds = base.bounds_estimate()
+    source_patches = []
+    source_shell = reconstructed.iter_shells(world=True)[0]
+    for patch in source_shell.patches:
+        patch_bounds = patch.bounds_estimate()
+        midpoint = np.asarray(
+            [
+                (patch_bounds[0] + patch_bounds[1]) * 0.5,
+                (patch_bounds[2] + patch_bounds[3]) * 0.5,
+                (patch_bounds[4] + patch_bounds[5]) * 0.5,
+            ],
+            dtype=float,
+        )
+        on_base_exterior = any(
+            abs(float(midpoint[axis]) - base_bounds[(axis * 2) + side]) <= tolerance
+            for axis in range(3)
+            for side in (0, 1)
+            if abs(patch_bounds[axis * 2 + 1] - patch_bounds[axis * 2]) <= tolerance
+        )
+        source_ref = SurfaceBooleanPatchRef(0 if on_base_exterior else primitive_index, 0)
+        source_patches.append(
+            replace(
+                patch,
+                metadata=_loft_primitive_result_patch_metadata(
+                    patch,
+                    role=(
+                        "loft_difference_retained_base_fragment"
+                        if on_base_exterior
+                        else "loft_difference_reversed_cutter_boundary"
+                    ),
+                    operation="difference",
+                    route_id=str(route.route_id),
+                    source_patch_ref=source_ref,
+                    provenance=("fix-08a-trim-fragments", "fix-08c-result-shell-reconstruction"),
+                ),
+            )
+        )
+    shell = make_surface_shell(
+        tuple(source_patches),
+        connected=True,
+        seams=source_shell.seams,
+        adjacency=source_shell.adjacency,
+        metadata=source_shell.metadata,
+    )
+    return make_surface_body((shell,), metadata=metadata)
+
+
 def execute_single_shell_loft_primitive_csg(operands: SurfaceBooleanOperands) -> SurfaceBooleanResult | None:
     """Execute exact no-cut/containment loft primitive CSG cases."""
 
@@ -15654,17 +15829,6 @@ def execute_loft_primitive_trim_fragment_csg(operands: SurfaceBooleanOperands) -
         isinstance(trim_fragment_payload, dict)
         and trim_fragment_payload.get("supported") is True
     )
-    if operands.operation == "difference" and trim_fragments_supported:
-        return SurfaceBooleanResult(
-            operation=operands.operation,
-            operands=operands,
-            status="unsupported",
-            failure_reason=(
-                "Loft difference trim fragments constructed; result-shell reconstruction is owned by Fix 08C; "
-                "no_mesh_fallback=True; "
-                f"loft_primitive_trim_adapter={json.dumps(payload, sort_keys=True, separators=(',', ':'))}"
-            ),
-        )
     proof_payload = payload["no_hidden_mesh_proof"]
     accepted = bool(
         isinstance(proof_payload, dict)
@@ -15703,17 +15867,42 @@ def execute_loft_primitive_trim_fragment_csg(operands: SurfaceBooleanOperands) -
             ),
         )
 
-    scope = LoftPrimitiveExecutionScopeRecord(
-        operation=operands.operation,
-        route_id=str(route.route_id),
-        scope="trim-fragment-cut",
-        status="succeeded",
-        accepted=True,
-    )
-    metadata = _loft_primitive_cut_executor_metadata(operands, route, payload, scope)
     if operands.operation == "union":
+        scope = LoftPrimitiveExecutionScopeRecord(
+            operation=operands.operation,
+            route_id=str(route.route_id),
+            scope="trim-fragment-cut",
+            status="succeeded",
+            accepted=True,
+        )
+        metadata = _loft_primitive_cut_executor_metadata(operands, route, payload, scope)
         body = _combine_surface_bodies_with_metadata(operands.bodies, metadata=metadata)
+    elif operands.operation == "difference":
+        try:
+            body = _assemble_loft_primitive_difference_result_body(
+                operands,
+                route=route,
+                payload=payload,
+            )
+        except (TypeError, ValueError) as exc:
+            return SurfaceBooleanResult(
+                operation="difference",
+                operands=operands,
+                status="unsupported",
+                failure_reason=(
+                    "Loft difference result-shell reconstruction refused the candidate; "
+                    f"no_mesh_fallback=True; reason={exc}"
+                ),
+            )
     else:
+        scope = LoftPrimitiveExecutionScopeRecord(
+            operation=operands.operation,
+            route_id=str(route.route_id),
+            scope="trim-fragment-cut",
+            status="succeeded",
+            accepted=True,
+        )
+        metadata = _loft_primitive_cut_executor_metadata(operands, route, payload, scope)
         body = _clone_surface_body_with_metadata(operands.bodies[loft_index], metadata=metadata)
     return _surface_boolean_finalize_body_result(operands.operation, operands, body)
 
@@ -17238,6 +17427,24 @@ def _surface_body_primitive_family(body: SurfaceBody) -> str | None:
         if isinstance(patch_family, str) and patch_family:
             return patch_family
     return None
+
+
+def _surface_body_is_axis_aligned_orthogonal_box(
+    body: SurfaceBody,
+    *,
+    tolerance: float,
+) -> bool:
+    """Return whether a box primitive still has six axis-aligned planar faces."""
+
+    if _surface_body_primitive_family(body) != "box" or body.shell_count != 1 or body.patch_count != 6:
+        return False
+    for patch in body.iter_patches(world=True):
+        if not isinstance(patch, PlanarSurfacePatch) or patch.trim_loops:
+            return False
+        spans = np.asarray(_bounds_size(patch.bounds_estimate()), dtype=float)
+        if int(np.count_nonzero(np.abs(spans) <= tolerance)) != 1:
+            return False
+    return True
 
 
 def _bounds_corners(bounds: tuple[float, float, float, float, float, float]) -> np.ndarray:

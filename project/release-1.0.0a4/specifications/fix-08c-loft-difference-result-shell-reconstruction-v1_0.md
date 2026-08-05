@@ -1,7 +1,7 @@
 # Fix 08C: Loft Difference Result Shell Reconstruction
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Primary ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Source artifact: [Split parent](./fix-08-loft-surface-difference-cut-execution-v1_0.md)
@@ -184,6 +184,9 @@ App-type-specific proof:
 ## Error And State Behavior
 
 - ambiguous classification, open seams, invalid closure, or no change cannot succeed
+- the exact reconstruction envelope is an axis-aligned rectangular loft minuend
+  and an axis-aligned orthogonal box cutter; candidates outside that envelope
+  return `unsupported` with explicit no-mesh-fallback evidence
 
 ## Test Strategy
 
@@ -198,6 +201,24 @@ App-type-specific proof:
   - public `boolean_difference` and preview/export consumers must exercise closed changed `SurfaceBody` or precise refusal
 - Production-data rule:
   - deterministic project fixtures and temporary directories only
+
+## Implementation Evidence
+
+- `construct_loft_difference_trim_fragments(...)` supplies the classified Fix
+  08A fragments consumed by the result-shell route.
+- The supported exact route retains base fragments, reverses cutter-derived
+  boundaries for difference, reconstructs one orthogonal surface-cell shell,
+  and runs the existing closed-body validity and public difference-success
+  gates.
+- Reconstructed patches retain inspectable base/cutter roles and source
+  provenance; the accepted body records the retained fragment IDs, solver
+  path, cutter orientation, closure requirement, and no-mesh guarantee.
+- Public preview and watertight-export tessellation consume the reconstructed
+  `SurfaceBody`. Rotated cutters and underconstrained branching candidates are
+  refused precisely instead of fabricating unchanged or mesh-derived geometry.
+- Validation on 2026-08-05: `tests/test_surface_csg.py` passed 251 tests; the
+  surface-consumer/no-hidden-mesh group passed 269 tests; the full repository
+  suite passed 1,771 tests.
 
 ## Acceptance Criteria
 
