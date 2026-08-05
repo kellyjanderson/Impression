@@ -210,13 +210,13 @@ prerequisites are complete; the whole preceding wave need not finish first.
 
 ### Fix 04B: Hole Junction Surface Execution
 
-- [ ] Implement junction patches, seam/orientation handling, exact terminal cap count, and closure validation.
+- [x] Implement junction patches, seam/orientation handling, exact terminal cap count, and closure validation.
   - Specification: [Fix 04B](../specifications/fix-04b-hole-junction-surface-execution-v1_0.md)
   - Prerequisite: [Fix 04A](../specifications/fix-04a-hole-junction-plan-records-v1_0.md)
-- [ ] Wire junction execution into `Loft(...)` and the published split/merge example route.
-- [ ] Validate closed `SurfaceBody` output, cap count, and showcase behavior.
+- [x] Wire junction execution into `Loft(...)` and the published split/merge example route.
+- [x] Validate closed `SurfaceBody` output, cap count, and showcase behavior.
   - Test specification: [Fix 04B Test](../test-specifications/fix-04b-hole-junction-surface-execution-v1_0.md)
-- [ ] Update loft docs, progression, and ACD status after route validation.
+- [x] Update loft docs, progression, and ACD status after route validation.
 
 ### Fix 08C: Loft Difference Result-Shell Reconstruction
 

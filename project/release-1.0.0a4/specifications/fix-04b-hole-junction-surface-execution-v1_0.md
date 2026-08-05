@@ -1,7 +1,7 @@
 # Fix 04B: Hole Junction Surface Execution
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Primary ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 Architecture ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 Source artifact: [Split parent](./fix-04-hole-split-merge-junction-surfaces-v1_0.md)
@@ -112,13 +112,14 @@ Pass 4 split decision: retained. Cohesion reason: one executor outcome assembles
 - Architecture feedback status:
   - tracked in active ACD
 - Already implemented prerequisites:
+  - Fix 04a junction plan records
   - existing records/routes named under Dependencies And Routes
 - Missing prerequisite architecture:
   - none
 - Missing prerequisite specifications:
   - none
 - Unimplemented prerequisite specifications:
-  - Fix 04a junction plan records
+  - none; Fix 04a junction plan records is implemented
 - Progression handling:
   - prerequisites listed above run first; otherwise this child may proceed after canonical review
 
