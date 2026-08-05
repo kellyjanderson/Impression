@@ -2298,21 +2298,51 @@ def classify_branching_loft_csg_policy(
 class BranchSubBodyCSGPlan:
     """One branch-local boolean execution plan before recomposition."""
 
+    subbody_id: str
     branch_id: str
     operation: SurfaceBooleanOperation
     source_body_id: str
+    cutter_body_ids: tuple[str, ...]
     joint_ids: tuple[str, ...]
+    source_branch_ids: tuple[str, ...] = ()
     execution_posture: Literal["planned"] = "planned"
     no_mesh_fallback: bool = True
 
+    def __post_init__(self) -> None:
+        subbody_id = str(self.subbody_id)
+        branch_id = str(self.branch_id)
+        operation = str(self.operation)
+        source_body_id = str(self.source_body_id)
+        if operation not in SURFACE_BOOLEAN_OPERATIONS:
+            raise ValueError("Branch sub-body CSG plan operation is unsupported.")
+        if not subbody_id or not branch_id or not source_body_id:
+            raise ValueError("Branch sub-body CSG plan requires stable subbody, branch, and source body IDs.")
+        cutter_body_ids = tuple(str(body_id) for body_id in self.cutter_body_ids if str(body_id))
+        joint_ids = tuple(dict.fromkeys(str(joint_id) for joint_id in self.joint_ids if str(joint_id)))
+        source_branch_ids = tuple(dict.fromkeys(str(branch_id) for branch_id in self.source_branch_ids if str(branch_id)))
+        if not source_branch_ids:
+            source_branch_ids = (branch_id,)
+        if self.execution_posture != "planned":
+            raise ValueError("Branch sub-body CSG plan execution posture must be planned.")
+        object.__setattr__(self, "subbody_id", subbody_id)
+        object.__setattr__(self, "branch_id", branch_id)
+        object.__setattr__(self, "operation", operation)
+        object.__setattr__(self, "source_body_id", source_body_id)
+        object.__setattr__(self, "cutter_body_ids", cutter_body_ids)
+        object.__setattr__(self, "joint_ids", joint_ids)
+        object.__setattr__(self, "source_branch_ids", source_branch_ids)
+
     def canonical_payload(self) -> dict[str, object]:
         return {
+            "cutter_body_ids": self.cutter_body_ids,
             "branch_id": self.branch_id,
             "execution_posture": self.execution_posture,
             "joint_ids": self.joint_ids,
             "no_mesh_fallback": self.no_mesh_fallback,
             "operation": self.operation,
+            "source_branch_ids": self.source_branch_ids,
             "source_body_id": self.source_body_id,
+            "subbody_id": self.subbody_id,
         }
 
 
@@ -2323,18 +2353,47 @@ class BranchDecompositionPlan:
     plan_id: str
     operation: SurfaceBooleanOperation
     source_body_id: str
+    cutter_body_ids: tuple[str, ...]
     policy: BranchingLoftCSGPolicyRecord
     subbody_plans: tuple[BranchSubBodyCSGPlan, ...]
+    max_subbody_count: int = 16
     recomposition_required: bool = True
+    diagnostics: tuple[str, ...] = ()
     no_mesh_fallback: bool = True
+
+    def __post_init__(self) -> None:
+        plan_id = str(self.plan_id)
+        operation = str(self.operation)
+        source_body_id = str(self.source_body_id)
+        if operation not in SURFACE_BOOLEAN_OPERATIONS:
+            raise ValueError("Branch decomposition plan operation is unsupported.")
+        cutter_body_ids = tuple(str(body_id) for body_id in self.cutter_body_ids if str(body_id))
+        diagnostics = tuple(dict.fromkeys(str(diagnostic) for diagnostic in self.diagnostics if str(diagnostic)))
+        max_subbody_count = int(self.max_subbody_count)
+        if max_subbody_count <= 0:
+            raise ValueError("Branch decomposition plan max_subbody_count must be positive.")
+        object.__setattr__(self, "plan_id", plan_id)
+        object.__setattr__(self, "operation", operation)
+        object.__setattr__(self, "source_body_id", source_body_id)
+        object.__setattr__(self, "cutter_body_ids", cutter_body_ids)
+        object.__setattr__(self, "max_subbody_count", max_subbody_count)
+        object.__setattr__(self, "diagnostics", diagnostics)
 
     @property
     def executable(self) -> bool:
-        return self.policy.policy_class == "decomposition-required" and bool(self.subbody_plans)
+        return (
+            self.policy.policy_class == "decomposition-required"
+            and bool(self.subbody_plans)
+            and len(self.subbody_plans) <= self.max_subbody_count
+            and not self.diagnostics
+        )
 
     def canonical_payload(self) -> dict[str, object]:
         return {
+            "cutter_body_ids": self.cutter_body_ids,
+            "diagnostics": self.diagnostics,
             "executable": self.executable,
+            "max_subbody_count": self.max_subbody_count,
             "no_mesh_fallback": self.no_mesh_fallback,
             "operation": self.operation,
             "plan_id": self.plan_id,
@@ -2353,7 +2412,9 @@ class BranchRecompositionRecord:
     valid: bool
     result_shape: BranchRecompositionResultShape
     result_body_ids: tuple[str, ...]
+    subbody_result_map: tuple[tuple[str, str], ...]
     recomposition_seams: tuple[str, ...]
+    required_joint_ids: tuple[str, ...] = ()
     diagnostics: tuple[str, ...] = ()
     no_mesh_fallback: bool = True
 
@@ -2362,9 +2423,11 @@ class BranchRecompositionRecord:
             "diagnostics": self.diagnostics,
             "no_mesh_fallback": self.no_mesh_fallback,
             "plan_id": self.plan_id,
+            "required_joint_ids": self.required_joint_ids,
             "recomposition_seams": self.recomposition_seams,
             "result_body_ids": self.result_body_ids,
             "result_shape": self.result_shape,
+            "subbody_result_map": self.subbody_result_map,
             "valid": self.valid,
         }
 
@@ -2372,21 +2435,31 @@ class BranchRecompositionRecord:
 def plan_branch_subbody_csg(
     body: SurfaceBody,
     operation: SurfaceBooleanOperation,
+    *,
+    cutter_bodies: Sequence[SurfaceBody] = (),
+    max_subbody_count: int = 16,
 ) -> BranchDecompositionPlan:
     """Plan branch-local CSG work for a complete branching loft policy record."""
 
     policy = classify_branching_loft_csg_policy(body, operation)
     branch_graph = policy.branch_graph
+    cutter_body_ids = tuple(body.stable_identity for body in cutter_bodies)
     joint_ids_by_branch: dict[str, list[str]] = {branch_id: [] for branch_id in branch_graph.branch_ids}
     for joint in branch_graph.joints:
         for branch_id in joint.branch_ids:
             joint_ids_by_branch.setdefault(branch_id, []).append(joint.joint_id)
+    diagnostics: list[str] = []
+    if len(branch_graph.branch_ids) > int(max_subbody_count):
+        diagnostics.append("branch-subbody-limit-exceeded")
     subbody_plans = tuple(
         BranchSubBodyCSGPlan(
+            subbody_id=f"{body.stable_identity}:branch:{branch_id}",
             branch_id=branch_id,
             operation=operation,
             source_body_id=body.stable_identity,
+            cutter_body_ids=cutter_body_ids,
             joint_ids=tuple(dict.fromkeys(joint_ids_by_branch.get(branch_id, ()))),
+            source_branch_ids=(branch_id,),
         )
         for branch_id in branch_graph.branch_ids
     )
@@ -2397,6 +2470,8 @@ def plan_branch_subbody_csg(
             {
                 "body_id": body.stable_identity,
                 "branch_ids": branch_graph.branch_ids,
+                "cutter_body_ids": cutter_body_ids,
+                "max_subbody_count": int(max_subbody_count),
                 "operation": operation,
             },
             sort_keys=True,
@@ -2407,8 +2482,11 @@ def plan_branch_subbody_csg(
         plan_id=f"branch-decomposition:{plan_digest}",
         operation=operation,
         source_body_id=body.stable_identity,
+        cutter_body_ids=cutter_body_ids,
         policy=policy,
         subbody_plans=subbody_plans,
+        max_subbody_count=int(max_subbody_count),
+        diagnostics=tuple(diagnostics),
     )
 
 
@@ -2424,12 +2502,22 @@ def validate_branch_recomposition(
     diagnostics: list[str] = []
     normalized_result_ids = tuple(str(body_id) for body_id in result_body_ids if str(body_id))
     normalized_seams = tuple(str(seam_id) for seam_id in recomposition_seams if str(seam_id))
+    subbody_ids = tuple(subplan.subbody_id for subplan in plan.subbody_plans)
+    required_joint_ids = tuple(
+        dict.fromkeys(joint_id for subplan in plan.subbody_plans for joint_id in subplan.joint_ids)
+    )
     if not plan.executable:
         diagnostics.append("decomposition-plan-not-executable")
     if len(normalized_result_ids) != len(plan.subbody_plans):
         diagnostics.append("subbody-result-count-mismatch")
+    if len(set(normalized_result_ids)) != len(normalized_result_ids):
+        diagnostics.append("duplicate-result-ownership")
     if plan.recomposition_required and not normalized_seams:
         diagnostics.append("missing-recomposition-seams")
+    for joint_id in required_joint_ids:
+        if not any(seam_id == joint_id or seam_id.startswith(f"{joint_id}:") for seam_id in normalized_seams):
+            diagnostics.append("open-recomposition-seam")
+            break
     if result_shape not in {"single-shell", "multi-shell", "refused"}:
         diagnostics.append("unsupported-result-shape")
         normalized_shape: BranchRecompositionResultShape = "refused"
@@ -2441,8 +2529,59 @@ def validate_branch_recomposition(
         valid=valid,
         result_shape=normalized_shape if valid else "refused",
         result_body_ids=normalized_result_ids,
+        subbody_result_map=tuple(zip(subbody_ids, normalized_result_ids, strict=False)),
         recomposition_seams=normalized_seams,
+        required_joint_ids=required_joint_ids,
         diagnostics=tuple(diagnostics),
+    )
+
+
+def _branch_decomposition_payload_for_operands(
+    operands: SurfaceBooleanOperands,
+) -> dict[str, object] | None:
+    """Return the branch-decomposition handoff payload for decomposable loft CSG."""
+
+    if operands.operation != "difference" or operands.operand_count < 2:
+        return None
+    base = operands.bodies[0]
+    policy = classify_branching_loft_csg_policy(base, operands.operation)
+    if policy.policy_class != "decomposition-required":
+        return None
+    plan = plan_branch_subbody_csg(
+        base,
+        operands.operation,
+        cutter_bodies=operands.bodies[1:],
+    )
+    recomposition = validate_branch_recomposition(plan)
+    return {
+        "decomposition_plan": plan.canonical_payload(),
+        "no_mesh_fallback": True,
+        "operation": operands.operation,
+        "operand_ids": operands.body_ids,
+        "policy": policy.canonical_payload(),
+        "recomposition_record": recomposition.canonical_payload(),
+        "route_id": "surface-csg.loft-branch-decomposition",
+        "status": "unsupported",
+    }
+
+
+def execute_branching_loft_difference_csg(
+    operands: SurfaceBooleanOperands,
+) -> SurfaceBooleanResult | None:
+    """Expose validated branch decomposition before Fix 08C result reconstruction."""
+
+    payload = _branch_decomposition_payload_for_operands(operands)
+    if payload is None:
+        return None
+    return SurfaceBooleanResult(
+        operation=operands.operation,
+        operands=operands,
+        status="unsupported",
+        failure_reason=(
+            "Branching loft difference decomposition planned; result-shell reconstruction is owned by Fix 08C; "
+            "no_mesh_fallback=True; "
+            f"branch_decomposition_adapter={json.dumps(payload, sort_keys=True, separators=(',', ':'))}"
+        ),
     )
 
 
@@ -15802,13 +15941,21 @@ def surface_csg_feature_gate(
         if record.code != "not-loft" and not record.supported
     )
     if loft_refusals:
+        raw_operands = SurfaceBooleanOperands(operation=operation, bodies=body_tuple)
+        branch_payload = _branch_decomposition_payload_for_operands(raw_operands)
+        payload_text = ""
+        if branch_payload is not None:
+            payload_text = (
+                "; "
+                f"branch_decomposition_adapter={json.dumps(branch_payload, sort_keys=True, separators=(',', ':'))}"
+            )
         return SurfaceCSGFeatureGateDiagnostic(
             caller_id=caller_id,
             operation=operation,
             supported=False,
             operand_ids=tuple(body.stable_identity for body in body_tuple),
             boundary="loft-eligibility",
-            reason="; ".join(record.message for record in loft_refusals),
+            reason="; ".join(record.message for record in loft_refusals) + payload_text,
         )
 
     plan = plan_surface_csg_operation(operation, body_tuple)
@@ -19943,6 +20090,9 @@ def surface_boolean_result(
             ),
             "surface-csg.plan-refusal",
         )
+    branching_loft_result = execute_branching_loft_difference_csg(operands)
+    if branching_loft_result is not None:
+        return finish(branching_loft_result, "surface-csg.loft-branch-decomposition")
     loft_pair_result = execute_loft_pair_csg(operands)
     if loft_pair_result is not None:
         return finish(loft_pair_result, "surface-csg.loft-pair")

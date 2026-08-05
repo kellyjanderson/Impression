@@ -198,13 +198,13 @@ prerequisites are complete; the whole preceding wave need not finish first.
 
 ### Fix 08B: Loft Difference Branch Decomposition
 
-- [ ] Implement branch eligibility, bounded decomposition, and a complete recomposition map.
+- [x] Implement branch eligibility, bounded decomposition, and a complete recomposition map.
   - Specification: [Fix 08B](../specifications/fix-08b-loft-difference-branch-decomposition-v1_0.md)
   - Prerequisite: [Fix 05B](../specifications/fix-05b-synthetic-station-identity-lineage-v1_0.md)
-- [ ] Wire lineage-backed sub-body cut planning into the difference executor.
-- [ ] Validate branch fixtures and the audio-cube branched-cutter regression.
+- [x] Wire lineage-backed sub-body cut planning into the difference executor.
+- [x] Validate branch fixtures and the audio-cube branched-cutter regression.
   - Test specification: [Fix 08B Test](../test-specifications/fix-08b-loft-difference-branch-decomposition-v1_0.md)
-- [ ] Update progression and surface-boolean ACD status after route validation.
+- [x] Update progression and surface-boolean ACD status after route validation.
 
 ## Wave 5: Closed Surface Execution
 
