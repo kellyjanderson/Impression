@@ -144,13 +144,13 @@ prerequisites are complete; the whole preceding wave need not finish first.
 
 ### Fix 09B: Difference Public Success Gate
 
-- [ ] Implement registry-wide success/no-cut classification using normalized geometry-change evidence.
+- [x] Implement registry-wide success/no-cut classification using normalized geometry-change evidence.
   - Specification: [Fix 09B](../specifications/fix-09b-difference-public-success-gate-v1_0.md)
   - Prerequisite: [Fix 09A](../specifications/fix-09a-difference-geometry-change-evidence-v1_0.md)
-- [ ] Wire the gate into public `boolean_difference` and every registered surfaced executor.
-- [ ] Validate public/registry outcomes and the rotated snap-groove false-success regression.
+- [x] Wire the gate into public `boolean_difference` and every registered surfaced executor.
+- [x] Validate public/registry outcomes and the rotated snap-groove false-success regression.
   - Test specification: [Fix 09B Test](../test-specifications/fix-09b-difference-public-success-gate-v1_0.md)
-- [ ] Update progression and surface-boolean ACD status after route validation.
+- [x] Update progression and surface-boolean ACD status after route validation.
 
 ## Wave 3: Preview Completion And Synthetic Lineage
 
