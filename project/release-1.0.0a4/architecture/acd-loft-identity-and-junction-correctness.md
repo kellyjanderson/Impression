@@ -116,6 +116,7 @@ internal resets.
 
 - [ ] Implementation conforms to the target architecture.
 - [x] Fix 03 named-hole identity resolution conforms through public planning and execution routes.
+- [x] Fix 06 immutable planner configuration propagates through direct, expanded, and nested pairing routes.
 - [x] Final leaves are independently reviewed and canonicalized.
 - [x] Paired test specs point to canonical leaves.
 - [x] Final progression preserves prerequisite order.
@@ -135,6 +136,10 @@ through public routes with closed-valid surface output.
 
 ## Change History
 
+- 2026-08-04 - Completed Fix 06 and reconciled canonical loft correspondence
+  architecture. Reason: public planner settings now become one immutable options
+  value consumed by direct, expanded, and synthetic transition pairing; branch
+  limit failures identify the effective cap and planning location.
 - 2026-08-04 - Completed Fix 03 and reconciled canonical loft correspondence
   architecture. Reason: named holes now resolve before anonymous geometric
   residue and execution consumes the resolved plan.

@@ -82,13 +82,13 @@ prerequisites are complete; the whole preceding wave need not finish first.
 
 ### Fix 06: Expanded Planner Configuration Propagation
 
-- [ ] Implement immutable propagation of public planner configuration through every expanded planning route.
+- [x] Implement immutable propagation of public planner configuration through every expanded planning route.
   - Specification: [Fix 06](../specifications/fix-06-expanded-planner-configuration-propagation-v1_0.md)
   - Prerequisites: none
-- [ ] Wire options through direct, nested-expansion, and ambiguity-enumeration library routes.
-- [ ] Validate below-, at-, and above-limit public planner behavior.
+- [x] Wire options through direct, nested-expansion, and ambiguity-enumeration library routes.
+- [x] Validate below-, at-, and above-limit public planner behavior.
   - Test specification: [Fix 06 Test](../test-specifications/fix-06-expanded-planner-configuration-propagation-v1_0.md)
-- [ ] Update progression and loft ACD status after route validation.
+- [x] Update progression and loft ACD status after route validation.
 
 ### Fix 08A: Loft Difference Trim-Fragment Construction
 

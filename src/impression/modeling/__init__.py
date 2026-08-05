@@ -62,6 +62,7 @@ from .drawing2d import (
 )
 from .loft import (
     Loft,
+    LoftPlannerOptions,
     Station,
     PlannedStation,
     PlannedLoopRef,
@@ -1279,6 +1280,7 @@ __all__ = [
     "RailConflictDiagnostic",
     "RailResolutionResult",
     "RailSource",
+    "LoftPlannerOptions",
     "PointLifecycleEvent",
     "PointLifecycleState",
     "LoftFamilyIntentEvidence",

@@ -1,7 +1,7 @@
 # Fix 06: Expanded Planner Configuration Propagation
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Primary ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 Architecture ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 Source artifact: [GitHub issue #246](https://github.com/kellyjanderson/Impression/issues/246)

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
+
 import numpy as np
 import pytest
 
-from impression.modeling import Loft, Loop, Region, Section, Station, SurfaceBody, TopologyPath
+from impression.modeling import Loft, LoftPlannerOptions, Loop, Region, Section, Station, SurfaceBody, TopologyPath
 from impression.modeling.loft import LoftPlanningBlockedError, loft_plan_sections
 
 
@@ -120,6 +122,27 @@ def test_anonymous_ambiguity_still_obeys_branch_limit() -> None:
 
     with pytest.raises(LoftPlanningBlockedError, match="candidate_enumeration_limit"):
         loft_plan_sections((source, target), samples=3, ambiguity_max_branches=2)
+
+
+def test_loft_planner_options_are_immutable_and_have_a_canonical_diagnostic_payload() -> None:
+    options = LoftPlannerOptions(
+        split_merge_mode="resolve",
+        split_merge_steps=6,
+        split_merge_bias=0.4,
+        ambiguity_mode="auto",
+        ambiguity_cost_profile="balanced",
+        ambiguity_max_branches=17,
+        fairness_mode="global",
+        fairness_weight=0.35,
+        skeleton_mode="auto",
+        fairness_iterations=9,
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        options.ambiguity_max_branches = 64  # type: ignore[misc]
+
+    assert options.canonical_payload()["ambiguity_max_branches"] == 17
+    assert options.canonical_payload()["fairness_mode"] == "global"
 
 
 def _named_rectangle(identity: str, center_x: float) -> TopologyPath:

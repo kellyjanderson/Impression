@@ -63,6 +63,36 @@ class RailSource(str, Enum):
 
 
 @dataclass(frozen=True)
+class LoftPlannerOptions:
+    """Validated planner configuration shared by every transition-planning call."""
+
+    split_merge_mode: str
+    split_merge_steps: int
+    split_merge_bias: float
+    ambiguity_mode: str
+    ambiguity_cost_profile: str
+    ambiguity_max_branches: int
+    fairness_mode: str
+    fairness_weight: float
+    skeleton_mode: str
+    fairness_iterations: int
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "split_merge_mode": self.split_merge_mode,
+            "split_merge_steps": int(self.split_merge_steps),
+            "split_merge_bias": float(self.split_merge_bias),
+            "ambiguity_mode": self.ambiguity_mode,
+            "ambiguity_cost_profile": self.ambiguity_cost_profile,
+            "ambiguity_max_branches": int(self.ambiguity_max_branches),
+            "fairness_mode": self.fairness_mode,
+            "fairness_weight": float(self.fairness_weight),
+            "skeleton_mode": self.skeleton_mode,
+            "fairness_iterations": int(self.fairness_iterations),
+        }
+
+
+@dataclass(frozen=True)
 class RailConflictDiagnostic:
     reason: str
     source_ref: str
@@ -3225,14 +3255,25 @@ def loft_plan_sections(
         if disambiguation_seed is None
         else int(disambiguation_seed)
     )
+    planner_options = LoftPlannerOptions(
+        split_merge_mode=split_merge_mode,
+        split_merge_steps=int(split_merge_steps),
+        split_merge_bias=float(split_merge_bias),
+        ambiguity_mode=resolved_ambiguity_mode,
+        ambiguity_cost_profile=ambiguity_cost_profile,
+        ambiguity_max_branches=int(ambiguity_max_branches),
+        fairness_mode=fairness_mode,
+        fairness_weight=float(fairness_weight),
+        skeleton_mode=skeleton_mode,
+        fairness_iterations=int(fairness_iterations),
+    )
 
     effective_stations = list(stations)
     if split_merge_mode == "resolve":
         effective_stations = _expand_split_merge_stations(
             stations=effective_stations,
             samples=samples,
-            split_merge_steps=split_merge_steps,
-            split_merge_bias=split_merge_bias,
+            options=planner_options,
         )
         _validate_section_stations(effective_stations)
 
@@ -3425,16 +3466,7 @@ def loft_plan_sections(
             transitions = _pair_sections_for_transition(
                 prev_regions,
                 curr_regions,
-                split_merge_mode=split_merge_mode,
-                split_merge_steps=split_merge_steps,
-                split_merge_bias=split_merge_bias,
-                ambiguity_mode=resolved_ambiguity_mode,
-                ambiguity_cost_profile=ambiguity_cost_profile,
-                ambiguity_max_branches=int(ambiguity_max_branches),
-                fairness_mode=fairness_mode,
-                fairness_weight=fairness_weight,
-                skeleton_mode=skeleton_mode,
-                fairness_iterations=fairness_iterations,
+                options=planner_options,
                 region_order_override=region_order_override,
                 many_to_many_assignment_override=selected_region_assignment,
                 hole_assignment_overrides=selected_hole_assignments,
@@ -3475,16 +3507,7 @@ def loft_plan_sections(
             transitions = _pair_sections_for_transition(
                 prev_regions,
                 curr_regions,
-                split_merge_mode=split_merge_mode,
-                split_merge_steps=split_merge_steps,
-                split_merge_bias=split_merge_bias,
-                ambiguity_mode=resolved_ambiguity_mode,
-                ambiguity_cost_profile=ambiguity_cost_profile,
-                ambiguity_max_branches=int(ambiguity_max_branches),
-                fairness_mode=fairness_mode,
-                fairness_weight=fairness_weight,
-                skeleton_mode=skeleton_mode,
-                fairness_iterations=fairness_iterations,
+                options=planner_options,
                 region_order_override=region_order_override,
                 many_to_many_assignment_override=selected_region_assignment,
                 hole_assignment_overrides=selected_hole_assignments,
@@ -3561,16 +3584,7 @@ def loft_plan_sections(
                     transitions = _pair_sections_for_transition(
                         prev_regions,
                         curr_regions,
-                        split_merge_mode=split_merge_mode,
-                        split_merge_steps=split_merge_steps,
-                        split_merge_bias=split_merge_bias,
-                        ambiguity_mode=resolved_ambiguity_mode,
-                        ambiguity_cost_profile=ambiguity_cost_profile,
-                        ambiguity_max_branches=int(ambiguity_max_branches),
-                        fairness_mode=fairness_mode,
-                        fairness_weight=fairness_weight,
-                        skeleton_mode=skeleton_mode,
-                        fairness_iterations=fairness_iterations,
+                        options=planner_options,
                         region_order_override=region_order_override,
                         many_to_many_assignment_override=selected_region_assignment,
                         hole_assignment_overrides=selected_hole_assignments,
@@ -3658,6 +3672,7 @@ def loft_plan_sections(
             "ambiguity_selection_policy": ambiguity_selection_policy,
             "ambiguity_cost_profile": ambiguity_cost_profile,
             "ambiguity_max_branches": int(ambiguity_max_branches),
+            "planner_options": planner_options.canonical_payload(),
             "disambiguation_mode": disambiguation_mode,
             "disambiguation_seed": int(resolved_disambiguation_seed),
             "probabilistic_trials": int(probabilistic_trials),
@@ -3719,14 +3734,25 @@ def loft_plan_ambiguities(
     _validate_ambiguity_max_branches(ambiguity_max_branches)
     _validate_section_stations(stations)
     _validate_station_hole_topology(stations)
+    planner_options = LoftPlannerOptions(
+        split_merge_mode=split_merge_mode,
+        split_merge_steps=int(split_merge_steps),
+        split_merge_bias=float(split_merge_bias),
+        ambiguity_mode="auto",
+        ambiguity_cost_profile=ambiguity_cost_profile,
+        ambiguity_max_branches=int(ambiguity_max_branches),
+        fairness_mode="local",
+        fairness_weight=0.2,
+        skeleton_mode="auto",
+        fairness_iterations=12,
+    )
 
     effective_stations = list(stations)
     if split_merge_mode == "resolve":
         effective_stations = _expand_split_merge_stations(
             stations=effective_stations,
             samples=samples,
-            split_merge_steps=split_merge_steps,
-            split_merge_bias=split_merge_bias,
+            options=planner_options,
         )
         _validate_section_stations(effective_stations)
 
@@ -3773,12 +3799,7 @@ def loft_plan_ambiguities(
             transitions = _pair_sections_for_transition(
                 prev_regions,
                 curr_regions,
-                split_merge_mode=split_merge_mode,
-                split_merge_steps=split_merge_steps,
-                split_merge_bias=split_merge_bias,
-                ambiguity_mode="auto",
-                ambiguity_cost_profile=ambiguity_cost_profile,
-                ambiguity_max_branches=int(ambiguity_max_branches),
+                options=planner_options,
             )
         except ValueError:
             continue
@@ -6021,9 +6042,10 @@ def _expand_split_merge_stations(
     *,
     stations: list[Station],
     samples: int,
-    split_merge_steps: int,
-    split_merge_bias: float,
+    options: LoftPlannerOptions,
 ) -> list[Station]:
+    split_merge_steps = options.split_merge_steps
+    split_merge_bias = options.split_merge_bias
     if len(stations) < 2 or split_merge_steps <= 1:
         return stations
 
@@ -6040,13 +6062,31 @@ def _expand_split_merge_stations(
             expanded.append(curr)
             continue
 
-        transitions = _pair_sections_for_transition(
-            prev_regions,
-            curr_regions,
-            split_merge_mode="resolve",
-            split_merge_steps=split_merge_steps,
-            split_merge_bias=split_merge_bias,
-        )
+        try:
+            transitions = _pair_sections_for_transition(
+                prev_regions,
+                curr_regions,
+                options=options,
+            )
+        except ValueError as exc:
+            detail = str(exc)
+            if "unsupported_topology_ambiguity" not in detail:
+                raise
+            ambiguity_class = _classify_region_transition_ambiguity(
+                prev_regions=[region[0] for region in prev_regions],
+                curr_regions=[region[0] for region in curr_regions],
+                ambiguity_max_branches=options.ambiguity_max_branches,
+                ambiguity_cost_profile=options.ambiguity_cost_profile,
+            )
+            raise ValueError(
+                "Unsupported topology transition: unsupported_topology_ambiguity "
+                f"(interval {idx}->{idx + 1}; ambiguity_class={ambiguity_class}; "
+                f"tie_break_stage={_ambiguity_failure_stage(detail)}; "
+                f"candidate_count_after_pruning={_ambiguity_failure_candidate_count(detail)}; "
+                f"ambiguity_max_branches={options.ambiguity_max_branches}; "
+                f"planner_location=split_merge_expansion:{idx}->{idx + 1}; "
+                f"effective_options={options.canonical_payload()}; detail={detail})"
+            ) from exc
         u0 = float(np.clip(split_merge_bias - 0.2, 0.0, 1.0))
         u1 = float(np.clip(split_merge_bias + 0.2, 0.0, 1.0))
         if u1 <= u0:
@@ -6339,20 +6379,19 @@ def _pair_sections_for_transition(
     prev_regions: list[list[np.ndarray]],
     curr_regions: list[list[np.ndarray]],
     *,
-    split_merge_mode: str,
-    split_merge_steps: int,
-    split_merge_bias: float,
-    ambiguity_mode: str = "auto",
-    ambiguity_cost_profile: str = "balanced",
-    ambiguity_max_branches: int = 64,
-    fairness_mode: str = "local",
-    fairness_weight: float = 0.2,
-    skeleton_mode: str = "auto",
-    fairness_iterations: int = 12,
+    options: LoftPlannerOptions,
     region_order_override: tuple[int, ...] | None = None,
     many_to_many_assignment_override: tuple[int, ...] | None = None,
     hole_assignment_overrides: dict[tuple[str, int, str, int], tuple[int, ...]] | None = None,
 ) -> list[_PairedSectionTransition]:
+    split_merge_mode = options.split_merge_mode
+    split_merge_steps = options.split_merge_steps
+    split_merge_bias = options.split_merge_bias
+    ambiguity_cost_profile = options.ambiguity_cost_profile
+    ambiguity_max_branches = options.ambiguity_max_branches
+    fairness_mode = options.fairness_mode
+    fairness_weight = options.fairness_weight
+    fairness_iterations = options.fairness_iterations
     prev_count = len(prev_regions)
     curr_count = len(curr_regions)
     transitions: list[_PairedSectionTransition] = []
@@ -6391,16 +6430,7 @@ def _pair_sections_for_transition(
             paired = _pair_region_loops_for_transition(
                 prev_regions[prev_idx],
                 curr_regions[curr_idx],
-                split_merge_mode=split_merge_mode,
-                split_merge_steps=split_merge_steps,
-                split_merge_bias=split_merge_bias,
-                ambiguity_mode=ambiguity_mode,
-                ambiguity_cost_profile=ambiguity_cost_profile,
-                ambiguity_max_branches=ambiguity_max_branches,
-                fairness_mode=fairness_mode,
-                fairness_weight=fairness_weight,
-                skeleton_mode=skeleton_mode,
-                fairness_iterations=fairness_iterations,
+                options=options,
                 hole_assignment_override=hole_assignment_overrides.get(
                     ("actual", prev_idx, "actual", curr_idx)
                 ),
@@ -6453,16 +6483,7 @@ def _pair_sections_for_transition(
             paired = _pair_region_loops_for_transition(
                 prev_regions[prev_idx],
                 curr_regions[curr_idx],
-                split_merge_mode=split_merge_mode,
-                split_merge_steps=split_merge_steps,
-                split_merge_bias=split_merge_bias,
-                ambiguity_mode=ambiguity_mode,
-                ambiguity_cost_profile=ambiguity_cost_profile,
-                ambiguity_max_branches=ambiguity_max_branches,
-                fairness_mode=fairness_mode,
-                fairness_weight=fairness_weight,
-                skeleton_mode=skeleton_mode,
-                fairness_iterations=fairness_iterations,
+                options=options,
                 hole_assignment_override=hole_assignment_overrides.get(
                     ("actual", prev_idx, "actual", curr_idx)
                 ),
@@ -6484,16 +6505,7 @@ def _pair_sections_for_transition(
             paired = _pair_region_loops_for_transition(
                 synthetic_prev,
                 curr_regions[curr_idx],
-                split_merge_mode=split_merge_mode,
-                split_merge_steps=split_merge_steps,
-                split_merge_bias=split_merge_bias,
-                ambiguity_mode=ambiguity_mode,
-                ambiguity_cost_profile=ambiguity_cost_profile,
-                ambiguity_max_branches=ambiguity_max_branches,
-                fairness_mode=fairness_mode,
-                fairness_weight=fairness_weight,
-                skeleton_mode=skeleton_mode,
-                fairness_iterations=fairness_iterations,
+                options=options,
                 hole_assignment_override=None,
             )
             transitions.append(
@@ -6546,16 +6558,7 @@ def _pair_sections_for_transition(
             paired = _pair_region_loops_for_transition(
                 prev_regions[prev_idx],
                 curr_regions[curr_idx],
-                split_merge_mode=split_merge_mode,
-                split_merge_steps=split_merge_steps,
-                split_merge_bias=split_merge_bias,
-                ambiguity_mode=ambiguity_mode,
-                ambiguity_cost_profile=ambiguity_cost_profile,
-                ambiguity_max_branches=ambiguity_max_branches,
-                fairness_mode=fairness_mode,
-                fairness_weight=fairness_weight,
-                skeleton_mode=skeleton_mode,
-                fairness_iterations=fairness_iterations,
+                options=options,
                 hole_assignment_override=hole_assignment_overrides.get(
                     ("actual", prev_idx, "actual", curr_idx)
                 ),
@@ -6577,16 +6580,7 @@ def _pair_sections_for_transition(
             paired = _pair_region_loops_for_transition(
                 prev_regions[prev_idx],
                 synthetic_curr,
-                split_merge_mode=split_merge_mode,
-                split_merge_steps=split_merge_steps,
-                split_merge_bias=split_merge_bias,
-                ambiguity_mode=ambiguity_mode,
-                ambiguity_cost_profile=ambiguity_cost_profile,
-                ambiguity_max_branches=ambiguity_max_branches,
-                fairness_mode=fairness_mode,
-                fairness_weight=fairness_weight,
-                skeleton_mode=skeleton_mode,
-                fairness_iterations=fairness_iterations,
+                options=options,
                 hole_assignment_override=None,
             )
             transitions.append(
@@ -6607,21 +6601,20 @@ def _pair_region_loops_for_transition(
     prev_region_loops: list[np.ndarray],
     curr_region_loops: list[np.ndarray],
     *,
-    split_merge_mode: str,
-    split_merge_steps: int,
-    split_merge_bias: float,
-    ambiguity_mode: str = "auto",
-    ambiguity_cost_profile: str = "balanced",
-    ambiguity_max_branches: int = 64,
-    fairness_mode: str = "local",
-    fairness_weight: float = 0.2,
-    skeleton_mode: str = "auto",
-    fairness_iterations: int = 12,
+    options: LoftPlannerOptions,
     hole_assignment_override: tuple[int, ...] | None = None,
 ) -> _PairedRegionLoops:
+    split_merge_mode = options.split_merge_mode
+    split_merge_steps = options.split_merge_steps
+    split_merge_bias = options.split_merge_bias
+    ambiguity_cost_profile = options.ambiguity_cost_profile
+    ambiguity_max_branches = options.ambiguity_max_branches
+    fairness_mode = options.fairness_mode
+    fairness_weight = options.fairness_weight
+    fairness_iterations = options.fairness_iterations
     # Step 1 (Spec 19): fairness/skeleton controls are surfaced and propagated.
     # Optimization behavior is introduced in follow-up steps.
-    _ = (fairness_mode, fairness_weight, skeleton_mode, fairness_iterations)
+    _ = options.skeleton_mode
 
     prev_outer = prev_region_loops[0]
     curr_outer = curr_region_loops[0]
