@@ -676,9 +676,10 @@ def test_loft_csg_reference_handoff_fixture_registry_smoke(tmp_path: Path, proje
     handoff = getattr(module, record.entrypoint)()
 
     assert not summary.diagnostics
-    assert handoff.accepted is True
-    assert handoff.dirty_stl_source_ready is True
-    assert handoff.accepted_body_identity
+    assert handoff.accepted is False
+    assert handoff.dirty_stl_source_ready is False
+    assert handoff.accepted_body_identity is None
+    assert {diagnostic.code for diagnostic in handoff.diagnostics} == {"non-success-result"}
 
 
 def test_loft_csg_section_evidence_readiness_fixture_registry_smoke(tmp_path: Path, project_root: Path) -> None:
@@ -711,9 +712,10 @@ def test_loft_csg_section_evidence_readiness_fixture_registry_smoke(tmp_path: Pa
     readiness = getattr(module, record.entrypoint)()
 
     assert not summary.diagnostics
-    assert readiness.ready is True
-    assert readiness.bundle_payload["evidence_kind"] == "loft-section"
-    assert readiness.accepted_body_identity
+    assert readiness.ready is False
+    assert readiness.bundle_payload is None
+    assert readiness.accepted_body_identity is None
+    assert {diagnostic.code for diagnostic in readiness.diagnostics} == {"missing-handoff"}
 
 
 def test_dirty_stl_fixture_file_reports_missing_artifact(tmp_path: Path, project_root: Path) -> None:

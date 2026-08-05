@@ -50,6 +50,7 @@ from impression.modeling import (
     LoftCutLoopBoundaryParticipationRecord,
     LoftCutLoopClosureDiagnostic,
     LoftCutLoopDegeneracyDiagnostic,
+    LoftDifferenceTrimFragmentConstructionRecord,
     LoftCSGOperationRouteRecord,
     LoftPairOperationPlanRecord,
     LoftPatchLocalInversionDiagnostic,
@@ -242,6 +243,7 @@ from impression.modeling import (
     classify_loft_cut_loop_degeneracy,
     classify_loft_primitive_cap_support,
     classify_loft_primitive_result_topology,
+    construct_loft_difference_trim_fragments,
     build_loft_primitive_generated_cap_records,
     evaluate_loft_primitive_topology_orientation,
     pair_loft_primitive_generated_cap_loops,
@@ -2645,11 +2647,12 @@ def test_surface_csg_selects_loft_primitive_route_before_execution() -> None:
     assert route.loft_operand_indices == (0,)
     assert route.primitive_families == ("", "box")
     assert route.canonical_payload()["no_mesh_fallback"] is True
-    assert result.status == "succeeded"
-    assert result.body is not None
-    scope_payload = result.body.kernel_metadata()["loft_primitive_public_executor"]["execution_scope"]
-    assert scope_payload["scope"] == "trim-fragment-cut"
-    assert scope_payload["accepted"] is True
+    assert result.status == "unsupported"
+    assert result.body is None
+    payload = json.loads(str(result.failure_reason).split("loft_primitive_trim_adapter=", 1)[1])
+    assert payload["trim_fragment_construction"]["supported"] is False
+    assert payload["execution_scope"]["scope"] == "structured-refusal"
+    assert payload["execution_scope"]["accepted"] is False
 
 
 def test_surface_csg_route_selection_reports_supported_loft_pairing() -> None:
@@ -3770,16 +3773,15 @@ def test_public_api_intersecting_loft_box_returns_public_cut_executor_result_wit
 
     result = surface_boolean_result("difference", operands)
 
-    assert result.status == "succeeded"
-    assert result.classification == "closed"
-    assert result.body is not None
-    assert result.failure_reason is None
-    payload = result.body.kernel_metadata()["loft_primitive_csg"]
-    executor_payload = result.body.kernel_metadata()["loft_primitive_public_executor"]
-    assert executor_payload["execution_scope"]["scope"] == "trim-fragment-cut"
-    assert executor_payload["execution_scope"]["status"] == "succeeded"
-    assert executor_payload["execution_scope"]["accepted"] is True
-    assert executor_payload["no_mesh_fallback"] is True
+    assert result.status == "unsupported"
+    assert result.body is None
+    assert result.failure_reason is not None
+    payload = json.loads(str(result.failure_reason).split("loft_primitive_trim_adapter=", 1)[1])
+    assert payload["execution_scope"]["scope"] == "structured-refusal"
+    assert payload["execution_scope"]["status"] == "unsupported"
+    assert payload["execution_scope"]["accepted"] is False
+    assert payload["trim_fragment_construction"]["supported"] is False
+    assert payload["no_mesh_fallback"] is True
     source_payload = payload["source_normalization"]
     assert source_payload["supported"] is True
     assert source_payload["primitive_family"] == "box"
@@ -3874,7 +3876,7 @@ def test_public_api_intersecting_loft_box_returns_public_cut_executor_result_wit
     assert proof_payload["diagnostics"] == []
 
 
-def test_loft_primitive_public_cut_executor_can_be_called_directly_without_rerouting() -> None:
+def test_loft_primitive_public_cut_executor_precisely_refuses_unverified_curved_trims() -> None:
     body = _small_capped_loft_body()
     cutter = make_box(size=(0.3, 0.3, 0.3), center=(0.0, 0.0, 0.25))
     operands = prepare_surface_boolean_difference_operands(body, [cutter])
@@ -3882,21 +3884,57 @@ def test_loft_primitive_public_cut_executor_can_be_called_directly_without_rerou
     result = execute_loft_primitive_trim_fragment_csg(operands)
 
     assert result is not None
-    assert result.status == "succeeded"
-    assert result.body is not None
-    scope_payload = result.body.kernel_metadata()["loft_primitive_public_executor"]["execution_scope"]
-    assert isinstance(
-        LoftPrimitiveExecutionScopeRecord(
-            operation="difference",
-            route_id="surface-csg.loft-primitive",
-            scope="trim-fragment-cut",
-            status="succeeded",
-            accepted=True,
-        ),
-        LoftPrimitiveExecutionScopeRecord,
+    assert result.status == "unsupported"
+    assert result.body is None
+    payload = json.loads(str(result.failure_reason).split("loft_primitive_trim_adapter=", 1)[1])
+    construction = payload["trim_fragment_construction"]
+    assert construction["supported"] is False
+    assert {diagnostic["code"] for diagnostic in construction["diagnostics"]} >= {
+        "missing-intersection-evidence",
+        "unsupported-patch-pair",
+    }
+    assert construction["no_mesh_fallback"] is True
+
+
+def test_loft_difference_executor_builds_bounds_pruned_closed_fragments_with_provenance() -> None:
+    body = loft(
+        [make_rect(size=(2.0, 2.0)), make_rect(size=(2.0, 2.0))],
+        path=[(0.0, 0.0, -1.0), (0.0, 0.0, 1.0)],
+        cap_ends=True,
+        samples=8,
     )
-    assert scope_payload["scope"] == "trim-fragment-cut"
-    assert scope_payload["accepted"] is True
+    cutter = make_box(size=(0.6, 0.6, 1.0), center=(0.0, 0.0, 1.0))
+    operands = prepare_surface_boolean_difference_operands(body, [cutter])
+    route = select_loft_csg_route(operands)
+
+    construction = construct_loft_difference_trim_fragments(operands, route=route)
+    result = execute_loft_primitive_trim_fragment_csg(operands)
+
+    assert isinstance(construction, LoftDifferenceTrimFragmentConstructionRecord)
+    assert construction.supported is True
+    assert 0 < len(construction.candidate_pairs) < body.patch_count * cutter.patch_count
+    assert len(construction.intersection_evidence) == 4
+    assert construction.base_fragments
+    assert construction.cutter_fragments
+    assert all(fragment.source_curve_ids for fragment in construction.base_fragments)
+    assert all(fragment.source_curve_ids for fragment in construction.cutter_fragments)
+    assert all(fragment.trim_loops for fragment in (*construction.base_fragments, *construction.cutter_fragments))
+    assert all(
+        len(loop.points_uv) >= 3 and abs(loop.area) > 0.0
+        for fragment in (*construction.base_fragments, *construction.cutter_fragments)
+        for loop in fragment.trim_loops
+    )
+
+    assert result is not None
+    assert result.status == "unsupported"
+    assert "result-shell reconstruction is owned by Fix 08C" in str(result.failure_reason)
+    payload = json.loads(str(result.failure_reason).split("loft_primitive_trim_adapter=", 1)[1])
+    route_construction = payload["trim_fragment_construction"]
+    assert route_construction["supported"] is True
+    assert len(route_construction["candidate_pairs"]) == len(construction.candidate_pairs)
+    assert len(route_construction["intersection_evidence"]) == len(construction.intersection_evidence)
+    assert len(route_construction["base_fragments"]) == len(construction.base_fragments)
+    assert len(route_construction["cutter_fragments"]) == len(construction.cutter_fragments)
 
 
 @pytest.mark.parametrize("operation", ("union", "intersection"))

@@ -935,8 +935,30 @@ Split decision:
 - Review for split. Cohesion reason: section evidence is one reference
   artifact contract and has already been split from metadata propagation.
 
+## Loft Difference Trim-Fragment Boundary
+
+The loft-difference executor first prunes base/cutter patch pairs by world-space
+patch bounds. Qualifying low-order pairs produce analytic intersection curves
+and matching patch-local UV evidence. Patch-local networks become closed trim
+loops either by joining a complete curve cycle or by closing one domain-to-domain
+cut segment against the source patch boundary.
+
+Each derived fragment records its base/cutter role, source patch and family,
+closed trim loops, and source curve IDs. This is the durable handoff from
+intersection to later branch decomposition and result-shell reconstruction.
+Candidate pairs without an exact family route are never sampled or tessellated;
+if the supported evidence cannot produce both base and cutter fragments, the
+public difference route returns a structured no-mesh refusal.
+
+Fix 08A deliberately does not publish a cut body. Even a complete fragment set
+remains an unsupported staged result until Fix 08C assembles and validates the
+closed result shell. Reference-STL and section-evidence handoffs therefore stay
+unready instead of accepting the former unchanged-base clone.
+
 ## Change History
 
+- 2026-08-04: Added the implemented bounds-pruned intersection-to-trim-fragment
+  boundary and the staged no-false-success handoff to result-shell reconstruction.
 - 2026-07-11: Completed five manifest review/update/rescore rounds. Context:
   oversized single-shell, branching, metadata, and section-evidence candidates
   were split into route-sized and artifact-sized candidates.

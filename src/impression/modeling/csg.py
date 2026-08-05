@@ -2711,6 +2711,144 @@ class LoftPrimitiveTrimAdapterRecord:
         }
 
 
+@dataclass(frozen=True)
+class LoftDifferencePatchPairCandidateRecord:
+    """Bounds-pruned base/cutter patch pair considered for loft difference."""
+
+    candidate_id: str
+    base_patch: SurfaceBooleanPatchRef
+    cutter_patch: SurfaceBooleanPatchRef
+    base_family: str
+    cutter_family: str
+    overlap_bounds: tuple[float, float, float, float, float, float]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "candidate_id": self.candidate_id,
+            "base_patch": _surface_boolean_patch_ref_payload(self.base_patch),
+            "cutter_patch": _surface_boolean_patch_ref_payload(self.cutter_patch),
+            "base_family": self.base_family,
+            "cutter_family": self.cutter_family,
+            "overlap_bounds": self.overlap_bounds,
+        }
+
+
+@dataclass(frozen=True)
+class LoftDifferenceIntersectionCurveEvidenceRecord:
+    """Analytic intersection evidence for one qualifying candidate patch pair."""
+
+    candidate_id: str
+    base_patch: SurfaceBooleanPatchRef
+    cutter_patch: SurfaceBooleanPatchRef
+    relation: str
+    curve_ids: tuple[str, ...] = ()
+    patch_local_curves: tuple[SurfaceCSGPatchLocalCurve, ...] = ()
+
+    @property
+    def qualifying(self) -> bool:
+        return bool(self.curve_ids) and len(self.patch_local_curves) == 2
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "candidate_id": self.candidate_id,
+            "base_patch": _surface_boolean_patch_ref_payload(self.base_patch),
+            "cutter_patch": _surface_boolean_patch_ref_payload(self.cutter_patch),
+            "relation": self.relation,
+            "curve_ids": self.curve_ids,
+            "patch_local_curves": tuple(curve.canonical_payload() for curve in self.patch_local_curves),
+            "qualifying": self.qualifying,
+        }
+
+
+@dataclass(frozen=True)
+class LoftDifferenceTrimFragmentDiagnostic:
+    """Precise refusal emitted by loft difference trim-fragment construction."""
+
+    code: Literal[
+        "unsupported-route",
+        "unsupported-patch-pair",
+        "missing-intersection-evidence",
+        "open-trim-network",
+        "ambiguous-trim-network",
+        "invalid-trim-loop",
+    ]
+    message: str
+    candidate_id: str | None = None
+    patch: SurfaceBooleanPatchRef | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "candidate_id": self.candidate_id,
+            "patch": None if self.patch is None else _surface_boolean_patch_ref_payload(self.patch),
+        }
+
+
+@dataclass(frozen=True)
+class LoftDifferenceTrimFragmentRecord:
+    """Closed patch-local fragment with immutable source and cut provenance."""
+
+    fragment_id: str
+    source_role: Literal["base", "cutter"]
+    source_patch: SurfaceBooleanPatchRef
+    source_family: str
+    trim_loops: tuple[TrimLoop, ...]
+    source_curve_ids: tuple[str, ...]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "fragment_id": self.fragment_id,
+            "source_role": self.source_role,
+            "source_patch": _surface_boolean_patch_ref_payload(self.source_patch),
+            "source_family": self.source_family,
+            "source_curve_ids": self.source_curve_ids,
+            "trim_loops": tuple(
+                {
+                    "category": loop.category,
+                    "points_uv": tuple(
+                        (float(point[0]), float(point[1])) for point in loop.points_uv
+                    ),
+                }
+                for loop in self.trim_loops
+            ),
+        }
+
+
+@dataclass(frozen=True)
+class LoftDifferenceTrimFragmentConstructionRecord:
+    """Complete Fix08A intersection-to-fragment construction result."""
+
+    route_id: str
+    candidate_pairs: tuple[LoftDifferencePatchPairCandidateRecord, ...] = ()
+    intersection_evidence: tuple[LoftDifferenceIntersectionCurveEvidenceRecord, ...] = ()
+    base_fragments: tuple[LoftDifferenceTrimFragmentRecord, ...] = ()
+    cutter_fragments: tuple[LoftDifferenceTrimFragmentRecord, ...] = ()
+    diagnostics: tuple[LoftDifferenceTrimFragmentDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    @property
+    def supported(self) -> bool:
+        return (
+            not self.diagnostics
+            and bool(self.intersection_evidence)
+            and bool(self.base_fragments)
+            and bool(self.cutter_fragments)
+        )
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "route_id": self.route_id,
+            "candidate_pairs": tuple(record.canonical_payload() for record in self.candidate_pairs),
+            "intersection_evidence": tuple(record.canonical_payload() for record in self.intersection_evidence),
+            "base_fragments": tuple(record.canonical_payload() for record in self.base_fragments),
+            "cutter_fragments": tuple(record.canonical_payload() for record in self.cutter_fragments),
+            "diagnostics": tuple(diagnostic.canonical_payload() for diagnostic in self.diagnostics),
+            "supported": self.supported,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
 LoftPrimitiveSourceRegionKind = Literal["box-overlap", "sphere-analytic-region", "cylinder-analytic-region"]
 
 
@@ -14519,12 +14657,400 @@ def assert_loft_primitive_no_hidden_mesh_fallback(
     return proof
 
 
+def _bounds_overlap_inclusive(
+    first: tuple[float, float, float, float, float, float],
+    second: tuple[float, float, float, float, float, float],
+    *,
+    tolerance: float,
+) -> tuple[float, float, float, float, float, float] | None:
+    overlap = _aabb_overlap(first, second)
+    if any(overlap[index] > overlap[index + 1] + tolerance for index in (0, 2, 4)):
+        return None
+    return (
+        float(overlap[0]),
+        float(overlap[1]),
+        float(overlap[2]),
+        float(overlap[3]),
+        float(overlap[4]),
+        float(overlap[5]),
+    )
+
+
+def build_loft_difference_patch_pair_candidates(
+    operands: SurfaceBooleanOperands,
+    *,
+    route: LoftCSGOperationRouteRecord | None = None,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> tuple[LoftDifferencePatchPairCandidateRecord, ...]:
+    """Prune loft-difference patch pairs using world-space patch bounds."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    selected_route = _loft_primitive_route_or_default(operands, route)
+    if (
+        selected_route is None
+        or operands.operation != "difference"
+        or selected_route.loft_operand_indices != (0,)
+    ):
+        return ()
+    base_patches = operands.bodies[0].iter_patches(world=True)
+    cutter_patches = operands.bodies[1].iter_patches(world=True)
+    candidates: list[LoftDifferencePatchPairCandidateRecord] = []
+    for base_index, base_patch in enumerate(base_patches):
+        for cutter_index, cutter_patch in enumerate(cutter_patches):
+            overlap = _bounds_overlap_inclusive(
+                base_patch.bounds_estimate(),
+                cutter_patch.bounds_estimate(),
+                tolerance=normalized_policy.domain_tolerance,
+            )
+            if overlap is None:
+                continue
+            candidates.append(
+                LoftDifferencePatchPairCandidateRecord(
+                    candidate_id=f"base:{base_index}|cutter:{cutter_index}",
+                    base_patch=SurfaceBooleanPatchRef(0, base_index),
+                    cutter_patch=SurfaceBooleanPatchRef(1, cutter_index),
+                    base_family=base_patch.family,
+                    cutter_family=cutter_patch.family,
+                    overlap_bounds=overlap,
+                )
+            )
+    return tuple(candidates)
+
+
+def _loft_difference_candidate_intersection(
+    candidate: LoftDifferencePatchPairCandidateRecord,
+    base_patch: SurfacePatch,
+    cutter_patch: SurfacePatch,
+    *,
+    policy: SurfaceCSGTolerancePolicy,
+) -> tuple[LoftDifferenceIntersectionCurveEvidenceRecord | None, LoftDifferenceTrimFragmentDiagnostic | None]:
+    if isinstance(base_patch, (PlanarSurfacePatch, RuledSurfacePatch)) and isinstance(
+        cutter_patch, (PlanarSurfacePatch, RuledSurfacePatch)
+    ):
+        intersection = intersect_planar_linear_patch_pair(
+            candidate.base_patch,
+            base_patch,
+            candidate.cutter_patch,
+            cutter_patch,
+            policy=policy,
+        )
+        if intersection.supported and intersection.curve is not None:
+            curve_id = surface_csg_curve_digest(intersection.curve)
+            return (
+                LoftDifferenceIntersectionCurveEvidenceRecord(
+                    candidate_id=candidate.candidate_id,
+                    base_patch=candidate.base_patch,
+                    cutter_patch=candidate.cutter_patch,
+                    relation=intersection.relation,
+                    curve_ids=(curve_id,),
+                    patch_local_curves=intersection.patch_local_curves,
+                ),
+                None,
+            )
+        if intersection.relation in {"parallel", "coincident", "disjoint", "touching"}:
+            return None, None
+        return None, LoftDifferenceTrimFragmentDiagnostic(
+            code="unsupported-patch-pair",
+            message=(
+                "Loft difference candidate requires an exact planar or affine-ruled intersection; "
+                f"{base_patch.family}/{cutter_patch.family} candidate {candidate.candidate_id} refused."
+            ),
+            candidate_id=candidate.candidate_id,
+        )
+    return None, LoftDifferenceTrimFragmentDiagnostic(
+        code="unsupported-patch-pair",
+        message=(
+            "Loft difference trim construction has no exact intersection route for "
+            f"{base_patch.family}/{cutter_patch.family}; no mesh fallback was attempted."
+        ),
+        candidate_id=candidate.candidate_id,
+    )
+
+
+def build_loft_difference_intersection_evidence(
+    operands: SurfaceBooleanOperands,
+    candidates: Sequence[LoftDifferencePatchPairCandidateRecord],
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> tuple[
+    tuple[LoftDifferenceIntersectionCurveEvidenceRecord, ...],
+    tuple[LoftDifferenceTrimFragmentDiagnostic, ...],
+]:
+    """Build analytic curve evidence for bounds-pruned loft difference candidates."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    base_patches = operands.bodies[0].iter_patches(world=True)
+    cutter_patches = operands.bodies[1].iter_patches(world=True)
+    records: list[LoftDifferenceIntersectionCurveEvidenceRecord] = []
+    diagnostics: list[LoftDifferenceTrimFragmentDiagnostic] = []
+    for candidate in candidates:
+        record, diagnostic = _loft_difference_candidate_intersection(
+            candidate,
+            base_patches[candidate.base_patch.patch_index],
+            cutter_patches[candidate.cutter_patch.patch_index],
+            policy=normalized_policy,
+        )
+        if record is not None:
+            records.append(record)
+        if diagnostic is not None:
+            diagnostics.append(diagnostic)
+    return tuple(records), tuple(diagnostics)
+
+
+def _point_on_domain_boundary(
+    point: tuple[float, float],
+    patch: SurfacePatch,
+    *,
+    tolerance: float,
+) -> bool:
+    u0, u1 = patch.domain.u_range
+    v0, v1 = patch.domain.v_range
+    return bool(
+        abs(point[0] - u0) <= tolerance
+        or abs(point[0] - u1) <= tolerance
+        or abs(point[1] - v0) <= tolerance
+        or abs(point[1] - v1) <= tolerance
+    )
+
+
+def _clip_domain_polygon_by_line(
+    polygon: Sequence[tuple[float, float]],
+    start: np.ndarray,
+    end: np.ndarray,
+    *,
+    keep_sign: float,
+    tolerance: float,
+) -> tuple[tuple[float, float], ...]:
+    direction = end - start
+
+    def signed(point: np.ndarray) -> float:
+        return float(direction[0] * (point[1] - start[1]) - direction[1] * (point[0] - start[0]))
+
+    output: list[np.ndarray] = []
+    previous = np.asarray(polygon[-1], dtype=float)
+    previous_value = signed(previous) * keep_sign
+    for raw_point in polygon:
+        current = np.asarray(raw_point, dtype=float)
+        current_value = signed(current) * keep_sign
+        previous_inside = previous_value >= -tolerance
+        current_inside = current_value >= -tolerance
+        if previous_inside != current_inside:
+            denominator = previous_value - current_value
+            if abs(denominator) > tolerance:
+                alpha = previous_value / denominator
+                output.append(previous + alpha * (current - previous))
+        if current_inside:
+            output.append(current)
+        previous = current
+        previous_value = current_value
+    return tuple((float(point[0]), float(point[1])) for point in output)
+
+
+def _domain_split_loops_for_open_curve(
+    patch: SurfacePatch,
+    curve: SurfaceCSGPatchLocalCurve,
+    *,
+    tolerance: float,
+) -> tuple[TrimLoop, ...]:
+    start = curve.points_uv[0]
+    end = curve.points_uv[-1]
+    if not (
+        _point_on_domain_boundary(start, patch, tolerance=tolerance)
+        and _point_on_domain_boundary(end, patch, tolerance=tolerance)
+    ):
+        return ()
+    u0, u1 = patch.domain.u_range
+    v0, v1 = patch.domain.v_range
+    rectangle = ((float(u0), float(v0)), (float(u1), float(v0)), (float(u1), float(v1)), (float(u0), float(v1)))
+    loops: list[TrimLoop] = []
+    for sign in (-1.0, 1.0):
+        points = _clip_domain_polygon_by_line(
+            rectangle,
+            np.asarray(start, dtype=float),
+            np.asarray(end, dtype=float),
+            keep_sign=sign,
+            tolerance=tolerance,
+        )
+        if len(points) < 3:
+            continue
+        loop = TrimLoop(points, category="outer").normalized()
+        if abs(loop.area) > tolerance:
+            loops.append(loop)
+    return tuple(loops)
+
+
+def _closed_patch_curve_loop(
+    curves: Sequence[SurfaceCSGPatchLocalCurve],
+    *,
+    tolerance: float,
+) -> TrimLoop | None:
+    if len(curves) == 1:
+        points = curves[0].points_uv
+        if np.linalg.norm(np.asarray(points[0]) - np.asarray(points[-1])) <= tolerance and len(points) >= 4:
+            return TrimLoop(points[:-1], category="inner").normalized()
+        return None
+    unused = list(curves)
+    ordered = list(unused.pop(0).points_uv)
+    while unused:
+        end = np.asarray(ordered[-1], dtype=float)
+        match_index = -1
+        match_points: tuple[tuple[float, float], ...] = ()
+        for index, curve in enumerate(unused):
+            points = curve.points_uv
+            if np.linalg.norm(end - np.asarray(points[0])) <= tolerance:
+                match_index, match_points = index, points
+                break
+            if np.linalg.norm(end - np.asarray(points[-1])) <= tolerance:
+                match_index, match_points = index, tuple(reversed(points))
+                break
+        if match_index < 0:
+            return None
+        unused.pop(match_index)
+        ordered.extend(match_points[1:])
+    if np.linalg.norm(np.asarray(ordered[0]) - np.asarray(ordered[-1])) > tolerance or len(ordered) < 4:
+        return None
+    return TrimLoop(tuple(ordered[:-1]), category="inner").normalized()
+
+
+def _loft_difference_fragments_for_patch(
+    patch_ref: SurfaceBooleanPatchRef,
+    patch: SurfacePatch,
+    curves: Sequence[SurfaceCSGPatchLocalCurve],
+    *,
+    tolerance: float,
+) -> tuple[LoftDifferenceTrimFragmentRecord, ...]:
+    unique_curves = tuple(
+        {curve.source_curve_digest: curve for curve in curves}.values()
+    )
+    source_role: Literal["base", "cutter"] = "base" if patch_ref.operand_index == 0 else "cutter"
+    curve_ids = tuple(sorted(curve.source_curve_digest for curve in unique_curves))
+    closed_loop = _closed_patch_curve_loop(unique_curves, tolerance=tolerance)
+    fragment_loops: tuple[tuple[TrimLoop, ...], ...]
+    if closed_loop is not None:
+        outer = _surface_csg_patch_domain_outer_trim(patch)
+        interior = replace(closed_loop, category="outer").normalized()
+        fragment_loops = ((outer, closed_loop), (interior,))
+    elif len(unique_curves) == 1:
+        split_loops = _domain_split_loops_for_open_curve(patch, unique_curves[0], tolerance=tolerance)
+        fragment_loops = tuple((loop,) for loop in split_loops)
+    else:
+        fragment_loops = ()
+    return tuple(
+        LoftDifferenceTrimFragmentRecord(
+            fragment_id=(
+                f"loft-difference:{source_role}:{patch_ref.patch_index}:fragment{index}"
+            ),
+            source_role=source_role,
+            source_patch=patch_ref,
+            source_family=patch.family,
+            trim_loops=loops,
+            source_curve_ids=curve_ids,
+        )
+        for index, loops in enumerate(fragment_loops)
+    )
+
+
+def construct_loft_difference_trim_fragments(
+    operands: SurfaceBooleanOperands,
+    *,
+    route: LoftCSGOperationRouteRecord | None = None,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> LoftDifferenceTrimFragmentConstructionRecord:
+    """Construct Fix08A intersection evidence and provenance-bearing trim fragments."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    selected_route = _loft_primitive_route_or_default(operands, route)
+    route_id = "surface-csg.loft-primitive" if selected_route is None else str(selected_route.route_id)
+    if (
+        selected_route is None
+        or operands.operation != "difference"
+        or selected_route.loft_operand_indices != (0,)
+    ):
+        return LoftDifferenceTrimFragmentConstructionRecord(
+            route_id=route_id,
+            diagnostics=(
+                LoftDifferenceTrimFragmentDiagnostic(
+                    code="unsupported-route",
+                    message="Loft difference trim fragments require a two-operand difference with the loft as base.",
+                ),
+            ),
+        )
+    candidates = build_loft_difference_patch_pair_candidates(
+        operands,
+        route=selected_route,
+        policy=normalized_policy,
+    )
+    evidence, diagnostics = build_loft_difference_intersection_evidence(
+        operands,
+        candidates,
+        policy=normalized_policy,
+    )
+    curves_by_patch: dict[SurfaceBooleanPatchRef, list[SurfaceCSGPatchLocalCurve]] = {}
+    for record in evidence:
+        for curve in record.patch_local_curves:
+            curves_by_patch.setdefault(curve.patch, []).append(curve)
+    fragments: list[LoftDifferenceTrimFragmentRecord] = []
+    bodies = operands.bodies
+    for patch_ref, curves in sorted(curves_by_patch.items(), key=lambda item: _surface_csg_patch_ref_sort_key(item[0])):
+        patch = bodies[patch_ref.operand_index].iter_patches(world=True)[patch_ref.patch_index]
+        patch_fragments = _loft_difference_fragments_for_patch(
+            patch_ref,
+            patch,
+            curves,
+            tolerance=normalized_policy.domain_tolerance,
+        )
+        if not patch_fragments:
+            diagnostics = (
+                *diagnostics,
+                LoftDifferenceTrimFragmentDiagnostic(
+                    code="open-trim-network",
+                    message=(
+                        "Patch-local intersection curves did not form a closed loop or a single "
+                        "domain-to-domain split."
+                    ),
+                    patch=patch_ref,
+                ),
+            )
+        fragments.extend(patch_fragments)
+    if not evidence:
+        diagnostics = (
+            *diagnostics,
+            LoftDifferenceTrimFragmentDiagnostic(
+                code="missing-intersection-evidence",
+                message="No bounds-pruned patch pair produced qualifying exact intersection evidence.",
+            ),
+        )
+    base_fragments = tuple(fragment for fragment in fragments if fragment.source_role == "base")
+    cutter_fragments = tuple(fragment for fragment in fragments if fragment.source_role == "cutter")
+    if evidence and (not base_fragments or not cutter_fragments):
+        diagnostics = (
+            *diagnostics,
+            LoftDifferenceTrimFragmentDiagnostic(
+                code="ambiguous-trim-network",
+                message="Intersection evidence did not produce both base and cutter patch fragments.",
+            ),
+        )
+    if base_fragments and cutter_fragments:
+        diagnostics = tuple(
+            diagnostic for diagnostic in diagnostics if diagnostic.code != "unsupported-patch-pair"
+        )
+    return LoftDifferenceTrimFragmentConstructionRecord(
+        route_id=route_id,
+        candidate_pairs=candidates,
+        intersection_evidence=evidence,
+        base_fragments=base_fragments,
+        cutter_fragments=cutter_fragments,
+        diagnostics=tuple(diagnostics),
+    )
+
+
 def _build_loft_primitive_cut_executor_payload(
     operands: SurfaceBooleanOperands,
     route: LoftCSGOperationRouteRecord,
 ) -> dict[str, object]:
     """Build the shared loft primitive cut-executor evidence payload once."""
 
+    trim_fragment_construction = construct_loft_difference_trim_fragments(operands, route=route)
     classifications = classify_loft_primitive_fragments(operands, route=route)
     adapters = tuple(
         adapt_loft_patch_for_primitive_csg(operands, record.loft_patch.patch_index, route=route)
@@ -14591,6 +15117,7 @@ def _build_loft_primitive_cut_executor_payload(
     no_hidden_mesh_proof = build_loft_primitive_no_hidden_mesh_proof(accepted_result)
     payload = {
         "route": route.canonical_payload(),
+        "trim_fragment_construction": trim_fragment_construction.canonical_payload(),
         "trim_adapters": [adapter.canonical_payload() for adapter in adapters],
         "fragment_classifications": [record.canonical_payload() for record in classifications],
         "source_normalization": source_record.canonical_payload(),
@@ -14832,10 +15359,27 @@ def execute_loft_primitive_trim_fragment_csg(operands: SurfaceBooleanOperands) -
         return None
 
     payload = _build_loft_primitive_cut_executor_payload(operands, route)
+    trim_fragment_payload = payload["trim_fragment_construction"]
+    trim_fragments_supported = bool(
+        isinstance(trim_fragment_payload, dict)
+        and trim_fragment_payload.get("supported") is True
+    )
+    if operands.operation == "difference" and trim_fragments_supported:
+        return SurfaceBooleanResult(
+            operation=operands.operation,
+            operands=operands,
+            status="unsupported",
+            failure_reason=(
+                "Loft difference trim fragments constructed; result-shell reconstruction is owned by Fix 08C; "
+                "no_mesh_fallback=True; "
+                f"loft_primitive_trim_adapter={json.dumps(payload, sort_keys=True, separators=(',', ':'))}"
+            ),
+        )
     proof_payload = payload["no_hidden_mesh_proof"]
     accepted = bool(
         isinstance(proof_payload, dict)
         and proof_payload.get("accepted") is True
+        and (operands.operation != "difference" or trim_fragments_supported)
         and _loft_primitive_cut_payload_supported(payload)
     )
     if not accepted:
@@ -18115,7 +18659,7 @@ def build_surface_csg_cap_patches(graph: SurfaceCSGFragmentGraphRecord) -> Surfa
     )
 
 
-def _surface_csg_patch_domain_outer_trim(patch: PlanarSurfacePatch) -> TrimLoop:
+def _surface_csg_patch_domain_outer_trim(patch: SurfacePatch) -> TrimLoop:
     u0, u1 = patch.domain.u_range
     v0, v1 = patch.domain.v_range
     return TrimLoop(

@@ -126,6 +126,7 @@ surface union/difference correction so callers have a complete surfaced route.
 
 - [ ] Implementation conforms to the target architecture.
 - [x] Fix 02 rectangular-loft face-touch/overlap merger conforms and passes the public preview/export route.
+- [x] Fix 08A bounds-pruned loft difference intersections produce closed provenance-bearing trim fragments or precise refusal.
 - [x] Final leaves are independently reviewed and canonicalized.
 - [x] Paired test specs point to canonical leaves.
 - [x] Final progression preserves no-op gate and API migration prerequisites.
@@ -145,6 +146,10 @@ architecture records the conformed solver and compatibility boundaries.
 
 ## Change History
 
+- 2026-08-04 - Completed Fix 08A and reconciled the canonical lofted-body CSG
+  architecture. Reason: the difference executor now exposes bounds-pruned
+  analytic intersection evidence and closed base/cutter fragments, and refuses
+  unverified curved trims instead of accepting an unchanged base clone.
 - 2026-08-04 - Completed Fix 02 and reconciled the canonical
   coincident-contact architecture. Reason: public rectangular-loft union now
   produces one validated surface shell without mesh fallback.
