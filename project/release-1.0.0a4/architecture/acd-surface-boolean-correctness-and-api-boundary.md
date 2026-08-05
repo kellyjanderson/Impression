@@ -82,6 +82,21 @@ mesh operands receive `TypeError` at the public boundary. Standalone mesh
 analysis/export functions remain unchanged. The API migration lands after
 surface union/difference correction so callers have a complete surfaced route.
 
+## Surface-Only Runtime API Boundary
+
+The public `impression.modeling` boolean functions now accept only
+`SurfaceBody` operands, use body/surface terminology, and return
+`SurfaceBooleanResult` consistently. A shared public-boundary validator rejects
+`Mesh`, `MeshGroup`, mixed collections, and other representations before family
+selection or kernel dispatch. Its error identifies the offending parameter or
+collection index and points callers to the explicit mesh-tool boundary.
+
+`union_meshes` is no longer a top-level `impression.modeling` export. It remains
+available through `impression.modeling.mesh_tools` beside retained mesh
+analysis and repair operations. Runtime and export separation is complete under
+Fix 07A; docs, examples, inventory guards, and clean installed-package proof
+remain owned by Fix 07B.
+
 ## Application Integration Contract
 
 - App type: library-only with console preview/export consumers.
