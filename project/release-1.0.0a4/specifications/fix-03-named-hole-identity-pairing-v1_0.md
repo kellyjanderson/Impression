@@ -1,7 +1,7 @@
 # Fix 03: Named Hole Identity Pairing
 
 Date: 2026-08-04
-Status: Proposed
+Status: Final
 Primary ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 Architecture ancestor: [Active ACD](../architecture/acd-loft-identity-and-junction-correctness.md)
 Source artifact: [GitHub issue #244](https://github.com/kellyjanderson/Impression/issues/244)

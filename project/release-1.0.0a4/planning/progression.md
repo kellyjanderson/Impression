@@ -72,13 +72,13 @@ prerequisites are complete; the whole preceding wave need not finish first.
 
 ### Fix 03: Named Hole Identity Pairing
 
-- [ ] Implement identity-first named-hole pairing with deterministic anonymous fallback and conflict diagnostics.
+- [x] Implement identity-first named-hole pairing with deterministic anonymous fallback and conflict diagnostics.
   - Specification: [Fix 03](../specifications/fix-03-named-hole-identity-pairing-v1_0.md)
   - Prerequisites: none
-- [ ] Wire pairing through public loft planning and `Loft(...)` execution.
-- [ ] Validate crossed-name, duplicate/conflict, and anonymous-control routes.
+- [x] Wire pairing through public loft planning and `Loft(...)` execution.
+- [x] Validate crossed-name, duplicate/conflict, and anonymous-control routes.
   - Test specification: [Fix 03 Test](../test-specifications/fix-03-named-hole-identity-pairing-v1_0.md)
-- [ ] Update progression and loft ACD status after route validation.
+- [x] Update progression and loft ACD status after route validation.
 
 ### Fix 06: Expanded Planner Configuration Propagation
 

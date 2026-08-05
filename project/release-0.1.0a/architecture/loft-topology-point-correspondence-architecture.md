@@ -84,6 +84,20 @@ Current relevant code paths:
 This works for simple symmetric or similarly authored profiles. It is not a
 complete topology correspondence model.
 
+## Implemented Loop Identity Boundary
+
+`PlannedLoopRef` now carries the stable `TopologyPath.id` and the authored path
+record for actual named holes. During each station interval, the planner maps
+authored topology paths onto canonical hole-loop slots, validates unique names,
+and resolves matching names before any geometric assignment. The existing
+minimum-cost matcher receives only anonymous residue.
+
+Duplicate names and unequal source/target name sets fail with stable
+`invalid_hole_identity` diagnostics before ambiguity enumeration. The resolved
+loop references are stored in the immutable plan consumed by surface execution;
+the executor does not repeat or override hole pairing. Unnamed sections retain
+their existing deterministic geometric behavior.
+
 ## Failure Mode
 
 The failure is not merely that a heuristic can pick the wrong start vertex. The
@@ -2919,6 +2933,8 @@ Split decision:
 
 ## Change History
 
+- 2026-08-04: Added the implemented identity-first named-hole planner boundary
+  and executor handoff contract.
 - 2026-05-27: Critically reviewed active manifest candidates beyond score
   thresholds and split the topology builder core API into point and segment
   builder specs.

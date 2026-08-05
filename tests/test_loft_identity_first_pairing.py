@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from impression.modeling import Loft, Loop, Region, Section, Station, SurfaceBody
+from impression.modeling import Loft, Loop, Region, Section, Station, SurfaceBody, TopologyPath
 from impression.modeling.loft import LoftPlanningBlockedError, loft_plan_sections
 
 
@@ -120,3 +120,97 @@ def test_anonymous_ambiguity_still_obeys_branch_limit() -> None:
 
     with pytest.raises(LoftPlanningBlockedError, match="candidate_enumeration_limit"):
         loft_plan_sections((source, target), samples=3, ambiguity_max_branches=2)
+
+
+def _named_rectangle(identity: str, center_x: float) -> TopologyPath:
+    return TopologyPath.from_points(
+        (
+            (center_x - 0.5, -0.5),
+            (center_x + 0.5, -0.5),
+            (center_x + 0.5, 0.5),
+            (center_x - 0.5, 0.5),
+        ),
+        id=identity,
+    )
+
+
+def _section_with_named_holes(paths: tuple[TopologyPath, ...]) -> Section:
+    outer = TopologyPath.from_points(((-5.0, -4.0), (5.0, -4.0), (5.0, 4.0), (-5.0, 4.0)), id="outer")
+    return Section(
+        regions=(
+            Region(
+                outer=outer.to_section_loop(),
+                holes=tuple(path.to_section_loop() for path in paths),
+            ),
+        ),
+        metadata={"topology_paths": (outer, *paths)},
+    )
+
+
+def _hole_stations(source: Section, target: Section) -> tuple[Station, Station]:
+    frame = {
+        "u": (1.0, 0.0, 0.0),
+        "v": (0.0, 1.0, 0.0),
+        "n": (0.0, 0.0, 1.0),
+    }
+    return (
+        Station(t=0.0, section=source, origin=(0.0, 0.0, 0.0), **frame),
+        Station(t=1.0, section=target, origin=(0.0, 0.0, 2.0), **frame),
+    )
+
+
+def test_named_holes_that_exchange_positions_pair_by_identity() -> None:
+    source = _section_with_named_holes((_named_rectangle("hole-a", -2.0), _named_rectangle("hole-b", 2.0)))
+    target = _section_with_named_holes((_named_rectangle("hole-a", 2.0), _named_rectangle("hole-b", -2.0)))
+
+    plan = loft_plan_sections(_hole_stations(source, target), samples=16, fairness_mode="off")
+    hole_pairs = plan.transitions[0].region_pairs[0].loop_pairs[1:]
+
+    assert tuple(pair.prev_loop_ref.identity for pair in hole_pairs) == ("hole-a", "hole-b")
+    assert tuple(pair.curr_loop_ref.identity for pair in hole_pairs) == ("hole-a", "hole-b")
+    assert tuple(float(pair.curr_loop[:, 0].mean()) for pair in hole_pairs) == pytest.approx((2.0, -2.0))
+    assert plan.metadata["hole_identity_resolved_pair_count"] == 2
+
+    body = Loft(
+        (0.0, 1.0),
+        _hole_stations(source, target),
+        (source, target),
+        samples=16,
+        fairness_mode="off",
+        cap_ends=True,
+    )
+    assert body.kernel_metadata()["hole_identity_resolved_pair_count"] == 2
+
+
+def test_duplicate_and_missing_named_hole_identities_fail_before_geometry() -> None:
+    source = _section_with_named_holes((_named_rectangle("hole-a", -2.0), _named_rectangle("hole-a", 2.0)))
+    target = _section_with_named_holes((_named_rectangle("hole-a", -2.0), _named_rectangle("hole-b", 2.0)))
+    with pytest.raises(ValueError, match="invalid_hole_identity duplicate source id 'hole-a'"):
+        loft_plan_sections(_hole_stations(source, target), samples=16)
+
+    source = _section_with_named_holes((_named_rectangle("hole-a", -2.0), _named_rectangle("hole-b", 2.0)))
+    target = _section_with_named_holes((_named_rectangle("hole-a", -2.0), _named_rectangle("hole-c", 2.0)))
+    with pytest.raises(ValueError, match="invalid_hole_identity contradictory exact id sets"):
+        loft_plan_sections(_hole_stations(source, target), samples=16)
+
+
+def test_named_pairing_leaves_anonymous_residue_to_geometric_fallback() -> None:
+    source_named = _named_rectangle("named", -2.0)
+    target_named = _named_rectangle("named", 2.0)
+    anonymous_source = _named_rectangle("unused-source", 0.0).to_section_loop()
+    anonymous_target = _named_rectangle("unused-target", 0.0).to_section_loop()
+    outer = TopologyPath.from_points(((-5.0, -4.0), (5.0, -4.0), (5.0, 4.0), (-5.0, 4.0)), id="outer")
+    source = Section(
+        regions=(Region(outer=outer.to_section_loop(), holes=(source_named.to_section_loop(), anonymous_source)),),
+        metadata={"topology_paths": (outer, source_named)},
+    )
+    target = Section(
+        regions=(Region(outer=outer.to_section_loop(), holes=(target_named.to_section_loop(), anonymous_target)),),
+        metadata={"topology_paths": (outer, target_named)},
+    )
+
+    plan = loft_plan_sections(_hole_stations(source, target), samples=16, fairness_mode="off")
+    hole_pairs = plan.transitions[0].region_pairs[0].loop_pairs[1:]
+
+    assert tuple(pair.prev_loop_ref.identity for pair in hole_pairs) == ("named", None)
+    assert tuple(float(pair.curr_loop[:, 0].mean()) for pair in hole_pairs) == pytest.approx((2.0, 0.0))
