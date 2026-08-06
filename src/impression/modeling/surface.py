@@ -4391,6 +4391,7 @@ ImplicitFieldNodeKind = Literal[
     "scale",
     "negate",
     "sampled_surface",
+    "polygon_loft_body",
 ]
 
 IMPLICIT_FIELD_NODE_KINDS: frozenset[str] = frozenset(
@@ -4407,6 +4408,7 @@ IMPLICIT_FIELD_NODE_KINDS: frozenset[str] = frozenset(
         "scale",
         "negate",
         "sampled_surface",
+        "polygon_loft_body",
     }
 )
 _IMPLICIT_EXECUTABLE_PARAMETER_NAMES = frozenset(
@@ -6206,6 +6208,17 @@ def _evaluate_implicit_field_value(node: ImplicitFieldNode, point: np.ndarray) -
             raise ValueError("sampled_surface.offset must be non-negative.")
         distances = np.linalg.norm(points - point, axis=1)
         return float(np.min(distances) - offset)
+    if node.kind == "polygon_loft_body":
+        cells_value = node.parameters.get("cells", ())
+        if not isinstance(cells_value, (tuple, list)) or not cells_value:
+            raise ValueError("polygon_loft_body.cells must contain one or more ruled loft cells.")
+        if len(cells_value) > 256:
+            raise ValueError("polygon_loft_body.cells exceeds the 256-cell safety limit.")
+        cell_values = tuple(
+            _evaluate_polygon_loft_cell(cell, point)
+            for cell in cells_value
+        )
+        return float(min(cell_values))
     if node.kind == "union":
         _require_child_count(node, minimum=1)
         return float(min(_evaluate_implicit_field_value(child, point) for child in node.children))
@@ -6231,6 +6244,78 @@ def _evaluate_implicit_field_value(node: ImplicitFieldNode, point: np.ndarray) -
         _require_child_count(node, minimum=1, maximum=1)
         return float(-_evaluate_implicit_field_value(node.children[0], point))
     raise ValueError(f"Unsupported implicit field node kind {node.kind!r}.")
+
+
+def _signed_distance_to_polygon_2d(point: np.ndarray, polygon: np.ndarray) -> float:
+    """Return a deterministic signed distance for one closed simple polygon."""
+
+    if polygon.ndim != 2 or polygon.shape[1] != 2 or polygon.shape[0] < 3:
+        raise ValueError("polygon loft cells require at least three 2D boundary points.")
+    if np.linalg.norm(polygon[0] - polygon[-1]) <= 1e-12:
+        polygon = polygon[:-1]
+    if polygon.shape[0] < 3:
+        raise ValueError("polygon loft cells require at least three distinct boundary points.")
+
+    minimum_distance = float("inf")
+    inside = False
+    px, py = float(point[0]), float(point[1])
+    previous = polygon[-1]
+    for current in polygon:
+        edge = current - previous
+        edge_length_squared = float(np.dot(edge, edge))
+        if edge_length_squared > 1e-24:
+            alpha = float(np.clip(np.dot(point - previous, edge) / edge_length_squared, 0.0, 1.0))
+            closest = previous + edge * alpha
+            minimum_distance = min(minimum_distance, float(np.linalg.norm(point - closest)))
+        x0, y0 = float(previous[0]), float(previous[1])
+        x1, y1 = float(current[0]), float(current[1])
+        crosses = (y0 > py) != (y1 > py)
+        if crosses:
+            x_crossing = x0 + ((py - y0) * (x1 - x0) / (y1 - y0))
+            if px < x_crossing:
+                inside = not inside
+        previous = current
+    return -minimum_distance if inside else minimum_distance
+
+
+def _evaluate_polygon_loft_cell(cell: object, point: np.ndarray) -> float:
+    """Evaluate one exact linear ruled-volume cell from declarative curve data."""
+
+    if not isinstance(cell, dict):
+        raise ValueError("polygon_loft_body cells must be mappings.")
+    start_curve = np.asarray(cell.get("start_curve", ()), dtype=float)
+    end_curve = np.asarray(cell.get("end_curve", ()), dtype=float)
+    if start_curve.shape[0] > 512:
+        raise ValueError("polygon_loft_body cells exceed the 512-point safety limit.")
+    normal = _normalize_axis(np.asarray(cell.get("normal", ()), dtype=float), name="polygon_loft_body.normal")
+    basis_u = _normalize_axis(np.asarray(cell.get("basis_u", ()), dtype=float), name="polygon_loft_body.basis_u")
+    basis_v = _normalize_axis(np.asarray(cell.get("basis_v", ()), dtype=float), name="polygon_loft_body.basis_v")
+    if start_curve.ndim != 2 or start_curve.shape[1] != 3 or start_curve.shape != end_curve.shape:
+        raise ValueError("polygon loft cell start/end curves must have matching Nx3 shapes.")
+    start_origin = np.mean(start_curve, axis=0)
+    end_origin = np.mean(end_curve, axis=0)
+    plane_span = float(np.dot(end_origin - start_origin, normal))
+    if abs(plane_span) <= 1e-12:
+        raise ValueError("polygon loft cell station planes must have non-zero separation.")
+    progression = float(np.dot(point - start_origin, normal) / plane_span)
+    interpolated = start_curve + ((end_curve - start_curve) * progression)
+    interpolated_origin = np.mean(interpolated, axis=0)
+    polygon = np.column_stack(
+        (
+            (interpolated - interpolated_origin) @ basis_u,
+            (interpolated - interpolated_origin) @ basis_v,
+        )
+    )
+    local_point = np.asarray(
+        (
+            float(np.dot(point - interpolated_origin, basis_u)),
+            float(np.dot(point - interpolated_origin, basis_v)),
+        ),
+        dtype=float,
+    )
+    profile_distance = _signed_distance_to_polygon_2d(local_point, polygon)
+    axial_distance = max(-progression * abs(plane_span), (progression - 1.0) * abs(plane_span))
+    return float(max(profile_distance, axial_distance))
 
 
 def evaluate_implicit_field_domain(

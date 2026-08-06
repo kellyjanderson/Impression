@@ -91,13 +91,12 @@ The release candidate may be tagged only after:
 This release has 19 cohesive canonical leaves with 100% issue responsibility
 coverage and a [dependency-ordered implementation progression](planning/progression.md).
 
-All 19 canonical implementation leaves and their paired test contracts are
-complete on the a4 integration branch. The source/docs/export inventory, primary
-surface CSG examples, and an isolated clean-wheel runtime smoke agree on the
-surface-only boolean contract. The full local repository suite passed 1,781
-tests on macOS on 2026-08-05.
-
-Exact next workflow action: perform release-candidate qualification against the
-remaining version-level gates, including the complete test-model reproduction,
-supported Linux lane, one-time wheel/sdist/docs artifact build, clean-install
-qualification of those exact artifacts, and prerelease publication approval.
+The release audit on 2026-08-06 found and reopened helper-only Fix 08B/Fix 08C
+evidence and false-positive USB/acoustic fixtures. The corrected implementation
+now executes bounded ruled-loft cells as a declarative surface field, recomposes
+branch cells without a modeling mesh fallback, and extracts a clean manifold
+only at the terminal preview/export boundary. The corrected uncut USB-C and
+acoustic fixtures plus the rotated snap pocket pass through public
+`boolean_difference`; the focused surface suite passes 516 tests and the full
+coverage run passes 1,783 tests at 82.9%. Tagging still waits for integration,
+watcher qualification, and exact built-artifact qualification.

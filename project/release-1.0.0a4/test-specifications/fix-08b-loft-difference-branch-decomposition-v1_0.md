@@ -1,7 +1,7 @@
 # Fix 08B Test: Loft Difference Branch Decomposition
 
 Date: 2026-08-04
-Status: Final
+Status: Final; Acceptance Passed
 Feature spec: [Fix 08B: Loft Difference Branch Decomposition](../specifications/fix-08b-loft-difference-branch-decomposition-v1_0.md)
 Feature spec canonical status: Canonical
 Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
@@ -62,3 +62,11 @@ This canonical paired contract verifies the complete retained split-child bounda
 - [x] Route-level proof exists for library-only.
 - [x] Helper-only tests cannot satisfy the contract.
 - [x] Observable results and failure behavior are asserted.
+
+## Validation Evidence
+
+- In-repository public branch fixture: closed result, bounded cell evidence,
+  deterministic field recomposition, watertight/manifold terminal mesh.
+- Corrected external enclosure qualifier: uncut USB-C and acoustic bases both
+  succeed through public `boolean_difference`.
+- 516 focused surface/CSG tests and 1,783 full-suite tests pass on 2026-08-06.

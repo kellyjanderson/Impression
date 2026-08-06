@@ -201,10 +201,12 @@ prerequisites are complete; the whole preceding wave need not finish first.
 - [x] Implement branch eligibility, bounded decomposition, and a complete recomposition map.
   - Specification: [Fix 08B](../specifications/fix-08b-loft-difference-branch-decomposition-v1_0.md)
   - Prerequisite: [Fix 05B](../specifications/fix-05b-synthetic-station-identity-lineage-v1_0.md)
-- [x] Wire lineage-backed sub-body cut planning into the difference executor.
-- [x] Validate branch fixtures and the audio-cube branched-cutter regression.
+- [x] Wire executable lineage-backed ruled-cell cuts and recomposition into the difference executor.
+- [x] Validate branch fixtures and the corrected uncut audio-cube branched-cutter regression.
   - Test specification: [Fix 08B Test](../test-specifications/fix-08b-loft-difference-branch-decomposition-v1_0.md)
 - [x] Update progression and surface-boolean ACD status after route validation.
+  - Completed 2026-08-06: public difference executes bounded branch-local
+    ruled cells and deterministically recomposes their declarative fields.
 
 ## Wave 5: Closed Surface Execution
 
@@ -223,13 +225,12 @@ prerequisites are complete; the whole preceding wave need not finish first.
 - [x] Implement retained-fragment classification, cutter-derived boundaries, seam rebuild, and closed result-shell validation.
   - Specification: [Fix 08C](../specifications/fix-08c-loft-difference-result-shell-reconstruction-v1_0.md)
   - Prerequisites: [Fix 08A](../specifications/fix-08a-loft-difference-trim-fragment-construction-v1_0.md), [Fix 08B](../specifications/fix-08b-loft-difference-branch-decomposition-v1_0.md), [Fix 09B](../specifications/fix-09b-difference-public-success-gate-v1_0.md)
-- [x] Wire reconstructed results into public `boolean_difference` and preview/export consumers.
-- [x] Validate public cut fixtures plus preview/export consumer smoke with truthful failure behavior.
+- [x] Wire loft/loft and rotated reconstructed results into public `boolean_difference` and preview/export consumers.
+- [x] Validate corrected uncut USB-C, acoustic, and rotated snap-pocket fixtures plus preview/export consumer smoke.
   - Test specification: [Fix 08C Test](../test-specifications/fix-08c-loft-difference-result-shell-reconstruction-v1_0.md)
 - [x] Update surface-boolean docs, progression, and ACD status after route validation.
-  - Exact rectangular-loft/axis-aligned-box cuts reconstruct a closed changed
-    surface shell; rotated and underconstrained branching candidates remain
-    precise no-mesh refusals.
+  - Completed 2026-08-06: declarative loft/loft field reconstruction covers
+    the named rotated and branching fixtures and terminal consumers.
 
 ## Wave 6: Public Boolean Contract
 

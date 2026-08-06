@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 import hashlib
+import itertools
 import json
 from typing import Iterable, Literal, Mapping, Sequence, Union
 
@@ -12232,7 +12233,7 @@ def _apply_face_colors(result: Mesh, face_ids: np.ndarray, color_map: dict[int, 
 
 
 def _weld_boolean_result_degenerate_vertices(mesh: Mesh) -> Mesh:
-    """Remove manifold-output zero edges when exact duplicate vertices are safe to weld."""
+    """Remove manifold-output zero edges or collinear boundary subdivisions safely."""
 
     original_analysis = analyze_mesh(mesh)
     if original_analysis.degenerate_faces == 0:
@@ -12259,31 +12260,83 @@ def _weld_boolean_result_degenerate_vertices(mesh: Mesh) -> Mesh:
                 if first_root != second_root:
                     parent[max(first_root, second_root)] = min(first_root, second_root)
                     merged = True
-    if not merged:
+    if merged:
+        inverse = np.asarray([root(index) for index in range(mesh.n_vertices)], dtype=int)
+        candidate = _boolean_mesh_collapse_candidate(mesh, inverse)
+        if _boolean_mesh_repair_preserves_topology(candidate, original_analysis):
+            return candidate
+
+    degenerate_faces = mesh.faces[areas <= 1e-12]
+    if len(degenerate_faces) > 8:
         return mesh
-    inverse = np.asarray([root(index) for index in range(mesh.n_vertices)], dtype=int)
+    collapse_choices: list[tuple[int, int, int]] = []
+    for face in degenerate_faces:
+        endpoint_a, endpoint_b, middle = max(
+            (
+                (int(face[0]), int(face[1]), int(face[2])),
+                (int(face[0]), int(face[2]), int(face[1])),
+                (int(face[1]), int(face[2]), int(face[0])),
+            ),
+            key=lambda item: float(np.linalg.norm(mesh.vertices[item[1]] - mesh.vertices[item[0]])),
+        )
+        collapse_choices.append((middle, endpoint_a, endpoint_b))
+    for selection in itertools.product((1, 2), repeat=len(collapse_choices)):
+        parent = np.arange(mesh.n_vertices, dtype=int)
+
+        def collapse_root(vertex_index: int) -> int:
+            while parent[vertex_index] != vertex_index:
+                parent[vertex_index] = parent[parent[vertex_index]]
+                vertex_index = int(parent[vertex_index])
+            return vertex_index
+
+        for choice, (middle, endpoint_a, endpoint_b) in zip(selection, collapse_choices, strict=True):
+            source = collapse_root(middle)
+            target = collapse_root(endpoint_a if choice == 1 else endpoint_b)
+            if source != target:
+                parent[source] = target
+        inverse = np.asarray([collapse_root(index) for index in range(mesh.n_vertices)], dtype=int)
+        candidate = _boolean_mesh_collapse_candidate(mesh, inverse)
+        if _boolean_mesh_repair_preserves_topology(candidate, original_analysis):
+            return candidate
+    return mesh
+
+
+def _boolean_mesh_collapse_candidate(mesh: Mesh, inverse: np.ndarray) -> Mesh:
     remapped_faces = inverse[mesh.faces]
     keep_faces = np.asarray([len(set(face)) == 3 for face in remapped_faces], dtype=bool)
     remapped_faces = remapped_faces[keep_faces]
-    referenced = np.unique(remapped_faces.reshape(-1))
+    unique_faces: list[np.ndarray] = []
+    unique_source_indices: list[int] = []
+    seen: set[tuple[int, int, int]] = set()
+    for source_index, face in zip(np.flatnonzero(keep_faces), remapped_faces, strict=True):
+        key = tuple(sorted(int(value) for value in face))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_faces.append(face)
+        unique_source_indices.append(int(source_index))
+    compact_faces = np.asarray(unique_faces, dtype=int).reshape(-1, 3)
+    referenced = np.unique(compact_faces.reshape(-1))
     compact_remap = np.full(mesh.n_vertices, -1, dtype=int)
     compact_remap[referenced] = np.arange(len(referenced), dtype=int)
     candidate = Mesh(
         vertices=mesh.vertices[referenced],
-        faces=compact_remap[remapped_faces],
+        faces=compact_remap[compact_faces],
         color=mesh.color,
         metadata=dict(mesh.metadata),
     )
     if mesh.face_colors is not None and len(mesh.face_colors) == mesh.n_faces:
-        candidate.face_colors = mesh.face_colors[keep_faces]
+        candidate.face_colors = mesh.face_colors[np.asarray(unique_source_indices, dtype=int)]
+    return candidate
+
+
+def _boolean_mesh_repair_preserves_topology(candidate: Mesh, original_analysis) -> bool:
     candidate_analysis = analyze_mesh(candidate)
-    if (
+    return (
         candidate_analysis.degenerate_faces == 0
         and candidate_analysis.boundary_edges == original_analysis.boundary_edges
         and candidate_analysis.nonmanifold_edges == original_analysis.nonmanifold_edges
-    ):
-        return candidate
-    return mesh
+    )
 
 
 def _apply_boolean(
@@ -17622,6 +17675,168 @@ def _surface_boolean_ruled_unsupported_cutter_diagnostic(
     return None
 
 
+def _polygon_loft_cell_payload(
+    patch: RuledSurfacePatch,
+    *,
+    tolerance: float = 1e-8,
+) -> dict[str, object] | None:
+    """Return declarative volume data for one closed linear ruled loft cell."""
+
+    transform = np.asarray(patch.transform_matrix, dtype=float)
+    rotation = transform[:3, :3]
+    translation = transform[:3, 3]
+    start_curve = np.asarray(patch.start_curve, dtype=float) @ rotation.T + translation
+    end_curve = np.asarray(patch.end_curve, dtype=float) @ rotation.T + translation
+    if start_curve.shape != end_curve.shape or start_curve.ndim != 2 or start_curve.shape[0] < 4:
+        return None
+    if start_curve.shape[0] > 512:
+        return None
+
+    start_origin = np.mean(start_curve, axis=0)
+    end_origin = np.mean(end_curve, axis=0)
+    basis_u: np.ndarray | None = None
+    normal: np.ndarray | None = None
+    for first_index in range(start_curve.shape[0] - 2):
+        first_edge = start_curve[first_index + 1] - start_curve[first_index]
+        if float(np.linalg.norm(first_edge)) <= tolerance:
+            continue
+        for second_index in range(first_index + 1, start_curve.shape[0] - 1):
+            second_edge = start_curve[second_index + 1] - start_curve[second_index]
+            candidate_normal = np.cross(first_edge, second_edge)
+            candidate_norm = float(np.linalg.norm(candidate_normal))
+            if candidate_norm <= tolerance:
+                continue
+            basis_u = first_edge / float(np.linalg.norm(first_edge))
+            normal = candidate_normal / candidate_norm
+            break
+        if normal is not None:
+            break
+    if basis_u is None or normal is None:
+        return None
+    if float(np.max(np.abs((start_curve - start_origin) @ normal))) > tolerance:
+        return None
+    if float(np.max(np.abs((end_curve - end_origin) @ normal))) > tolerance:
+        return None
+    plane_span = float(np.dot(end_origin - start_origin, normal))
+    if abs(plane_span) <= tolerance:
+        return None
+    if plane_span < 0.0:
+        normal = -normal
+        plane_span = -plane_span
+    basis_v = np.cross(normal, basis_u)
+    basis_v_norm = float(np.linalg.norm(basis_v))
+    if basis_v_norm <= tolerance:
+        return None
+    basis_v /= basis_v_norm
+    return {
+        "start_curve": tuple(tuple(float(value) for value in point) for point in start_curve),
+        "end_curve": tuple(tuple(float(value) for value in point) for point in end_curve),
+        "normal": tuple(float(value) for value in normal),
+        "basis_u": tuple(float(value) for value in basis_u),
+        "basis_v": tuple(float(value) for value in basis_v),
+    }
+
+
+def _surface_body_polygon_loft_field_node(body: SurfaceBody) -> ImplicitFieldNode | None:
+    """Adapt one closed polygonal loft body to an exact declarative field graph."""
+
+    if _surface_body_loft_provenance(body) is None:
+        return None
+    cells: list[dict[str, object]] = []
+    for patch in body.iter_patches(world=True):
+        if not isinstance(patch, RuledSurfacePatch):
+            continue
+        kernel = patch.kernel_metadata()
+        loop_index = int(kernel.get("loop_index", 0) or 0)
+        if loop_index != 0:
+            return None
+        cell = _polygon_loft_cell_payload(patch)
+        if cell is None:
+            return None
+        cell["source_patch_id"] = patch.stable_identity
+        cell["branch_id"] = str(kernel.get("branch_id", ""))
+        cells.append(cell)
+        if len(cells) > 256:
+            return None
+    if not cells:
+        return None
+    return ImplicitFieldNode(
+        "polygon_loft_body",
+        parameters={"cells": tuple(cells)},
+    )
+
+
+def _surface_boolean_polygon_loft_field_result(
+    operands: SurfaceBooleanOperands,
+) -> SurfaceBooleanResult | None:
+    """Execute exact ruled polygon-loft difference as a closed implicit surface."""
+
+    if operands.operation != "difference" or operands.operand_count != 2:
+        return None
+    if _surface_boolean_body_relation(
+        operands.bodies[0].bounds_estimate(),
+        operands.bodies[1].bounds_estimate(),
+    ) in {"disjoint", "touching"}:
+        return None
+    roots = tuple(_surface_body_polygon_loft_field_node(body) for body in operands.bodies)
+    if any(root is None for root in roots):
+        return None
+    root = _compose_implicit_root(
+        "difference",
+        tuple(candidate for candidate in roots if candidate is not None),
+    )
+    metadata = _surface_boolean_result_metadata(operands)
+    decomposition = []
+    for operand_index, field_root in enumerate(roots):
+        assert field_root is not None
+        cells = field_root.parameters["cells"]
+        decomposition.append(
+            {
+                "operand_index": operand_index,
+                "source_body_id": operands.body_ids[operand_index],
+                "cell_count": len(cells),
+                "branch_ids": tuple(
+                    sorted({str(cell["branch_id"]) for cell in cells if str(cell["branch_id"])})
+                ),
+                "source_patch_ids": tuple(str(cell["source_patch_id"]) for cell in cells),
+                "execution": "declarative-cell-field-union",
+                "recomposition": "implicit-min-union",
+            }
+        )
+    route_payload = {
+        "operation": "difference",
+        "operand_ids": operands.body_ids,
+        "source_family": "polygon-loft",
+        "solver_path": "declarative-polygon-loft-field-difference",
+        "branching_base": int(_surface_body_loft_provenance(operands.bodies[0]).get("branch_count", 0) or 0) > 1,
+        "decomposition": tuple(decomposition),
+        "bounded_cell_limit": 256,
+        "bounded_points_per_cell_limit": 512,
+        "no_mesh_fallback": True,
+    }
+    metadata["kernel"]["boolean_surface_route"] = "surface-csg.polygon-loft-field"
+    metadata["kernel"]["polygon_loft_field_csg"] = route_payload
+    metadata["consumer"]["boolean_surface_route"] = "surface-csg.polygon-loft-field"
+    metadata["consumer"]["polygon_loft_field_csg"] = route_payload
+    patch = ImplicitSurfacePatch(
+        family="implicit",
+        field=root,
+        bounds=operands.bodies[0].bounds_estimate(),
+        metadata={"kernel": route_payload},
+    )
+    body = make_surface_body(
+        (
+            make_surface_shell(
+                (patch,),
+                connected=True,
+                metadata={"kernel": {"operation": "polygon-loft-field-difference"}},
+            ),
+        ),
+        metadata=metadata,
+    )
+    return _surface_boolean_finalize_body_result("difference", operands, body)
+
+
 def _surface_body_contains_exact(
     container: SurfaceBody,
     candidate: SurfaceBody,
@@ -20286,6 +20501,9 @@ def surface_boolean_result(
     sweep_subdivision_result = _surface_boolean_sweep_subdivision_body_route_result(operands)
     if sweep_subdivision_result is not None:
         return finish(sweep_subdivision_result, "surface-csg.sweep-subdivision")
+    polygon_loft_field_result = _surface_boolean_polygon_loft_field_result(operands)
+    if polygon_loft_field_result is not None:
+        return finish(polygon_loft_field_result, "surface-csg.polygon-loft-field")
     plan = plan_prepared_surface_csg_operation(operands)
     if not plan.executable:
         return finish(
@@ -20375,6 +20593,12 @@ def _surface_boolean_result_after_family_gate(
     if any(not isinstance(body, SurfaceBody) for body in bodies):
         return None
     raw_operands = SurfaceBooleanOperands(operation=operation, bodies=bodies)
+    if (
+        operation == "difference"
+        and len(bodies) == 2
+        and all(_surface_body_polygon_loft_field_node(body) is not None for body in bodies)
+    ):
+        return None
     gate = surface_csg_feature_gate(caller_id, operation, bodies)
     if gate.supported:
         return None
