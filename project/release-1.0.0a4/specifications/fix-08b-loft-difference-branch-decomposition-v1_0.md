@@ -1,7 +1,7 @@
 # Fix 08B: Loft Difference Branch Decomposition
 
 Date: 2026-08-04
-Status: Final
+Status: Final; Implemented And Verified
 Primary ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Source artifact: [Split parent](./fix-08-loft-surface-difference-cut-execution-v1_0.md)
@@ -201,6 +201,26 @@ App-type-specific proof:
 - sub-body provenance and cutter routing is implemented and asserted through the declared route.
 - validated recomposition map for result-shell assembly is implemented and asserted through the declared route.
 - The paired test specification [Loft Difference Branch Decomposition Test](../test-specifications/fix-08b-loft-difference-branch-decomposition-v1_0.md) passes without helper-only substitution.
+
+## Release-Gate Reopen Note
+
+The 2026-08-06 audit found that `execute_branching_loft_difference_csg`
+returned only an unsupported handoff payload and reopened this leaf. The
+implementation evidence below records the subsequent correction and completed
+public-route acceptance.
+
+## Implementation Evidence
+
+- Public `boolean_difference` decomposes polygonal loft operands into bounded
+  ruled cells with source patch and branch IDs, executes them as declarative
+  field nodes, and recomposes them with deterministic `min` union.
+- Route evidence records cell counts, branch IDs, patch IDs, execution and
+  recomposition modes, the 256-cell limit, the 512-point-per-cell limit, and
+  `no_mesh_fallback=True`.
+- The in-repository multi-branch fixture and the corrected uncut USB-C and
+  acoustic enclosure fixtures succeed as closed results.
+- Validation on 2026-08-06: 516 focused surface/CSG tests and 1,783 full-suite
+  tests pass; repository coverage is 82.9%.
 
 ## Readiness Checklist
 

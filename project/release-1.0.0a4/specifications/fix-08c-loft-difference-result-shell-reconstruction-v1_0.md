@@ -1,7 +1,7 @@
 # Fix 08C: Loft Difference Result Shell Reconstruction
 
 Date: 2026-08-04
-Status: Final
+Status: Final; Implemented And Verified
 Primary ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
 Source artifact: [Split parent](./fix-08-loft-surface-difference-cut-execution-v1_0.md)
@@ -179,14 +179,15 @@ App-type-specific proof:
 
 ## Performance Contract
 
-- assembly scales with produced fragments and avoids tessellation
+- modeling assembly scales with bounded ruled cells and avoids tessellation;
+  terminal preview/export extraction scales with the emitted cell manifolds
 
 ## Error And State Behavior
 
 - ambiguous classification, open seams, invalid closure, or no change cannot succeed
-- the exact reconstruction envelope is an axis-aligned rectangular loft minuend
-  and an axis-aligned orthogonal box cutter; candidates outside that envelope
-  return `unsupported` with explicit no-mesh-fallback evidence
+- the exact reconstruction envelope is bounded polygonal linear ruled-loft
+  operands, including world-transformed cutters; candidates outside that
+  envelope return `unsupported` with explicit no-mesh-fallback evidence
 
 ## Test Strategy
 
@@ -214,11 +215,18 @@ App-type-specific proof:
   provenance; the accepted body records the retained fragment IDs, solver
   path, cutter orientation, closure requirement, and no-mesh guarantee.
 - Public preview and watertight-export tessellation consume the reconstructed
-  `SurfaceBody`. Rotated cutters and underconstrained branching candidates are
-  refused precisely instead of fabricating unchanged or mesh-derived geometry.
+  `SurfaceBody`. This 2026-08-05 evidence covered the axis-aligned subset and
+  precise refusal behavior and was superseded by the completion evidence below.
 - Validation on 2026-08-05: `tests/test_surface_csg.py` passed 251 tests; the
   surface-consumer/no-hidden-mesh group passed 269 tests; the full repository
   suite passed 1,771 tests.
+
+- Completion validation on 2026-08-06 replaces the bounded-subset evidence:
+  public loft/loft difference produces a closed declarative field shell for
+  rotated and branching operands. Preview/export terminal extraction is
+  watertight, manifold, and has zero degenerate faces for the corrected USB-C,
+  acoustic, and snap-pocket fixtures. The focused suite passes 516 tests; the
+  full coverage run passes 1,783 tests at 82.9%.
 
 ## Acceptance Criteria
 
@@ -226,6 +234,14 @@ App-type-specific proof:
 - seam/adjacency and closed-shell reconstruction is implemented and asserted through the declared route.
 - public fixture, validity, witness, preview/export, and no-mesh proof is implemented and asserted through the declared route.
 - The paired test specification [Loft Difference Result Shell Reconstruction Test](../test-specifications/fix-08c-loft-difference-result-shell-reconstruction-v1_0.md) passes without helper-only substitution.
+
+## Release-Gate Reopen Note
+
+The 2026-08-06 audit found that the then-accepted reconstruction path was
+limited to an axis-aligned rectangular-loft/box subset and reopened this leaf.
+The completion evidence above records the subsequent loft/loft, rotated, and
+branching correction; truthful refusal remains required outside that bounded
+envelope.
 
 ## Readiness Checklist
 

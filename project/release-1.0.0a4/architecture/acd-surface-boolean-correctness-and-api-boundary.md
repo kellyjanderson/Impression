@@ -1,7 +1,7 @@
 # Surface Boolean Correctness And API Boundary Architectural Change Document
 
 Date: 2026-08-04
-Status: Implementation Complete; Canonical Reconciliation Pending
+Status: Implementation Complete; Reconciliation Pending
 Canonical architecture targets:
 
 - `project/release-0.1.0a/architecture/csg-coincident-contact-architecture.md`
@@ -148,24 +148,20 @@ registered executor or monkeypatched public route from bypassing the gate.
 
 ## Branch Decomposition Boundary
 
-Branching loft difference now reaches a validated decomposition handoff before
-result-shell reconstruction. The CSG route records stable branch-local sub-body
-plans with source branch IDs, joint IDs, cutter body IDs, a bounded sub-body
-limit, and a deterministic recomposition map. Recomposition refuses duplicate
-result ownership, missing result bodies, and uncovered branch-joint seams.
-Fix 08C consumes validated trim fragments for the exact single-shell
-rectangular-loft/orthogonal-box envelope and reconstructs one closed changed
-surface shell from orthogonal surface cells. Each result preserves retained
-base-fragment and reversed cutter-boundary provenance and must pass the shared
-body-validity and public difference gates before success.
+Branching polygonal loft difference decomposes each operand into bounded linear
+ruled cells carrying source patch and branch lineage. Each cell is executable
+as declarative field data; `min` union recomposes the cells, and field
+difference produces the closed `ImplicitSurfacePatch` result. The route is
+bounded to 256 cells per body and 512 boundary points per cell and records the
+cell, branch, patch, execution, and recomposition evidence on the result.
 
-Branch plans that do not yet provide executable branch-local surface bodies,
-rotated cutters, ambiguous fragment classifications, open seams, and unchanged
-interacting candidates remain `unsupported` or `invalid` as appropriate. They
-cannot fall back to tessellation or cross the public success gate. This bounded
-support envelope is intentional: Fix 08C makes accepted geometry real and
-closed while preserving truthful refusal for topology the surface kernel cannot
-yet reconstruct exactly.
+This is a surface-authored modeling route: no mesh is created or consumed by
+`boolean_difference`. Preview and export tessellate the same declarative cells
+at their terminal boundary, use manifold operations there to extract the
+visible/exportable boundary, and accept collinear cleanup only when boundary
+and nonmanifold edge counts are preserved. Loft/loft, rotated snap-pocket, and
+branching USB-C/acoustic fixtures share this route; unsupported or over-limit
+inputs continue through the existing precise refusal boundary.
 
 ## Specification Sources
 
@@ -197,19 +193,20 @@ yet reconstruct exactly.
 
 ## Conformance Checklist
 
-- [x] Implementation conforms to the target architecture within the declared
-  bounded exact-support and truthful-refusal envelope.
+- [x] Implementation conforms to the target architecture for the declared
+  USB-C, acoustic, rotated snap-pocket, and branching-loft fixtures.
 - [x] Fix 02 rectangular-loft face-touch/overlap merger conforms and passes the public preview/export route.
 - [x] Fix 08A bounds-pruned loft difference intersections produce closed provenance-bearing trim fragments or precise refusal.
 - [x] Fix 09A normalizes every surfaced difference result into validated changed, unchanged, or ambiguous evidence.
 - [x] Fix 09B gates every surfaced difference dispatcher outcome as success, no-cut, invalid, or unsupported.
 - [x] Final leaves are independently reviewed and canonicalized.
 - [x] Paired test specs point to canonical leaves.
-- [x] Final progression preserves no-op gate and API migration prerequisites.
+- [x] Final progression preserves no-op gate and API migration prerequisites
+  while exercising executable branch-local reconstruction.
 - [x] Fix 07A and Fix 07B align runtime signatures, top-level exports,
   documentation, tutorials, executable examples, preview/export consumption,
   and the isolated clean-wheel contract.
-- [ ] Canonical CSG/API architecture is reconciled after implementation.
+- [ ] Canonical CSG/API architecture is reconciled after integration.
 
 ## Closure Criteria
 
@@ -224,6 +221,17 @@ architecture records the conformed solver and compatibility boundaries.
 - Follow-up ACDs: none.
 
 ## Change History
+
+- 2026-08-06 - Completed Fix 08B and Fix 08C implementation. Reason: bounded
+  ruled-cell decomposition and declarative field recomposition now execute the
+  corrected loft/loft, rotated snap-pocket, and branching project fixtures;
+  preview/export terminal extraction is watertight, manifold, and free of
+  degenerate faces without a modeling mesh fallback.
+
+- 2026-08-06 - Reopened Fix 08B and Fix 08C after the release-gate audit.
+  Reason: the implementation publishes a branch-decomposition handoff but no
+  branch-local bodies, and reconstruction remains limited to an axis-aligned
+  subset while issue #248 requires the project-scale cut routes.
 
 - 2026-08-05 - Completed Fix 07A and Fix 07B. Reason: the public modeling
   boolean boundary now accepts only `SurfaceBody`, returns

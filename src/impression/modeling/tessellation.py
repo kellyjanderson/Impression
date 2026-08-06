@@ -676,6 +676,18 @@ def assert_implicit_tessellation_sampling_safety(
 
 
 def _implicit_patch_mesh(patch: ImplicitSurfacePatch, request: NormalizedTessellationRequest) -> Mesh:
+    polygon_loft_mesh = _polygon_loft_boolean_terminal_mesh(patch)
+    if polygon_loft_mesh is not None:
+        polygon_loft_mesh.metadata.update(
+            {
+                "surface_family": patch.family,
+                "surface_patch_id": patch.stable_identity,
+                "implicit_approximation_boundary": "tessellation",
+                "implicit_polygon_loft_extraction": "surface-authored-terminal-manifold",
+                "no_modeling_mesh_fallback": True,
+            }
+        )
+        return polygon_loft_mesh
     diagnostic = assert_implicit_tessellation_sampling_safety(patch, request)
     domain = ImplicitFieldEvaluationDomain(bounds=patch.bounds, samples=diagnostic.samples)
     values = patch.evaluate_domain(samples=diagnostic.samples)
@@ -756,6 +768,176 @@ def _implicit_patch_mesh(patch: ImplicitSurfacePatch, request: NormalizedTessell
             "implicit_approximation_boundary": "tessellation",
         },
     )
+
+
+def _polygon_loft_cell_terminal_mesh(cell: object) -> Mesh:
+    """Tessellate one declarative polygon-loft cell at the terminal boundary."""
+
+    if not isinstance(cell, dict):
+        raise ValueError("polygon loft tessellation cells must be mappings.")
+    start = np.asarray(cell.get("start_curve", ()), dtype=float)
+    end = np.asarray(cell.get("end_curve", ()), dtype=float)
+    basis_u = np.asarray(cell.get("basis_u", ()), dtype=float)
+    basis_v = np.asarray(cell.get("basis_v", ()), dtype=float)
+    if start.ndim != 2 or start.shape[1] != 3 or start.shape != end.shape or start.shape[0] < 4:
+        raise ValueError("polygon loft tessellation requires matching start/end Nx3 curves.")
+    if float(np.linalg.norm(start[0] - start[-1])) <= 1e-9:
+        start = start[:-1]
+        end = end[:-1]
+    keep = np.ones(start.shape[0], dtype=bool)
+    changed = True
+    while changed and int(np.count_nonzero(keep)) > 3:
+        changed = False
+        indices = np.flatnonzero(keep)
+        for offset, index in enumerate(indices):
+            previous = indices[offset - 1]
+            following = indices[(offset + 1) % len(indices)]
+            removable = True
+            for curve in (start, end):
+                before = curve[index] - curve[previous]
+                after = curve[following] - curve[index]
+                if float(np.linalg.norm(before)) <= 1e-10 or float(np.linalg.norm(after)) <= 1e-10:
+                    continue
+                if float(np.linalg.norm(np.cross(before, after))) > 1e-9:
+                    removable = False
+                    break
+                if float(np.dot(before, after)) < -1e-12:
+                    removable = False
+                    break
+            if removable:
+                keep[index] = False
+                changed = True
+                break
+    start = start[keep]
+    end = end[keep]
+    start_origin = np.mean(start, axis=0)
+    end_origin = np.mean(end, axis=0)
+    start_uv = np.column_stack(((start - start_origin) @ basis_u, (start - start_origin) @ basis_v))
+    end_uv = np.column_stack(((end - end_origin) @ basis_u, (end - end_origin) @ basis_v))
+    signed_area = 0.5 * float(
+        np.sum(start_uv[:, 0] * np.roll(start_uv[:, 1], -1) - np.roll(start_uv[:, 0], -1) * start_uv[:, 1])
+    )
+    if signed_area < 0.0:
+        start = start[::-1]
+        end = end[::-1]
+        start_uv = start_uv[::-1]
+        end_uv = end_uv[::-1]
+    start_faces = _triangulate_polygon_with_collinear_boundary(start_uv)
+    end_faces = _triangulate_polygon_with_collinear_boundary(end_uv)
+    count = start.shape[0]
+    faces: list[tuple[int, int, int]] = [
+        tuple(int(value) for value in face[::-1])
+        for face in start_faces
+    ]
+    faces.extend(
+        tuple(int(value) + count for value in face)
+        for face in end_faces
+    )
+    for index in range(count):
+        following = (index + 1) % count
+        faces.append((index, following, count + following))
+        faces.append((index, count + following, count + index))
+    return Mesh(
+        vertices=np.vstack((start, end)),
+        faces=np.asarray(faces, dtype=int),
+        metadata={"surface_family": "polygon-loft-cell"},
+    )
+
+
+def _triangulate_polygon_with_collinear_boundary(points: np.ndarray) -> np.ndarray:
+    """Triangulate a simple polygon while retaining every collinear boundary vertex."""
+
+    polygon = np.asarray(points, dtype=float)
+    keep = np.ones(polygon.shape[0], dtype=bool)
+    changed = True
+    while changed and int(np.count_nonzero(keep)) > 3:
+        changed = False
+        indices = np.flatnonzero(keep)
+        for offset, index in enumerate(indices):
+            previous = indices[offset - 1]
+            following = indices[(offset + 1) % len(indices)]
+            before = polygon[index] - polygon[previous]
+            after = polygon[following] - polygon[index]
+            if (
+                float(np.linalg.norm(before)) <= 1e-12
+                or float(np.linalg.norm(after)) <= 1e-12
+                or (
+                    abs(float(before[0] * after[1] - before[1] * after[0])) <= 1e-10
+                    and float(np.dot(before, after)) >= -1e-12
+                )
+            ):
+                keep[index] = False
+                changed = True
+                break
+    kept_indices = [int(index) for index in np.flatnonzero(keep)]
+    _vertices, simple_faces = triangulate_loops([polygon[kept_indices]])
+    faces = [tuple(kept_indices[int(index)] for index in face) for face in simple_faces]
+
+    def face_area(face: tuple[int, int, int]) -> float:
+        a, b, c = (polygon[index] for index in face)
+        return float((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))
+
+    count = polygon.shape[0]
+    for kept_offset, start_index in enumerate(kept_indices):
+        end_index = kept_indices[(kept_offset + 1) % len(kept_indices)]
+        intermediates: list[int] = []
+        cursor = (start_index + 1) % count
+        while cursor != end_index:
+            intermediates.append(cursor)
+            cursor = (cursor + 1) % count
+        edge_start = start_index
+        for middle in intermediates:
+            face_index = next(
+                (
+                    index
+                    for index, face in enumerate(faces)
+                    if edge_start in face and end_index in face
+                ),
+                None,
+            )
+            if face_index is None:
+                raise ValueError("Could not retain a collinear polygon boundary vertex during triangulation.")
+            face = faces.pop(face_index)
+            opposite = next(index for index in face if index not in {edge_start, end_index})
+            orientation = np.sign(face_area(face))
+            first = (edge_start, middle, opposite)
+            second = (middle, end_index, opposite)
+            if np.sign(face_area(first)) != orientation:
+                first = (middle, edge_start, opposite)
+            if np.sign(face_area(second)) != orientation:
+                second = (end_index, middle, opposite)
+            faces.extend((first, second))
+            edge_start = middle
+    return np.asarray(faces, dtype=int)
+
+
+def _polygon_loft_body_terminal_mesh(node) -> Mesh:
+    if node.kind != "polygon_loft_body":
+        raise ValueError("polygon loft terminal extraction requires a polygon_loft_body node.")
+    cells = node.parameters.get("cells", ())
+    if not isinstance(cells, (tuple, list)) or not cells:
+        raise ValueError("polygon_loft_body.cells must be non-empty.")
+    cell_meshes = tuple(_polygon_loft_cell_terminal_mesh(cell) for cell in cells)
+    if len(cell_meshes) == 1:
+        return cell_meshes[0]
+    from .csg import _apply_boolean
+
+    return _apply_boolean(cell_meshes, "union")
+
+
+def _polygon_loft_boolean_terminal_mesh(patch: ImplicitSurfacePatch) -> Mesh | None:
+    root = patch.field
+    if root.kind != "difference" or len(root.children) < 2:
+        return None
+    if any(child.kind != "polygon_loft_body" for child in root.children):
+        return None
+    from .csg import _apply_boolean
+
+    operands = tuple(_polygon_loft_body_terminal_mesh(child) for child in root.children)
+    result = _apply_boolean(operands, "difference")
+    if not np.allclose(patch.transform_matrix, np.eye(4), atol=1e-12, rtol=0.0):
+        result = result.transformed(patch.transform_matrix)
+    return result
 
 
 @dataclass(frozen=True)

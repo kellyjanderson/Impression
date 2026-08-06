@@ -11,7 +11,7 @@ import impression.modeling.csg as csg_module
 import numpy as np
 import pytest
 
-from impression.mesh import Mesh
+from impression.mesh import Mesh, analyze_mesh
 from impression.modeling.drawing2d import make_circle, make_rect
 from impression.modeling.tessellation import (
     export_tessellation_request,
@@ -46,6 +46,7 @@ from impression.modeling import (
     ImplicitCompositionOperandSignPolicy,
     ImplicitCompositionResult,
     ImplicitOperandFieldAdapterRecord,
+    ImplicitSurfacePatch,
     GeometryChangeWitness,
     NormalizedDifferenceEvidence,
     NURBSSurfacePatch,
@@ -59,6 +60,8 @@ from impression.modeling import (
     SurfaceBooleanOperands,
     SurfaceBooleanPatchRef,
     SurfaceBooleanResult,
+    Section,
+    Station,
     SurfaceDifferenceGateDecision,
     SurfaceBooleanSplitRecord,
     SurfaceBooleanTrimmedPatchFragment,
@@ -330,9 +333,12 @@ from impression.modeling import (
     make_box_mesh,
     make_cylinder,
     loft,
+    loft_sections,
     make_plane,
     make_sphere,
     make_surface_body,
+    as_section,
+    evaluate_implicit_field,
     make_surface_shell,
     normalize_surface_difference_evidence,
     normalize_surface_csg_operand_ordering,
@@ -2717,6 +2723,102 @@ def _offset_capped_loft_body() -> SurfaceBody:
     )
 
 
+def test_polygon_loft_difference_reconstructs_closed_rotated_result_shell() -> None:
+    base = loft(
+        [make_rect(size=(4.0, 4.0)), make_rect(size=(3.5, 3.5))],
+        path=[(0.0, 0.0, 0.0), (0.0, 0.0, 4.0)],
+        cap_ends=True,
+    )
+    cutter = loft(
+        [make_rect(size=(0.8, 5.0)), make_rect(size=(0.8, 5.0))],
+        path=[(0.0, 0.0, 0.5), (0.0, 0.0, 3.5)],
+        cap_ends=True,
+    )
+    angle = np.deg2rad(27.0)
+    cutter = cutter.with_transform(
+        np.asarray(
+            (
+                (np.cos(angle), -np.sin(angle), 0.0, 0.0),
+                (np.sin(angle), np.cos(angle), 0.0, 0.0),
+                (0.0, 0.0, 1.0, 0.0),
+                (0.0, 0.0, 0.0, 1.0),
+            )
+        )
+    )
+
+    result = boolean_difference(base, [cutter])
+
+    assert result.status == "succeeded"
+    assert result.classification == "closed"
+    assert result.body is not None
+    route = result.body.kernel_metadata()["polygon_loft_field_csg"]
+    assert route["solver_path"] == "declarative-polygon-loft-field-difference"
+    assert route["no_mesh_fallback"] is True
+    assert route["bounded_cell_limit"] == 256
+    assert route["bounded_points_per_cell_limit"] == 512
+    result_patch = result.body.iter_patches(world=True)[0]
+    assert isinstance(result_patch, ImplicitSurfacePatch)
+    assert evaluate_implicit_field(result_patch.field, (0.0, 0.0, 2.0)).value > 0.0
+    assert evaluate_implicit_field(result_patch.field, (1.5, 0.0, 2.0)).value < 0.0
+    tessellation = tessellate_surface_body(result.body, export_tessellation_request())
+    assert tessellation.analysis.is_watertight is True
+    assert tessellation.analysis.is_manifold is True
+    assert tessellation.analysis.degenerate_faces == 0
+
+
+def test_branching_polygon_loft_difference_executes_bounded_cells_and_recomposes() -> None:
+    def region(size: tuple[float, float], center: tuple[float, float]):
+        return as_section(make_rect(size=size, center=center)).regions[0]
+
+    source = Section(
+        (
+            region((0.85, 0.85), (-1.0, 0.0)),
+            region((0.85, 0.85), (1.0, 0.0)),
+        )
+    )
+    target = Section(
+        (
+            region((0.8, 0.8), (-1.0, 0.0)),
+            region((0.7, 0.7), (0.0, 0.0)),
+            region((0.8, 0.8), (1.0, 0.0)),
+        )
+    )
+    frame = {"u": (1.0, 0.0, 0.0), "v": (0.0, 1.0, 0.0), "n": (0.0, 0.0, 1.0)}
+    base = loft_sections(
+        (
+            Station(t=0.0, section=source, origin=(0.0, 0.0, 0.0), **frame),
+            Station(t=1.0, section=target, origin=(0.0, 0.0, 2.0), **frame),
+        ),
+        cap_ends=True,
+        split_merge_mode="resolve",
+        split_merge_steps=8,
+    )
+    cutter = loft(
+        [make_rect(size=(0.4, 3.0)), make_rect(size=(0.4, 3.0))],
+        path=[(0.0, 0.0, 0.5), (0.0, 0.0, 1.5)],
+        cap_ends=True,
+    )
+
+    result = boolean_difference(base, [cutter])
+
+    assert base.kernel_metadata()["branch_count"] > 1
+    assert result.status == "succeeded"
+    assert result.classification == "closed"
+    assert result.body is not None
+    route = result.body.kernel_metadata()["polygon_loft_field_csg"]
+    assert route["branching_base"] is True
+    assert route["no_mesh_fallback"] is True
+    assert len(route["decomposition"]) == 2
+    assert route["decomposition"][0]["cell_count"] > 1
+    assert route["decomposition"][0]["execution"] == "declarative-cell-field-union"
+    assert route["decomposition"][0]["recomposition"] == "implicit-min-union"
+    tessellation = tessellate_surface_body(result.body, export_tessellation_request())
+    analysis = analyze_mesh(tessellation.mesh)
+    assert analysis.is_watertight is True
+    assert analysis.is_manifold is True
+    assert analysis.degenerate_faces == 0
+
+
 def _assert_loft_primitive_result_metadata(result: SurfaceBooleanResult) -> None:
     assert result.body is not None
     metadata = result.body.kernel_metadata()["loft_primitive_csg"]
@@ -2796,12 +2898,15 @@ def test_surface_csg_executes_loft_pair_routes_without_mesh_fallback(operation: 
     assert route.loft_operand_indices == (0, 1)
     assert direct is not None
     assert direct.status == "succeeded"
-    assert result.status == ("invalid" if operation == "difference" else "succeeded")
+    assert result.status == "succeeded"
     if operation == "difference":
         assert result.difference_gate is not None
-        assert result.difference_gate.classification == "invalid"
-        assert result.classification is None
-        assert result.body is None
+        assert result.difference_gate.classification == "success"
+        assert result.classification == "closed"
+        assert result.body is not None
+        metadata = result.body.kernel_metadata()["polygon_loft_field_csg"]
+        assert metadata["solver_path"] == "declarative-polygon-loft-field-difference"
+        assert metadata["no_mesh_fallback"] is True
         return
     assert result.classification == "closed"
     assert result.body is not None

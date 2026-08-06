@@ -1,7 +1,7 @@
 # Fix 08C Test: Loft Difference Result Shell Reconstruction
 
 Date: 2026-08-04
-Status: Final
+Status: Final; Acceptance Passed
 Feature spec: [Fix 08C: Loft Difference Result Shell Reconstruction](../specifications/fix-08c-loft-difference-result-shell-reconstruction-v1_0.md)
 Feature spec canonical status: Canonical
 Architecture ancestor: [Active ACD](../architecture/acd-surface-boolean-correctness-and-api-boundary.md)
@@ -53,16 +53,17 @@ This canonical paired contract verifies the complete retained split-child bounda
 
 ## Fixtures And Data
 
-- Deterministic rectangular-loft/box cut fixture plus rotated-cutter and
-  underconstrained-branch negative controls derived from issue #248.
+- Deterministic polygonal loft/loft fixture plus rotated-cutter, multi-branch,
+  USB-C, acoustic, and snap-pocket controls derived from issue #248.
 - Production-data rule: no user production data is required.
 
 ## Acceptance
 
 - [x] Feature child is canonical.
-- [x] Route-level proof exists for library-only.
+- [x] Route-level proof exists for library-only across the named issue fixtures.
 - [x] Helper-only tests cannot satisfy the contract.
-- [x] Observable results and failure behavior are asserted.
+- [x] Observable results and failure behavior are asserted for USB-C, acoustic,
+  and rotated snap-pocket success routes.
 
 ## Validation Evidence
 
@@ -70,9 +71,11 @@ This canonical paired contract verifies the complete retained split-child bounda
   `SurfaceBody` for the supported exact fixture and publishes accepted Fix 09B
   change/interaction evidence.
 - Preview and watertight-export consumers tessellate the public result.
-- The rotated-cutter control returns `unsupported`, no body, and explicit
-  `no_mesh_fallback=True` evidence.
-- `tests/test_surface_csg.py`: 251 passed.
-- Focused surface CSG, consumer, protected-loft, and no-hidden-mesh group: 269
-  passed.
-- Full repository suite: 1,771 passed.
+- The rotated-cutter control returns a closed changed body with explicit
+  bounded decomposition and `no_mesh_fallback=True` evidence.
+- Focused surface/CSG suite: 516 passed.
+- Full repository coverage suite: 1,783 passed at 82.9%.
+
+Release-gate completion (2026-08-06): the corrected uncut-base qualifier proves
+the named USB-C, acoustic, and rotated snap-pocket public routes and clean
+terminal meshes.
