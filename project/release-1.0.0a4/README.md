@@ -1,7 +1,7 @@
 # Impression v1.0.0a4 Corrective Release Definition
 
 Date: 2026-08-04
-Status: Implementation Complete; Release Qualification Pending
+Status: Release Candidate Qualified Locally; Publication Pending
 Issue set: [#242](https://github.com/kellyjanderson/Impression/issues/242) through [#248](https://github.com/kellyjanderson/Impression/issues/248)
 Base release: `v1.0.0a3`
 
@@ -98,5 +98,18 @@ branch cells without a modeling mesh fallback, and extracts a clean manifold
 only at the terminal preview/export boundary. The corrected uncut USB-C and
 acoustic fixtures plus the rotated snap pocket pass through public
 `boolean_difference`; the focused surface suite passes 516 tests and the full
-coverage run passes 1,783 tests at 82.9%. Tagging still waits for integration,
-watcher qualification, and exact built-artifact qualification.
+coverage run passes 1,783 tests at 82.9%. A real macOS preview smoke verified
+both transitive save-to-refresh and `R`-to-refresh after restoring the helper's
+exact prior mtime. Tagging still waits for main-branch integration and exact
+built-artifact qualification.
+
+## Candidate Evidence
+
+- Candidate version: `1.0.0a4` in package metadata and runtime metadata.
+- GitHub issues #242 through #248 are closed with integrated evidence.
+- Corrected external enclosure qualifier passes all seven recorded issue
+  families, including uncut USB-C/acoustic bases and the rotated snap groove.
+- Focused surface/CSG suite: 516 passed.
+- Full configured coverage suite: 1,783 passed, 82.9% coverage.
+- Real visible preview smoke: transitive save reload and mtime-neutral `R`
+  refresh both changed the rendered geometry; temporary fixtures were removed.
