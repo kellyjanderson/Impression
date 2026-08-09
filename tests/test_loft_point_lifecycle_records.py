@@ -3,12 +3,21 @@ import dataclasses
 import pytest
 
 from impression.modeling.loft import (
+    LoftJunctionEvent,
     PointLifecycleEvent,
     PointLifecycleState,
+    SyntheticRegionLineage,
+    SyntheticStationLineage,
     SyntheticSupportReference,
+    TopologyPath,
+    Station,
+    loft_execute_plan,
+    loft_plan_sections,
+    validate_loft_junction_event,
     validate_point_lifecycle_event,
     validate_point_lifecycle_events,
 )
+from impression.modeling.topology import Region, Section
 
 
 def _event(**overrides: object) -> PointLifecycleEvent:
@@ -101,3 +110,216 @@ def test_synthetic_support_reference_validates_and_normalizes() -> None:
             span_parameter=1.5,
             coordinates=(0.25, 0.0),
         )
+
+
+def test_synthetic_station_lineage_is_frozen_complete_and_canonical() -> None:
+    path = TopologyPath.from_points(((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)), id="shell-outer")
+    region = SyntheticRegionLineage(
+        identity="shell",
+        prev_region_ref=("actual", 0),
+        curr_region_ref=("actual", 1),
+        predecessor_ids=frozenset({"shell"}),
+        successor_ids=frozenset({"shell"}),
+        loop_identities=("shell-outer",),
+        predecessor_loop_ids=("shell-outer",),
+        successor_loop_ids=("shell-outer",),
+    )
+    lineage = SyntheticStationLineage(
+        identity="synthetic-station-0-1-1-of-2",
+        source_interval=(0.0, 1.0),
+        stage_index=0,
+        stage_count=2,
+        station_t=0.4,
+        regions=(region,),
+        topology_paths=(path,),
+    )
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        lineage.stage_index = 1  # type: ignore[misc]
+    assert lineage.canonical_payload()["topology_path_ids"] == ("shell-outer",)
+    assert lineage.canonical_payload()["regions"][0]["identity"] == "shell"
+
+
+def test_synthetic_station_lineage_rejects_missing_and_conflicting_loop_paths() -> None:
+    region = SyntheticRegionLineage(
+        identity="shell",
+        prev_region_ref=("actual", 0),
+        curr_region_ref=("actual", 0),
+        predecessor_ids=frozenset({"shell"}),
+        successor_ids=frozenset({"shell"}),
+        loop_identities=("shell-outer",),
+        predecessor_loop_ids=("shell-outer",),
+        successor_loop_ids=("shell-outer",),
+    )
+
+    with pytest.raises(ValueError, match="topology paths do not cover every loop"):
+        SyntheticStationLineage(
+            identity="missing-path",
+            source_interval=(0.0, 1.0),
+            stage_index=0,
+            stage_count=1,
+            station_t=0.5,
+            regions=(region,),
+            topology_paths=(),
+        )
+
+    other_path = TopologyPath.from_points(
+        ((2.0, 0.0), (3.0, 0.0), (2.0, 1.0)),
+        id="other-outer",
+    )
+    conflicting_region = dataclasses.replace(
+        region,
+        loop_identities=("other-outer",),
+        predecessor_loop_ids=("other-outer",),
+        successor_loop_ids=("other-outer",),
+    )
+    with pytest.raises(ValueError, match="duplicate region identity"):
+        SyntheticStationLineage(
+            identity="duplicate-region",
+            source_interval=(0.0, 1.0),
+            stage_index=0,
+            stage_count=1,
+            station_t=0.5,
+            regions=(region, conflicting_region),
+            topology_paths=(
+                TopologyPath.from_points(
+                    ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)),
+                    id="shell-outer",
+                ),
+                other_path,
+            ),
+        )
+
+
+def _named_hole(identity: str, center_x: float) -> TopologyPath:
+    return TopologyPath.from_points(
+        (
+            (center_x - 0.5, -0.5),
+            (center_x + 0.5, -0.5),
+            (center_x + 0.5, 0.5),
+            (center_x - 0.5, 0.5),
+        ),
+        id=identity,
+    )
+
+
+def _hole_section(holes: tuple[TopologyPath, ...]) -> Section:
+    outer = TopologyPath.from_points(
+        ((-5.0, -4.0), (5.0, -4.0), (5.0, 4.0), (-5.0, 4.0)),
+        id="outer",
+    )
+    return Section(
+        regions=(
+            Region(
+                outer=outer.to_section_loop(),
+                holes=tuple(hole.to_section_loop() for hole in holes),
+            ),
+        ),
+        metadata={"topology_paths": (outer, *holes)},
+    )
+
+
+def _hole_stations(source: Section, target: Section) -> tuple[Station, Station]:
+    frame = {
+        "u": (1.0, 0.0, 0.0),
+        "v": (0.0, 1.0, 0.0),
+        "n": (0.0, 0.0, 1.0),
+    }
+    return (
+        Station(t=0.0, section=source, origin=(0.0, 0.0, 0.0), **frame),
+        Station(t=1.0, section=target, origin=(0.0, 0.0, 2.0), **frame),
+    )
+
+
+def test_hole_birth_plan_carries_deterministic_identity_bearing_junction_event() -> None:
+    source = _hole_section((_named_hole("continuing", -2.0),))
+    target = _hole_section(
+        (_named_hole("continuing", -2.0), _named_hole("born", 2.0))
+    )
+
+    plan = loft_plan_sections(
+        _hole_stations(source, target),
+        samples=16,
+        split_merge_mode="resolve",
+        ambiguity_mode="auto",
+        fairness_mode="off",
+    )
+    repeated = loft_plan_sections(
+        _hole_stations(source, target),
+        samples=16,
+        split_merge_mode="resolve",
+        ambiguity_mode="auto",
+        fairness_mode="off",
+    )
+    event = plan.transitions[0].junction_events[0]
+
+    assert isinstance(event, LoftJunctionEvent)
+    assert event.direction == "one_to_many"
+    assert event.continuing_loop_ids == ("continuing",)
+    assert event.born_loop_ids == ("born",)
+    assert event.closing_loop_ids == ()
+    assert plan.metadata["synthetic_station_lineage_records"]
+    assert plan.transitions[0].region_pairs[0].loop_pairs[1].curr_loop_ref.identity == "continuing"
+    assert event.surface_role == "interior_junction"
+    assert event.terminal_cap_allowed is False
+    assert {ring.role for ring in event.boundary_rings} == {
+        "continuing",
+        "born",
+        "synthetic_support",
+    }
+    assert (
+        event.canonical_payload()
+        == repeated.transitions[0].junction_events[0].canonical_payload()
+    )
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        event.direction = "many_to_one"  # type: ignore[misc]
+
+
+def test_hole_death_plan_records_closing_lineage_and_executor_publishes_it() -> None:
+    source = _hole_section(
+        (_named_hole("continuing", -2.0), _named_hole("closing", 2.0))
+    )
+    target = _hole_section((_named_hole("continuing", -2.0),))
+    plan = loft_plan_sections(_hole_stations(source, target), samples=16, fairness_mode="off")
+    event = plan.transitions[0].junction_events[0]
+
+    assert event.direction == "many_to_one"
+    assert event.continuing_loop_ids == ("continuing",)
+    assert event.born_loop_ids == ()
+    assert event.closing_loop_ids == ("closing",)
+    assert {ring.loop_identity for ring in event.boundary_rings} == {
+        "continuing",
+        "closing",
+    }
+
+    body = loft_execute_plan(plan)
+    kernel = body.kernel_metadata()
+    assert kernel["loft_junction_events"] == (event.canonical_payload(),)
+    assert kernel["loft_junction_event_records"] == (event,)
+
+
+def test_incomplete_or_terminal_cap_junction_intent_fails_before_execution() -> None:
+    source = _hole_section((_named_hole("continuing", -2.0),))
+    target = _hole_section(
+        (_named_hole("continuing", -2.0), _named_hole("born", 2.0))
+    )
+    plan = loft_plan_sections(_hole_stations(source, target), samples=16, fairness_mode="off")
+    event = plan.transitions[0].junction_events[0]
+
+    with pytest.raises(ValueError, match="invalid_loft_junction_lineage.*not a terminal cap"):
+        validate_loft_junction_event(dataclasses.replace(event, terminal_cap_allowed=True))
+
+    unknown_ring = dataclasses.replace(event.boundary_rings[0], loop_identity="missing")
+    with pytest.raises(ValueError, match="invalid_loft_junction_lineage.*unknown loop identity"):
+        validate_loft_junction_event(
+            dataclasses.replace(
+                event,
+                boundary_rings=(unknown_ring, *event.boundary_rings[1:]),
+            )
+        )
+
+    incomplete = dataclasses.replace(event, boundary_rings=())
+    invalid_transition = dataclasses.replace(plan.transitions[0], junction_events=(incomplete,))
+    invalid_plan = dataclasses.replace(plan, transitions=(invalid_transition,))
+    with pytest.raises(ValueError, match="invalid_loft_junction_lineage.*boundary rings"):
+        loft_execute_plan(invalid_plan)

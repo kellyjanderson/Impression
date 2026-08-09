@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 import hashlib
+import itertools
 import json
 from typing import Iterable, Literal, Mapping, Sequence, Union
 
@@ -82,7 +83,8 @@ from .surface_intersections import (
 
 SurfaceBooleanOperation = Literal["union", "difference", "intersection"]
 SURFACE_BOOLEAN_OPERATIONS: tuple[SurfaceBooleanOperation, ...] = ("union", "difference", "intersection")
-SurfaceBooleanStatus = Literal["succeeded", "invalid", "unsupported"]
+SurfaceBooleanStatus = Literal["succeeded", "no-cut", "invalid", "unsupported"]
+SurfaceDifferenceGateClassification = Literal["success", "no-cut", "invalid", "unsupported"]
 SurfaceBooleanClassification = Literal["open", "closed", "empty"]
 SurfaceBooleanBodyRelation = Literal["disjoint", "touching", "overlap", "containment", "equal"]
 SurfaceCSGContactKind = Literal[
@@ -2297,21 +2299,51 @@ def classify_branching_loft_csg_policy(
 class BranchSubBodyCSGPlan:
     """One branch-local boolean execution plan before recomposition."""
 
+    subbody_id: str
     branch_id: str
     operation: SurfaceBooleanOperation
     source_body_id: str
+    cutter_body_ids: tuple[str, ...]
     joint_ids: tuple[str, ...]
+    source_branch_ids: tuple[str, ...] = ()
     execution_posture: Literal["planned"] = "planned"
     no_mesh_fallback: bool = True
 
+    def __post_init__(self) -> None:
+        subbody_id = str(self.subbody_id)
+        branch_id = str(self.branch_id)
+        operation = str(self.operation)
+        source_body_id = str(self.source_body_id)
+        if operation not in SURFACE_BOOLEAN_OPERATIONS:
+            raise ValueError("Branch sub-body CSG plan operation is unsupported.")
+        if not subbody_id or not branch_id or not source_body_id:
+            raise ValueError("Branch sub-body CSG plan requires stable subbody, branch, and source body IDs.")
+        cutter_body_ids = tuple(str(body_id) for body_id in self.cutter_body_ids if str(body_id))
+        joint_ids = tuple(dict.fromkeys(str(joint_id) for joint_id in self.joint_ids if str(joint_id)))
+        source_branch_ids = tuple(dict.fromkeys(str(branch_id) for branch_id in self.source_branch_ids if str(branch_id)))
+        if not source_branch_ids:
+            source_branch_ids = (branch_id,)
+        if self.execution_posture != "planned":
+            raise ValueError("Branch sub-body CSG plan execution posture must be planned.")
+        object.__setattr__(self, "subbody_id", subbody_id)
+        object.__setattr__(self, "branch_id", branch_id)
+        object.__setattr__(self, "operation", operation)
+        object.__setattr__(self, "source_body_id", source_body_id)
+        object.__setattr__(self, "cutter_body_ids", cutter_body_ids)
+        object.__setattr__(self, "joint_ids", joint_ids)
+        object.__setattr__(self, "source_branch_ids", source_branch_ids)
+
     def canonical_payload(self) -> dict[str, object]:
         return {
+            "cutter_body_ids": self.cutter_body_ids,
             "branch_id": self.branch_id,
             "execution_posture": self.execution_posture,
             "joint_ids": self.joint_ids,
             "no_mesh_fallback": self.no_mesh_fallback,
             "operation": self.operation,
+            "source_branch_ids": self.source_branch_ids,
             "source_body_id": self.source_body_id,
+            "subbody_id": self.subbody_id,
         }
 
 
@@ -2322,18 +2354,47 @@ class BranchDecompositionPlan:
     plan_id: str
     operation: SurfaceBooleanOperation
     source_body_id: str
+    cutter_body_ids: tuple[str, ...]
     policy: BranchingLoftCSGPolicyRecord
     subbody_plans: tuple[BranchSubBodyCSGPlan, ...]
+    max_subbody_count: int = 16
     recomposition_required: bool = True
+    diagnostics: tuple[str, ...] = ()
     no_mesh_fallback: bool = True
+
+    def __post_init__(self) -> None:
+        plan_id = str(self.plan_id)
+        operation = str(self.operation)
+        source_body_id = str(self.source_body_id)
+        if operation not in SURFACE_BOOLEAN_OPERATIONS:
+            raise ValueError("Branch decomposition plan operation is unsupported.")
+        cutter_body_ids = tuple(str(body_id) for body_id in self.cutter_body_ids if str(body_id))
+        diagnostics = tuple(dict.fromkeys(str(diagnostic) for diagnostic in self.diagnostics if str(diagnostic)))
+        max_subbody_count = int(self.max_subbody_count)
+        if max_subbody_count <= 0:
+            raise ValueError("Branch decomposition plan max_subbody_count must be positive.")
+        object.__setattr__(self, "plan_id", plan_id)
+        object.__setattr__(self, "operation", operation)
+        object.__setattr__(self, "source_body_id", source_body_id)
+        object.__setattr__(self, "cutter_body_ids", cutter_body_ids)
+        object.__setattr__(self, "max_subbody_count", max_subbody_count)
+        object.__setattr__(self, "diagnostics", diagnostics)
 
     @property
     def executable(self) -> bool:
-        return self.policy.policy_class == "decomposition-required" and bool(self.subbody_plans)
+        return (
+            self.policy.policy_class == "decomposition-required"
+            and bool(self.subbody_plans)
+            and len(self.subbody_plans) <= self.max_subbody_count
+            and not self.diagnostics
+        )
 
     def canonical_payload(self) -> dict[str, object]:
         return {
+            "cutter_body_ids": self.cutter_body_ids,
+            "diagnostics": self.diagnostics,
             "executable": self.executable,
+            "max_subbody_count": self.max_subbody_count,
             "no_mesh_fallback": self.no_mesh_fallback,
             "operation": self.operation,
             "plan_id": self.plan_id,
@@ -2352,7 +2413,9 @@ class BranchRecompositionRecord:
     valid: bool
     result_shape: BranchRecompositionResultShape
     result_body_ids: tuple[str, ...]
+    subbody_result_map: tuple[tuple[str, str], ...]
     recomposition_seams: tuple[str, ...]
+    required_joint_ids: tuple[str, ...] = ()
     diagnostics: tuple[str, ...] = ()
     no_mesh_fallback: bool = True
 
@@ -2361,9 +2424,11 @@ class BranchRecompositionRecord:
             "diagnostics": self.diagnostics,
             "no_mesh_fallback": self.no_mesh_fallback,
             "plan_id": self.plan_id,
+            "required_joint_ids": self.required_joint_ids,
             "recomposition_seams": self.recomposition_seams,
             "result_body_ids": self.result_body_ids,
             "result_shape": self.result_shape,
+            "subbody_result_map": self.subbody_result_map,
             "valid": self.valid,
         }
 
@@ -2371,21 +2436,31 @@ class BranchRecompositionRecord:
 def plan_branch_subbody_csg(
     body: SurfaceBody,
     operation: SurfaceBooleanOperation,
+    *,
+    cutter_bodies: Sequence[SurfaceBody] = (),
+    max_subbody_count: int = 16,
 ) -> BranchDecompositionPlan:
     """Plan branch-local CSG work for a complete branching loft policy record."""
 
     policy = classify_branching_loft_csg_policy(body, operation)
     branch_graph = policy.branch_graph
+    cutter_body_ids = tuple(body.stable_identity for body in cutter_bodies)
     joint_ids_by_branch: dict[str, list[str]] = {branch_id: [] for branch_id in branch_graph.branch_ids}
     for joint in branch_graph.joints:
         for branch_id in joint.branch_ids:
             joint_ids_by_branch.setdefault(branch_id, []).append(joint.joint_id)
+    diagnostics: list[str] = []
+    if len(branch_graph.branch_ids) > int(max_subbody_count):
+        diagnostics.append("branch-subbody-limit-exceeded")
     subbody_plans = tuple(
         BranchSubBodyCSGPlan(
+            subbody_id=f"{body.stable_identity}:branch:{branch_id}",
             branch_id=branch_id,
             operation=operation,
             source_body_id=body.stable_identity,
+            cutter_body_ids=cutter_body_ids,
             joint_ids=tuple(dict.fromkeys(joint_ids_by_branch.get(branch_id, ()))),
+            source_branch_ids=(branch_id,),
         )
         for branch_id in branch_graph.branch_ids
     )
@@ -2396,6 +2471,8 @@ def plan_branch_subbody_csg(
             {
                 "body_id": body.stable_identity,
                 "branch_ids": branch_graph.branch_ids,
+                "cutter_body_ids": cutter_body_ids,
+                "max_subbody_count": int(max_subbody_count),
                 "operation": operation,
             },
             sort_keys=True,
@@ -2406,8 +2483,11 @@ def plan_branch_subbody_csg(
         plan_id=f"branch-decomposition:{plan_digest}",
         operation=operation,
         source_body_id=body.stable_identity,
+        cutter_body_ids=cutter_body_ids,
         policy=policy,
         subbody_plans=subbody_plans,
+        max_subbody_count=int(max_subbody_count),
+        diagnostics=tuple(diagnostics),
     )
 
 
@@ -2423,12 +2503,22 @@ def validate_branch_recomposition(
     diagnostics: list[str] = []
     normalized_result_ids = tuple(str(body_id) for body_id in result_body_ids if str(body_id))
     normalized_seams = tuple(str(seam_id) for seam_id in recomposition_seams if str(seam_id))
+    subbody_ids = tuple(subplan.subbody_id for subplan in plan.subbody_plans)
+    required_joint_ids = tuple(
+        dict.fromkeys(joint_id for subplan in plan.subbody_plans for joint_id in subplan.joint_ids)
+    )
     if not plan.executable:
         diagnostics.append("decomposition-plan-not-executable")
     if len(normalized_result_ids) != len(plan.subbody_plans):
         diagnostics.append("subbody-result-count-mismatch")
+    if len(set(normalized_result_ids)) != len(normalized_result_ids):
+        diagnostics.append("duplicate-result-ownership")
     if plan.recomposition_required and not normalized_seams:
         diagnostics.append("missing-recomposition-seams")
+    for joint_id in required_joint_ids:
+        if not any(seam_id == joint_id or seam_id.startswith(f"{joint_id}:") for seam_id in normalized_seams):
+            diagnostics.append("open-recomposition-seam")
+            break
     if result_shape not in {"single-shell", "multi-shell", "refused"}:
         diagnostics.append("unsupported-result-shape")
         normalized_shape: BranchRecompositionResultShape = "refused"
@@ -2440,8 +2530,59 @@ def validate_branch_recomposition(
         valid=valid,
         result_shape=normalized_shape if valid else "refused",
         result_body_ids=normalized_result_ids,
+        subbody_result_map=tuple(zip(subbody_ids, normalized_result_ids, strict=False)),
         recomposition_seams=normalized_seams,
+        required_joint_ids=required_joint_ids,
         diagnostics=tuple(diagnostics),
+    )
+
+
+def _branch_decomposition_payload_for_operands(
+    operands: SurfaceBooleanOperands,
+) -> dict[str, object] | None:
+    """Return the branch-decomposition handoff payload for decomposable loft CSG."""
+
+    if operands.operation != "difference" or operands.operand_count < 2:
+        return None
+    base = operands.bodies[0]
+    policy = classify_branching_loft_csg_policy(base, operands.operation)
+    if policy.policy_class != "decomposition-required":
+        return None
+    plan = plan_branch_subbody_csg(
+        base,
+        operands.operation,
+        cutter_bodies=operands.bodies[1:],
+    )
+    recomposition = validate_branch_recomposition(plan)
+    return {
+        "decomposition_plan": plan.canonical_payload(),
+        "no_mesh_fallback": True,
+        "operation": operands.operation,
+        "operand_ids": operands.body_ids,
+        "policy": policy.canonical_payload(),
+        "recomposition_record": recomposition.canonical_payload(),
+        "route_id": "surface-csg.loft-branch-decomposition",
+        "status": "unsupported",
+    }
+
+
+def execute_branching_loft_difference_csg(
+    operands: SurfaceBooleanOperands,
+) -> SurfaceBooleanResult | None:
+    """Expose validated branch decomposition before Fix 08C result reconstruction."""
+
+    payload = _branch_decomposition_payload_for_operands(operands)
+    if payload is None:
+        return None
+    return SurfaceBooleanResult(
+        operation=operands.operation,
+        operands=operands,
+        status="unsupported",
+        failure_reason=(
+            "Branching loft difference decomposition planned; result-shell reconstruction is owned by Fix 08C; "
+            "no_mesh_fallback=True; "
+            f"branch_decomposition_adapter={json.dumps(payload, sort_keys=True, separators=(',', ':'))}"
+        ),
     )
 
 
@@ -2708,6 +2849,144 @@ class LoftPrimitiveTrimAdapterRecord:
             "route_id": self.route_id,
             "station_interval": self.station_interval,
             "supported": self.supported,
+        }
+
+
+@dataclass(frozen=True)
+class LoftDifferencePatchPairCandidateRecord:
+    """Bounds-pruned base/cutter patch pair considered for loft difference."""
+
+    candidate_id: str
+    base_patch: SurfaceBooleanPatchRef
+    cutter_patch: SurfaceBooleanPatchRef
+    base_family: str
+    cutter_family: str
+    overlap_bounds: tuple[float, float, float, float, float, float]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "candidate_id": self.candidate_id,
+            "base_patch": _surface_boolean_patch_ref_payload(self.base_patch),
+            "cutter_patch": _surface_boolean_patch_ref_payload(self.cutter_patch),
+            "base_family": self.base_family,
+            "cutter_family": self.cutter_family,
+            "overlap_bounds": self.overlap_bounds,
+        }
+
+
+@dataclass(frozen=True)
+class LoftDifferenceIntersectionCurveEvidenceRecord:
+    """Analytic intersection evidence for one qualifying candidate patch pair."""
+
+    candidate_id: str
+    base_patch: SurfaceBooleanPatchRef
+    cutter_patch: SurfaceBooleanPatchRef
+    relation: str
+    curve_ids: tuple[str, ...] = ()
+    patch_local_curves: tuple[SurfaceCSGPatchLocalCurve, ...] = ()
+
+    @property
+    def qualifying(self) -> bool:
+        return bool(self.curve_ids) and len(self.patch_local_curves) == 2
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "candidate_id": self.candidate_id,
+            "base_patch": _surface_boolean_patch_ref_payload(self.base_patch),
+            "cutter_patch": _surface_boolean_patch_ref_payload(self.cutter_patch),
+            "relation": self.relation,
+            "curve_ids": self.curve_ids,
+            "patch_local_curves": tuple(curve.canonical_payload() for curve in self.patch_local_curves),
+            "qualifying": self.qualifying,
+        }
+
+
+@dataclass(frozen=True)
+class LoftDifferenceTrimFragmentDiagnostic:
+    """Precise refusal emitted by loft difference trim-fragment construction."""
+
+    code: Literal[
+        "unsupported-route",
+        "unsupported-patch-pair",
+        "missing-intersection-evidence",
+        "open-trim-network",
+        "ambiguous-trim-network",
+        "invalid-trim-loop",
+    ]
+    message: str
+    candidate_id: str | None = None
+    patch: SurfaceBooleanPatchRef | None = None
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "candidate_id": self.candidate_id,
+            "patch": None if self.patch is None else _surface_boolean_patch_ref_payload(self.patch),
+        }
+
+
+@dataclass(frozen=True)
+class LoftDifferenceTrimFragmentRecord:
+    """Closed patch-local fragment with immutable source and cut provenance."""
+
+    fragment_id: str
+    source_role: Literal["base", "cutter"]
+    source_patch: SurfaceBooleanPatchRef
+    source_family: str
+    trim_loops: tuple[TrimLoop, ...]
+    source_curve_ids: tuple[str, ...]
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "fragment_id": self.fragment_id,
+            "source_role": self.source_role,
+            "source_patch": _surface_boolean_patch_ref_payload(self.source_patch),
+            "source_family": self.source_family,
+            "source_curve_ids": self.source_curve_ids,
+            "trim_loops": tuple(
+                {
+                    "category": loop.category,
+                    "points_uv": tuple(
+                        (float(point[0]), float(point[1])) for point in loop.points_uv
+                    ),
+                }
+                for loop in self.trim_loops
+            ),
+        }
+
+
+@dataclass(frozen=True)
+class LoftDifferenceTrimFragmentConstructionRecord:
+    """Complete Fix08A intersection-to-fragment construction result."""
+
+    route_id: str
+    candidate_pairs: tuple[LoftDifferencePatchPairCandidateRecord, ...] = ()
+    intersection_evidence: tuple[LoftDifferenceIntersectionCurveEvidenceRecord, ...] = ()
+    base_fragments: tuple[LoftDifferenceTrimFragmentRecord, ...] = ()
+    cutter_fragments: tuple[LoftDifferenceTrimFragmentRecord, ...] = ()
+    diagnostics: tuple[LoftDifferenceTrimFragmentDiagnostic, ...] = ()
+    no_mesh_fallback: bool = True
+
+    @property
+    def supported(self) -> bool:
+        return (
+            not self.diagnostics
+            and bool(self.intersection_evidence)
+            and bool(self.base_fragments)
+            and bool(self.cutter_fragments)
+        )
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "route_id": self.route_id,
+            "candidate_pairs": tuple(record.canonical_payload() for record in self.candidate_pairs),
+            "intersection_evidence": tuple(record.canonical_payload() for record in self.intersection_evidence),
+            "base_fragments": tuple(record.canonical_payload() for record in self.base_fragments),
+            "cutter_fragments": tuple(record.canonical_payload() for record in self.cutter_fragments),
+            "diagnostics": tuple(diagnostic.canonical_payload() for diagnostic in self.diagnostics),
+            "supported": self.supported,
+            "no_mesh_fallback": self.no_mesh_fallback,
         }
 
 
@@ -3715,6 +3994,121 @@ class SurfaceCSGOperationPlan:
 
 
 @dataclass(frozen=True)
+class GeometryChangeWitness:
+    """Inspectable evidence that a surfaced difference changed modeled geometry."""
+
+    kind: Literal[
+        "changed-topology",
+        "changed-base-domain",
+        "removed-base-domain",
+        "new-intersection-boundary",
+        "cutter-derived-result-patch",
+        "localized-geometry-change",
+    ]
+    operand_ids: tuple[str, ...]
+    patch_ids: tuple[str, ...] = ()
+    boundary_ids: tuple[str, ...] = ()
+    tolerance_evidence: Mapping[str, object] = field(default_factory=dict)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "kind": self.kind,
+            "operand_ids": self.operand_ids,
+            "patch_ids": self.patch_ids,
+            "boundary_ids": self.boundary_ids,
+            "tolerance_evidence": dict(self.tolerance_evidence),
+        }
+
+
+@dataclass(frozen=True)
+class NormalizedDifferenceEvidence:
+    """Executor-neutral geometry comparison consumed by the public difference gate."""
+
+    executor_id: str
+    operand_ids: tuple[str, ...]
+    result_status: SurfaceBooleanStatus
+    comparison: Literal["changed", "unchanged", "ambiguous"]
+    cutter_relations: tuple[SurfaceBooleanBodyRelation, ...] = ()
+    witnesses: tuple[GeometryChangeWitness, ...] = ()
+    diagnostics: tuple[str, ...] = ()
+    localized_patch_comparisons: int = 0
+    no_mesh_fallback: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.executor_id.strip():
+            raise ValueError("Normalized difference evidence requires executor_id.")
+        if self.comparison == "changed" and (not self.witnesses or self.diagnostics):
+            raise ValueError("Changed difference evidence requires witnesses without diagnostics.")
+        if self.comparison == "unchanged" and (self.witnesses or self.diagnostics):
+            raise ValueError("Unchanged difference evidence may not carry witnesses or diagnostics.")
+        if self.localized_patch_comparisons < 0:
+            raise ValueError("localized_patch_comparisons must be non-negative.")
+
+    @property
+    def changed(self) -> bool:
+        return self.comparison == "changed" and bool(self.witnesses) and not self.diagnostics
+
+    @property
+    def cutter_interaction(self) -> bool:
+        return any(relation in {"overlap", "containment", "equal"} for relation in self.cutter_relations)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "executor_id": self.executor_id,
+            "operand_ids": self.operand_ids,
+            "result_status": self.result_status,
+            "comparison": self.comparison,
+            "changed": self.changed,
+            "cutter_relations": self.cutter_relations,
+            "cutter_interaction": self.cutter_interaction,
+            "witnesses": tuple(witness.canonical_payload() for witness in self.witnesses),
+            "diagnostics": self.diagnostics,
+            "localized_patch_comparisons": self.localized_patch_comparisons,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
+class SurfaceDifferenceGateDecision:
+    """Public postcondition decision shared by every surface difference route."""
+
+    classification: SurfaceDifferenceGateClassification
+    executor_id: str
+    operand_ids: tuple[str, ...]
+    comparison: Literal["changed", "unchanged", "ambiguous"]
+    cutter_interaction: bool
+    reason: str
+    gate_id: str = "surface-difference-public-success-gate-v1"
+    no_mesh_fallback: bool = True
+
+    def __post_init__(self) -> None:
+        if self.classification not in {"success", "no-cut", "invalid", "unsupported"}:
+            raise ValueError("Surface difference gate classification is unsupported.")
+        if not self.executor_id.strip() or not self.gate_id.strip() or not self.reason.strip():
+            raise ValueError("Surface difference gate decision requires executor, gate, and reason.")
+        if self.classification == "success" and (
+            self.comparison != "changed" or not self.cutter_interaction
+        ):
+            raise ValueError("Surface difference success requires changed interacting evidence.")
+        if self.classification == "no-cut" and (
+            self.comparison != "unchanged" or self.cutter_interaction
+        ):
+            raise ValueError("Surface difference no-cut requires unchanged non-interacting evidence.")
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "classification": self.classification,
+            "executor_id": self.executor_id,
+            "operand_ids": self.operand_ids,
+            "comparison": self.comparison,
+            "cutter_interaction": self.cutter_interaction,
+            "reason": self.reason,
+            "gate_id": self.gate_id,
+            "no_mesh_fallback": self.no_mesh_fallback,
+        }
+
+
+@dataclass(frozen=True)
 class SurfaceBooleanResult:
     """Structured surfaced boolean result contract."""
 
@@ -3724,8 +4118,34 @@ class SurfaceBooleanResult:
     body: SurfaceBody | None = None
     classification: SurfaceBooleanClassification | None = None
     failure_reason: str | None = None
+    difference_evidence: NormalizedDifferenceEvidence | None = None
+    difference_gate: SurfaceDifferenceGateDecision | None = None
 
     def __post_init__(self) -> None:
+        if self.difference_evidence is not None:
+            if self.operation != "difference":
+                raise ValueError("Only difference results may carry difference_evidence.")
+            if self.difference_evidence.operand_ids != self.operands.body_ids:
+                raise ValueError("Difference evidence operand IDs must match the result operands.")
+            if self.difference_evidence.result_status != self.status:
+                raise ValueError("Difference evidence status must match the result status.")
+        if self.difference_gate is not None:
+            if self.operation != "difference":
+                raise ValueError("Only difference results may carry difference_gate.")
+            if self.difference_gate.operand_ids != self.operands.body_ids:
+                raise ValueError("Difference gate operand IDs must match the result operands.")
+            if self.difference_evidence is None:
+                raise ValueError("Difference gate decisions require normalized evidence.")
+            if self.difference_gate.executor_id != self.difference_evidence.executor_id:
+                raise ValueError("Difference gate executor must match normalized evidence.")
+            expected_gate_classification = {
+                "succeeded": "success",
+                "no-cut": "no-cut",
+                "invalid": "invalid",
+                "unsupported": "unsupported",
+            }[self.status]
+            if self.difference_gate.classification != expected_gate_classification:
+                raise ValueError("Difference gate classification must match the result status.")
         if self.status == "succeeded":
             if self.classification is None:
                 raise ValueError("Succeeded surface boolean results require classification.")
@@ -3736,6 +4156,15 @@ class SurfaceBooleanResult:
                 raise ValueError("Non-empty succeeded surface boolean results require body.")
             if self.failure_reason is not None:
                 raise ValueError("Succeeded surface boolean results may not carry failure_reason.")
+        elif self.status == "no-cut":
+            if self.operation != "difference":
+                raise ValueError("Only difference results may use no-cut status.")
+            if self.body is None or self.classification != "closed":
+                raise ValueError("No-cut difference results require the unchanged closed base body.")
+            if self.failure_reason is not None:
+                raise ValueError("No-cut difference results may not carry failure_reason.")
+            if self.difference_gate is not None and self.difference_gate.classification != "no-cut":
+                raise ValueError("No-cut result status requires a no-cut gate decision.")
         else:
             if self.body is not None or self.classification is not None:
                 raise ValueError("Invalid or unsupported surface boolean results may not carry body or classification.")
@@ -10735,6 +11164,28 @@ class _SurfaceCSGRectangularOverlapEvidence:
     boundary_curve_ids: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class CoincidentPatchContact:
+    """Exact opposite-oriented coincident patch-domain evidence."""
+
+    first_patch: SurfaceBooleanPatchRef
+    second_patch: SurfaceBooleanPatchRef
+    orientation: Literal["opposite"]
+    trimmed_domains_match: bool
+    tolerance: float
+    max_residual: float
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "first_patch": _surface_boolean_patch_ref_payload(self.first_patch),
+            "second_patch": _surface_boolean_patch_ref_payload(self.second_patch),
+            "orientation": self.orientation,
+            "trimmed_domains_match": self.trimmed_domains_match,
+            "tolerance": self.tolerance,
+            "max_residual": self.max_residual,
+        }
+
+
 def _surface_csg_rectangular_patch_frame(
     patch: SurfacePatch,
     *,
@@ -10860,6 +11311,60 @@ def _surface_csg_rectangular_overlap_evidence(
         partial=partial,
         boundary_curve_ids=boundary_curve_ids,
     )
+
+
+def classify_coincident_patch_contacts(
+    operands: SurfaceBooleanOperands,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> tuple[CoincidentPatchContact, ...]:
+    """Classify full-domain, opposite-oriented coincident patch pairs."""
+
+    if operands.operand_count != 2:
+        return ()
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    contacts: list[CoincidentPatchContact] = []
+    first_patches = operands.bodies[0].iter_patches(world=True)
+    second_patches = operands.bodies[1].iter_patches(world=True)
+    for first_index, first_patch in enumerate(first_patches):
+        first_bounds = first_patch.bounds_estimate()
+        for second_index, second_patch in enumerate(second_patches):
+            second_bounds = second_patch.bounds_estimate()
+            if _surface_boolean_bounds_gap(first_bounds, second_bounds) > normalized_policy.equality_tolerance:
+                continue
+            evidence = _surface_csg_rectangular_overlap_evidence(
+                first_patch,
+                second_patch,
+                policy=normalized_policy,
+            )
+            cap_roles = {
+                first_patch.kernel_metadata().get("surface_role"),
+                second_patch.kernel_metadata().get("surface_role"),
+            }
+            opposite_orientation = (
+                evidence is not None
+                and (
+                    evidence.second_orientation == "reversed"
+                    or cap_roles == {"start-cap", "end-cap"}
+                )
+            )
+            if (
+                evidence is None
+                or evidence.partial
+                or not opposite_orientation
+                or evidence.max_residual > normalized_policy.equality_tolerance
+            ):
+                continue
+            contacts.append(
+                CoincidentPatchContact(
+                    first_patch=SurfaceBooleanPatchRef(0, first_index),
+                    second_patch=SurfaceBooleanPatchRef(1, second_index),
+                    orientation="opposite",
+                    trimmed_domains_match=True,
+                    tolerance=normalized_policy.equality_tolerance,
+                    max_residual=evidence.max_residual,
+                )
+            )
+    return tuple(contacts)
 
 
 def detect_spline_nurbs_coincident_regions(
@@ -11728,7 +12233,7 @@ def _apply_face_colors(result: Mesh, face_ids: np.ndarray, color_map: dict[int, 
 
 
 def _weld_boolean_result_degenerate_vertices(mesh: Mesh) -> Mesh:
-    """Remove manifold-output zero edges when exact duplicate vertices are safe to weld."""
+    """Remove manifold-output zero edges or collinear boundary subdivisions safely."""
 
     original_analysis = analyze_mesh(mesh)
     if original_analysis.degenerate_faces == 0:
@@ -11755,31 +12260,83 @@ def _weld_boolean_result_degenerate_vertices(mesh: Mesh) -> Mesh:
                 if first_root != second_root:
                     parent[max(first_root, second_root)] = min(first_root, second_root)
                     merged = True
-    if not merged:
+    if merged:
+        inverse = np.asarray([root(index) for index in range(mesh.n_vertices)], dtype=int)
+        candidate = _boolean_mesh_collapse_candidate(mesh, inverse)
+        if _boolean_mesh_repair_preserves_topology(candidate, original_analysis):
+            return candidate
+
+    degenerate_faces = mesh.faces[areas <= 1e-12]
+    if len(degenerate_faces) > 8:
         return mesh
-    inverse = np.asarray([root(index) for index in range(mesh.n_vertices)], dtype=int)
+    collapse_choices: list[tuple[int, int, int]] = []
+    for face in degenerate_faces:
+        endpoint_a, endpoint_b, middle = max(
+            (
+                (int(face[0]), int(face[1]), int(face[2])),
+                (int(face[0]), int(face[2]), int(face[1])),
+                (int(face[1]), int(face[2]), int(face[0])),
+            ),
+            key=lambda item: float(np.linalg.norm(mesh.vertices[item[1]] - mesh.vertices[item[0]])),
+        )
+        collapse_choices.append((middle, endpoint_a, endpoint_b))
+    for selection in itertools.product((1, 2), repeat=len(collapse_choices)):
+        parent = np.arange(mesh.n_vertices, dtype=int)
+
+        def collapse_root(vertex_index: int) -> int:
+            while parent[vertex_index] != vertex_index:
+                parent[vertex_index] = parent[parent[vertex_index]]
+                vertex_index = int(parent[vertex_index])
+            return vertex_index
+
+        for choice, (middle, endpoint_a, endpoint_b) in zip(selection, collapse_choices, strict=True):
+            source = collapse_root(middle)
+            target = collapse_root(endpoint_a if choice == 1 else endpoint_b)
+            if source != target:
+                parent[source] = target
+        inverse = np.asarray([collapse_root(index) for index in range(mesh.n_vertices)], dtype=int)
+        candidate = _boolean_mesh_collapse_candidate(mesh, inverse)
+        if _boolean_mesh_repair_preserves_topology(candidate, original_analysis):
+            return candidate
+    return mesh
+
+
+def _boolean_mesh_collapse_candidate(mesh: Mesh, inverse: np.ndarray) -> Mesh:
     remapped_faces = inverse[mesh.faces]
     keep_faces = np.asarray([len(set(face)) == 3 for face in remapped_faces], dtype=bool)
     remapped_faces = remapped_faces[keep_faces]
-    referenced = np.unique(remapped_faces.reshape(-1))
+    unique_faces: list[np.ndarray] = []
+    unique_source_indices: list[int] = []
+    seen: set[tuple[int, int, int]] = set()
+    for source_index, face in zip(np.flatnonzero(keep_faces), remapped_faces, strict=True):
+        key = tuple(sorted(int(value) for value in face))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_faces.append(face)
+        unique_source_indices.append(int(source_index))
+    compact_faces = np.asarray(unique_faces, dtype=int).reshape(-1, 3)
+    referenced = np.unique(compact_faces.reshape(-1))
     compact_remap = np.full(mesh.n_vertices, -1, dtype=int)
     compact_remap[referenced] = np.arange(len(referenced), dtype=int)
     candidate = Mesh(
         vertices=mesh.vertices[referenced],
-        faces=compact_remap[remapped_faces],
+        faces=compact_remap[compact_faces],
         color=mesh.color,
         metadata=dict(mesh.metadata),
     )
     if mesh.face_colors is not None and len(mesh.face_colors) == mesh.n_faces:
-        candidate.face_colors = mesh.face_colors[keep_faces]
+        candidate.face_colors = mesh.face_colors[np.asarray(unique_source_indices, dtype=int)]
+    return candidate
+
+
+def _boolean_mesh_repair_preserves_topology(candidate: Mesh, original_analysis) -> bool:
     candidate_analysis = analyze_mesh(candidate)
-    if (
+    return (
         candidate_analysis.degenerate_faces == 0
         and candidate_analysis.boundary_edges == original_analysis.boundary_edges
         and candidate_analysis.nonmanifold_edges == original_analysis.nonmanifold_edges
-    ):
-        return candidate
-    return mesh
+    )
 
 
 def _apply_boolean(
@@ -14443,12 +15000,400 @@ def assert_loft_primitive_no_hidden_mesh_fallback(
     return proof
 
 
+def _bounds_overlap_inclusive(
+    first: tuple[float, float, float, float, float, float],
+    second: tuple[float, float, float, float, float, float],
+    *,
+    tolerance: float,
+) -> tuple[float, float, float, float, float, float] | None:
+    overlap = _aabb_overlap(first, second)
+    if any(overlap[index] > overlap[index + 1] + tolerance for index in (0, 2, 4)):
+        return None
+    return (
+        float(overlap[0]),
+        float(overlap[1]),
+        float(overlap[2]),
+        float(overlap[3]),
+        float(overlap[4]),
+        float(overlap[5]),
+    )
+
+
+def build_loft_difference_patch_pair_candidates(
+    operands: SurfaceBooleanOperands,
+    *,
+    route: LoftCSGOperationRouteRecord | None = None,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> tuple[LoftDifferencePatchPairCandidateRecord, ...]:
+    """Prune loft-difference patch pairs using world-space patch bounds."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    selected_route = _loft_primitive_route_or_default(operands, route)
+    if (
+        selected_route is None
+        or operands.operation != "difference"
+        or selected_route.loft_operand_indices != (0,)
+    ):
+        return ()
+    base_patches = operands.bodies[0].iter_patches(world=True)
+    cutter_patches = operands.bodies[1].iter_patches(world=True)
+    candidates: list[LoftDifferencePatchPairCandidateRecord] = []
+    for base_index, base_patch in enumerate(base_patches):
+        for cutter_index, cutter_patch in enumerate(cutter_patches):
+            overlap = _bounds_overlap_inclusive(
+                base_patch.bounds_estimate(),
+                cutter_patch.bounds_estimate(),
+                tolerance=normalized_policy.domain_tolerance,
+            )
+            if overlap is None:
+                continue
+            candidates.append(
+                LoftDifferencePatchPairCandidateRecord(
+                    candidate_id=f"base:{base_index}|cutter:{cutter_index}",
+                    base_patch=SurfaceBooleanPatchRef(0, base_index),
+                    cutter_patch=SurfaceBooleanPatchRef(1, cutter_index),
+                    base_family=base_patch.family,
+                    cutter_family=cutter_patch.family,
+                    overlap_bounds=overlap,
+                )
+            )
+    return tuple(candidates)
+
+
+def _loft_difference_candidate_intersection(
+    candidate: LoftDifferencePatchPairCandidateRecord,
+    base_patch: SurfacePatch,
+    cutter_patch: SurfacePatch,
+    *,
+    policy: SurfaceCSGTolerancePolicy,
+) -> tuple[LoftDifferenceIntersectionCurveEvidenceRecord | None, LoftDifferenceTrimFragmentDiagnostic | None]:
+    if isinstance(base_patch, (PlanarSurfacePatch, RuledSurfacePatch)) and isinstance(
+        cutter_patch, (PlanarSurfacePatch, RuledSurfacePatch)
+    ):
+        intersection = intersect_planar_linear_patch_pair(
+            candidate.base_patch,
+            base_patch,
+            candidate.cutter_patch,
+            cutter_patch,
+            policy=policy,
+        )
+        if intersection.supported and intersection.curve is not None:
+            curve_id = surface_csg_curve_digest(intersection.curve)
+            return (
+                LoftDifferenceIntersectionCurveEvidenceRecord(
+                    candidate_id=candidate.candidate_id,
+                    base_patch=candidate.base_patch,
+                    cutter_patch=candidate.cutter_patch,
+                    relation=intersection.relation,
+                    curve_ids=(curve_id,),
+                    patch_local_curves=intersection.patch_local_curves,
+                ),
+                None,
+            )
+        if intersection.relation in {"parallel", "coincident", "disjoint", "touching"}:
+            return None, None
+        return None, LoftDifferenceTrimFragmentDiagnostic(
+            code="unsupported-patch-pair",
+            message=(
+                "Loft difference candidate requires an exact planar or affine-ruled intersection; "
+                f"{base_patch.family}/{cutter_patch.family} candidate {candidate.candidate_id} refused."
+            ),
+            candidate_id=candidate.candidate_id,
+        )
+    return None, LoftDifferenceTrimFragmentDiagnostic(
+        code="unsupported-patch-pair",
+        message=(
+            "Loft difference trim construction has no exact intersection route for "
+            f"{base_patch.family}/{cutter_patch.family}; no mesh fallback was attempted."
+        ),
+        candidate_id=candidate.candidate_id,
+    )
+
+
+def build_loft_difference_intersection_evidence(
+    operands: SurfaceBooleanOperands,
+    candidates: Sequence[LoftDifferencePatchPairCandidateRecord],
+    *,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> tuple[
+    tuple[LoftDifferenceIntersectionCurveEvidenceRecord, ...],
+    tuple[LoftDifferenceTrimFragmentDiagnostic, ...],
+]:
+    """Build analytic curve evidence for bounds-pruned loft difference candidates."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    base_patches = operands.bodies[0].iter_patches(world=True)
+    cutter_patches = operands.bodies[1].iter_patches(world=True)
+    records: list[LoftDifferenceIntersectionCurveEvidenceRecord] = []
+    diagnostics: list[LoftDifferenceTrimFragmentDiagnostic] = []
+    for candidate in candidates:
+        record, diagnostic = _loft_difference_candidate_intersection(
+            candidate,
+            base_patches[candidate.base_patch.patch_index],
+            cutter_patches[candidate.cutter_patch.patch_index],
+            policy=normalized_policy,
+        )
+        if record is not None:
+            records.append(record)
+        if diagnostic is not None:
+            diagnostics.append(diagnostic)
+    return tuple(records), tuple(diagnostics)
+
+
+def _point_on_domain_boundary(
+    point: tuple[float, float],
+    patch: SurfacePatch,
+    *,
+    tolerance: float,
+) -> bool:
+    u0, u1 = patch.domain.u_range
+    v0, v1 = patch.domain.v_range
+    return bool(
+        abs(point[0] - u0) <= tolerance
+        or abs(point[0] - u1) <= tolerance
+        or abs(point[1] - v0) <= tolerance
+        or abs(point[1] - v1) <= tolerance
+    )
+
+
+def _clip_domain_polygon_by_line(
+    polygon: Sequence[tuple[float, float]],
+    start: np.ndarray,
+    end: np.ndarray,
+    *,
+    keep_sign: float,
+    tolerance: float,
+) -> tuple[tuple[float, float], ...]:
+    direction = end - start
+
+    def signed(point: np.ndarray) -> float:
+        return float(direction[0] * (point[1] - start[1]) - direction[1] * (point[0] - start[0]))
+
+    output: list[np.ndarray] = []
+    previous = np.asarray(polygon[-1], dtype=float)
+    previous_value = signed(previous) * keep_sign
+    for raw_point in polygon:
+        current = np.asarray(raw_point, dtype=float)
+        current_value = signed(current) * keep_sign
+        previous_inside = previous_value >= -tolerance
+        current_inside = current_value >= -tolerance
+        if previous_inside != current_inside:
+            denominator = previous_value - current_value
+            if abs(denominator) > tolerance:
+                alpha = previous_value / denominator
+                output.append(previous + alpha * (current - previous))
+        if current_inside:
+            output.append(current)
+        previous = current
+        previous_value = current_value
+    return tuple((float(point[0]), float(point[1])) for point in output)
+
+
+def _domain_split_loops_for_open_curve(
+    patch: SurfacePatch,
+    curve: SurfaceCSGPatchLocalCurve,
+    *,
+    tolerance: float,
+) -> tuple[TrimLoop, ...]:
+    start = curve.points_uv[0]
+    end = curve.points_uv[-1]
+    if not (
+        _point_on_domain_boundary(start, patch, tolerance=tolerance)
+        and _point_on_domain_boundary(end, patch, tolerance=tolerance)
+    ):
+        return ()
+    u0, u1 = patch.domain.u_range
+    v0, v1 = patch.domain.v_range
+    rectangle = ((float(u0), float(v0)), (float(u1), float(v0)), (float(u1), float(v1)), (float(u0), float(v1)))
+    loops: list[TrimLoop] = []
+    for sign in (-1.0, 1.0):
+        points = _clip_domain_polygon_by_line(
+            rectangle,
+            np.asarray(start, dtype=float),
+            np.asarray(end, dtype=float),
+            keep_sign=sign,
+            tolerance=tolerance,
+        )
+        if len(points) < 3:
+            continue
+        loop = TrimLoop(points, category="outer").normalized()
+        if abs(loop.area) > tolerance:
+            loops.append(loop)
+    return tuple(loops)
+
+
+def _closed_patch_curve_loop(
+    curves: Sequence[SurfaceCSGPatchLocalCurve],
+    *,
+    tolerance: float,
+) -> TrimLoop | None:
+    if len(curves) == 1:
+        points = curves[0].points_uv
+        if np.linalg.norm(np.asarray(points[0]) - np.asarray(points[-1])) <= tolerance and len(points) >= 4:
+            return TrimLoop(points[:-1], category="inner").normalized()
+        return None
+    unused = list(curves)
+    ordered = list(unused.pop(0).points_uv)
+    while unused:
+        end = np.asarray(ordered[-1], dtype=float)
+        match_index = -1
+        match_points: tuple[tuple[float, float], ...] = ()
+        for index, curve in enumerate(unused):
+            points = curve.points_uv
+            if np.linalg.norm(end - np.asarray(points[0])) <= tolerance:
+                match_index, match_points = index, points
+                break
+            if np.linalg.norm(end - np.asarray(points[-1])) <= tolerance:
+                match_index, match_points = index, tuple(reversed(points))
+                break
+        if match_index < 0:
+            return None
+        unused.pop(match_index)
+        ordered.extend(match_points[1:])
+    if np.linalg.norm(np.asarray(ordered[0]) - np.asarray(ordered[-1])) > tolerance or len(ordered) < 4:
+        return None
+    return TrimLoop(tuple(ordered[:-1]), category="inner").normalized()
+
+
+def _loft_difference_fragments_for_patch(
+    patch_ref: SurfaceBooleanPatchRef,
+    patch: SurfacePatch,
+    curves: Sequence[SurfaceCSGPatchLocalCurve],
+    *,
+    tolerance: float,
+) -> tuple[LoftDifferenceTrimFragmentRecord, ...]:
+    unique_curves = tuple(
+        {curve.source_curve_digest: curve for curve in curves}.values()
+    )
+    source_role: Literal["base", "cutter"] = "base" if patch_ref.operand_index == 0 else "cutter"
+    curve_ids = tuple(sorted(curve.source_curve_digest for curve in unique_curves))
+    closed_loop = _closed_patch_curve_loop(unique_curves, tolerance=tolerance)
+    fragment_loops: tuple[tuple[TrimLoop, ...], ...]
+    if closed_loop is not None:
+        outer = _surface_csg_patch_domain_outer_trim(patch)
+        interior = replace(closed_loop, category="outer").normalized()
+        fragment_loops = ((outer, closed_loop), (interior,))
+    elif len(unique_curves) == 1:
+        split_loops = _domain_split_loops_for_open_curve(patch, unique_curves[0], tolerance=tolerance)
+        fragment_loops = tuple((loop,) for loop in split_loops)
+    else:
+        fragment_loops = ()
+    return tuple(
+        LoftDifferenceTrimFragmentRecord(
+            fragment_id=(
+                f"loft-difference:{source_role}:{patch_ref.patch_index}:fragment{index}"
+            ),
+            source_role=source_role,
+            source_patch=patch_ref,
+            source_family=patch.family,
+            trim_loops=loops,
+            source_curve_ids=curve_ids,
+        )
+        for index, loops in enumerate(fragment_loops)
+    )
+
+
+def construct_loft_difference_trim_fragments(
+    operands: SurfaceBooleanOperands,
+    *,
+    route: LoftCSGOperationRouteRecord | None = None,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> LoftDifferenceTrimFragmentConstructionRecord:
+    """Construct Fix08A intersection evidence and provenance-bearing trim fragments."""
+
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    selected_route = _loft_primitive_route_or_default(operands, route)
+    route_id = "surface-csg.loft-primitive" if selected_route is None else str(selected_route.route_id)
+    if (
+        selected_route is None
+        or operands.operation != "difference"
+        or selected_route.loft_operand_indices != (0,)
+    ):
+        return LoftDifferenceTrimFragmentConstructionRecord(
+            route_id=route_id,
+            diagnostics=(
+                LoftDifferenceTrimFragmentDiagnostic(
+                    code="unsupported-route",
+                    message="Loft difference trim fragments require a two-operand difference with the loft as base.",
+                ),
+            ),
+        )
+    candidates = build_loft_difference_patch_pair_candidates(
+        operands,
+        route=selected_route,
+        policy=normalized_policy,
+    )
+    evidence, diagnostics = build_loft_difference_intersection_evidence(
+        operands,
+        candidates,
+        policy=normalized_policy,
+    )
+    curves_by_patch: dict[SurfaceBooleanPatchRef, list[SurfaceCSGPatchLocalCurve]] = {}
+    for record in evidence:
+        for curve in record.patch_local_curves:
+            curves_by_patch.setdefault(curve.patch, []).append(curve)
+    fragments: list[LoftDifferenceTrimFragmentRecord] = []
+    bodies = operands.bodies
+    for patch_ref, curves in sorted(curves_by_patch.items(), key=lambda item: _surface_csg_patch_ref_sort_key(item[0])):
+        patch = bodies[patch_ref.operand_index].iter_patches(world=True)[patch_ref.patch_index]
+        patch_fragments = _loft_difference_fragments_for_patch(
+            patch_ref,
+            patch,
+            curves,
+            tolerance=normalized_policy.domain_tolerance,
+        )
+        if not patch_fragments:
+            diagnostics = (
+                *diagnostics,
+                LoftDifferenceTrimFragmentDiagnostic(
+                    code="open-trim-network",
+                    message=(
+                        "Patch-local intersection curves did not form a closed loop or a single "
+                        "domain-to-domain split."
+                    ),
+                    patch=patch_ref,
+                ),
+            )
+        fragments.extend(patch_fragments)
+    if not evidence:
+        diagnostics = (
+            *diagnostics,
+            LoftDifferenceTrimFragmentDiagnostic(
+                code="missing-intersection-evidence",
+                message="No bounds-pruned patch pair produced qualifying exact intersection evidence.",
+            ),
+        )
+    base_fragments = tuple(fragment for fragment in fragments if fragment.source_role == "base")
+    cutter_fragments = tuple(fragment for fragment in fragments if fragment.source_role == "cutter")
+    if evidence and (not base_fragments or not cutter_fragments):
+        diagnostics = (
+            *diagnostics,
+            LoftDifferenceTrimFragmentDiagnostic(
+                code="ambiguous-trim-network",
+                message="Intersection evidence did not produce both base and cutter patch fragments.",
+            ),
+        )
+    if base_fragments and cutter_fragments:
+        diagnostics = tuple(
+            diagnostic for diagnostic in diagnostics if diagnostic.code != "unsupported-patch-pair"
+        )
+    return LoftDifferenceTrimFragmentConstructionRecord(
+        route_id=route_id,
+        candidate_pairs=candidates,
+        intersection_evidence=evidence,
+        base_fragments=base_fragments,
+        cutter_fragments=cutter_fragments,
+        diagnostics=tuple(diagnostics),
+    )
+
+
 def _build_loft_primitive_cut_executor_payload(
     operands: SurfaceBooleanOperands,
     route: LoftCSGOperationRouteRecord,
 ) -> dict[str, object]:
     """Build the shared loft primitive cut-executor evidence payload once."""
 
+    trim_fragment_construction = construct_loft_difference_trim_fragments(operands, route=route)
     classifications = classify_loft_primitive_fragments(operands, route=route)
     adapters = tuple(
         adapt_loft_patch_for_primitive_csg(operands, record.loft_patch.patch_index, route=route)
@@ -14515,6 +15460,7 @@ def _build_loft_primitive_cut_executor_payload(
     no_hidden_mesh_proof = build_loft_primitive_no_hidden_mesh_proof(accepted_result)
     payload = {
         "route": route.canonical_payload(),
+        "trim_fragment_construction": trim_fragment_construction.canonical_payload(),
         "trim_adapters": [adapter.canonical_payload() for adapter in adapters],
         "fragment_classifications": [record.canonical_payload() for record in classifications],
         "source_normalization": source_record.canonical_payload(),
@@ -14679,6 +15625,181 @@ def _loft_primitive_cut_payload_supported(payload: dict[str, object]) -> bool:
     return True
 
 
+def _loft_primitive_result_patch_metadata(
+    source_patch,
+    *,
+    role: str,
+    operation: SurfaceBooleanOperation,
+    route_id: str,
+    source_patch_ref: SurfaceBooleanPatchRef,
+    cut_curve_ids: Sequence[str] = (),
+    cap_id: str | None = None,
+    provenance: Sequence[str] = (),
+):
+    metadata = dict(getattr(source_patch, "metadata", {}))
+    kernel = dict(source_patch.kernel_metadata()) if hasattr(source_patch, "kernel_metadata") else {}
+    consumer = dict(source_patch.consumer_metadata()) if hasattr(source_patch, "consumer_metadata") else {}
+    kernel.update(
+        {
+            "boolean_surface_route": route_id,
+            "boolean_operation": operation,
+            "generated_role": role,
+            "source_operand_index": source_patch_ref.operand_index,
+            "source_patch_index": source_patch_ref.patch_index,
+            "no_mesh_fallback": True,
+        }
+    )
+    if cut_curve_ids:
+        kernel["cut_curve_ids"] = tuple(sorted(str(item) for item in cut_curve_ids))
+    if cap_id is not None:
+        kernel["cap_id"] = str(cap_id)
+    if provenance:
+        kernel["provenance"] = tuple(str(item) for item in provenance)
+    metadata["kernel"] = kernel
+    if consumer:
+        metadata["consumer"] = consumer
+    return metadata
+
+
+def _assemble_loft_primitive_difference_result_body(
+    operands: SurfaceBooleanOperands,
+    *,
+    route: LoftCSGOperationRouteRecord,
+    payload: dict[str, object],
+) -> SurfaceBody:
+    construction = construct_loft_difference_trim_fragments(operands, route=route)
+    if not construction.supported:
+        diagnostic_codes = ", ".join(diagnostic.code for diagnostic in construction.diagnostics)
+        raise ValueError(
+            "Loft difference result-shell reconstruction requires supported Fix 08A trim fragments"
+            + (f": {diagnostic_codes}" if diagnostic_codes else ".")
+        )
+
+    base = operands.bodies[0]
+    primitive_index = 1 - route.loft_operand_indices[0]
+    cutter = operands.bodies[primitive_index]
+    tolerance = DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.equality_tolerance
+    if not _surface_body_is_axis_aligned_rectangular_loft(base, tolerance=tolerance):
+        raise ValueError(
+            "Loft difference result-shell reconstruction currently requires an exact axis-aligned rectangular loft base."
+        )
+    if not _surface_body_is_axis_aligned_orthogonal_box(cutter, tolerance=tolerance):
+        raise ValueError(
+            "Loft difference result-shell reconstruction currently requires an exact axis-aligned box cutter."
+        )
+
+    retained_base_fragment_ids = tuple(
+        fragment.fragment_id
+        for fragment in construction.base_fragments
+        if len(fragment.trim_loops) > 1
+        or classify_surface_csg_fragment_against_body(
+            fragment.source_patch,
+            _surface_csg_patch_for_ref(operands, fragment.source_patch),
+            cutter,
+            trim_loop=fragment.trim_loops[0],
+            cut_curve_ids=fragment.source_curve_ids,
+        ).relation
+        != "inside"
+    )
+    retained_cutter_fragment_ids = tuple(
+        fragment.fragment_id
+        for fragment in construction.cutter_fragments
+        if classify_surface_csg_fragment_against_body(
+            fragment.source_patch,
+            _surface_csg_patch_for_ref(operands, fragment.source_patch),
+            base,
+            trim_loop=fragment.trim_loops[0],
+            cut_curve_ids=fragment.source_curve_ids,
+        ).relation
+        in {"inside", "on"}
+    )
+    if not retained_base_fragment_ids or not retained_cutter_fragment_ids:
+        raise ValueError(
+            "Loft difference result-shell reconstruction could not classify both retained base and cutter boundaries."
+        )
+
+    reconstruction_payload = {
+        **payload,
+        "result_shell_reconstruction": {
+            "supported": True,
+            "retained_base_fragment_ids": retained_base_fragment_ids,
+            "retained_cutter_fragment_ids": retained_cutter_fragment_ids,
+            "solver_path": "orthogonal-surface-cell-reconstruction",
+            "cutter_boundary_orientation": "reversed-for-difference",
+            "closed_shell_required": True,
+            "no_mesh_fallback": True,
+        },
+    }
+    metadata = _loft_primitive_cut_executor_metadata(
+        operands,
+        route,
+        reconstruction_payload,
+        LoftPrimitiveExecutionScopeRecord(
+            operation=operands.operation,
+            route_id=str(route.route_id),
+            scope="result-shell-reconstruction",
+            status="succeeded",
+            accepted=True,
+        ),
+    )
+    reconstructed = _surface_orthogonal_box_boolean_body(
+        base.bounds_estimate(),
+        cutter.bounds_estimate(),
+        operation="difference",
+        metadata=metadata,
+    )
+    if reconstructed is None:
+        raise ValueError(
+            "Loft difference result-shell reconstruction could not assemble one connected orthogonal result shell."
+        )
+
+    base_bounds = base.bounds_estimate()
+    source_patches = []
+    source_shell = reconstructed.iter_shells(world=True)[0]
+    for patch in source_shell.patches:
+        patch_bounds = patch.bounds_estimate()
+        midpoint = np.asarray(
+            [
+                (patch_bounds[0] + patch_bounds[1]) * 0.5,
+                (patch_bounds[2] + patch_bounds[3]) * 0.5,
+                (patch_bounds[4] + patch_bounds[5]) * 0.5,
+            ],
+            dtype=float,
+        )
+        on_base_exterior = any(
+            abs(float(midpoint[axis]) - base_bounds[(axis * 2) + side]) <= tolerance
+            for axis in range(3)
+            for side in (0, 1)
+            if abs(patch_bounds[axis * 2 + 1] - patch_bounds[axis * 2]) <= tolerance
+        )
+        source_ref = SurfaceBooleanPatchRef(0 if on_base_exterior else primitive_index, 0)
+        source_patches.append(
+            replace(
+                patch,
+                metadata=_loft_primitive_result_patch_metadata(
+                    patch,
+                    role=(
+                        "loft_difference_retained_base_fragment"
+                        if on_base_exterior
+                        else "loft_difference_reversed_cutter_boundary"
+                    ),
+                    operation="difference",
+                    route_id=str(route.route_id),
+                    source_patch_ref=source_ref,
+                    provenance=("fix-08a-trim-fragments", "fix-08c-result-shell-reconstruction"),
+                ),
+            )
+        )
+    shell = make_surface_shell(
+        tuple(source_patches),
+        connected=True,
+        seams=source_shell.seams,
+        adjacency=source_shell.adjacency,
+        metadata=source_shell.metadata,
+    )
+    return make_surface_body((shell,), metadata=metadata)
+
+
 def execute_single_shell_loft_primitive_csg(operands: SurfaceBooleanOperands) -> SurfaceBooleanResult | None:
     """Execute exact no-cut/containment loft primitive CSG cases."""
 
@@ -14756,10 +15877,16 @@ def execute_loft_primitive_trim_fragment_csg(operands: SurfaceBooleanOperands) -
         return None
 
     payload = _build_loft_primitive_cut_executor_payload(operands, route)
+    trim_fragment_payload = payload["trim_fragment_construction"]
+    trim_fragments_supported = bool(
+        isinstance(trim_fragment_payload, dict)
+        and trim_fragment_payload.get("supported") is True
+    )
     proof_payload = payload["no_hidden_mesh_proof"]
     accepted = bool(
         isinstance(proof_payload, dict)
         and proof_payload.get("accepted") is True
+        and (operands.operation != "difference" or trim_fragments_supported)
         and _loft_primitive_cut_payload_supported(payload)
     )
     if not accepted:
@@ -14793,17 +15920,42 @@ def execute_loft_primitive_trim_fragment_csg(operands: SurfaceBooleanOperands) -
             ),
         )
 
-    scope = LoftPrimitiveExecutionScopeRecord(
-        operation=operands.operation,
-        route_id=str(route.route_id),
-        scope="trim-fragment-cut",
-        status="succeeded",
-        accepted=True,
-    )
-    metadata = _loft_primitive_cut_executor_metadata(operands, route, payload, scope)
     if operands.operation == "union":
+        scope = LoftPrimitiveExecutionScopeRecord(
+            operation=operands.operation,
+            route_id=str(route.route_id),
+            scope="trim-fragment-cut",
+            status="succeeded",
+            accepted=True,
+        )
+        metadata = _loft_primitive_cut_executor_metadata(operands, route, payload, scope)
         body = _combine_surface_bodies_with_metadata(operands.bodies, metadata=metadata)
+    elif operands.operation == "difference":
+        try:
+            body = _assemble_loft_primitive_difference_result_body(
+                operands,
+                route=route,
+                payload=payload,
+            )
+        except (TypeError, ValueError) as exc:
+            return SurfaceBooleanResult(
+                operation="difference",
+                operands=operands,
+                status="unsupported",
+                failure_reason=(
+                    "Loft difference result-shell reconstruction refused the candidate; "
+                    f"no_mesh_fallback=True; reason={exc}"
+                ),
+            )
     else:
+        scope = LoftPrimitiveExecutionScopeRecord(
+            operation=operands.operation,
+            route_id=str(route.route_id),
+            scope="trim-fragment-cut",
+            status="succeeded",
+            accepted=True,
+        )
+        metadata = _loft_primitive_cut_executor_metadata(operands, route, payload, scope)
         body = _clone_surface_body_with_metadata(operands.bodies[loft_index], metadata=metadata)
     return _surface_boolean_finalize_body_result(operands.operation, operands, body)
 
@@ -14834,6 +15986,136 @@ def _loft_pair_result_metadata(
     return metadata
 
 
+def _surface_body_is_axis_aligned_rectangular_loft(
+    body: SurfaceBody,
+    *,
+    tolerance: float,
+) -> bool:
+    """Return whether a loft exactly represents one unholed orthogonal box."""
+
+    if _surface_body_loft_provenance(body) is None or body.shell_count != 1 or body.patch_count != 3:
+        return False
+    patches = body.iter_patches(world=True)
+    ruled_patches = tuple(patch for patch in patches if isinstance(patch, RuledSurfacePatch))
+    cap_patches = tuple(patch for patch in patches if isinstance(patch, PlanarSurfacePatch))
+    if len(ruled_patches) != 1 or len(cap_patches) != 2 or ruled_patches[0].trim_loops:
+        return False
+    if any(len(patch.trim_loops) != 1 or patch.trim_loops[0].category != "outer" for patch in cap_patches):
+        return False
+
+    body_bounds = body.bounds_estimate()
+    cap_axes: list[int] = []
+    cap_positions: list[float] = []
+    for patch in cap_patches:
+        patch_bounds = patch.bounds_estimate()
+        spans = np.asarray(_bounds_size(patch_bounds), dtype=float)
+        zero_axes = tuple(index for index, span in enumerate(spans) if abs(float(span)) <= tolerance)
+        if len(zero_axes) != 1:
+            return False
+        cap_axis = zero_axes[0]
+        projected_axes = tuple(index for index in range(3) if index != cap_axis)
+        expected_spans = tuple(body_bounds[index * 2 + 1] - body_bounds[index * 2] for index in projected_axes)
+        if not np.allclose(spans[list(projected_axes)], expected_spans, atol=tolerance, rtol=0.0):
+            return False
+
+        trim = patch.trim_loops[0]
+        world_points = tuple(patch.point_at(float(u), float(v)) for u, v in trim.points_uv)
+        projected = np.asarray([[point[index] for index in projected_axes] for point in world_points], dtype=float)
+        projected_bounds = (
+            float(projected[:, 0].min()),
+            float(projected[:, 0].max()),
+            float(projected[:, 1].min()),
+            float(projected[:, 1].max()),
+        )
+        expected_projected_bounds = (
+            body_bounds[projected_axes[0] * 2],
+            body_bounds[projected_axes[0] * 2 + 1],
+            body_bounds[projected_axes[1] * 2],
+            body_bounds[projected_axes[1] * 2 + 1],
+        )
+        if not np.allclose(projected_bounds, expected_projected_bounds, atol=tolerance, rtol=0.0):
+            return False
+        on_rectangle_boundary = (
+            np.isclose(projected[:, 0], projected_bounds[0], atol=tolerance, rtol=0.0)
+            | np.isclose(projected[:, 0], projected_bounds[1], atol=tolerance, rtol=0.0)
+            | np.isclose(projected[:, 1], projected_bounds[2], atol=tolerance, rtol=0.0)
+            | np.isclose(projected[:, 1], projected_bounds[3], atol=tolerance, rtol=0.0)
+        )
+        if not bool(np.all(on_rectangle_boundary)):
+            return False
+        next_projected = np.roll(projected, -1, axis=0)
+        polygon_area = abs(
+            float(
+                np.sum(
+                    projected[:, 0] * next_projected[:, 1]
+                    - next_projected[:, 0] * projected[:, 1]
+                )
+                * 0.5
+            )
+        )
+        rectangle_area = (projected_bounds[1] - projected_bounds[0]) * (
+            projected_bounds[3] - projected_bounds[2]
+        )
+        if not np.isclose(polygon_area, rectangle_area, atol=tolerance, rtol=0.0):
+            return False
+        cap_axes.append(cap_axis)
+        cap_positions.append(float(patch_bounds[cap_axis * 2]))
+
+    if cap_axes[0] != cap_axes[1]:
+        return False
+    axis = cap_axes[0]
+    return np.allclose(
+        sorted(cap_positions),
+        (body_bounds[axis * 2], body_bounds[axis * 2 + 1]),
+        atol=tolerance,
+        rtol=0.0,
+    )
+
+
+def _execute_orthogonal_coplanar_loft_union(
+    operands: SurfaceBooleanOperands,
+    route: LoftCSGOperationRouteRecord,
+    relation: SurfaceBooleanBodyRelation,
+) -> SurfaceBooleanResult | None:
+    """Fuse two exact rectangular loft solids through the surface shell assembler."""
+
+    if operands.operation != "union" or relation not in {"touching", "overlap"}:
+        return None
+    tolerance = DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.equality_tolerance
+    if not all(
+        _surface_body_is_axis_aligned_rectangular_loft(body, tolerance=tolerance)
+        for body in operands.bodies
+    ):
+        return None
+    left_bounds, right_bounds = (body.bounds_estimate() for body in operands.bodies)
+    metadata = _loft_pair_result_metadata(operands, route, relation)
+    merge_evidence = {
+        "contact_kind": "coplanar-face-overlap",
+        "coincident_patch_contacts": tuple(
+            contact.canonical_payload()
+            for contact in classify_coincident_patch_contacts(operands)
+        ),
+        "operand_bounds": (left_bounds, right_bounds),
+        "solver_path": "orthogonal-coplanar-shell-merge",
+        "tolerance": tolerance,
+        "no_mesh_fallback": True,
+    }
+    for metadata_kind in ("kernel", "consumer"):
+        route_metadata = dict(metadata[metadata_kind]["loft_pair_csg"])
+        route_metadata.update(merge_evidence)
+        metadata[metadata_kind]["loft_pair_csg"] = route_metadata
+        metadata[metadata_kind]["boolean_surface_route"] = "surface-csg.loft-orthogonal-coplanar-union"
+    body = _surface_orthogonal_box_boolean_body(
+        left_bounds,
+        right_bounds,
+        operation="union",
+        metadata=metadata,
+    )
+    if body is None:
+        return None
+    return _surface_boolean_finalize_body_result("union", operands, body)
+
+
 def execute_loft_pair_csg(operands: SurfaceBooleanOperands) -> SurfaceBooleanResult | None:
     """Execute eligible single-shell loft/loft CSG routes without mesh fallback."""
 
@@ -14851,6 +16133,9 @@ def execute_loft_pair_csg(operands: SurfaceBooleanOperands) -> SurfaceBooleanRes
             status="succeeded",
             classification="empty",
         )
+    coplanar_union = _execute_orthogonal_coplanar_loft_union(operands, route, relation)
+    if coplanar_union is not None:
+        return coplanar_union
     metadata = _loft_pair_result_metadata(operands, route, relation)
     if operands.operation == "union":
         body = _combine_surface_bodies_with_metadata(operands.bodies, metadata=metadata)
@@ -14898,13 +16183,21 @@ def surface_csg_feature_gate(
         if record.code != "not-loft" and not record.supported
     )
     if loft_refusals:
+        raw_operands = SurfaceBooleanOperands(operation=operation, bodies=body_tuple)
+        branch_payload = _branch_decomposition_payload_for_operands(raw_operands)
+        payload_text = ""
+        if branch_payload is not None:
+            payload_text = (
+                "; "
+                f"branch_decomposition_adapter={json.dumps(branch_payload, sort_keys=True, separators=(',', ':'))}"
+            )
         return SurfaceCSGFeatureGateDiagnostic(
             caller_id=caller_id,
             operation=operation,
             supported=False,
             operand_ids=tuple(body.stable_identity for body in body_tuple),
             boundary="loft-eligibility",
-            reason="; ".join(record.message for record in loft_refusals),
+            reason="; ".join(record.message for record in loft_refusals) + payload_text,
         )
 
     plan = plan_surface_csg_operation(operation, body_tuple)
@@ -15742,6 +17035,438 @@ def _combine_surface_bodies_with_metadata(
     return make_surface_body(shells, metadata=metadata)
 
 
+def validate_geometry_change_witness(witness: GeometryChangeWitness) -> tuple[str, ...]:
+    """Return precise validation errors for one claimed geometry-change witness."""
+
+    diagnostics: list[str] = []
+    if not witness.operand_ids:
+        diagnostics.append("missing-operand-identity")
+    if witness.kind in {
+        "changed-base-domain",
+        "removed-base-domain",
+        "cutter-derived-result-patch",
+        "localized-geometry-change",
+    } and not witness.patch_ids:
+        diagnostics.append("missing-patch-identity")
+    if witness.kind == "new-intersection-boundary" and not witness.boundary_ids:
+        diagnostics.append("missing-boundary-identity")
+    tolerance = witness.tolerance_evidence.get("tolerance")
+    if not isinstance(tolerance, (int, float)) or not np.isfinite(float(tolerance)) or float(tolerance) <= 0.0:
+        diagnostics.append("invalid-tolerance-evidence")
+    return tuple(diagnostics)
+
+
+def _difference_cutter_relations(
+    operands: SurfaceBooleanOperands,
+    *,
+    tolerance: float,
+) -> tuple[SurfaceBooleanBodyRelation, ...]:
+    base_bounds = operands.bodies[0].bounds_estimate()
+    return tuple(
+        _surface_boolean_body_relation(base_bounds, cutter.bounds_estimate(), epsilon=tolerance)
+        for cutter in operands.bodies[1:]
+    )
+
+
+def _difference_body_topology_signature(body: SurfaceBody) -> tuple[object, ...]:
+    shell_signatures: list[tuple[object, ...]] = []
+    for shell in body.iter_shells(world=True):
+        seam_uses = tuple(
+            sorted(
+                (
+                    len(seam.boundaries),
+                    seam.continuity,
+                    seam.is_open,
+                )
+                for seam in shell.seams
+            )
+        )
+        patch_seam_degrees = [0] * shell.patch_count
+        for seam in shell.seams:
+            for boundary in seam.boundaries:
+                patch_seam_degrees[boundary.patch_index] += 1
+        shell_signatures.append(
+            (
+                shell.connected,
+                tuple(sorted(patch.family for patch in shell.iter_patches(world=True))),
+                tuple(sorted(patch_seam_degrees)),
+                seam_uses,
+            )
+        )
+    return tuple(sorted(shell_signatures, key=repr))
+
+
+def _difference_patch_pairing_key(patch: SurfacePatch) -> tuple[object, ...]:
+    return (
+        patch.family,
+        tuple(round(float(value), 12) for value in patch.bounds_estimate()),
+        patch.domain.u_range,
+        patch.domain.v_range,
+    )
+
+
+def _difference_patch_domain_delta(first: SurfacePatch, second: SurfacePatch) -> float:
+    if first.family != second.family or first.domain.normalized != second.domain.normalized:
+        return float("inf")
+    first_ranges = np.asarray((*first.domain.u_range, *first.domain.v_range), dtype=float)
+    second_ranges = np.asarray((*second.domain.u_range, *second.domain.v_range), dtype=float)
+    delta = float(np.max(np.abs(first_ranges - second_ranges)))
+    first_loops = tuple(loop.normalized() for loop in first.trim_loops)
+    second_loops = tuple(loop.normalized() for loop in second.trim_loops)
+    if len(first_loops) != len(second_loops):
+        return float("inf")
+    for first_loop, second_loop in zip(first_loops, second_loops, strict=True):
+        if first_loop.category != second_loop.category or first_loop.points_uv.shape != second_loop.points_uv.shape:
+            return float("inf")
+        delta = max(delta, float(np.max(np.abs(first_loop.points_uv - second_loop.points_uv))))
+    return delta
+
+
+def _difference_patch_local_geometry_delta(first: SurfacePatch, second: SurfacePatch) -> float:
+    sample_fractions = ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0), (0.5, 0.5))
+    distances: list[float] = []
+    for u_fraction, v_fraction in sample_fractions:
+        first_u = first.domain.u_range[0] + first.domain.u_span * u_fraction
+        first_v = first.domain.v_range[0] + first.domain.v_span * v_fraction
+        second_u = second.domain.u_range[0] + second.domain.u_span * u_fraction
+        second_v = second.domain.v_range[0] + second.domain.v_span * v_fraction
+        distance = float(
+            np.linalg.norm(
+                np.asarray(first.point_at(first_u, first_v), dtype=float)
+                - np.asarray(second.point_at(second_u, second_v), dtype=float)
+            )
+        )
+        if not np.isfinite(distance):
+            raise FloatingPointError("Patch-local comparison produced a non-finite distance.")
+        distances.append(distance)
+    return max(distances, default=0.0)
+
+
+def _difference_provenance_witnesses(
+    operands: SurfaceBooleanOperands,
+    result_body: SurfaceBody,
+    *,
+    tolerance: float,
+) -> tuple[GeometryChangeWitness, ...]:
+    witnesses: list[GeometryChangeWitness] = []
+    for patch in result_body.iter_patches(world=True):
+        kernel = patch.kernel_metadata()
+        source_operand_index = kernel.get("source_operand_index")
+        cut_curve_ids = tuple(str(value) for value in kernel.get("cut_curve_ids", ()))
+        tolerance_evidence = {"comparison": "declared-provenance", "tolerance": tolerance}
+        if isinstance(source_operand_index, int) and source_operand_index > 0:
+            witnesses.append(
+                GeometryChangeWitness(
+                    kind="cutter-derived-result-patch",
+                    operand_ids=operands.body_ids,
+                    patch_ids=(patch.stable_identity,),
+                    tolerance_evidence=tolerance_evidence,
+                )
+            )
+        if cut_curve_ids:
+            witnesses.append(
+                GeometryChangeWitness(
+                    kind="new-intersection-boundary",
+                    operand_ids=operands.body_ids,
+                    patch_ids=(patch.stable_identity,),
+                    boundary_ids=tuple(sorted(cut_curve_ids)),
+                    tolerance_evidence=tolerance_evidence,
+                )
+            )
+    return tuple(witnesses)
+
+
+def compare_surface_difference_geometry(
+    operands: SurfaceBooleanOperands,
+    result_body: SurfaceBody,
+    *,
+    executor_id: str,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> NormalizedDifferenceEvidence:
+    """Compare a difference result with its minuend without trusting clone identity."""
+
+    if operands.operation != "difference":
+        raise ValueError("Difference geometry comparison requires difference operands.")
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    tolerance = normalized_policy.equality_tolerance
+    base = operands.bodies[0]
+    relations = _difference_cutter_relations(operands, tolerance=tolerance)
+    declared_witnesses = _difference_provenance_witnesses(operands, result_body, tolerance=tolerance)
+    geometry_witnesses: list[GeometryChangeWitness] = []
+    localized_comparisons = 0
+
+    if _difference_body_topology_signature(base) != _difference_body_topology_signature(result_body):
+        geometry_witnesses.append(
+            GeometryChangeWitness(
+                kind="changed-topology",
+                operand_ids=operands.body_ids,
+                tolerance_evidence={"comparison": "topology-signature", "tolerance": tolerance},
+            )
+        )
+    else:
+        base_patches = tuple(sorted(base.iter_patches(world=True), key=_difference_patch_pairing_key))
+        result_patches = tuple(sorted(result_body.iter_patches(world=True), key=_difference_patch_pairing_key))
+        domain_changed = False
+        for base_patch, result_patch in zip(base_patches, result_patches, strict=True):
+            domain_delta = _difference_patch_domain_delta(base_patch, result_patch)
+            if domain_delta > normalized_policy.domain_tolerance:
+                domain_changed = True
+                geometry_witnesses.append(
+                    GeometryChangeWitness(
+                        kind="changed-base-domain",
+                        operand_ids=operands.body_ids,
+                        patch_ids=(base_patch.stable_identity, result_patch.stable_identity),
+                        tolerance_evidence={
+                            "comparison": "patch-domain",
+                            "measured_delta": (
+                                domain_delta if np.isfinite(domain_delta) else "structural-mismatch"
+                            ),
+                            "tolerance": normalized_policy.domain_tolerance,
+                        },
+                    )
+                )
+        if not domain_changed:
+            try:
+                for base_patch, result_patch in zip(base_patches, result_patches, strict=True):
+                    localized_comparisons += 1
+                    geometry_delta = _difference_patch_local_geometry_delta(base_patch, result_patch)
+                    if geometry_delta > tolerance:
+                        geometry_witnesses.append(
+                            GeometryChangeWitness(
+                                kind="localized-geometry-change",
+                                operand_ids=operands.body_ids,
+                                patch_ids=(base_patch.stable_identity, result_patch.stable_identity),
+                                tolerance_evidence={
+                                    "comparison": "five-point-patch-local",
+                                    "measured_delta": geometry_delta,
+                                    "tolerance": tolerance,
+                                },
+                            )
+                        )
+            except (TypeError, ValueError, FloatingPointError, NotImplementedError, RuntimeError) as exc:
+                return NormalizedDifferenceEvidence(
+                    executor_id=executor_id,
+                    operand_ids=operands.body_ids,
+                    result_status="succeeded",
+                    comparison="ambiguous",
+                    cutter_relations=relations,
+                    diagnostics=(f"localized-comparison-failed:{type(exc).__name__}",),
+                    localized_patch_comparisons=localized_comparisons,
+                )
+
+    witnesses = tuple((*geometry_witnesses, *declared_witnesses))
+    validation_diagnostics = tuple(
+        f"invalid-witness:{diagnostic}"
+        for witness in witnesses
+        for diagnostic in validate_geometry_change_witness(witness)
+    )
+    if validation_diagnostics:
+        comparison: Literal["changed", "unchanged", "ambiguous"] = "ambiguous"
+    elif geometry_witnesses:
+        comparison = "changed"
+    elif declared_witnesses:
+        comparison = "ambiguous"
+        validation_diagnostics = ("contradictory-provenance-with-unchanged-geometry",)
+    else:
+        comparison = "unchanged"
+    return NormalizedDifferenceEvidence(
+        executor_id=executor_id,
+        operand_ids=operands.body_ids,
+        result_status="succeeded",
+        comparison=comparison,
+        cutter_relations=relations,
+        witnesses=witnesses,
+        diagnostics=validation_diagnostics,
+        localized_patch_comparisons=localized_comparisons,
+    )
+
+
+def normalize_surface_difference_evidence(
+    result: SurfaceBooleanResult,
+    *,
+    executor_id: str,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> NormalizedDifferenceEvidence:
+    """Normalize any surfaced difference executor result into comparable evidence."""
+
+    if result.operation != "difference" or result.operands.operation != "difference":
+        raise ValueError("Difference evidence normalization requires a difference result.")
+    normalized_policy = normalize_surface_csg_tolerance_policy(policy)
+    relations = _difference_cutter_relations(
+        result.operands,
+        tolerance=normalized_policy.equality_tolerance,
+    )
+    if result.status not in {"succeeded", "no-cut"}:
+        return NormalizedDifferenceEvidence(
+            executor_id=executor_id,
+            operand_ids=result.operands.body_ids,
+            result_status=result.status,
+            comparison="ambiguous",
+            cutter_relations=relations,
+            diagnostics=("non-success-result",),
+        )
+    if result.classification == "empty":
+        witness = GeometryChangeWitness(
+            kind="removed-base-domain",
+            operand_ids=result.operands.body_ids,
+            patch_ids=tuple(patch.stable_identity for patch in result.operands.bodies[0].iter_patches(world=True)),
+            tolerance_evidence={
+                "comparison": "empty-result",
+                "tolerance": normalized_policy.equality_tolerance,
+            },
+        )
+        diagnostics = tuple(f"invalid-witness:{code}" for code in validate_geometry_change_witness(witness))
+        return NormalizedDifferenceEvidence(
+            executor_id=executor_id,
+            operand_ids=result.operands.body_ids,
+            result_status=result.status,
+            comparison="changed" if not diagnostics else "ambiguous",
+            cutter_relations=relations,
+            witnesses=(witness,),
+            diagnostics=diagnostics,
+        )
+    if result.body is None:
+        return NormalizedDifferenceEvidence(
+            executor_id=executor_id,
+            operand_ids=result.operands.body_ids,
+            result_status=result.status,
+            comparison="ambiguous",
+            cutter_relations=relations,
+            diagnostics=("missing-result-body",),
+        )
+    evidence = compare_surface_difference_geometry(
+        result.operands,
+        result.body,
+        executor_id=executor_id,
+        policy=normalized_policy,
+    )
+    return replace(evidence, result_status=result.status)
+
+
+def classify_surface_difference_no_cut(evidence: NormalizedDifferenceEvidence) -> bool:
+    """Return true only for a proven disjoint, unchanged difference."""
+
+    return bool(evidence.cutter_relations) and all(
+        relation == "disjoint"
+        for relation in evidence.cutter_relations
+    ) and evidence.comparison == "unchanged" and not evidence.witnesses and not evidence.diagnostics
+
+
+def apply_surface_difference_success_gate(
+    result: SurfaceBooleanResult,
+    *,
+    executor_id: str,
+    policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> SurfaceBooleanResult:
+    """Apply the one public success/no-cut postcondition for surface differences."""
+
+    if result.operation != "difference":
+        return result
+    evidence = normalize_surface_difference_evidence(
+        result,
+        executor_id=executor_id,
+        policy=policy,
+    )
+    if result.status == "unsupported":
+        decision = SurfaceDifferenceGateDecision(
+            classification="unsupported",
+            executor_id=executor_id,
+            operand_ids=result.operands.body_ids,
+            comparison=evidence.comparison,
+            cutter_interaction=evidence.cutter_interaction,
+            reason="The selected surfaced difference executor is unsupported.",
+        )
+        return replace(result, difference_evidence=evidence, difference_gate=decision)
+    if result.status == "invalid":
+        decision = SurfaceDifferenceGateDecision(
+            classification="invalid",
+            executor_id=executor_id,
+            operand_ids=result.operands.body_ids,
+            comparison=evidence.comparison,
+            cutter_interaction=evidence.cutter_interaction,
+            reason="The surfaced difference executor returned an invalid result.",
+        )
+        return replace(result, difference_evidence=evidence, difference_gate=decision)
+    if result.status == "succeeded" and evidence.changed and evidence.cutter_interaction:
+        decision = SurfaceDifferenceGateDecision(
+            classification="success",
+            executor_id=executor_id,
+            operand_ids=result.operands.body_ids,
+            comparison=evidence.comparison,
+            cutter_interaction=True,
+            reason="Validated cutter interaction and geometry-change witnesses permit success.",
+        )
+        return replace(result, difference_evidence=evidence, difference_gate=decision)
+    if classify_surface_difference_no_cut(evidence):
+        no_cut_evidence = replace(evidence, result_status="no-cut")
+        decision = SurfaceDifferenceGateDecision(
+            classification="no-cut",
+            executor_id=executor_id,
+            operand_ids=result.operands.body_ids,
+            comparison=no_cut_evidence.comparison,
+            cutter_interaction=False,
+            reason="All cutters are proven disjoint and the base geometry is unchanged.",
+        )
+        return SurfaceBooleanResult(
+            operation="difference",
+            operands=result.operands,
+            status="no-cut",
+            body=result.body if result.body is not None else result.operands.bodies[0],
+            classification="closed",
+            difference_evidence=no_cut_evidence,
+            difference_gate=decision,
+        )
+
+    invalid_reason = (
+        "Surface difference invalid-result classification: cutter interaction produced no "
+        "validated geometry change."
+        if evidence.comparison == "unchanged"
+        else "Surface difference invalid-result classification: geometry-change evidence is ambiguous."
+        if evidence.comparison == "ambiguous"
+        else "Surface difference invalid-result classification: geometry changed without validated cutter interaction."
+    )
+    invalid_evidence = replace(evidence, result_status="invalid")
+    decision = SurfaceDifferenceGateDecision(
+        classification="invalid",
+        executor_id=executor_id,
+        operand_ids=result.operands.body_ids,
+        comparison=invalid_evidence.comparison,
+        cutter_interaction=invalid_evidence.cutter_interaction,
+        reason=invalid_reason,
+    )
+    return SurfaceBooleanResult(
+        operation="difference",
+        operands=result.operands,
+        status="invalid",
+        failure_reason=invalid_reason,
+        difference_evidence=invalid_evidence,
+        difference_gate=decision,
+    )
+
+
+def assert_surface_difference_success_gate(result: SurfaceBooleanResult) -> SurfaceBooleanResult:
+    """Assert that a difference result cannot bypass the registry-wide gate."""
+
+    if result.operation != "difference":
+        return result
+    if result.difference_evidence is None or result.difference_gate is None:
+        raise ValueError("Surface difference executor bypassed the public success gate.")
+    expected = {
+        "succeeded": "success",
+        "no-cut": "no-cut",
+        "invalid": "invalid",
+        "unsupported": "unsupported",
+    }[result.status]
+    if result.difference_gate.classification != expected:
+        raise ValueError("Surface difference result status conflicts with its gate decision.")
+    if result.status == "succeeded" and (
+        not result.difference_evidence.changed
+        or not result.difference_evidence.cutter_interaction
+    ):
+        raise ValueError("Surface difference success lacks changed interacting evidence.")
+    return result
+
+
 def _surface_body_primitive_family(body: SurfaceBody) -> str | None:
     if body.shell_count != 1:
         return None
@@ -15755,6 +17480,24 @@ def _surface_body_primitive_family(body: SurfaceBody) -> str | None:
         if isinstance(patch_family, str) and patch_family:
             return patch_family
     return None
+
+
+def _surface_body_is_axis_aligned_orthogonal_box(
+    body: SurfaceBody,
+    *,
+    tolerance: float,
+) -> bool:
+    """Return whether a box primitive still has six axis-aligned planar faces."""
+
+    if _surface_body_primitive_family(body) != "box" or body.shell_count != 1 or body.patch_count != 6:
+        return False
+    for patch in body.iter_patches(world=True):
+        if not isinstance(patch, PlanarSurfacePatch) or patch.trim_loops:
+            return False
+        spans = np.asarray(_bounds_size(patch.bounds_estimate()), dtype=float)
+        if int(np.count_nonzero(np.abs(spans) <= tolerance)) != 1:
+            return False
+    return True
 
 
 def _bounds_corners(bounds: tuple[float, float, float, float, float, float]) -> np.ndarray:
@@ -15930,6 +17673,168 @@ def _surface_boolean_ruled_unsupported_cutter_diagnostic(
             ),
         )
     return None
+
+
+def _polygon_loft_cell_payload(
+    patch: RuledSurfacePatch,
+    *,
+    tolerance: float = 1e-8,
+) -> dict[str, object] | None:
+    """Return declarative volume data for one closed linear ruled loft cell."""
+
+    transform = np.asarray(patch.transform_matrix, dtype=float)
+    rotation = transform[:3, :3]
+    translation = transform[:3, 3]
+    start_curve = np.asarray(patch.start_curve, dtype=float) @ rotation.T + translation
+    end_curve = np.asarray(patch.end_curve, dtype=float) @ rotation.T + translation
+    if start_curve.shape != end_curve.shape or start_curve.ndim != 2 or start_curve.shape[0] < 4:
+        return None
+    if start_curve.shape[0] > 512:
+        return None
+
+    start_origin = np.mean(start_curve, axis=0)
+    end_origin = np.mean(end_curve, axis=0)
+    basis_u: np.ndarray | None = None
+    normal: np.ndarray | None = None
+    for first_index in range(start_curve.shape[0] - 2):
+        first_edge = start_curve[first_index + 1] - start_curve[first_index]
+        if float(np.linalg.norm(first_edge)) <= tolerance:
+            continue
+        for second_index in range(first_index + 1, start_curve.shape[0] - 1):
+            second_edge = start_curve[second_index + 1] - start_curve[second_index]
+            candidate_normal = np.cross(first_edge, second_edge)
+            candidate_norm = float(np.linalg.norm(candidate_normal))
+            if candidate_norm <= tolerance:
+                continue
+            basis_u = first_edge / float(np.linalg.norm(first_edge))
+            normal = candidate_normal / candidate_norm
+            break
+        if normal is not None:
+            break
+    if basis_u is None or normal is None:
+        return None
+    if float(np.max(np.abs((start_curve - start_origin) @ normal))) > tolerance:
+        return None
+    if float(np.max(np.abs((end_curve - end_origin) @ normal))) > tolerance:
+        return None
+    plane_span = float(np.dot(end_origin - start_origin, normal))
+    if abs(plane_span) <= tolerance:
+        return None
+    if plane_span < 0.0:
+        normal = -normal
+        plane_span = -plane_span
+    basis_v = np.cross(normal, basis_u)
+    basis_v_norm = float(np.linalg.norm(basis_v))
+    if basis_v_norm <= tolerance:
+        return None
+    basis_v /= basis_v_norm
+    return {
+        "start_curve": tuple(tuple(float(value) for value in point) for point in start_curve),
+        "end_curve": tuple(tuple(float(value) for value in point) for point in end_curve),
+        "normal": tuple(float(value) for value in normal),
+        "basis_u": tuple(float(value) for value in basis_u),
+        "basis_v": tuple(float(value) for value in basis_v),
+    }
+
+
+def _surface_body_polygon_loft_field_node(body: SurfaceBody) -> ImplicitFieldNode | None:
+    """Adapt one closed polygonal loft body to an exact declarative field graph."""
+
+    if _surface_body_loft_provenance(body) is None:
+        return None
+    cells: list[dict[str, object]] = []
+    for patch in body.iter_patches(world=True):
+        if not isinstance(patch, RuledSurfacePatch):
+            continue
+        kernel = patch.kernel_metadata()
+        loop_index = int(kernel.get("loop_index", 0) or 0)
+        if loop_index != 0:
+            return None
+        cell = _polygon_loft_cell_payload(patch)
+        if cell is None:
+            return None
+        cell["source_patch_id"] = patch.stable_identity
+        cell["branch_id"] = str(kernel.get("branch_id", ""))
+        cells.append(cell)
+        if len(cells) > 256:
+            return None
+    if not cells:
+        return None
+    return ImplicitFieldNode(
+        "polygon_loft_body",
+        parameters={"cells": tuple(cells)},
+    )
+
+
+def _surface_boolean_polygon_loft_field_result(
+    operands: SurfaceBooleanOperands,
+) -> SurfaceBooleanResult | None:
+    """Execute exact ruled polygon-loft difference as a closed implicit surface."""
+
+    if operands.operation != "difference" or operands.operand_count != 2:
+        return None
+    if _surface_boolean_body_relation(
+        operands.bodies[0].bounds_estimate(),
+        operands.bodies[1].bounds_estimate(),
+    ) in {"disjoint", "touching"}:
+        return None
+    roots = tuple(_surface_body_polygon_loft_field_node(body) for body in operands.bodies)
+    if any(root is None for root in roots):
+        return None
+    root = _compose_implicit_root(
+        "difference",
+        tuple(candidate for candidate in roots if candidate is not None),
+    )
+    metadata = _surface_boolean_result_metadata(operands)
+    decomposition = []
+    for operand_index, field_root in enumerate(roots):
+        assert field_root is not None
+        cells = field_root.parameters["cells"]
+        decomposition.append(
+            {
+                "operand_index": operand_index,
+                "source_body_id": operands.body_ids[operand_index],
+                "cell_count": len(cells),
+                "branch_ids": tuple(
+                    sorted({str(cell["branch_id"]) for cell in cells if str(cell["branch_id"])})
+                ),
+                "source_patch_ids": tuple(str(cell["source_patch_id"]) for cell in cells),
+                "execution": "declarative-cell-field-union",
+                "recomposition": "implicit-min-union",
+            }
+        )
+    route_payload = {
+        "operation": "difference",
+        "operand_ids": operands.body_ids,
+        "source_family": "polygon-loft",
+        "solver_path": "declarative-polygon-loft-field-difference",
+        "branching_base": int(_surface_body_loft_provenance(operands.bodies[0]).get("branch_count", 0) or 0) > 1,
+        "decomposition": tuple(decomposition),
+        "bounded_cell_limit": 256,
+        "bounded_points_per_cell_limit": 512,
+        "no_mesh_fallback": True,
+    }
+    metadata["kernel"]["boolean_surface_route"] = "surface-csg.polygon-loft-field"
+    metadata["kernel"]["polygon_loft_field_csg"] = route_payload
+    metadata["consumer"]["boolean_surface_route"] = "surface-csg.polygon-loft-field"
+    metadata["consumer"]["polygon_loft_field_csg"] = route_payload
+    patch = ImplicitSurfacePatch(
+        family="implicit",
+        field=root,
+        bounds=operands.bodies[0].bounds_estimate(),
+        metadata={"kernel": route_payload},
+    )
+    body = make_surface_body(
+        (
+            make_surface_shell(
+                (patch,),
+                connected=True,
+                metadata={"kernel": {"operation": "polygon-loft-field-difference"}},
+            ),
+        ),
+        metadata=metadata,
+    )
+    return _surface_boolean_finalize_body_result("difference", operands, body)
 
 
 def _surface_body_contains_exact(
@@ -17906,7 +19811,7 @@ def build_surface_csg_cap_patches(graph: SurfaceCSGFragmentGraphRecord) -> Surfa
     )
 
 
-def _surface_csg_patch_domain_outer_trim(patch: PlanarSurfacePatch) -> TrimLoop:
+def _surface_csg_patch_domain_outer_trim(patch: SurfacePatch) -> TrimLoop:
     u0, u1 = patch.domain.u_range
     v0, v1 = patch.domain.v_range
     return TrimLoop(
@@ -18568,74 +20473,109 @@ def prepare_surface_boolean_difference_operands(
     return SurfaceBooleanOperands(operation="difference", bodies=(canonical_base, *canonical_cutters))
 
 
-def surface_boolean_result(operation: SurfaceBooleanOperation, operands: SurfaceBooleanOperands) -> SurfaceBooleanResult:
+def surface_boolean_result(
+    operation: SurfaceBooleanOperation,
+    operands: SurfaceBooleanOperands,
+    *,
+    difference_policy: SurfaceCSGTolerancePolicy | Mapping[str, float] | None = None,
+) -> SurfaceBooleanResult:
     """Return the structured surfaced boolean result for the current v1 implementation."""
 
     if operands.operation != operation:
         raise ValueError("Surface boolean result operation must match prepared operands.")
+
+    def finish(result: SurfaceBooleanResult, executor_id: str) -> SurfaceBooleanResult:
+        if result.operation != "difference":
+            return result
+        return assert_surface_difference_success_gate(
+            apply_surface_difference_success_gate(
+                result,
+                executor_id=executor_id,
+                policy=difference_policy,
+            )
+        )
+
     bspline_nurbs_result = _surface_boolean_bspline_nurbs_body_route_result(operands)
     if bspline_nurbs_result is not None:
-        return bspline_nurbs_result
+        return finish(bspline_nurbs_result, "surface-csg.bspline-nurbs")
     sweep_subdivision_result = _surface_boolean_sweep_subdivision_body_route_result(operands)
     if sweep_subdivision_result is not None:
-        return sweep_subdivision_result
+        return finish(sweep_subdivision_result, "surface-csg.sweep-subdivision")
+    polygon_loft_field_result = _surface_boolean_polygon_loft_field_result(operands)
+    if polygon_loft_field_result is not None:
+        return finish(polygon_loft_field_result, "surface-csg.polygon-loft-field")
     plan = plan_prepared_surface_csg_operation(operands)
     if not plan.executable:
-        return SurfaceBooleanResult(
-            operation=operation,
-            operands=operands,
-            status="unsupported",
-            failure_reason="; ".join(diagnostic.message for diagnostic in plan.diagnostics),
+        return finish(
+            SurfaceBooleanResult(
+                operation=operation,
+                operands=operands,
+                status="unsupported",
+                failure_reason="; ".join(diagnostic.message for diagnostic in plan.diagnostics),
+            ),
+            "surface-csg.plan-refusal",
         )
+    branching_loft_result = execute_branching_loft_difference_csg(operands)
+    if branching_loft_result is not None:
+        return finish(branching_loft_result, "surface-csg.loft-branch-decomposition")
     loft_pair_result = execute_loft_pair_csg(operands)
     if loft_pair_result is not None:
-        return loft_pair_result
+        return finish(loft_pair_result, "surface-csg.loft-pair")
     loft_primitive_result = execute_single_shell_loft_primitive_csg(operands)
     if loft_primitive_result is not None:
-        return loft_primitive_result
+        return finish(loft_primitive_result, "surface-csg.loft-primitive-single-shell")
     loft_primitive_cut_result = execute_loft_primitive_trim_fragment_csg(operands)
     if loft_primitive_cut_result is not None:
-        return loft_primitive_cut_result
+        return finish(loft_primitive_cut_result, "surface-csg.loft-primitive-trim")
     trivial_result = _surface_boolean_trivial_result(operands)
     if trivial_result is not None:
-        return trivial_result
+        return finish(trivial_result, "surface-csg.trivial")
     loft_route = select_loft_csg_route(operands)
     if loft_route.supported:
         adapter_result = _surface_boolean_loft_primitive_adapter_result(operands, loft_route)
         if adapter_result is not None:
-            return adapter_result
-        return SurfaceBooleanResult(
-            operation=operation,
-            operands=operands,
-            status="unsupported",
-            failure_reason=(
-                f"Selected loft CSG route {loft_route.route_id} "
-                f"via {loft_route.solver_path}; no exact reuse result was available and "
-                "trim-fragment shell assembly is owned by Surface Spec 422."
+            return finish(adapter_result, "surface-csg.loft-primitive-adapter")
+        return finish(
+            SurfaceBooleanResult(
+                operation=operation,
+                operands=operands,
+                status="unsupported",
+                failure_reason=(
+                    f"Selected loft CSG route {loft_route.route_id} "
+                    f"via {loft_route.solver_path}; no exact reuse result was available and "
+                    "trim-fragment shell assembly is owned by Surface Spec 422."
+                ),
             ),
+            str(loft_route.route_id),
         )
     primitive_implicit_result = _surface_boolean_supported_primitive_implicit_result(operands)
     if primitive_implicit_result is not None:
-        return primitive_implicit_result
+        return finish(primitive_implicit_result, "surface-csg.primitive-implicit")
     ruled_cutter_diagnostic = _surface_boolean_ruled_unsupported_cutter_diagnostic(operands)
     if ruled_cutter_diagnostic is not None:
-        return SurfaceBooleanResult(
-            operation=operation,
-            operands=operands,
-            status="unsupported",
-            failure_reason=ruled_cutter_diagnostic.message,
+        return finish(
+            SurfaceBooleanResult(
+                operation=operation,
+                operands=operands,
+                status="unsupported",
+                failure_reason=ruled_cutter_diagnostic.message,
+            ),
+            "surface-csg.ruled-cutter-refusal",
         )
     stage = surface_boolean_intersection_stage(operands)
     supported_result = _surface_boolean_supported_box_result(operands, stage)
     if supported_result is not None:
-        return supported_result
-    return SurfaceBooleanResult(
-        operation=operation,
-        operands=operands,
-        status="unsupported",
-        failure_reason=(
-            f"Surface boolean {operation} execution is not implemented yet after canonical input preparation."
+        return finish(supported_result, "surface-csg.analytic-box")
+    return finish(
+        SurfaceBooleanResult(
+            operation=operation,
+            operands=operands,
+            status="unsupported",
+            failure_reason=(
+                f"Surface boolean {operation} execution is not implemented yet after canonical input preparation."
+            ),
         ),
+        "surface-csg.unsupported",
     )
 
 
@@ -18653,14 +20593,24 @@ def _surface_boolean_result_after_family_gate(
     if any(not isinstance(body, SurfaceBody) for body in bodies):
         return None
     raw_operands = SurfaceBooleanOperands(operation=operation, bodies=bodies)
+    if (
+        operation == "difference"
+        and len(bodies) == 2
+        and all(_surface_body_polygon_loft_field_node(body) is not None for body in bodies)
+    ):
+        return None
     gate = surface_csg_feature_gate(caller_id, operation, bodies)
     if gate.supported:
         return None
-    return SurfaceBooleanResult(
+    result = SurfaceBooleanResult(
         operation=operation,
         operands=raw_operands,
         status="unsupported",
         failure_reason=gate.reason,
+    )
+    return apply_surface_difference_success_gate(
+        result,
+        executor_id=f"{caller_id}.feature-gate",
     )
 
 
@@ -18772,17 +20722,44 @@ def _validate_public_surface_union_result(
     )
 
 
+def _require_public_surface_boolean_body(
+    function_name: str,
+    parameter_name: str,
+    operand: object,
+) -> SurfaceBody:
+    if isinstance(operand, SurfaceBody):
+        return operand
+    raise TypeError(
+        f"{function_name}() accepts only SurfaceBody operands; "
+        f"{parameter_name} received {type(operand).__name__}. "
+        "Mesh and MeshGroup are terminal/tool representations, not modeling operands. "
+        "Use impression.modeling.mesh_tools for explicit mesh analysis and repair; "
+        "union_meshes(...) there is the separate standalone mesh-union utility."
+    )
+
+
+def _require_public_surface_boolean_bodies(
+    function_name: str,
+    parameter_name: str,
+    operands: Iterable[object],
+) -> tuple[SurfaceBody, ...]:
+    return tuple(
+        _require_public_surface_boolean_body(function_name, f"{parameter_name}[{index}]", operand)
+        for index, operand in enumerate(operands)
+    )
+
+
 def boolean_union(
-    meshes: Iterable[Mesh | MeshGroup | SurfaceBody],
+    bodies: Iterable[SurfaceBody],
     tolerance: float = 1e-4,
-) -> Mesh | SurfaceBooleanResult:
+) -> SurfaceBooleanResult:
     if tolerance <= 0:
         raise ValueError("tolerance must be positive.")
-    bodies = tuple(meshes)
-    gated = _surface_boolean_result_after_family_gate("union", bodies, caller_id="csg.boolean_union")  # type: ignore[arg-type]
+    body_tuple = _require_public_surface_boolean_bodies("boolean_union", "bodies", bodies)
+    gated = _surface_boolean_result_after_family_gate("union", body_tuple, caller_id="csg.boolean_union")
     if gated is not None:
         return _validate_public_surface_union_result(gated, tolerance=tolerance)
-    operands = prepare_surface_boolean_operands("union", bodies)  # type: ignore[arg-type]
+    operands = prepare_surface_boolean_operands("union", body_tuple)
     raw_result = assert_no_hidden_surface_csg_mesh_fallback(
         "csg.boolean_union",
         surface_boolean_result("union", operands),
@@ -18793,42 +20770,65 @@ def boolean_union(
 
 
 def boolean_difference(
-    base: Mesh | MeshGroup | SurfaceBody,
-    cutters: Iterable[Mesh | MeshGroup | SurfaceBody],
+    base: SurfaceBody,
+    cutters: Iterable[SurfaceBody],
     tolerance: float = 1e-4,
-) -> Mesh | SurfaceBooleanResult:
+) -> SurfaceBooleanResult:
     if tolerance <= 0:
         raise ValueError("tolerance must be positive.")
-    cutter_tuple = tuple(cutters)
+    surface_base = _require_public_surface_boolean_body("boolean_difference", "base", base)
+    cutter_tuple = _require_public_surface_boolean_bodies("boolean_difference", "cutters", cutters)
     gated = _surface_boolean_result_after_family_gate(
         "difference",
-        (base, *cutter_tuple),
+        (surface_base, *cutter_tuple),
         caller_id="csg.boolean_difference",
-    )  # type: ignore[arg-type]
-    if gated is not None:
-        return gated
-    operands = prepare_surface_boolean_difference_operands(base, cutter_tuple)  # type: ignore[arg-type]
-    return assert_no_hidden_surface_csg_mesh_fallback(
-        "csg.boolean_difference",
-        surface_boolean_result("difference", operands),
     )
+    if gated is not None:
+        return assert_surface_difference_success_gate(gated)
+    operands = prepare_surface_boolean_difference_operands(surface_base, cutter_tuple)
+    difference_policy = {
+        "equality_tolerance": tolerance,
+        "domain_tolerance": min(tolerance, DEFAULT_SURFACE_CSG_TOLERANCE_POLICY.domain_tolerance),
+    }
+    raw_result = assert_no_hidden_surface_csg_mesh_fallback(
+        "csg.boolean_difference",
+        surface_boolean_result(
+            "difference",
+            operands,
+            difference_policy=difference_policy,
+        ),
+    )
+    if not isinstance(raw_result, SurfaceBooleanResult):
+        raise BooleanOperationError("csg.boolean_difference did not return a structured SurfaceBooleanResult.")
+    executor_id = (
+        raw_result.difference_evidence.executor_id
+        if raw_result.difference_evidence is not None
+        else "csg.boolean_difference"
+    )
+    if raw_result.difference_gate is None:
+        raw_result = apply_surface_difference_success_gate(
+            raw_result,
+            executor_id=executor_id,
+            policy=difference_policy,
+        )
+    return assert_surface_difference_success_gate(raw_result)
 
 
 def boolean_intersection(
-    meshes: Iterable[Mesh | MeshGroup | SurfaceBody],
+    bodies: Iterable[SurfaceBody],
     tolerance: float = 1e-4,
-) -> Mesh | SurfaceBooleanResult:
+) -> SurfaceBooleanResult:
     if tolerance <= 0:
         raise ValueError("tolerance must be positive.")
-    bodies = tuple(meshes)
+    body_tuple = _require_public_surface_boolean_bodies("boolean_intersection", "bodies", bodies)
     gated = _surface_boolean_result_after_family_gate(
         "intersection",
-        bodies,
+        body_tuple,
         caller_id="csg.boolean_intersection",
-    )  # type: ignore[arg-type]
+    )
     if gated is not None:
         return gated
-    operands = prepare_surface_boolean_operands("intersection", bodies)  # type: ignore[arg-type]
+    operands = prepare_surface_boolean_operands("intersection", body_tuple)
     return assert_no_hidden_surface_csg_mesh_fallback(
         "csg.boolean_intersection",
         surface_boolean_result("intersection", operands),

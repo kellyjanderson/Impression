@@ -60,6 +60,24 @@ CLI and workbench hosts own:
 - host-specific toolbar actions
 - renderer creation and disposal timing
 
+## CLI Live-Reload Coordination
+
+The CLI preview host owns a bounded reload coordinator in `impression.preview`.
+Filesystem events, manual refresh, control-file switches, signals, and animation
+updates enter that coordinator as typed requests. It keeps one active build and
+at most one latest replacement, preserving forced-refresh intent while
+coalescing bursts.
+
+The CLI model loader in `impression.cli` owns the reload generation and the set
+of project-local modules discovered from the entry model. Forced refresh
+advances the generation and evicts the entry model plus those transitive modules
+before rebuilding, including when filesystem timestamp evidence is unchanged.
+
+Model loading and dataset construction remain on the background build executor.
+The host render thread admits only the current generation, applies successful
+datasets through the shared scene path, and preserves the camera. Failed, stale,
+or post-shutdown results cannot replace the last good scene.
+
 ## Required Code Changes
 
 - Extract scene application from CLI-only methods into a reusable controller.

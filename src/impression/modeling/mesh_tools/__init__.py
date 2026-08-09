@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from impression.mesh import Mesh, MeshAnalysis, analyze_mesh, repair_mesh, section_mesh_with_plane
+from impression.modeling.csg import union_meshes
 from impression.modeling._ops_mesh import hull_mesh, manifold_from_mesh_group, mesh_from_manifold
 
 MESH_TOOL_BOUNDARY = "explicit-mesh-tool"
@@ -46,4 +47,5 @@ __all__ = [
     "mesh_from_manifold",
     "repair_mesh",
     "section_mesh_with_plane",
+    "union_meshes",
 ]

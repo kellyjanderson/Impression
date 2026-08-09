@@ -84,6 +84,20 @@ Current relevant code paths:
 This works for simple symmetric or similarly authored profiles. It is not a
 complete topology correspondence model.
 
+## Implemented Loop Identity Boundary
+
+`PlannedLoopRef` now carries the stable `TopologyPath.id` and the authored path
+record for actual named holes. During each station interval, the planner maps
+authored topology paths onto canonical hole-loop slots, validates unique names,
+and resolves matching names before any geometric assignment. The existing
+minimum-cost matcher receives only anonymous residue.
+
+Duplicate names and unequal source/target name sets fail with stable
+`invalid_hole_identity` diagnostics before ambiguity enumeration. The resolved
+loop references are stored in the immutable plan consumed by surface execution;
+the executor does not repeat or override hole pairing. Unnamed sections retain
+their existing deterministic geometric behavior.
+
 ## Failure Mode
 
 The failure is not merely that a heuristic can pick the wrong start vertex. The
@@ -2917,8 +2931,27 @@ Split decision:
 - Cohesion reason: helper methods should be specified together as one public
   authoring surface over the same topology path record family.
 
+## Planner Configuration Propagation
+
+Public loft planning constructs one immutable `LoftPlannerOptions` value after
+boundary validation. Direct transition pairing, split/merge station expansion,
+synthetic region/loop pairing, and ambiguity-report pairing all consume that
+same value; nested helpers do not define planner-policy defaults. In particular,
+`ambiguity_max_branches` remains a hard caller-owned candidate bound throughout
+the call graph.
+
+The plan stores the effective options as canonical metadata. Candidate-limit
+refusals report the effective cap and transition location, including whether the
+limit was reached during original-station expansion or a later expanded-plan
+interval. This makes configuration drift observable without changing existing
+public argument names or defaults.
+
 ## Change History
 
+- 2026-08-04: Added the implemented immutable planner-options boundary and
+  direct/nested/synthetic propagation contract.
+- 2026-08-04: Added the implemented identity-first named-hole planner boundary
+  and executor handoff contract.
 - 2026-05-27: Critically reviewed active manifest candidates beyond score
   thresholds and split the topology builder core API into point and segment
   builder specs.

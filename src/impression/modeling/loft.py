@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Iterable, Mapping, Sequence
 
@@ -60,6 +60,36 @@ class RailSource(str, Enum):
     SEGMENT_NAME = "segment_name"
     AUTHORED_ORDER = "authored_order"
     GENERATED_RAIL = "generated_rail"
+
+
+@dataclass(frozen=True)
+class LoftPlannerOptions:
+    """Validated planner configuration shared by every transition-planning call."""
+
+    split_merge_mode: str
+    split_merge_steps: int
+    split_merge_bias: float
+    ambiguity_mode: str
+    ambiguity_cost_profile: str
+    ambiguity_max_branches: int
+    fairness_mode: str
+    fairness_weight: float
+    skeleton_mode: str
+    fairness_iterations: int
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "split_merge_mode": self.split_merge_mode,
+            "split_merge_steps": int(self.split_merge_steps),
+            "split_merge_bias": float(self.split_merge_bias),
+            "ambiguity_mode": self.ambiguity_mode,
+            "ambiguity_cost_profile": self.ambiguity_cost_profile,
+            "ambiguity_max_branches": int(self.ambiguity_max_branches),
+            "fairness_mode": self.fairness_mode,
+            "fairness_weight": float(self.fairness_weight),
+            "skeleton_mode": self.skeleton_mode,
+            "fairness_iterations": int(self.fairness_iterations),
+        }
 
 
 @dataclass(frozen=True)
@@ -831,6 +861,8 @@ class PlannedLoopRef:
 
     kind: str  # actual | synthetic
     index: int
+    identity: str | None = None
+    topology_path: TopologyPath | None = None
 
 
 @dataclass(frozen=True)
@@ -1467,6 +1499,109 @@ class PlannedRegionPair:
 
 
 @dataclass(frozen=True)
+class LoftJunctionBoundaryRingInput:
+    """Immutable planner input for one side of an interior hole junction."""
+
+    station_index: int
+    side: str  # prev | curr
+    role: str  # continuing | born | closing | synthetic_support
+    loop_identity: str
+    region_ref: PlannedRegionRef
+    loop_ref: PlannedLoopRef
+    points: tuple[tuple[float, float], ...]
+    surface_role: str = "interior_junction"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "station_index", int(self.station_index))
+        object.__setattr__(self, "side", str(self.side))
+        object.__setattr__(self, "role", str(self.role))
+        object.__setattr__(self, "loop_identity", str(self.loop_identity))
+        object.__setattr__(
+            self,
+            "points",
+            tuple(tuple(float(value) for value in point) for point in self.points),
+        )
+        object.__setattr__(self, "surface_role", str(self.surface_role))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "station_index": int(self.station_index),
+            "side": self.side,
+            "role": self.role,
+            "loop_identity": self.loop_identity,
+            "region_ref": {
+                "kind": self.region_ref.kind,
+                "index": int(self.region_ref.index),
+            },
+            "loop_ref": {
+                "kind": self.loop_ref.kind,
+                "index": int(self.loop_ref.index),
+                "identity": self.loop_ref.identity,
+            },
+            "points": self.points,
+            "surface_role": self.surface_role,
+        }
+
+
+@dataclass(frozen=True)
+class LoftJunctionEvent:
+    """Identity-bearing one-to-many or many-to-one hole-junction plan record."""
+
+    id: str
+    station_interval: tuple[int, int]
+    branch_id: str
+    direction: str  # one_to_many | many_to_one
+    continuing_loop_ids: tuple[str, ...]
+    born_loop_ids: tuple[str, ...]
+    closing_loop_ids: tuple[str, ...]
+    boundary_rings: tuple[LoftJunctionBoundaryRingInput, ...]
+    surface_role: str = "interior_junction"
+    terminal_cap_allowed: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", str(self.id))
+        object.__setattr__(
+            self,
+            "station_interval",
+            tuple(int(index) for index in self.station_interval),
+        )
+        object.__setattr__(self, "branch_id", str(self.branch_id))
+        object.__setattr__(self, "direction", str(self.direction))
+        object.__setattr__(
+            self,
+            "continuing_loop_ids",
+            tuple(str(identity) for identity in self.continuing_loop_ids),
+        )
+        object.__setattr__(
+            self,
+            "born_loop_ids",
+            tuple(str(identity) for identity in self.born_loop_ids),
+        )
+        object.__setattr__(
+            self,
+            "closing_loop_ids",
+            tuple(str(identity) for identity in self.closing_loop_ids),
+        )
+        object.__setattr__(self, "boundary_rings", tuple(self.boundary_rings))
+        object.__setattr__(self, "surface_role", str(self.surface_role))
+        object.__setattr__(self, "terminal_cap_allowed", bool(self.terminal_cap_allowed))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "station_interval": self.station_interval,
+            "branch_id": self.branch_id,
+            "direction": self.direction,
+            "continuing_loop_ids": self.continuing_loop_ids,
+            "born_loop_ids": self.born_loop_ids,
+            "closing_loop_ids": self.closing_loop_ids,
+            "boundary_rings": tuple(ring.canonical_payload() for ring in self.boundary_rings),
+            "surface_role": self.surface_role,
+            "terminal_cap_allowed": self.terminal_cap_allowed,
+        }
+
+
+@dataclass(frozen=True)
 class LoftSuggestedAuthoredRail:
     """Non-mutating advice for resolving an authored topology ambiguity."""
 
@@ -1596,6 +1731,232 @@ class LoftManyToManyCandidateSet:
     matched_curr_region_indices: tuple[int, ...]
     residual_prev_region_indices: tuple[int, ...]
     residual_curr_region_indices: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class ExactRegionIdentityPair:
+    """One source-ordered exact region identity match."""
+
+    identity: str
+    prev_region_index: int
+    curr_region_index: int
+
+    def __post_init__(self) -> None:
+        identity = str(self.identity).strip()
+        if not identity:
+            raise ValueError("Exact region identity pairs require a non-empty identity.")
+        if self.prev_region_index < 0 or self.curr_region_index < 0:
+            raise ValueError("Exact region identity pair indexes must be non-negative.")
+        object.__setattr__(self, "identity", identity)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "identity": self.identity,
+            "prev_region_index": self.prev_region_index,
+            "curr_region_index": self.curr_region_index,
+        }
+
+
+@dataclass(frozen=True)
+class RegionIdentityTransitionResolution:
+    """Exact pairs plus explicit anonymous residue, births, and deaths."""
+
+    exact_pairs: tuple[ExactRegionIdentityPair, ...]
+    geometric_pairs: tuple[tuple[int, int], ...]
+    unnamed_prev_region_indices: tuple[int, ...]
+    unnamed_curr_region_indices: tuple[int, ...]
+    birth_curr_region_indices: tuple[int, ...]
+    death_prev_region_indices: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        tuple_fields = (
+            "exact_pairs",
+            "geometric_pairs",
+            "unnamed_prev_region_indices",
+            "unnamed_curr_region_indices",
+            "birth_curr_region_indices",
+            "death_prev_region_indices",
+        )
+        for field_name in tuple_fields:
+            object.__setattr__(self, field_name, tuple(getattr(self, field_name)))
+        exact_identities = tuple(pair.identity for pair in self.exact_pairs)
+        exact_prev = tuple(pair.prev_region_index for pair in self.exact_pairs)
+        exact_curr = tuple(pair.curr_region_index for pair in self.exact_pairs)
+        geometric_prev = tuple(pair[0] for pair in self.geometric_pairs)
+        geometric_curr = tuple(pair[1] for pair in self.geometric_pairs)
+        paired_prev = (*exact_prev, *geometric_prev)
+        paired_curr = (*exact_curr, *geometric_curr)
+        if len(set(exact_identities)) != len(exact_identities):
+            raise ValueError("Exact region identity resolution contains duplicate identities.")
+        if len(set(paired_prev)) != len(paired_prev):
+            raise ValueError("Region identity resolution reuses a source region.")
+        if len(set(paired_curr)) != len(paired_curr):
+            raise ValueError("Region identity resolution reuses a target region.")
+        if not set(geometric_prev).issubset(self.unnamed_prev_region_indices):
+            raise ValueError("Geometric source residue must be anonymous.")
+        if not set(geometric_curr).issubset(self.unnamed_curr_region_indices):
+            raise ValueError("Geometric target residue must be anonymous.")
+        if set(self.death_prev_region_indices) & set(paired_prev):
+            raise ValueError("A paired source region cannot also be a death.")
+        if set(self.birth_curr_region_indices) & set(paired_curr):
+            raise ValueError("A paired target region cannot also be a birth.")
+        all_indexes = (
+            *exact_prev,
+            *exact_curr,
+            *geometric_prev,
+            *geometric_curr,
+            *self.unnamed_prev_region_indices,
+            *self.unnamed_curr_region_indices,
+            *self.birth_curr_region_indices,
+            *self.death_prev_region_indices,
+        )
+        if any(index < 0 for index in all_indexes):
+            raise ValueError("Region identity transition indexes must be non-negative.")
+
+    @property
+    def actual_pairs(self) -> tuple[tuple[int, int], ...]:
+        exact = tuple((pair.prev_region_index, pair.curr_region_index) for pair in self.exact_pairs)
+        return tuple(sorted((*exact, *self.geometric_pairs), key=lambda pair: (pair[0], pair[1])))
+
+    @property
+    def residual_candidate_count(self) -> int:
+        return max(len(self.unnamed_prev_region_indices), len(self.unnamed_curr_region_indices))
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "exact_pairs": tuple(pair.canonical_payload() for pair in self.exact_pairs),
+            "geometric_pairs": self.geometric_pairs,
+            "unnamed_prev_region_indices": self.unnamed_prev_region_indices,
+            "unnamed_curr_region_indices": self.unnamed_curr_region_indices,
+            "birth_curr_region_indices": self.birth_curr_region_indices,
+            "death_prev_region_indices": self.death_prev_region_indices,
+            "actual_pairs": self.actual_pairs,
+            "residual_candidate_count": self.residual_candidate_count,
+        }
+
+
+@dataclass(frozen=True)
+class SyntheticRegionLineage:
+    """Stable region and loop identity carried by one staged region."""
+
+    identity: str
+    prev_region_ref: tuple[str, int]
+    curr_region_ref: tuple[str, int]
+    predecessor_ids: frozenset[str]
+    successor_ids: frozenset[str]
+    loop_identities: tuple[str, ...]
+    predecessor_loop_ids: tuple[str | None, ...]
+    successor_loop_ids: tuple[str | None, ...]
+
+    def __post_init__(self) -> None:
+        identity = str(self.identity).strip()
+        if not identity:
+            raise ValueError("invalid_synthetic_lineage region identity must be non-empty")
+        object.__setattr__(self, "identity", identity)
+        object.__setattr__(self, "predecessor_ids", frozenset(self.predecessor_ids))
+        object.__setattr__(self, "successor_ids", frozenset(self.successor_ids))
+        object.__setattr__(self, "loop_identities", tuple(self.loop_identities))
+        object.__setattr__(self, "predecessor_loop_ids", tuple(self.predecessor_loop_ids))
+        object.__setattr__(self, "successor_loop_ids", tuple(self.successor_loop_ids))
+        for field_name, ref in (
+            ("prev_region_ref", self.prev_region_ref),
+            ("curr_region_ref", self.curr_region_ref),
+        ):
+            if len(ref) != 2 or ref[0] not in {"actual", "synthetic"} or int(ref[1]) < 0:
+                raise ValueError(f"invalid_synthetic_lineage {field_name} is invalid")
+            object.__setattr__(self, field_name, (str(ref[0]), int(ref[1])))
+        for field_name, identities in (
+            ("predecessor_ids", self.predecessor_ids),
+            ("successor_ids", self.successor_ids),
+        ):
+            if len(identities) > 1 or any(not str(value).strip() for value in identities):
+                raise ValueError(
+                    f"invalid_synthetic_lineage {field_name} must contain at most one non-empty id"
+                )
+        loop_count = len(self.loop_identities)
+        if loop_count == 0:
+            raise ValueError("invalid_synthetic_lineage region requires at least one loop")
+        if len(set(self.loop_identities)) != loop_count:
+            raise ValueError("invalid_synthetic_lineage duplicate loop identity")
+        if any(not str(value).strip() for value in self.loop_identities):
+            raise ValueError("invalid_synthetic_lineage loop identity must be non-empty")
+        if (
+            len(self.predecessor_loop_ids) != loop_count
+            or len(self.successor_loop_ids) != loop_count
+        ):
+            raise ValueError("invalid_synthetic_lineage loop lineage length mismatch")
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "identity": self.identity,
+            "prev_region_ref": self.prev_region_ref,
+            "curr_region_ref": self.curr_region_ref,
+            "predecessor_ids": tuple(sorted(self.predecessor_ids)),
+            "successor_ids": tuple(sorted(self.successor_ids)),
+            "loop_identities": self.loop_identities,
+            "predecessor_loop_ids": self.predecessor_loop_ids,
+            "successor_loop_ids": self.successor_loop_ids,
+        }
+
+
+@dataclass(frozen=True)
+class SyntheticStationLineage:
+    """Immutable identity handoff for one inserted split/merge station."""
+
+    identity: str
+    source_interval: tuple[float, float]
+    stage_index: int
+    stage_count: int
+    station_t: float
+    regions: tuple[SyntheticRegionLineage, ...]
+    topology_paths: tuple[TopologyPath, ...]
+
+    def __post_init__(self) -> None:
+        identity = str(self.identity).strip()
+        if not identity:
+            raise ValueError("invalid_synthetic_lineage station identity must be non-empty")
+        object.__setattr__(self, "identity", identity)
+        interval = tuple(float(value) for value in self.source_interval)
+        if len(interval) != 2 or not all(np.isfinite(interval)) or not interval[0] < interval[1]:
+            raise ValueError("invalid_synthetic_lineage source interval must be increasing")
+        object.__setattr__(self, "source_interval", interval)
+        object.__setattr__(self, "stage_index", int(self.stage_index))
+        object.__setattr__(self, "stage_count", int(self.stage_count))
+        object.__setattr__(self, "station_t", float(self.station_t))
+        object.__setattr__(self, "regions", tuple(self.regions))
+        object.__setattr__(self, "topology_paths", tuple(self.topology_paths))
+        validate_synthetic_station_lineage(self)
+
+    def canonical_payload(self) -> dict[str, object]:
+        return {
+            "identity": self.identity,
+            "source_interval": self.source_interval,
+            "stage_index": self.stage_index,
+            "stage_count": self.stage_count,
+            "station_t": self.station_t,
+            "regions": tuple(region.canonical_payload() for region in self.regions),
+            "topology_path_ids": tuple(path.id for path in self.topology_paths),
+        }
+
+
+def validate_synthetic_station_lineage(lineage: SyntheticStationLineage) -> None:
+    """Fail incomplete or conflicting derived lineage before surface execution."""
+
+    if lineage.stage_count < 1 or not 0 <= lineage.stage_index < lineage.stage_count:
+        raise ValueError("invalid_synthetic_lineage stage index is outside the staged interval")
+    if not lineage.source_interval[0] < lineage.station_t < lineage.source_interval[1]:
+        raise ValueError("invalid_synthetic_lineage station t is outside the source interval")
+    region_ids = tuple(region.identity for region in lineage.regions)
+    if len(set(region_ids)) != len(region_ids):
+        raise ValueError("invalid_synthetic_lineage duplicate region identity")
+    loop_ids = tuple(loop_id for region in lineage.regions for loop_id in region.loop_identities)
+    if len(set(loop_ids)) != len(loop_ids):
+        raise ValueError("invalid_synthetic_lineage duplicate loop identity across regions")
+    path_ids = tuple(path.id for path in lineage.topology_paths)
+    if len(set(path_ids)) != len(path_ids):
+        raise ValueError("invalid_synthetic_lineage duplicate topology path identity")
+    if set(path_ids) != set(loop_ids):
+        raise ValueError("invalid_synthetic_lineage topology paths do not cover every loop")
 
 
 @dataclass(frozen=True)
@@ -1756,6 +2117,7 @@ class PlannedTransition:
     ambiguity_class: str = "none"  # none | permutation | containment | symmetry | closure
     prev_region_count: int = 0
     curr_region_count: int = 0
+    junction_events: tuple[LoftJunctionEvent, ...] = ()
 
     @property
     def planned_state_indices(self) -> tuple[int, int]:
@@ -2459,7 +2821,7 @@ def _loft_kernel_metadata_from_body(body: SurfaceBody) -> dict[str, object]:
 def _loft_expected_patch_boundary_refs(patch: object, patch_index: int) -> tuple[SurfaceBoundaryRef, ...]:
     kernel = dict(getattr(patch, "metadata", {}).get("kernel", {}))
     surface_role = kernel.get("surface_role")
-    if surface_role in {"closure-cap", "start-cap", "end-cap"}:
+    if surface_role in {"closure-cap", "start-cap", "end-cap", "interior_junction"}:
         trim_loops = tuple(getattr(patch, "trim_loops", ()) or ())
         if not trim_loops:
             return (SurfaceBoundaryRef(patch_index, "trim:outer"),)
@@ -2529,7 +2891,7 @@ def _loft_cap_patch_indices(patches: Sequence[object]) -> tuple[int, ...]:
         patch_index
         for patch_index, patch in enumerate(patches)
         if dict(getattr(patch, "metadata", {}).get("kernel", {})).get("surface_role")
-        in {"closure-cap", "start-cap", "end-cap"}
+        in {"start-cap", "end-cap"}
     )
 
 
@@ -3223,14 +3585,25 @@ def loft_plan_sections(
         if disambiguation_seed is None
         else int(disambiguation_seed)
     )
+    planner_options = LoftPlannerOptions(
+        split_merge_mode=split_merge_mode,
+        split_merge_steps=int(split_merge_steps),
+        split_merge_bias=float(split_merge_bias),
+        ambiguity_mode=resolved_ambiguity_mode,
+        ambiguity_cost_profile=ambiguity_cost_profile,
+        ambiguity_max_branches=int(ambiguity_max_branches),
+        fairness_mode=fairness_mode,
+        fairness_weight=float(fairness_weight),
+        skeleton_mode=skeleton_mode,
+        fairness_iterations=int(fairness_iterations),
+    )
 
     effective_stations = list(stations)
     if split_merge_mode == "resolve":
         effective_stations = _expand_split_merge_stations(
             stations=effective_stations,
             samples=samples,
-            split_merge_steps=split_merge_steps,
-            split_merge_bias=split_merge_bias,
+            options=planner_options,
         )
         _validate_section_stations(effective_stations)
 
@@ -3274,6 +3647,8 @@ def loft_plan_sections(
     probabilistic_selected_candidate_ids: dict[str, str] = {}
     identity_resolved_pair_count = 0
     identity_residual_region_count = 0
+    identity_transition_resolutions: list[dict[str, object]] = []
+    hole_identity_resolved_pair_count = 0
     previous_interval_vectors: dict[int, np.ndarray] | None = None
     for idx in range(len(planned_stations) - 1):
         prev_station = planned_stations[idx]
@@ -3285,12 +3660,16 @@ def loft_plan_sections(
             len(curr_regions),
         )
         interval = (idx, idx + 1)
+        prev_hole_identity_index = _section_hole_identity_index(
+            effective_stations[idx].section,
+            side="source",
+        )
+        curr_hole_identity_index = _section_hole_identity_index(
+            effective_stations[idx + 1].section,
+            side="target",
+        )
         try:
-            (
-                identity_assignment,
-                interval_identity_pairs,
-                interval_identity_residue,
-            ) = _identity_first_region_assignment(
+            identity_resolution = construct_residual_region_transition(
                 prev_station=effective_stations[idx],
                 curr_station=effective_stations[idx + 1],
                 prev_regions=prev_regions,
@@ -3300,6 +3679,12 @@ def loft_plan_sections(
                 fairness_mode=fairness_mode,
                 fairness_weight=fairness_weight,
                 fairness_iterations=fairness_iterations,
+            )
+            interval_identity_pairs = 0 if identity_resolution is None else len(identity_resolution.exact_pairs)
+            interval_identity_residue = (
+                min(len(prev_regions), len(curr_regions))
+                if identity_resolution is None
+                else identity_resolution.residual_candidate_count
             )
         except ValueError as exc:
             if "invalid_region_identity" in str(exc):
@@ -3315,7 +3700,13 @@ def loft_plan_sections(
             )
         identity_resolved_pair_count += interval_identity_pairs
         identity_residual_region_count += interval_identity_residue
-        if identity_assignment is not None:
+        if identity_resolution is not None:
+            identity_transition_resolutions.append(
+                {
+                    "interval": interval,
+                    **identity_resolution.canonical_payload(),
+                }
+            )
             ambiguity_class = "none"
         else:
             ambiguity_class = _classify_region_transition_ambiguity(
@@ -3324,16 +3715,20 @@ def loft_plan_sections(
                 ambiguity_max_branches=int(ambiguity_max_branches),
                 ambiguity_cost_profile=ambiguity_cost_profile,
             )
-        selected_region_assignment: tuple[int, ...] | None = identity_assignment
+        selected_region_assignment: tuple[int, ...] | None = None
         selected_hole_assignments: dict[tuple[str, int, str, int], tuple[int, ...]] = {}
-        ambiguity_candidates = _enumerate_region_ambiguity_candidates(
-            prev_regions=prev_regions,
-            curr_regions=curr_regions,
-            interval=interval,
-            topology_case=topology_case,
-            ambiguity_class=ambiguity_class,
-            ambiguity_cost_profile=ambiguity_cost_profile,
-            ambiguity_max_branches=int(ambiguity_max_branches),
+        ambiguity_candidates = (
+            ()
+            if identity_resolution is not None
+            else _enumerate_region_ambiguity_candidates(
+                prev_regions=prev_regions,
+                curr_regions=curr_regions,
+                interval=interval,
+                topology_case=topology_case,
+                ambiguity_class=ambiguity_class,
+                ambiguity_cost_profile=ambiguity_cost_profile,
+                ambiguity_max_branches=int(ambiguity_max_branches),
+            )
         )
         if split_merge_mode == "resolve" and resolved_ambiguity_mode == "fail" and ambiguity_class != "none":
             _raise_structured_ambiguity_error(
@@ -3390,7 +3785,7 @@ def loft_plan_sections(
             ambiguity_class_counts[ambiguity_class] = ambiguity_class_counts.get(ambiguity_class, 0) + 1
             ambiguity_resolved_intervals_count += 1
         region_order_override: tuple[int, ...] | None = None
-        if fairness_mode == "global" and topology_case == "one_to_one" and identity_assignment is None:
+        if fairness_mode == "global" and topology_case == "one_to_one" and identity_resolution is None:
             (
                 region_order_override,
                 interval_optimizer_ran,
@@ -3414,18 +3809,10 @@ def loft_plan_sections(
             transitions = _pair_sections_for_transition(
                 prev_regions,
                 curr_regions,
-                split_merge_mode=split_merge_mode,
-                split_merge_steps=split_merge_steps,
-                split_merge_bias=split_merge_bias,
-                ambiguity_mode=resolved_ambiguity_mode,
-                ambiguity_cost_profile=ambiguity_cost_profile,
-                ambiguity_max_branches=int(ambiguity_max_branches),
-                fairness_mode=fairness_mode,
-                fairness_weight=fairness_weight,
-                skeleton_mode=skeleton_mode,
-                fairness_iterations=fairness_iterations,
+                options=planner_options,
                 region_order_override=region_order_override,
                 many_to_many_assignment_override=selected_region_assignment,
+                region_identity_resolution=identity_resolution,
                 hole_assignment_overrides=selected_hole_assignments,
             )
         except ValueError as exc:
@@ -3442,6 +3829,35 @@ def loft_plan_sections(
                 detail=message,
             )
 
+        for region_pair in tuple(
+            _as_planned_region_pair(transition, interval=interval, pair_index=pair_index)
+            for pair_index, transition in enumerate(transitions)
+        ):
+            if region_pair.prev_region_ref.kind != "actual" or region_pair.curr_region_ref.kind != "actual":
+                continue
+            prev_region_index = region_pair.prev_region_ref.index
+            curr_region_index = region_pair.curr_region_ref.index
+            assignment, resolved_count = _identity_first_hole_assignment(
+                list(prev_regions[prev_region_index][1:]),
+                list(curr_regions[curr_region_index][1:]),
+                prev_hole_identity_index[prev_region_index],
+                curr_hole_identity_index[curr_region_index],
+            )
+            if assignment is None:
+                continue
+            selected_hole_assignments[_transition_hole_assignment_key(region_pair)] = assignment
+            hole_identity_resolved_pair_count += resolved_count
+        if selected_hole_assignments:
+            transitions = _pair_sections_for_transition(
+                prev_regions,
+                curr_regions,
+                options=planner_options,
+                region_order_override=region_order_override,
+                many_to_many_assignment_override=selected_region_assignment,
+                region_identity_resolution=identity_resolution,
+                hole_assignment_overrides=selected_hole_assignments,
+            )
+
         if ambiguity_class == "none":
             hole_candidate_reports: list[LoftAmbiguityCandidate] = []
             for region_pair in tuple(
@@ -3449,6 +3865,8 @@ def loft_plan_sections(
                 for pair_index, transition in enumerate(transitions)
             ):
                 if region_pair.prev_region_ref.kind != "actual" or region_pair.curr_region_ref.kind != "actual":
+                    continue
+                if _transition_hole_assignment_key(region_pair) in selected_hole_assignments:
                     continue
                 prev_region = prev_regions[region_pair.prev_region_ref.index]
                 curr_region = curr_regions[region_pair.curr_region_ref.index]
@@ -3511,18 +3929,10 @@ def loft_plan_sections(
                     transitions = _pair_sections_for_transition(
                         prev_regions,
                         curr_regions,
-                        split_merge_mode=split_merge_mode,
-                        split_merge_steps=split_merge_steps,
-                        split_merge_bias=split_merge_bias,
-                        ambiguity_mode=resolved_ambiguity_mode,
-                        ambiguity_cost_profile=ambiguity_cost_profile,
-                        ambiguity_max_branches=int(ambiguity_max_branches),
-                        fairness_mode=fairness_mode,
-                        fairness_weight=fairness_weight,
-                        skeleton_mode=skeleton_mode,
-                        fairness_iterations=fairness_iterations,
+                        options=planner_options,
                         region_order_override=region_order_override,
                         many_to_many_assignment_override=selected_region_assignment,
+                        region_identity_resolution=identity_resolution,
                         hole_assignment_overrides=selected_hole_assignments,
                     )
         previous_interval_vectors = _transition_curr_vectors(
@@ -3531,22 +3941,34 @@ def loft_plan_sections(
             transitions=transitions,
         )
         planned_pairs = tuple(
-            _as_planned_region_pair(
-                transition,
-                interval=interval,
-                pair_index=pair_index,
+            _annotate_planned_hole_identities(
+                _as_planned_region_pair(
+                    transition,
+                    interval=interval,
+                    pair_index=pair_index,
+                ),
+                prev_hole_identity_index[
+                    transition.prev_region_ref.index
+                ] if transition.prev_region_ref.kind == "actual" else (),
+                curr_hole_identity_index[
+                    transition.curr_region_ref.index
+                ] if transition.curr_region_ref.kind == "actual" else (),
             )
             for pair_index, transition in enumerate(transitions)
         )
+        planned_transition = PlannedTransition(
+            interval=interval,
+            region_pairs=planned_pairs,
+            branch_order=tuple(pair.branch_id for pair in planned_pairs),
+            topology_case=topology_case,
+            ambiguity_class=ambiguity_class,
+            prev_region_count=len(prev_regions),
+            curr_region_count=len(curr_regions),
+        )
         planned_transitions.append(
-            PlannedTransition(
-                interval=interval,
-                region_pairs=planned_pairs,
-                branch_order=tuple(pair.branch_id for pair in planned_pairs),
-                topology_case=topology_case,
-                ambiguity_class=ambiguity_class,
-                prev_region_count=len(prev_regions),
-                curr_region_count=len(curr_regions),
+            replace(
+                planned_transition,
+                junction_events=build_loft_junction_events(planned_transition),
             )
         )
 
@@ -3586,6 +4008,18 @@ def loft_plan_sections(
         for station in effective_stations
         if station.section is not None
     )
+    synthetic_station_lineage_records = tuple(
+        lineage
+        for station in effective_stations
+        if station.section is not None
+        for lineage in (station.section.metadata.get("synthetic_station_lineage"),)
+        if isinstance(lineage, SyntheticStationLineage)
+    )
+    junction_event_records = tuple(
+        event
+        for transition in planned_transitions
+        for event in transition.junction_events
+    )
     plan = LoftPlan(
         samples=samples,
         stations=tuple(planned_stations),
@@ -3600,6 +4034,7 @@ def loft_plan_sections(
             "ambiguity_selection_policy": ambiguity_selection_policy,
             "ambiguity_cost_profile": ambiguity_cost_profile,
             "ambiguity_max_branches": int(ambiguity_max_branches),
+            "planner_options": planner_options.canonical_payload(),
             "disambiguation_mode": disambiguation_mode,
             "disambiguation_seed": int(resolved_disambiguation_seed),
             "probabilistic_trials": int(probabilistic_trials),
@@ -3614,6 +4049,8 @@ def loft_plan_sections(
             "probabilistic_selected_candidate_ids": dict(probabilistic_selected_candidate_ids),
             "identity_resolved_pair_count": int(identity_resolved_pair_count),
             "identity_residual_region_count": int(identity_residual_region_count),
+            "identity_transition_resolutions": tuple(identity_transition_resolutions),
+            "hole_identity_resolved_pair_count": int(hole_identity_resolved_pair_count),
             "region_topology_case_counts": _count_region_topology_cases(planned_transitions),
             "region_action_counts": _count_region_actions(planned_transitions),
             "fairness_mode": fairness_mode,
@@ -3629,6 +4066,15 @@ def loft_plan_sections(
             "fairness_diagnostics": fairness_diagnostics,
             "fairness_optimization_convergence_status": fairness_convergence_status,
             "source_topology_paths": source_topology_paths,
+            "synthetic_station_lineages": tuple(
+                lineage.canonical_payload()
+                for lineage in synthetic_station_lineage_records
+            ),
+            "synthetic_station_lineage_records": synthetic_station_lineage_records,
+            "loft_junction_events": tuple(
+                event.canonical_payload() for event in junction_event_records
+            ),
+            "loft_junction_event_records": junction_event_records,
         },
     )
     _validate_loft_plan(plan)
@@ -3660,14 +4106,25 @@ def loft_plan_ambiguities(
     _validate_ambiguity_max_branches(ambiguity_max_branches)
     _validate_section_stations(stations)
     _validate_station_hole_topology(stations)
+    planner_options = LoftPlannerOptions(
+        split_merge_mode=split_merge_mode,
+        split_merge_steps=int(split_merge_steps),
+        split_merge_bias=float(split_merge_bias),
+        ambiguity_mode="auto",
+        ambiguity_cost_profile=ambiguity_cost_profile,
+        ambiguity_max_branches=int(ambiguity_max_branches),
+        fairness_mode="local",
+        fairness_weight=0.2,
+        skeleton_mode="auto",
+        fairness_iterations=12,
+    )
 
     effective_stations = list(stations)
     if split_merge_mode == "resolve":
         effective_stations = _expand_split_merge_stations(
             stations=effective_stations,
             samples=samples,
-            split_merge_steps=split_merge_steps,
-            split_merge_bias=split_merge_bias,
+            options=planner_options,
         )
         _validate_section_stations(effective_stations)
 
@@ -3714,12 +4171,7 @@ def loft_plan_ambiguities(
             transitions = _pair_sections_for_transition(
                 prev_regions,
                 curr_regions,
-                split_merge_mode=split_merge_mode,
-                split_merge_steps=split_merge_steps,
-                split_merge_bias=split_merge_bias,
-                ambiguity_mode="auto",
-                ambiguity_cost_profile=ambiguity_cost_profile,
-                ambiguity_max_branches=int(ambiguity_max_branches),
+                options=planner_options,
             )
         except ValueError:
             continue
@@ -3964,6 +4416,12 @@ def _loft_execute_plan_surface(
 
     _validate_loft_plan(plan)
     plan.require_executable()
+    junction_event_records = tuple(
+        event for transition in plan.transitions for event in transition.junction_events
+    )
+    junction_event_payloads = tuple(
+        event.canonical_payload() for event in junction_event_records
+    )
 
     patches: list[object] = []
     seams: list[SurfaceSeam] = []
@@ -4012,6 +4470,12 @@ def _loft_execute_plan_surface(
         prev_station = plan.stations[prev_idx]
         curr_station = plan.stations[curr_idx]
         region_pairs_by_branch = {pair.branch_id: pair for pair in transition.region_pairs}
+        junction_event_ids_by_branch = {
+            branch_id: tuple(
+                event.id for event in transition.junction_events if event.branch_id == branch_id
+            )
+            for branch_id in transition.branch_order
+        }
         family_selection = family_selection_by_interval.get(
             transition.interval,
             classify_loft_patch_family(transition).canonical_payload(),
@@ -4112,6 +4576,11 @@ def _loft_execute_plan_surface(
                     loop_ref = loop_pair.prev_loop_ref if closure.side == "prev" else loop_pair.curr_loop_ref
                     region_ref = region_pair.prev_region_ref if closure.side == "prev" else region_pair.curr_region_ref
                     patch_index = len(patches)
+                    closure_surface_role = (
+                        "interior_junction"
+                        if loop_pair.role in {"synthetic_birth", "synthetic_death"}
+                        else "closure-cap"
+                    )
                     patches.append(
                         _loft_planar_patch_from_station_loops(
                             station,
@@ -4120,11 +4589,12 @@ def _loft_execute_plan_surface(
                                 "kernel": {
                                     "operation": "loft",
                                     "executor": "surface",
-                                    "surface_role": "closure-cap",
+                                    "surface_role": closure_surface_role,
                                     "closure_scope": "loop",
                                     "closure_side": closure.side,
                                     "branch_id": branch_id,
                                     "loop_index": closure.loop_index,
+                                    "junction_event_ids": junction_event_ids_by_branch.get(branch_id, ()),
                                 }
                             },
                         )
@@ -4147,6 +4617,11 @@ def _loft_execute_plan_surface(
                         for loop_pair in region_pair.loop_pairs
                     )
                     patch_index = len(patches)
+                    closure_surface_role = (
+                        "interior_junction"
+                        if region_pair.action in {"split_birth", "merge_death"}
+                        else "closure-cap"
+                    )
                     patches.append(
                         _loft_planar_patch_from_station_loops(
                             station,
@@ -4155,10 +4630,11 @@ def _loft_execute_plan_surface(
                                 "kernel": {
                                     "operation": "loft",
                                     "executor": "surface",
-                                    "surface_role": "closure-cap",
+                                    "surface_role": closure_surface_role,
                                     "closure_scope": "region",
                                     "closure_side": closure.side,
                                     "branch_id": branch_id,
+                                    "junction_event_ids": junction_event_ids_by_branch.get(branch_id, ()),
                                 }
                             },
                         )
@@ -4238,11 +4714,20 @@ def _loft_execute_plan_surface(
             "station_count": len(plan.stations),
             "identity_resolved_pair_count": plan.metadata.get("identity_resolved_pair_count", 0),
             "identity_residual_region_count": plan.metadata.get("identity_residual_region_count", 0),
+            "identity_transition_resolutions": plan.metadata.get("identity_transition_resolutions", ()),
+            "hole_identity_resolved_pair_count": plan.metadata.get("hole_identity_resolved_pair_count", 0),
             "loft_boundary_graph": boundary_graph.canonical_payload(),
             "loft_cap_validity": cap_validity.canonical_payload(),
             "loft_closure_evidence": closure_evidence.canonical_payload(),
             "loft_seam_coverage": seam_coverage.canonical_payload(),
             "source_topology_paths": plan.metadata.get("source_topology_paths", ()),
+            "synthetic_station_lineages": plan.metadata.get("synthetic_station_lineages", ()),
+            "synthetic_station_lineage_records": plan.metadata.get(
+                "synthetic_station_lineage_records",
+                (),
+            ),
+            "loft_junction_events": junction_event_payloads,
+            "loft_junction_event_records": junction_event_records,
         },
     }
     shell = make_surface_shell(
@@ -4862,6 +5347,279 @@ def _to_planned_region_ref(ref: _RegionRef) -> PlannedRegionRef:
     return PlannedRegionRef(kind=ref.kind, index=ref.index)
 
 
+def _junction_loop_identity(
+    loop_ref: PlannedLoopRef,
+    *,
+    branch_id: str,
+    loop_pair_index: int,
+) -> str:
+    if loop_ref.identity is not None and str(loop_ref.identity).strip():
+        return str(loop_ref.identity).strip()
+    if loop_ref.topology_path is not None and str(loop_ref.topology_path.id).strip():
+        return str(loop_ref.topology_path.id).strip()
+    return f"{branch_id}:hole-{loop_pair_index}"
+
+
+def derive_loft_junction_boundary_inputs(
+    region_pair: PlannedRegionPair,
+    *,
+    station_interval: tuple[int, int],
+) -> tuple[LoftJunctionBoundaryRingInput, ...]:
+    """Derive deterministic boundary-ring inputs for a hole-junction event."""
+
+    prev_idx, curr_idx = station_interval
+    rings: list[LoftJunctionBoundaryRingInput] = []
+    for loop_pair_index, loop_pair in enumerate(region_pair.loop_pairs):
+        if (
+            loop_pair.role == "stable"
+            and loop_pair.prev_loop_ref.kind == "actual"
+            and loop_pair.prev_loop_ref.index == 0
+            and loop_pair.curr_loop_ref.kind == "actual"
+            and loop_pair.curr_loop_ref.index == 0
+        ):
+            continue
+        if loop_pair.role == "synthetic_birth":
+            identity = _junction_loop_identity(
+                loop_pair.curr_loop_ref,
+                branch_id=region_pair.branch_id,
+                loop_pair_index=loop_pair_index,
+            )
+            roles = ("synthetic_support", "born")
+        elif loop_pair.role == "synthetic_death":
+            identity = _junction_loop_identity(
+                loop_pair.prev_loop_ref,
+                branch_id=region_pair.branch_id,
+                loop_pair_index=loop_pair_index,
+            )
+            roles = ("closing", "synthetic_support")
+        else:
+            prev_identity = loop_pair.prev_loop_ref.identity
+            curr_identity = loop_pair.curr_loop_ref.identity
+            if prev_identity and curr_identity and prev_identity != curr_identity:
+                raise ValueError(
+                    "invalid_loft_junction_lineage continuing hole identities disagree "
+                    f"on branch {region_pair.branch_id!r}: {prev_identity!r} != {curr_identity!r}"
+                )
+            identity = _junction_loop_identity(
+                loop_pair.prev_loop_ref if prev_identity else loop_pair.curr_loop_ref,
+                branch_id=region_pair.branch_id,
+                loop_pair_index=loop_pair_index,
+            )
+            roles = ("continuing", "continuing")
+        for station_index, side, role, region_ref, loop_ref, points in (
+            (
+                prev_idx,
+                "prev",
+                roles[0],
+                region_pair.prev_region_ref,
+                loop_pair.prev_loop_ref,
+                loop_pair.prev_loop,
+            ),
+            (
+                curr_idx,
+                "curr",
+                roles[1],
+                region_pair.curr_region_ref,
+                loop_pair.curr_loop_ref,
+                loop_pair.curr_loop,
+            ),
+        ):
+            rings.append(
+                LoftJunctionBoundaryRingInput(
+                    station_index=station_index,
+                    side=side,
+                    role=role,
+                    loop_identity=identity,
+                    region_ref=region_ref,
+                    loop_ref=loop_ref,
+                    points=tuple(tuple(float(value) for value in point) for point in points),
+                )
+            )
+    return tuple(rings)
+
+
+def build_loft_junction_events(
+    transition: PlannedTransition,
+) -> tuple[LoftJunctionEvent, ...]:
+    """Build one explicit junction event for each count-changing hole branch."""
+
+    events: list[LoftJunctionEvent] = []
+    for region_pair in transition.region_pairs:
+        birth_pairs = tuple(
+            pair for pair in region_pair.loop_pairs if pair.role == "synthetic_birth"
+        )
+        death_pairs = tuple(
+            pair for pair in region_pair.loop_pairs if pair.role == "synthetic_death"
+        )
+        if not birth_pairs and not death_pairs:
+            continue
+        if birth_pairs and death_pairs:
+            raise ValueError(
+                "invalid_loft_junction_lineage branch contains both born and closing holes "
+                f"({region_pair.branch_id!r})"
+            )
+        direction = "one_to_many" if birth_pairs else "many_to_one"
+        continuing: list[str] = []
+        born: list[str] = []
+        closing: list[str] = []
+        for loop_pair_index, loop_pair in enumerate(region_pair.loop_pairs):
+            if loop_pair.role == "stable":
+                if loop_pair.prev_loop_ref.index == 0 and loop_pair.curr_loop_ref.index == 0:
+                    continue
+                identity = _junction_loop_identity(
+                    loop_pair.prev_loop_ref
+                    if loop_pair.prev_loop_ref.identity
+                    else loop_pair.curr_loop_ref,
+                    branch_id=region_pair.branch_id,
+                    loop_pair_index=loop_pair_index,
+                )
+                continuing.append(identity)
+            elif loop_pair.role == "synthetic_birth":
+                born.append(
+                    _junction_loop_identity(
+                        loop_pair.curr_loop_ref,
+                        branch_id=region_pair.branch_id,
+                        loop_pair_index=loop_pair_index,
+                    )
+                )
+            elif loop_pair.role == "synthetic_death":
+                closing.append(
+                    _junction_loop_identity(
+                        loop_pair.prev_loop_ref,
+                        branch_id=region_pair.branch_id,
+                        loop_pair_index=loop_pair_index,
+                    )
+                )
+        event = LoftJunctionEvent(
+            id=f"{region_pair.branch_id}:hole-junction:{direction}",
+            station_interval=transition.interval,
+            branch_id=region_pair.branch_id,
+            direction=direction,
+            continuing_loop_ids=tuple(continuing),
+            born_loop_ids=tuple(born),
+            closing_loop_ids=tuple(closing),
+            boundary_rings=derive_loft_junction_boundary_inputs(
+                region_pair,
+                station_interval=transition.interval,
+            ),
+        )
+        validate_loft_junction_event(event)
+        events.append(event)
+    return tuple(events)
+
+
+def validate_loft_junction_event(event: LoftJunctionEvent) -> LoftJunctionEvent:
+    """Validate one immutable junction event and return it unchanged."""
+
+    if not event.id or not event.branch_id:
+        raise ValueError("invalid_loft_junction_lineage event id and branch_id must be non-empty")
+    if (
+        len(event.station_interval) != 2
+        or event.station_interval[1] != event.station_interval[0] + 1
+    ):
+        raise ValueError("invalid_loft_junction_lineage station_interval must be consecutive")
+    if event.direction not in {"one_to_many", "many_to_one"}:
+        raise ValueError(
+            "invalid_loft_junction_lineage direction must be one_to_many or many_to_one"
+        )
+    if event.surface_role != "interior_junction" or event.terminal_cap_allowed:
+        raise ValueError(
+            "invalid_loft_junction_lineage hole change must be an interior junction and not a terminal cap"
+        )
+    identity_groups = (
+        event.continuing_loop_ids,
+        event.born_loop_ids,
+        event.closing_loop_ids,
+    )
+    identities = tuple(identity for group in identity_groups for identity in group)
+    if any(not str(identity).strip() for identity in identities) or len(set(identities)) != len(
+        identities
+    ):
+        raise ValueError(
+            "invalid_loft_junction_lineage loop identities must be non-empty and unique"
+        )
+    if event.direction == "one_to_many" and (not event.born_loop_ids or event.closing_loop_ids):
+        raise ValueError("invalid_loft_junction_lineage one_to_many requires born loops only")
+    if event.direction == "many_to_one" and (not event.closing_loop_ids or event.born_loop_ids):
+        raise ValueError("invalid_loft_junction_lineage many_to_one requires closing loops only")
+    if not event.boundary_rings:
+        raise ValueError("invalid_loft_junction_lineage boundary rings are required")
+    valid_roles = {"continuing", "born", "closing", "synthetic_support"}
+    ring_coverage: set[tuple[str, str, str]] = set()
+    for ring in event.boundary_rings:
+        if ring.side not in {"prev", "curr"} or ring.role not in valid_roles:
+            raise ValueError("invalid_loft_junction_lineage boundary ring side or role is invalid")
+        if ring.station_index not in event.station_interval:
+            raise ValueError("invalid_loft_junction_lineage boundary ring station is outside interval")
+        expected_station = (
+            event.station_interval[0]
+            if ring.side == "prev"
+            else event.station_interval[1]
+        )
+        if ring.station_index != expected_station:
+            raise ValueError(
+                "invalid_loft_junction_lineage boundary ring side does not match station"
+            )
+        points = np.asarray(ring.points, dtype=float)
+        if (
+            points.ndim != 2
+            or points.shape[0] < 3
+            or points.shape[1] != 2
+            or not np.all(np.isfinite(points))
+        ):
+            raise ValueError("invalid_loft_junction_lineage boundary ring points must be finite Nx2")
+        if ring.surface_role != "interior_junction" or not ring.loop_identity:
+            raise ValueError(
+                "invalid_loft_junction_lineage boundary ring intent or identity is incomplete"
+            )
+        if ring.loop_identity not in identities:
+            raise ValueError(
+                "invalid_loft_junction_lineage boundary ring references unknown loop identity"
+            )
+        coverage_key = (ring.loop_identity, ring.side, ring.role)
+        if coverage_key in ring_coverage:
+            raise ValueError(
+                "invalid_loft_junction_lineage duplicate boundary ring role ownership"
+            )
+        ring_coverage.add(coverage_key)
+    expected_ring_coverage = {
+        (identity, side, "continuing")
+        for identity in event.continuing_loop_ids
+        for side in ("prev", "curr")
+    }
+    expected_ring_coverage.update(
+        (identity, side, role)
+        for identity in event.born_loop_ids
+        for side, role in (("prev", "synthetic_support"), ("curr", "born"))
+    )
+    expected_ring_coverage.update(
+        (identity, side, role)
+        for identity in event.closing_loop_ids
+        for side, role in (("prev", "closing"), ("curr", "synthetic_support"))
+    )
+    if ring_coverage != expected_ring_coverage:
+        raise ValueError(
+            "invalid_loft_junction_lineage boundary rings do not exactly cover loop roles"
+        )
+    return event
+
+
+def validate_loft_junction_events(
+    transition: PlannedTransition,
+) -> tuple[LoftJunctionEvent, ...]:
+    """Validate coverage and deterministic ownership for one transition."""
+
+    expected = build_loft_junction_events(replace(transition, junction_events=()))
+    actual = tuple(validate_loft_junction_event(event) for event in transition.junction_events)
+    if tuple(event.canonical_payload() for event in actual) != tuple(
+        event.canonical_payload() for event in expected
+    ):
+        raise ValueError(
+            "invalid_loft_junction_lineage transition junction events do not exactly cover planned hole changes"
+        )
+    return actual
+
+
 def _validate_loft_plan(plan: LoftPlan) -> None:
     if plan.samples < 3:
         raise ValueError("Invalid loft plan: samples must be >= 3.")
@@ -5287,6 +6045,28 @@ def _validate_loft_plan(plan: LoftPlan) -> None:
             raise ValueError(
                 f"Invalid loft plan transition interval {expected_interval}: "
                 "branch_order must match region_pairs emission order."
+            )
+        validate_loft_junction_events(transition)
+
+    junction_event_records = tuple(
+        event for transition in plan.transitions for event in transition.junction_events
+    )
+    junction_event_payloads = tuple(
+        event.canonical_payload() for event in junction_event_records
+    )
+    if "loft_junction_events" in plan.metadata and tuple(
+        plan.metadata["loft_junction_events"]
+    ) != junction_event_payloads:
+        raise ValueError(
+            "invalid_loft_junction_lineage plan metadata does not match transition events"
+        )
+    if "loft_junction_event_records" in plan.metadata:
+        metadata_records = tuple(plan.metadata["loft_junction_event_records"])
+        if not all(isinstance(event, LoftJunctionEvent) for event in metadata_records) or tuple(
+            event.canonical_payload() for event in metadata_records
+        ) != junction_event_payloads:
+            raise ValueError(
+                "invalid_loft_junction_lineage plan record metadata is incomplete or stale"
             )
 
 
@@ -5957,13 +6737,273 @@ def _canonicalize_section_for_loft(
     return canonical
 
 
+def _section_loop_topology_paths(
+    section: Section,
+) -> tuple[tuple[TopologyPath | None, ...], ...]:
+    """Locate topology paths for every canonical outer and hole loop."""
+
+    canonical = _canonicalize_section_for_loft(section)
+    assert isinstance(canonical, Section)
+    slots: list[list[TopologyPath | None]] = [
+        [None] * (1 + len(region.holes))
+        for region in canonical.regions
+    ]
+    candidates_by_key: dict[tuple[float, ...], list[tuple[int, int]]] = {}
+    for region_index, region in enumerate(canonical.regions):
+        for loop_index, loop in enumerate(
+            (region.outer.points, *(hole.points for hole in region.holes))
+        ):
+            key = tuple(round(value, 8) for value in _loop_sort_key(loop)[:4])
+            candidates_by_key.setdefault(key, []).append((region_index, loop_index))
+    for path in tuple(section.metadata.get("topology_paths", ())):
+        if not isinstance(path, TopologyPath):
+            continue
+        path_key = tuple(
+            round(value, 8)
+            for value in _loop_sort_key(path.to_section_loop().points)[:4]
+        )
+        matches = tuple(candidates_by_key.get(path_key, ()))
+        if len(matches) > 1:
+            raise ValueError(
+                f"invalid_synthetic_lineage topology path {path.id!r} matches multiple loops"
+            )
+        if not matches:
+            continue
+        region_index, loop_index = matches[0]
+        existing = slots[region_index][loop_index]
+        if existing is not None and existing.id != path.id:
+            raise ValueError(
+                "invalid_synthetic_lineage conflicting topology paths "
+                f"{existing.id!r} and {path.id!r} map to one loop"
+            )
+        slots[region_index][loop_index] = path
+    return tuple(tuple(region_slots) for region_slots in slots)
+
+
+def _stable_lineage_token(value: float) -> str:
+    return format(float(value), ".12g").replace("-", "m").replace(".", "p")
+
+
+def _derived_region_lineage_identity(
+    prev: Station,
+    curr: Station,
+    transition: _PairedSectionTransition,
+) -> str:
+    refs = sorted(
+        (
+            f"{transition.prev_region_ref.kind}-{transition.prev_region_ref.index}",
+            f"{transition.curr_region_ref.kind}-{transition.curr_region_ref.index}",
+        )
+    )
+    return (
+        "synthetic-region-"
+        f"{_stable_lineage_token(prev.t)}-{_stable_lineage_token(curr.t)}-"
+        f"{refs[0]}-{refs[1]}"
+    )
+
+
+def _transition_region_identity(
+    prev: Station,
+    curr: Station,
+    transition: _PairedSectionTransition,
+) -> tuple[str, frozenset[str]]:
+    prev_ids = (
+        prev.successor_ids[transition.prev_region_ref.index]
+        if transition.prev_region_ref.kind == "actual"
+        else frozenset()
+    )
+    curr_ids = (
+        curr.predecessor_ids[transition.curr_region_ref.index]
+        if transition.curr_region_ref.kind == "actual"
+        else frozenset()
+    )
+    explicit_ids = prev_ids | curr_ids
+    if len(explicit_ids) > 1:
+        raise ValueError(
+            "invalid_synthetic_lineage conflicting region ids "
+            f"source={tuple(sorted(prev_ids))} target={tuple(sorted(curr_ids))}"
+        )
+    if explicit_ids:
+        return next(iter(explicit_ids)), explicit_ids
+    return _derived_region_lineage_identity(prev, curr, transition), frozenset()
+
+
+def _transition_loop_path(
+    paths: tuple[tuple[TopologyPath | None, ...], ...],
+    region_ref: _RegionRef,
+    loop_ref: _LoopRef,
+) -> TopologyPath | None:
+    if region_ref.kind != "actual" or loop_ref.kind != "actual":
+        return None
+    region_paths = paths[region_ref.index]
+    return region_paths[loop_ref.index] if loop_ref.index < len(region_paths) else None
+
+
+def _derived_loop_lineage_identity(
+    region_identity: str,
+    prev_ref: _LoopRef,
+    curr_ref: _LoopRef,
+    prev_path: TopologyPath | None,
+    curr_path: TopologyPath | None,
+) -> str:
+    path_ids = sorted(
+        path.id
+        for path in (prev_path, curr_path)
+        if path is not None
+    )
+    if path_ids and len(set(path_ids)) == 1:
+        return path_ids[0]
+    if path_ids:
+        return f"{region_identity}-loop-{'--'.join(path_ids)}"
+    refs = sorted((f"{prev_ref.kind}-{prev_ref.index}", f"{curr_ref.kind}-{curr_ref.index}"))
+    return f"{region_identity}-loop-{refs[0]}-{refs[1]}"
+
+
+def _lineage_topology_path(
+    identity: str,
+    loop: np.ndarray,
+    *,
+    lineage_only: bool,
+) -> TopologyPath:
+    named_points = tuple(
+        (f"{identity}-sample-{index}", tuple(float(value) for value in point))
+        for index, point in enumerate(np.asarray(loop, dtype=float))
+    )
+    path = TopologyPath.from_points(named_points, id=identity)
+    return replace(
+        path,
+        metadata={
+            **path.metadata,
+            "synthetic_lineage": True,
+            "synthetic_lineage_only": bool(lineage_only),
+        },
+    )
+
+
+def _synthetic_station_from_transition_lineage(
+    *,
+    prev: Station,
+    curr: Station,
+    u: float,
+    stage_index: int,
+    stage_count: int,
+    staged_region_loops: list[list[np.ndarray]],
+    transitions: list[_PairedSectionTransition],
+) -> Station:
+    prev_paths = _section_loop_topology_paths(prev.section) if prev.section is not None else ()
+    curr_paths = _section_loop_topology_paths(curr.section) if curr.section is not None else ()
+    staged_section = _section_from_region_loops(staged_region_loops, color=curr.section.color)
+    _canonical, region_order = _canonicalize_section_for_loft(staged_section, return_region_order=True)
+
+    unordered_regions: list[SyntheticRegionLineage] = []
+    unordered_paths: list[tuple[TopologyPath, ...]] = []
+    for transition, loops in zip(transitions, staged_region_loops, strict=True):
+        region_identity, directional_ids = _transition_region_identity(prev, curr, transition)
+        loop_identities: list[str] = []
+        predecessor_loop_ids: list[str | None] = []
+        successor_loop_ids: list[str | None] = []
+        generated_paths: list[TopologyPath] = []
+        for loop, prev_loop_ref, curr_loop_ref in zip(
+            loops,
+            transition.region.prev_sources,
+            transition.region.curr_sources,
+            strict=True,
+        ):
+            prev_path = _transition_loop_path(
+                prev_paths,
+                transition.prev_region_ref,
+                prev_loop_ref,
+            )
+            curr_path = _transition_loop_path(
+                curr_paths,
+                transition.curr_region_ref,
+                curr_loop_ref,
+            )
+            loop_identity = _derived_loop_lineage_identity(
+                region_identity,
+                prev_loop_ref,
+                curr_loop_ref,
+                prev_path,
+                curr_path,
+            )
+            loop_identities.append(loop_identity)
+            predecessor_loop_ids.append(None if prev_path is None else prev_path.id)
+            successor_loop_ids.append(None if curr_path is None else curr_path.id)
+            generated_paths.append(
+                _lineage_topology_path(
+                    loop_identity,
+                    loop,
+                    lineage_only=prev_path is None and curr_path is None,
+                )
+            )
+        unordered_regions.append(
+            SyntheticRegionLineage(
+                identity=region_identity,
+                prev_region_ref=(
+                    transition.prev_region_ref.kind,
+                    transition.prev_region_ref.index,
+                ),
+                curr_region_ref=(
+                    transition.curr_region_ref.kind,
+                    transition.curr_region_ref.index,
+                ),
+                predecessor_ids=directional_ids,
+                successor_ids=directional_ids,
+                loop_identities=tuple(loop_identities),
+                predecessor_loop_ids=tuple(predecessor_loop_ids),
+                successor_loop_ids=tuple(successor_loop_ids),
+            )
+        )
+        unordered_paths.append(tuple(generated_paths))
+
+    regions = tuple(unordered_regions[index] for index in region_order)
+    region_paths = tuple(unordered_paths[index] for index in region_order)
+    topology_paths = tuple(paths[0] for paths in region_paths) + tuple(
+        path
+        for paths in region_paths
+        for path in paths[1:]
+    )
+    station_t = (1.0 - float(u)) * prev.t + float(u) * curr.t
+    lineage = SyntheticStationLineage(
+        identity=(
+            "synthetic-station-"
+            f"{_stable_lineage_token(prev.t)}-{_stable_lineage_token(curr.t)}-"
+            f"{stage_index + 1}-of-{stage_count}"
+        ),
+        source_interval=(prev.t, curr.t),
+        stage_index=stage_index,
+        stage_count=stage_count,
+        station_t=station_t,
+        regions=regions,
+        topology_paths=topology_paths,
+    )
+    section = Section(
+        tuple(_canonical.regions),
+        color=_canonical.color,
+        metadata={
+            **_canonical.metadata,
+            "topology_paths": topology_paths,
+            "synthetic_station_lineage": lineage,
+        },
+    )
+    return _interpolate_station(
+        prev,
+        curr,
+        float(u),
+        section,
+        predecessor_ids=tuple(region.predecessor_ids for region in regions),
+        successor_ids=tuple(region.successor_ids for region in regions),
+    )
+
+
 def _expand_split_merge_stations(
     *,
     stations: list[Station],
     samples: int,
-    split_merge_steps: int,
-    split_merge_bias: float,
+    options: LoftPlannerOptions,
 ) -> list[Station]:
+    split_merge_steps = options.split_merge_steps
+    split_merge_bias = options.split_merge_bias
     if len(stations) < 2 or split_merge_steps <= 1:
         return stations
 
@@ -5980,19 +7020,49 @@ def _expand_split_merge_stations(
             expanded.append(curr)
             continue
 
-        transitions = _pair_sections_for_transition(
-            prev_regions,
-            curr_regions,
-            split_merge_mode="resolve",
-            split_merge_steps=split_merge_steps,
-            split_merge_bias=split_merge_bias,
-        )
+        try:
+            identity_resolution = construct_residual_region_transition(
+                prev_station=prev,
+                curr_station=curr,
+                prev_regions=prev_regions,
+                curr_regions=curr_regions,
+                ambiguity_cost_profile=options.ambiguity_cost_profile,
+                ambiguity_max_branches=options.ambiguity_max_branches,
+                fairness_mode=options.fairness_mode,
+                fairness_weight=options.fairness_weight,
+                fairness_iterations=options.fairness_iterations,
+            )
+            transitions = _pair_sections_for_transition(
+                prev_regions,
+                curr_regions,
+                options=options,
+                region_identity_resolution=identity_resolution,
+            )
+        except ValueError as exc:
+            detail = str(exc)
+            if "unsupported_topology_ambiguity" not in detail:
+                raise
+            ambiguity_class = _classify_region_transition_ambiguity(
+                prev_regions=[region[0] for region in prev_regions],
+                curr_regions=[region[0] for region in curr_regions],
+                ambiguity_max_branches=options.ambiguity_max_branches,
+                ambiguity_cost_profile=options.ambiguity_cost_profile,
+            )
+            raise ValueError(
+                "Unsupported topology transition: unsupported_topology_ambiguity "
+                f"(interval {idx}->{idx + 1}; ambiguity_class={ambiguity_class}; "
+                f"tie_break_stage={_ambiguity_failure_stage(detail)}; "
+                f"candidate_count_after_pruning={_ambiguity_failure_candidate_count(detail)}; "
+                f"ambiguity_max_branches={options.ambiguity_max_branches}; "
+                f"planner_location=split_merge_expansion:{idx}->{idx + 1}; "
+                f"effective_options={options.canonical_payload()}; detail={detail})"
+            ) from exc
         u0 = float(np.clip(split_merge_bias - 0.2, 0.0, 1.0))
         u1 = float(np.clip(split_merge_bias + 0.2, 0.0, 1.0))
         if u1 <= u0:
             u0, u1 = 0.25, 0.75
         u_values = np.linspace(u0, u1, split_merge_steps + 2, dtype=float)[1:-1]
-        for u in u_values:
+        for stage_index, u in enumerate(u_values):
             alpha = (float(u) - u0) / (u1 - u0)
             staged_region_loops: list[list[np.ndarray]] = []
             for transition in transitions:
@@ -6004,8 +7074,17 @@ def _expand_split_merge_stations(
                 ):
                     region_loops.append((1.0 - alpha) * prev_loop + alpha * curr_loop)
                 staged_region_loops.append(region_loops)
-            staged_section = _section_from_region_loops(staged_region_loops, color=curr.section.color)
-            expanded.append(_interpolate_station(prev, curr, float(u), staged_section))
+            expanded.append(
+                _synthetic_station_from_transition_lineage(
+                    prev=prev,
+                    curr=curr,
+                    u=float(u),
+                    stage_index=stage_index,
+                    stage_count=len(u_values),
+                    staged_region_loops=staged_region_loops,
+                    transitions=transitions,
+                )
+            )
         expanded.append(curr)
     return expanded
 
@@ -6050,7 +7129,15 @@ def _section_from_region_loops(
     return Section(tuple(region_objs), color=color).normalized()
 
 
-def _interpolate_station(prev: Station, curr: Station, u: float, section: Section) -> Station:
+def _interpolate_station(
+    prev: Station,
+    curr: Station,
+    u: float,
+    section: Section,
+    *,
+    predecessor_ids: tuple[frozenset[str], ...] = (),
+    successor_ids: tuple[frozenset[str], ...] = (),
+) -> Station:
     u = float(np.clip(u, 0.0, 1.0))
     t = (1.0 - u) * prev.t + u * curr.t
     origin = (1.0 - u) * prev.origin + u * curr.origin
@@ -6058,7 +7145,16 @@ def _interpolate_station(prev: Station, curr: Station, u: float, section: Sectio
     v_vec = (1.0 - u) * prev.v + u * curr.v
     n_vec = (1.0 - u) * prev.n + u * curr.n
     fu, fv, fn = _orthonormalize_frame(u_vec, v_vec, n_vec)
-    return Station(t=t, origin=origin, u=fu, v=fv, n=fn, section=section)
+    return Station(
+        t=t,
+        origin=origin,
+        u=fu,
+        v=fv,
+        n=fn,
+        section=section,
+        predecessor_ids=predecessor_ids,
+        successor_ids=successor_ids,
+    )
 
 
 def _loop_sort_key(loop: np.ndarray) -> tuple[float, ...]:
@@ -6072,113 +7168,262 @@ def _loop_sort_key(loop: np.ndarray) -> tuple[float, ...]:
     return (float(centroid[0]), float(centroid[1]), area, perimeter, *signature)
 
 
-def _identity_first_region_assignment(
+def _section_hole_identity_index(
+    section: Section,
+    *,
+    side: str,
+) -> tuple[tuple[tuple[str | None, TopologyPath | None], ...], ...]:
+    """Map authored topology paths onto canonical hole-loop slots."""
+
+    canonical = _canonicalize_section_for_loft(section)
+    assert isinstance(canonical, Section)
+    indexed: list[list[tuple[str | None, TopologyPath | None]]] = [
+        [(None, None) for _hole in region.holes]
+        for region in canonical.regions
+    ]
+    candidates = tuple(
+        (region_index, hole_index, _loop_sort_key(hole.points)[:4])
+        for region_index, region in enumerate(canonical.regions)
+        for hole_index, hole in enumerate(region.holes)
+    )
+    identities: dict[str, tuple[int, int]] = {}
+    for path in tuple(section.metadata.get("topology_paths", ())):
+        if not isinstance(path, TopologyPath):
+            continue
+        if bool(path.metadata.get("synthetic_lineage_only", False)):
+            continue
+        path_key = _loop_sort_key(path.to_section_loop().points)[:4]
+        matches = tuple(
+            (region_index, hole_index)
+            for region_index, hole_index, hole_key in candidates
+            if np.allclose(path_key, hole_key, atol=1e-8, rtol=0.0)
+        )
+        if not matches:
+            continue
+        if len(matches) != 1:
+            raise ValueError(
+                f"invalid_hole_identity contradictory path {path.id!r} matches multiple normalized holes"
+            )
+        slot = matches[0]
+        identity = str(path.id).strip()
+        if not identity:
+            raise ValueError("invalid_hole_identity authored hole id must be non-empty")
+        if identity in identities:
+            raise ValueError(
+                f"invalid_hole_identity duplicate {side} id {identity!r} on holes "
+                f"{identities[identity]} and {slot}"
+            )
+        if indexed[slot[0]][slot[1]][0] is not None:
+            raise ValueError(f"invalid_hole_identity contradictory paths map to hole {slot}")
+        identities[identity] = slot
+        indexed[slot[0]][slot[1]] = (identity, path)
+    return tuple(tuple(region) for region in indexed)
+
+
+def _identity_first_hole_assignment(
+    prev_holes: list[np.ndarray],
+    curr_holes: list[np.ndarray],
+    prev_identity_slots: tuple[tuple[str | None, TopologyPath | None], ...],
+    curr_identity_slots: tuple[tuple[str | None, TopologyPath | None], ...],
+) -> tuple[tuple[int, ...] | None, int]:
+    """Resolve matching named holes before assigning anonymous residue geometrically."""
+
+    if len(prev_holes) != len(curr_holes):
+        return None, 0
+    prev_by_id = {
+        identity: index
+        for index, (identity, _path) in enumerate(prev_identity_slots)
+        if identity is not None
+    }
+    curr_by_id = {
+        identity: index
+        for index, (identity, _path) in enumerate(curr_identity_slots)
+        if identity is not None
+    }
+    if not prev_by_id and not curr_by_id:
+        return None, 0
+    if set(prev_by_id) != set(curr_by_id):
+        raise ValueError(
+            "invalid_hole_identity contradictory exact id sets "
+            f"source={tuple(sorted(prev_by_id))} target={tuple(sorted(curr_by_id))}"
+        )
+    assignment: list[int | None] = [None] * len(prev_holes)
+    for identity in sorted(prev_by_id):
+        assignment[prev_by_id[identity]] = curr_by_id[identity]
+    prev_residue = tuple(index for index, value in enumerate(assignment) if value is None)
+    used_targets = {value for value in assignment if value is not None}
+    curr_residue = tuple(index for index in range(len(curr_holes)) if index not in used_targets)
+    if len(prev_residue) != len(curr_residue):
+        raise ValueError("invalid_hole_identity named pairing left contradictory anonymous residue")
+    if prev_residue:
+        residue_order = _minimum_cost_hole_assignment(
+            [prev_holes[index] for index in prev_residue],
+            [curr_holes[index] for index in curr_residue],
+        )
+        for source_offset, target_offset in enumerate(residue_order):
+            assignment[prev_residue[source_offset]] = curr_residue[target_offset]
+    return tuple(int(value) for value in assignment if value is not None), len(prev_by_id)
+
+
+def _annotate_planned_hole_identities(
+    region_pair: PlannedRegionPair,
+    prev_identity_slots: tuple[tuple[str | None, TopologyPath | None], ...],
+    curr_identity_slots: tuple[tuple[str | None, TopologyPath | None], ...],
+) -> PlannedRegionPair:
+    loop_pairs: list[PlannedLoopPair] = []
+    for loop_pair in region_pair.loop_pairs:
+        prev_ref = loop_pair.prev_loop_ref
+        curr_ref = loop_pair.curr_loop_ref
+        if prev_ref.kind == "actual" and prev_ref.index > 0 and prev_ref.index - 1 < len(prev_identity_slots):
+            identity, path = prev_identity_slots[prev_ref.index - 1]
+            prev_ref = replace(prev_ref, identity=identity, topology_path=path)
+        if curr_ref.kind == "actual" and curr_ref.index > 0 and curr_ref.index - 1 < len(curr_identity_slots):
+            identity, path = curr_identity_slots[curr_ref.index - 1]
+            curr_ref = replace(curr_ref, identity=identity, topology_path=path)
+        loop_pairs.append(replace(loop_pair, prev_loop_ref=prev_ref, curr_loop_ref=curr_ref))
+    return replace(region_pair, loop_pairs=tuple(loop_pairs))
+
+
+def _region_identity_map(
+    groups: tuple[frozenset[str], ...],
+    *,
+    side: str,
+) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for region_index, identities in enumerate(groups):
+        if len(identities) > 1:
+            values = ",".join(sorted(identities))
+            raise ValueError(
+                "invalid_region_identity contradictory "
+                f"{side} region {region_index} declares multiple exact ids: {values}"
+            )
+        if not identities:
+            continue
+        identity = next(iter(identities))
+        if identity in result:
+            raise ValueError(
+                "invalid_region_identity duplicate "
+                f"{side} id {identity!r} on regions {result[identity]} and {region_index}"
+            )
+        result[identity] = region_index
+    return result
+
+
+def resolve_exact_region_identity_pairs(
+    prev_station: Station,
+    curr_station: Station,
+) -> tuple[ExactRegionIdentityPair, ...]:
+    """Resolve unique source-ordered exact pairs without geometric scoring."""
+
+    prev_by_id = _region_identity_map(prev_station.successor_ids, side="source")
+    curr_by_id = _region_identity_map(curr_station.predecessor_ids, side="target")
+    if len(prev_station.successor_ids) == len(curr_station.predecessor_ids) and set(prev_by_id) != set(curr_by_id):
+        missing_source = sorted(set(curr_by_id) - set(prev_by_id))
+        missing_target = sorted(set(prev_by_id) - set(curr_by_id))
+        raise ValueError(
+            "invalid_region_identity contradictory exact id sets "
+            f"missing_source={missing_source} missing_target={missing_target}"
+        )
+    return tuple(
+        ExactRegionIdentityPair(
+            identity=identity,
+            prev_region_index=prev_index,
+            curr_region_index=curr_by_id[identity],
+        )
+        for identity, prev_index in prev_by_id.items()
+        if identity in curr_by_id
+    )
+
+
+def construct_residual_region_transition(
     *,
     prev_station: Station,
     curr_station: Station,
     prev_regions: list[list[np.ndarray]],
     curr_regions: list[list[np.ndarray]],
-    ambiguity_cost_profile: str,
-    ambiguity_max_branches: int,
-    fairness_mode: str,
-    fairness_weight: float,
-    fairness_iterations: int,
-) -> tuple[tuple[int, ...] | None, int, int]:
-    """Resolve explicit directional region IDs before bounded geometric search."""
+    ambiguity_cost_profile: str = "balanced",
+    ambiguity_max_branches: int = 64,
+    fairness_mode: str = "local",
+    fairness_weight: float = 0.2,
+    fairness_iterations: int = 12,
+) -> RegionIdentityTransitionResolution | None:
+    """Pair only anonymous residue and classify every remaining region birth/death."""
 
-    if len(prev_regions) <= len(curr_regions):
-        source_regions = prev_regions
-        target_regions = curr_regions
-        source_groups = prev_station.successor_ids
-        target_groups = curr_station.predecessor_ids
-    else:
-        source_regions = curr_regions
-        target_regions = prev_regions
-        source_groups = curr_station.predecessor_ids
-        target_groups = prev_station.successor_ids
+    prev_by_id = _region_identity_map(prev_station.successor_ids, side="source")
+    curr_by_id = _region_identity_map(curr_station.predecessor_ids, side="target")
+    if not prev_by_id and not curr_by_id:
+        return None
+    exact_pairs = resolve_exact_region_identity_pairs(prev_station, curr_station)
+    exact_prev = {pair.prev_region_index for pair in exact_pairs}
+    exact_curr = {pair.curr_region_index for pair in exact_pairs}
+    named_prev = set(prev_by_id.values())
+    named_curr = set(curr_by_id.values())
+    unnamed_prev = tuple(index for index in range(len(prev_regions)) if index not in named_prev)
+    unnamed_curr = tuple(index for index in range(len(curr_regions)) if index not in named_curr)
 
-    def identity_map(groups: tuple[frozenset[str], ...], side: str) -> dict[str, int]:
-        result: dict[str, int] = {}
-        for region_index, identities in enumerate(groups):
-            if len(identities) > 1:
-                values = ",".join(sorted(identities))
-                raise ValueError(
-                    "invalid_region_identity contradictory "
-                    f"{side} region {region_index} declares multiple exact ids: {values}"
-                )
-            if not identities:
-                continue
-            identity = next(iter(identities))
-            if identity in result:
-                raise ValueError(
-                    "invalid_region_identity duplicate "
-                    f"{side} id {identity!r} on regions {result[identity]} and {region_index}"
-                )
-            result[identity] = region_index
-        return result
+    geometric_pairs: list[tuple[int, int]] = []
+    if unnamed_prev and unnamed_curr:
+        if len(unnamed_prev) <= len(unnamed_curr):
+            assignment = _minimum_cost_subset_assignment(
+                [prev_regions[index][0] for index in unnamed_prev],
+                [curr_regions[index][0] for index in unnamed_curr],
+                entity="region",
+                ambiguity_cost_profile=ambiguity_cost_profile,
+                ambiguity_max_branches=ambiguity_max_branches,
+                fairness_mode=fairness_mode,
+                fairness_weight=fairness_weight,
+                fairness_iterations=fairness_iterations,
+            )
+            geometric_pairs.extend(
+                (unnamed_prev[source_offset], unnamed_curr[target_offset])
+                for source_offset, target_offset in enumerate(assignment)
+            )
+        else:
+            assignment = _minimum_cost_subset_assignment(
+                [curr_regions[index][0] for index in unnamed_curr],
+                [prev_regions[index][0] for index in unnamed_prev],
+                entity="region",
+                ambiguity_cost_profile=ambiguity_cost_profile,
+                ambiguity_max_branches=ambiguity_max_branches,
+                fairness_mode=fairness_mode,
+                fairness_weight=fairness_weight,
+                fairness_iterations=fairness_iterations,
+            )
+            geometric_pairs.extend(
+                (unnamed_prev[target_offset], unnamed_curr[source_offset])
+                for source_offset, target_offset in enumerate(assignment)
+            )
 
-    source_by_id = identity_map(source_groups, "source")
-    target_by_id = identity_map(target_groups, "target")
-    if not source_by_id and not target_by_id:
-        return None, 0, min(len(source_regions), len(target_regions))
-    if len(source_regions) == len(target_regions) and set(source_by_id) != set(target_by_id):
-        missing_source = sorted(set(target_by_id) - set(source_by_id))
-        missing_target = sorted(set(source_by_id) - set(target_by_id))
-        raise ValueError(
-            "invalid_region_identity contradictory exact id sets "
-            f"missing_source={missing_source} missing_target={missing_target}"
-        )
-
-    matched_ids = tuple(identity for identity in source_by_id if identity in target_by_id)
-    if not matched_ids:
-        raise ValueError(
-            "invalid_region_identity contradictory exact ids have no source/target matches "
-            f"source={sorted(source_by_id)} target={sorted(target_by_id)}"
-        )
-    assignment: list[int | None] = [None] * len(source_regions)
-    for identity in matched_ids:
-        assignment[source_by_id[identity]] = target_by_id[identity]
-
-    used_targets = {index for index in assignment if index is not None}
-    residual_source = [index for index, target_index in enumerate(assignment) if target_index is None]
-    residual_target = [index for index in range(len(target_regions)) if index not in used_targets]
-    if residual_source:
-        residual_assignment = _minimum_cost_subset_assignment(
-            [source_regions[index][0] for index in residual_source],
-            [target_regions[index][0] for index in residual_target],
-            entity="region",
-            ambiguity_cost_profile=ambiguity_cost_profile,
-            ambiguity_max_branches=ambiguity_max_branches,
-            fairness_mode=fairness_mode,
-            fairness_weight=fairness_weight,
-            fairness_iterations=fairness_iterations,
-        )
-        for source_offset, target_offset in enumerate(residual_assignment):
-            assignment[residual_source[source_offset]] = residual_target[target_offset]
-
-    if any(index is None for index in assignment):
-        raise ValueError("invalid_region_identity unresolved source region after identity reduction")
-    return tuple(int(index) for index in assignment), len(matched_ids), len(residual_source)
+    paired_prev = exact_prev | {prev_index for prev_index, _curr_index in geometric_pairs}
+    paired_curr = exact_curr | {curr_index for _prev_index, curr_index in geometric_pairs}
+    return RegionIdentityTransitionResolution(
+        exact_pairs=exact_pairs,
+        geometric_pairs=tuple(sorted(geometric_pairs, key=lambda pair: (pair[0], pair[1]))),
+        unnamed_prev_region_indices=unnamed_prev,
+        unnamed_curr_region_indices=unnamed_curr,
+        birth_curr_region_indices=tuple(index for index in range(len(curr_regions)) if index not in paired_curr),
+        death_prev_region_indices=tuple(index for index in range(len(prev_regions)) if index not in paired_prev),
+    )
 
 
 def _pair_sections_for_transition(
     prev_regions: list[list[np.ndarray]],
     curr_regions: list[list[np.ndarray]],
     *,
-    split_merge_mode: str,
-    split_merge_steps: int,
-    split_merge_bias: float,
-    ambiguity_mode: str = "auto",
-    ambiguity_cost_profile: str = "balanced",
-    ambiguity_max_branches: int = 64,
-    fairness_mode: str = "local",
-    fairness_weight: float = 0.2,
-    skeleton_mode: str = "auto",
-    fairness_iterations: int = 12,
+    options: LoftPlannerOptions,
     region_order_override: tuple[int, ...] | None = None,
     many_to_many_assignment_override: tuple[int, ...] | None = None,
+    region_identity_resolution: RegionIdentityTransitionResolution | None = None,
     hole_assignment_overrides: dict[tuple[str, int, str, int], tuple[int, ...]] | None = None,
 ) -> list[_PairedSectionTransition]:
+    split_merge_mode = options.split_merge_mode
+    split_merge_steps = options.split_merge_steps
+    split_merge_bias = options.split_merge_bias
+    ambiguity_cost_profile = options.ambiguity_cost_profile
+    ambiguity_max_branches = options.ambiguity_max_branches
+    fairness_mode = options.fairness_mode
+    fairness_weight = options.fairness_weight
+    fairness_iterations = options.fairness_iterations
     prev_count = len(prev_regions)
     curr_count = len(curr_regions)
     transitions: list[_PairedSectionTransition] = []
@@ -6186,6 +7431,69 @@ def _pair_sections_for_transition(
 
     prev_refs = [_RegionRef("actual", i) for i in range(prev_count)]
     curr_refs = [_RegionRef("actual", i) for i in range(curr_count)]
+
+    if region_identity_resolution is not None:
+        for prev_idx, curr_idx in region_identity_resolution.actual_pairs:
+            paired = _pair_region_loops_for_transition(
+                prev_regions[prev_idx],
+                curr_regions[curr_idx],
+                options=options,
+                hole_assignment_override=hole_assignment_overrides.get(
+                    ("actual", prev_idx, "actual", curr_idx)
+                ),
+            )
+            transitions.append(
+                _PairedSectionTransition(
+                    prev_region_ref=prev_refs[prev_idx],
+                    curr_region_ref=curr_refs[curr_idx],
+                    region=paired,
+                    region_closures=(),
+                    action=(
+                        "stable"
+                        if prev_count == curr_count
+                        else "split_match"
+                        if prev_count < curr_count
+                        else "merge_match"
+                    ),
+                )
+            )
+        for prev_idx in region_identity_resolution.death_prev_region_indices:
+            synthetic_curr = _shrunken_region(
+                prev_regions[prev_idx],
+                scale=_synthetic_seed_scale(split_merge_steps, split_merge_bias),
+            )
+            transitions.append(
+                _PairedSectionTransition(
+                    prev_region_ref=prev_refs[prev_idx],
+                    curr_region_ref=_RegionRef("synthetic", prev_idx),
+                    region=_pair_region_loops_for_transition(
+                        prev_regions[prev_idx],
+                        synthetic_curr,
+                        options=options,
+                    ),
+                    region_closures=("curr",),
+                    action="merge_death",
+                )
+            )
+        for curr_idx in region_identity_resolution.birth_curr_region_indices:
+            synthetic_prev = _shrunken_region(
+                curr_regions[curr_idx],
+                scale=_synthetic_seed_scale(split_merge_steps, split_merge_bias),
+            )
+            transitions.append(
+                _PairedSectionTransition(
+                    prev_region_ref=_RegionRef("synthetic", curr_idx),
+                    curr_region_ref=curr_refs[curr_idx],
+                    region=_pair_region_loops_for_transition(
+                        synthetic_prev,
+                        curr_regions[curr_idx],
+                        options=options,
+                    ),
+                    region_closures=("prev",),
+                    action="split_birth",
+                )
+            )
+        return transitions
 
     if prev_count == curr_count:
         if region_order_override is not None:
@@ -6217,16 +7525,7 @@ def _pair_sections_for_transition(
             paired = _pair_region_loops_for_transition(
                 prev_regions[prev_idx],
                 curr_regions[curr_idx],
-                split_merge_mode=split_merge_mode,
-                split_merge_steps=split_merge_steps,
-                split_merge_bias=split_merge_bias,
-                ambiguity_mode=ambiguity_mode,
-                ambiguity_cost_profile=ambiguity_cost_profile,
-                ambiguity_max_branches=ambiguity_max_branches,
-                fairness_mode=fairness_mode,
-                fairness_weight=fairness_weight,
-                skeleton_mode=skeleton_mode,
-                fairness_iterations=fairness_iterations,
+                options=options,
                 hole_assignment_override=hole_assignment_overrides.get(
                     ("actual", prev_idx, "actual", curr_idx)
                 ),
@@ -6279,16 +7578,7 @@ def _pair_sections_for_transition(
             paired = _pair_region_loops_for_transition(
                 prev_regions[prev_idx],
                 curr_regions[curr_idx],
-                split_merge_mode=split_merge_mode,
-                split_merge_steps=split_merge_steps,
-                split_merge_bias=split_merge_bias,
-                ambiguity_mode=ambiguity_mode,
-                ambiguity_cost_profile=ambiguity_cost_profile,
-                ambiguity_max_branches=ambiguity_max_branches,
-                fairness_mode=fairness_mode,
-                fairness_weight=fairness_weight,
-                skeleton_mode=skeleton_mode,
-                fairness_iterations=fairness_iterations,
+                options=options,
                 hole_assignment_override=hole_assignment_overrides.get(
                     ("actual", prev_idx, "actual", curr_idx)
                 ),
@@ -6310,16 +7600,7 @@ def _pair_sections_for_transition(
             paired = _pair_region_loops_for_transition(
                 synthetic_prev,
                 curr_regions[curr_idx],
-                split_merge_mode=split_merge_mode,
-                split_merge_steps=split_merge_steps,
-                split_merge_bias=split_merge_bias,
-                ambiguity_mode=ambiguity_mode,
-                ambiguity_cost_profile=ambiguity_cost_profile,
-                ambiguity_max_branches=ambiguity_max_branches,
-                fairness_mode=fairness_mode,
-                fairness_weight=fairness_weight,
-                skeleton_mode=skeleton_mode,
-                fairness_iterations=fairness_iterations,
+                options=options,
                 hole_assignment_override=None,
             )
             transitions.append(
@@ -6372,16 +7653,7 @@ def _pair_sections_for_transition(
             paired = _pair_region_loops_for_transition(
                 prev_regions[prev_idx],
                 curr_regions[curr_idx],
-                split_merge_mode=split_merge_mode,
-                split_merge_steps=split_merge_steps,
-                split_merge_bias=split_merge_bias,
-                ambiguity_mode=ambiguity_mode,
-                ambiguity_cost_profile=ambiguity_cost_profile,
-                ambiguity_max_branches=ambiguity_max_branches,
-                fairness_mode=fairness_mode,
-                fairness_weight=fairness_weight,
-                skeleton_mode=skeleton_mode,
-                fairness_iterations=fairness_iterations,
+                options=options,
                 hole_assignment_override=hole_assignment_overrides.get(
                     ("actual", prev_idx, "actual", curr_idx)
                 ),
@@ -6403,16 +7675,7 @@ def _pair_sections_for_transition(
             paired = _pair_region_loops_for_transition(
                 prev_regions[prev_idx],
                 synthetic_curr,
-                split_merge_mode=split_merge_mode,
-                split_merge_steps=split_merge_steps,
-                split_merge_bias=split_merge_bias,
-                ambiguity_mode=ambiguity_mode,
-                ambiguity_cost_profile=ambiguity_cost_profile,
-                ambiguity_max_branches=ambiguity_max_branches,
-                fairness_mode=fairness_mode,
-                fairness_weight=fairness_weight,
-                skeleton_mode=skeleton_mode,
-                fairness_iterations=fairness_iterations,
+                options=options,
                 hole_assignment_override=None,
             )
             transitions.append(
@@ -6433,21 +7696,20 @@ def _pair_region_loops_for_transition(
     prev_region_loops: list[np.ndarray],
     curr_region_loops: list[np.ndarray],
     *,
-    split_merge_mode: str,
-    split_merge_steps: int,
-    split_merge_bias: float,
-    ambiguity_mode: str = "auto",
-    ambiguity_cost_profile: str = "balanced",
-    ambiguity_max_branches: int = 64,
-    fairness_mode: str = "local",
-    fairness_weight: float = 0.2,
-    skeleton_mode: str = "auto",
-    fairness_iterations: int = 12,
+    options: LoftPlannerOptions,
     hole_assignment_override: tuple[int, ...] | None = None,
 ) -> _PairedRegionLoops:
+    split_merge_mode = options.split_merge_mode
+    split_merge_steps = options.split_merge_steps
+    split_merge_bias = options.split_merge_bias
+    ambiguity_cost_profile = options.ambiguity_cost_profile
+    ambiguity_max_branches = options.ambiguity_max_branches
+    fairness_mode = options.fairness_mode
+    fairness_weight = options.fairness_weight
+    fairness_iterations = options.fairness_iterations
     # Step 1 (Spec 19): fairness/skeleton controls are surfaced and propagated.
     # Optimization behavior is introduced in follow-up steps.
-    _ = (fairness_mode, fairness_weight, skeleton_mode, fairness_iterations)
+    _ = options.skeleton_mode
 
     prev_outer = prev_region_loops[0]
     curr_outer = curr_region_loops[0]
@@ -7750,6 +9012,8 @@ def _expected_region_pair_action(
             return "split_match"
         if prev_ref.kind == "synthetic" and curr_ref.kind == "actual":
             return "split_birth"
+        if prev_ref.kind == "actual" and curr_ref.kind == "synthetic":
+            return "merge_death"
         raise ValueError(
             "Invalid loft plan region refs for expanding transition: "
             f"prev={prev_ref.kind!r} curr={curr_ref.kind!r}."
@@ -7759,6 +9023,8 @@ def _expected_region_pair_action(
             return "merge_match"
         if prev_ref.kind == "actual" and curr_ref.kind == "synthetic":
             return "merge_death"
+        if prev_ref.kind == "synthetic" and curr_ref.kind == "actual":
+            return "split_birth"
         raise ValueError(
             "Invalid loft plan region refs for collapsing transition: "
             f"prev={prev_ref.kind!r} curr={curr_ref.kind!r}."
@@ -7958,6 +9224,8 @@ __all__ = [
     "PlannedLoopPair",
     "PlannedClosure",
     "PlannedRegionPair",
+    "LoftJunctionBoundaryRingInput",
+    "LoftJunctionEvent",
     "PlannedTransition",
     "InferenceCandidateScore",
     "InferenceRefusalDiagnostic",
@@ -8003,6 +9271,7 @@ __all__ = [
     "build_loft_ambiguity_record",
     "build_loft_boundary_graph",
     "build_loft_closure_evidence",
+    "build_loft_junction_events",
     "loft_patch_family_selection_records",
     "classify_loft_cap_validity",
     "classify_loft_seam_coverage",
@@ -8021,10 +9290,13 @@ __all__ = [
     "validate_mesh_executor_correspondence_input",
     "validate_rail_priority",
     "validate_loft_ambiguity_locators",
+    "validate_loft_junction_event",
+    "validate_loft_junction_events",
     "validate_sample_correspondence",
     "validate_surface_executor_correspondence_input",
     "check_executed_loft_self_intersection_validity",
     "detect_loft_plan_self_intersections",
+    "derive_loft_junction_boundary_inputs",
     "summarize_loft_shell_validity",
     "loft_profiles",
     "loft",

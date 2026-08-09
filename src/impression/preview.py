@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import copy
 import os
-import queue
 import threading
 import math
 import traceback
@@ -10,6 +10,7 @@ import signal
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Callable, Iterable, List, MutableMapping
 
@@ -52,6 +53,109 @@ def _prepare_vtk_runtime() -> None:
 SceneFactory = Callable[[], object]
 ModelPathState = MutableMapping[str, Path]
 WatchPathsGetter = Callable[[], Iterable[Path]]
+
+
+class ReloadReason(str, Enum):
+    """Source of a live-preview rebuild request."""
+
+    FILE_CHANGE = "file_change"
+    MANUAL_REFRESH = "manual_refresh"
+    CONTROL_SWITCH = "control_switch"
+    SIGNAL = "signal"
+    ANIMATION = "animation"
+
+
+@dataclass(frozen=True)
+class ReloadRequest:
+    """Immutable reload intent owned by :class:`PreviewReloadCoordinator`."""
+
+    reason: ReloadReason
+    force: bool
+    changed_paths: tuple[Path, ...]
+    generation: int
+
+
+class PreviewReloadCoordinator:
+    """Keep one active preview build and one latest replacement request."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._next_generation = 0
+        self._active: ReloadRequest | None = None
+        self._latest: ReloadRequest | None = None
+        self._shutdown = False
+
+    def submit_reload(
+        self,
+        reason: ReloadReason,
+        *,
+        force: bool = False,
+        changed_paths: Iterable[Path] = (),
+    ) -> ReloadRequest | None:
+        """Submit reload intent without performing model work on the caller thread."""
+
+        normalized_paths = tuple(sorted({Path(path) for path in changed_paths}, key=str))
+        with self._lock:
+            if self._shutdown:
+                return None
+            self._next_generation += 1
+            request = ReloadRequest(
+                reason=reason,
+                force=force,
+                changed_paths=normalized_paths,
+                generation=self._next_generation,
+            )
+            if self._latest is not None:
+                request = ReloadRequest(
+                    reason=reason,
+                    force=self._latest.force or force,
+                    changed_paths=tuple(
+                        sorted(
+                            set(self._latest.changed_paths) | set(normalized_paths),
+                            key=str,
+                        )
+                    ),
+                    generation=request.generation,
+                )
+            self._latest = request
+            return request
+
+    def begin_next_build(self) -> ReloadRequest | None:
+        """Promote the latest pending request when no build is active."""
+
+        with self._lock:
+            if self._shutdown or self._active is not None or self._latest is None:
+                return None
+            self._active = self._latest
+            self._latest = None
+            return self._active
+
+    def is_current(self, generation: int) -> bool:
+        """Return whether a result may mutate current preview state."""
+
+        with self._lock:
+            return (
+                not self._shutdown
+                and self._active is not None
+                and self._active.generation == generation
+                and self._latest is None
+            )
+
+    def complete_build(self, generation: int) -> bool:
+        """Complete only the matching active generation, leaving newer intent intact."""
+
+        with self._lock:
+            if self._active is None or self._active.generation != generation:
+                return False
+            self._active = None
+            return True
+
+    def shutdown(self) -> None:
+        """Reject new work and discard pending replacement intent."""
+
+        with self._lock:
+            self._shutdown = True
+            self._latest = None
 
 def _next_available_path(path: Path) -> Path:
     if not path.exists():
@@ -773,6 +877,7 @@ class PyVistaPreviewer:
         control_file: Path | None = None,
         model_path_state: ModelPathState | None = None,
         watch_paths_getter: WatchPathsGetter | None = None,
+        force_scene_reload: Callable[[], None] | None = None,
         auto_rebuild_interval_getter: Callable[[], float | None] | None = None,
     ) -> None:
         datasets = []
@@ -817,7 +922,7 @@ class PyVistaPreviewer:
             return
 
         model_state = model_path_state or {"path": model_path}
-        reload_queue: queue.Queue[float] = queue.Queue()
+        reload_coordinator = PreviewReloadCoordinator()
         stop_event = threading.Event()
         watcher_thread = None
         watch_roots: list[Path] = []
@@ -825,10 +930,10 @@ class PyVistaPreviewer:
         build_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="impression-preview-build")
         build_state: dict[str, object] = {
             "future": None,
-            "generation": 0,
+            "request": None,
             "path": None,
-            "queued": False,
         }
+        visible_error: dict[str, str | None] = {"message": None}
         render_state = {
             "show_edges": show_edges,
             "face_edges": face_edges,
@@ -880,6 +985,15 @@ class PyVistaPreviewer:
                     roots.append(resolved_watch_path if resolved_watch_path.is_dir() else resolved_watch_path.parent)
             return sorted(set(roots))
 
+        def _submit_watcher_reload(
+            reason: ReloadReason,
+            changed_paths: tuple[Path, ...],
+        ) -> None:
+            reload_coordinator.submit_reload(
+                reason,
+                changed_paths=changed_paths,
+            )
+
         def _start_watcher(current_path: Path) -> None:
             nonlocal stop_event, watcher_thread, watch_roots
             previous_thread = watcher_thread
@@ -890,7 +1004,13 @@ class PyVistaPreviewer:
             watch_roots = _watch_roots_for(current_path)
             watcher_thread = threading.Thread(
                 target=self._watch_model_file,
-                args=(model_state, reload_queue, stop_event, watch_roots, control_path),
+                args=(
+                    model_state,
+                    _submit_watcher_reload,
+                    stop_event,
+                    watch_roots,
+                    control_path,
+                ),
                 kwargs={"watch_paths_getter": watch_paths_getter},
                 name="impression-watch",
                 daemon=True,
@@ -900,30 +1020,43 @@ class PyVistaPreviewer:
         _start_watcher(model_state["path"])
         previous_handler = None
 
-        def request_reload() -> None:
-            try:
-                reload_queue.put_nowait(0.0)
-            except queue.Full:
-                return
+        def request_reload(
+            reason: ReloadReason,
+            *,
+            force: bool = False,
+            changed_paths: Iterable[Path] = (),
+        ) -> ReloadRequest | None:
+            request = reload_coordinator.submit_reload(
+                reason,
+                force=force,
+                changed_paths=changed_paths,
+            )
+            if request is not None and force and force_scene_reload is not None:
+                force_scene_reload()
+            return request
 
-        def request_reload_with_message(message: str) -> None:
+        def request_reload_with_message(
+            message: str,
+            reason: ReloadReason,
+            *,
+            force: bool = False,
+        ) -> None:
             self.console.print(message)
-            request_reload()
+            if request_reload(reason, force=force) is None:
+                self.console.print("[yellow]Reload ignored because preview is shutting down.[/yellow]")
 
         def _build_scene_datasets() -> list[Mesh | Polyline]:
             return _collect_datasets_from_scene(scene_factory())
 
-        def _submit_scene_build(message: str | None = None) -> None:
-            future = build_state["future"]
-            if isinstance(future, Future) and not future.done():
-                build_state["queued"] = True
+        def _submit_next_scene_build() -> None:
+            request = reload_coordinator.begin_next_build()
+            if request is None:
                 return
-            if message is not None:
-                self.console.print(message)
-            generation = int(build_state["generation"]) + 1
-            build_state["generation"] = generation
+            if request.reason == ReloadReason.CONTROL_SWITCH:
+                maybe_switch_model()
+            self.console.print(f"[yellow]Reloading {model_state['path']}…[/yellow]")
+            build_state["request"] = request
             build_state["path"] = model_state["path"]
-            build_state["queued"] = False
             build_state["future"] = build_executor.submit(_build_scene_datasets)
 
         def _poll_scene_build() -> None:
@@ -931,14 +1064,28 @@ class PyVistaPreviewer:
             if not isinstance(future, Future) or not future.done():
                 return
             build_state["future"] = None
+            request = build_state["request"]
+            build_state["request"] = None
+            if not isinstance(request, ReloadRequest):
+                return
             build_path = build_state["path"]
+            is_current = reload_coordinator.is_current(request.generation)
             try:
                 datasets = future.result()
             except Exception as exc:
-                panel = Panel.fit(_format_exception(exc), title="Preview rebuild failed", style="red")
-                self.console.print(panel)
+                if is_current:
+                    message = _format_exception(exc)
+                    visible_error["message"] = message
+                    panel = Panel.fit(message, title="Preview rebuild failed", style="red")
+                    self.console.print(panel)
             else:
-                if build_path == model_state["path"]:
+                if is_current and build_path == model_state["path"]:
+                    camera_position = (
+                        copy.deepcopy(plotter.camera_position)
+                        if current_datasets
+                        else None
+                    )
+                    align_camera = not current_datasets
                     current_datasets.clear()
                     current_datasets.extend(datasets)
                     self._apply_scene(
@@ -948,15 +1095,21 @@ class PyVistaPreviewer:
                         face_edges=render_state["face_edges"],
                         show_bounds=show_bounds,
                         show_axes=show_axes,
-                        align_camera=False,
+                        align_camera=align_camera,
                     )
+                    if camera_position is not None:
+                        plotter.camera_position = camera_position
+                        plotter.reset_camera_clipping_range()
                     plotter.render()
+                    if visible_error["message"] is not None:
+                        self.console.print("[green]Preview recovered after rebuild failure.[/green]")
+                        visible_error["message"] = None
                     self.console.print(f"[green]Reloaded {model_state['path']}[/green]")
                     new_roots = _watch_roots_for(model_state["path"])
                     if set(new_roots) != set(watch_roots):
                         _start_watcher(model_state["path"])
-            if build_state["queued"]:
-                _submit_scene_build(f"[yellow]Reloading {model_state['path']}…[/yellow]")
+            reload_coordinator.complete_build(request.generation)
+            _submit_next_scene_build()
 
         def maybe_switch_model() -> bool:
             new_path = _read_control_file()
@@ -978,9 +1131,16 @@ class PyVistaPreviewer:
         if hasattr(signal, "SIGUSR1"):
             def _signal_reload(_signum, _frame) -> None:  # pragma: no cover - signal path
                 if maybe_switch_model():
-                    request_reload_with_message("[yellow]Reload requested (switch).[/yellow]")
+                    request_reload_with_message(
+                        "[yellow]Reload requested (switch).[/yellow]",
+                        ReloadReason.CONTROL_SWITCH,
+                    )
                 else:
-                    request_reload_with_message("[yellow]Reload requested (SIGUSR1).[/yellow]")
+                    request_reload_with_message(
+                        "[yellow]Reload requested (SIGUSR1).[/yellow]",
+                        ReloadReason.SIGNAL,
+                        force=True,
+                    )
 
             previous_handler = signal.getsignal(signal.SIGUSR1)
             signal.signal(signal.SIGUSR1, _signal_reload)
@@ -991,18 +1151,7 @@ class PyVistaPreviewer:
             render_dirty["value"] = True
 
         def process_queue() -> None:
-            reload_requested = False
-            while True:
-                try:
-                    reload_queue.get_nowait()
-                    reload_requested = True
-                except queue.Empty:
-                    break
-            if not reload_requested:
-                return
-            maybe_switch_model()
-            current_path = model_state["path"]
-            _submit_scene_build(f"[yellow]Reloading {current_path}…[/yellow]")
+            _submit_next_scene_build()
 
         interval_seconds = max(1.0 / max(target_fps, 1), 0.05)
         callback_cleanup = None
@@ -1019,7 +1168,7 @@ class PyVistaPreviewer:
                 if now - last_auto_rebuild["time"] < interval:
                     return
                 last_auto_rebuild["time"] = now
-                _submit_scene_build()
+                request_reload(ReloadReason.ANIMATION)
 
             def guarded_process_queue() -> None:
                 try:
@@ -1050,7 +1199,11 @@ class PyVistaPreviewer:
                 return False
 
             def _handle_key_reload() -> None:
-                request_reload_with_message("[yellow]Reload requested (R).[/yellow]")
+                request_reload_with_message(
+                    "[yellow]Reload requested (R).[/yellow]",
+                    ReloadReason.MANUAL_REFRESH,
+                    force=True,
+                )
 
             plotter.add_key_event("r", _handle_key_reload)
 
@@ -1092,6 +1245,7 @@ class PyVistaPreviewer:
         try:
             plotter.show(title="Impression Preview", auto_close=False)
         finally:
+            reload_coordinator.shutdown()
             stop_event.set()
             if watcher_thread is not None and watcher_thread.is_alive():
                 watcher_thread.join(timeout=1.0)
@@ -1285,7 +1439,7 @@ class PyVistaPreviewer:
     def _watch_model_file(
         self,
         model_path_state: ModelPathState,
-        reload_queue: "queue.Queue[float]",
+        submit_reload: Callable[[ReloadReason, tuple[Path, ...]], None],
         stop_event: threading.Event,
         watch_roots: list[Path],
         control_path: Path | None,
@@ -1295,22 +1449,38 @@ class PyVistaPreviewer:
         watch_paths = [str(root) for root in watch_roots]
         resolved_control = control_path.resolve() if control_path is not None else None
 
-        for changes in watch(*watch_paths, stop_event=stop_event, debounce=300):
+        try:
+            for changes in watch(
+                *watch_paths,
+                stop_event=stop_event,
+                debounce=50,
+                step=10,
+            ):
+                if stop_event.is_set():
+                    return
+
+                for change, changed_path in changes:
+                    changed = Path(changed_path).resolve()
+                    resolved_model = model_path_state["path"].resolve()
+                    resolved_watch_paths = set()
+                    if watch_paths_getter is not None:
+                        resolved_watch_paths = {path.resolve() for path in watch_paths_getter()}
+                    if resolved_control is not None and changed == resolved_control:
+                        submit_reload(ReloadReason.CONTROL_SWITCH, (changed,))
+                        break
+                    if Change.deleted == change and changed == resolved_model:
+                        submit_reload(ReloadReason.FILE_CHANGE, (changed,))
+                        break
+                    if changed == resolved_model or changed in resolved_watch_paths:
+                        submit_reload(ReloadReason.FILE_CHANGE, (changed,))
+                        break
+        except Exception as exc:
             if stop_event.is_set():
                 return
-
-            for change, changed_path in changes:
-                changed = Path(changed_path).resolve()
-                resolved_model = model_path_state["path"].resolve()
-                resolved_watch_paths = set()
-                if watch_paths_getter is not None:
-                    resolved_watch_paths = {path.resolve() for path in watch_paths_getter()}
-                if resolved_control is not None and changed == resolved_control:
-                    reload_queue.put_nowait(0.0)
-                    break
-                if Change.deleted == change and changed == resolved_model:
-                    reload_queue.put_nowait(0.0)
-                    break
-                if changed == resolved_model or changed in resolved_watch_paths:
-                    reload_queue.put_nowait(0.0)
-                    break
+            if self.console is not None:
+                panel = Panel.fit(
+                    _format_exception(exc),
+                    title="Preview watcher failed",
+                    style="red",
+                )
+                self.console.print(panel)

@@ -9,10 +9,13 @@ import pytest
 
 from impression.mesh import analyze_mesh
 from impression.modeling import (
+    Loft,
+    Loop,
     MeshQuality,
     Path3D,
     PlannedLoopRef,
     PlannedRegionRef,
+    Region,
     Section,
     Station,
     BSplineSurfacePatch,
@@ -22,6 +25,8 @@ from impression.modeling import (
     SurfaceBoundaryRef,
     SurfaceConsumerCollection,
     SurfaceSeam,
+    SyntheticStationLineage,
+    TopologyPath,
     assert_loft_bspline_output_contract,
     assert_loft_nurbs_output_contract,
     assert_loft_sweep_output_contract,
@@ -943,7 +948,7 @@ def test_private_surface_loft_executor_reuses_station_seams_across_adjacent_inte
     assert {(1, "bottom"), (1, "top")} in seam_pairs
 
 
-def test_private_surface_loft_executor_emits_loop_closure_cap_for_synthetic_hole_birth() -> None:
+def test_private_surface_loft_executor_emits_interior_junction_patch_for_synthetic_hole_birth() -> None:
     outer = make_rect(size=(1.2, 1.2)).outer
     hole = make_rect(size=(0.4, 0.4)).outer
     start = PlanarShape2D(outer=outer, holes=[])
@@ -963,10 +968,16 @@ def test_private_surface_loft_executor_emits_loop_closure_cap_for_synthetic_hole
         for patch in body.iter_patches(world=False)
         if patch.family == "planar"
     ]
-    assert planar_roles == ["closure-cap"]
+    assert planar_roles == ["interior_junction"]
+    planar_kernel = next(
+        patch.metadata.get("kernel", {})
+        for patch in body.iter_patches(world=False)
+        if patch.family == "planar"
+    )
+    assert planar_kernel.get("junction_event_ids")
 
 
-def test_private_surface_loft_executor_emits_region_closure_cap_for_region_death() -> None:
+def test_private_surface_loft_executor_emits_interior_junction_patch_for_region_death() -> None:
     base = as_section(make_rect(size=(1.0, 1.0)))
     extra = as_section(make_rect(size=(0.5, 0.5), center=(2.0, 0.0)))
     s0 = Section((base.regions[0], extra.regions[0]))
@@ -983,7 +994,7 @@ def test_private_surface_loft_executor_emits_region_closure_cap_for_region_death
     planar_patches = [patch for patch in body.iter_patches(world=False) if patch.family == "planar"]
     assert planar_patches
     assert any(
-        patch.metadata.get("kernel", {}).get("surface_role") == "closure-cap"
+        patch.metadata.get("kernel", {}).get("surface_role") == "interior_junction"
         and patch.metadata.get("kernel", {}).get("closure_scope") == "region"
         for patch in planar_patches
     )
@@ -1464,6 +1475,225 @@ def test_station_directional_correspondence_requires_section_and_valid_lengths()
         )
 
 
+def _lineage_region(identity: str, center_x: float) -> tuple[Region, TopologyPath]:
+    path = TopologyPath.from_points(
+        (
+            ("lower-left", (center_x - 0.5, -0.5)),
+            ("lower-right", (center_x + 0.5, -0.5)),
+            ("upper", (center_x, 0.5)),
+        ),
+        id=f"{identity}-rail-pair",
+    )
+    return Region(Loop(path.to_section_loop().points)), path
+
+
+def _lineage_transition_fixture(*, reverse: bool = False) -> tuple[tuple[Station, Station], tuple[Section, Section]]:
+    shell_region, shell_path = _lineage_region("shell", -10.0)
+    guide_a_region, guide_a_path = _lineage_region("guide-a", 10.0)
+    guide_b_region, guide_b_path = _lineage_region("guide-b", 0.0)
+    source = Section(
+        (shell_region, guide_a_region),
+        metadata={"topology_paths": (shell_path, guide_a_path)},
+    )
+    target = Section(
+        (shell_region, guide_b_region, guide_a_region),
+        metadata={"topology_paths": (shell_path, guide_b_path, guide_a_path)},
+    )
+    frame = {
+        "u": (1.0, 0.0, 0.0),
+        "v": (0.0, 1.0, 0.0),
+        "n": (0.0, 0.0, 1.0),
+    }
+    if not reverse:
+        stations = (
+            Station(
+                t=0.0,
+                section=source,
+                origin=(0.0, 0.0, 0.0),
+                successor_ids=(("shell",), ("guide-a",)),
+                **frame,
+            ),
+            Station(
+                t=1.0,
+                section=target,
+                origin=(0.0, 0.0, 2.0),
+                predecessor_ids=(("shell",), ("guide-b",), ("guide-a",)),
+                **frame,
+            ),
+        )
+        return stations, (source, target)
+    stations = (
+        Station(
+            t=0.0,
+            section=target,
+            origin=(0.0, 0.0, 0.0),
+            successor_ids=(("shell",), ("guide-b",), ("guide-a",)),
+            **frame,
+        ),
+        Station(
+            t=1.0,
+            section=source,
+            origin=(0.0, 0.0, 2.0),
+            predecessor_ids=(("shell",), ("guide-a",)),
+            **frame,
+        ),
+    )
+    return stations, (target, source)
+
+
+def test_public_loft_preserves_named_rail_pair_lineage_through_synthetic_stations() -> None:
+    stations, topology = _lineage_transition_fixture()
+
+    plan = loft_plan_sections(
+        stations,
+        samples=8,
+        split_merge_mode="resolve",
+        split_merge_steps=3,
+        ambiguity_max_branches=1,
+    )
+    body = Loft(
+        (0.0, 1.0),
+        stations,
+        topology,
+        samples=8,
+        split_merge_mode="resolve",
+        split_merge_steps=3,
+        ambiguity_max_branches=1,
+    )
+    metadata = body.kernel_metadata()
+    records = metadata["synthetic_station_lineage_records"]
+
+    assert isinstance(body, SurfaceBody)
+    assert plan.metadata["synthetic_station_lineages"] == metadata["synthetic_station_lineages"]
+    assert metadata["station_count"] == 5
+    assert len(records) == 3
+    assert all(isinstance(record, SyntheticStationLineage) for record in records)
+    for record in records:
+        by_identity = {region.identity: region for region in record.regions}
+        assert set(by_identity) == {"shell", "guide-a", "guide-b"}
+        for identity, region in by_identity.items():
+            assert region.predecessor_ids == region.successor_ids == frozenset({identity})
+            assert len(region.loop_identities) == 1
+        assert {path.id for path in record.topology_paths} == {
+            loop_id
+            for region in record.regions
+            for loop_id in region.loop_identities
+        }
+    assert len(metadata["source_topology_paths"]) == metadata["station_count"]
+    assert metadata["synthetic_station_lineages"] == tuple(
+        record.canonical_payload()
+        for record in records
+    )
+
+
+def test_reversed_public_loft_inverts_refs_without_changing_region_or_loop_identity() -> None:
+    forward_stations, forward_topology = _lineage_transition_fixture()
+    reverse_stations, reverse_topology = _lineage_transition_fixture(reverse=True)
+
+    forward = Loft(
+        (0.0, 1.0),
+        forward_stations,
+        forward_topology,
+        samples=8,
+        split_merge_mode="resolve",
+        split_merge_steps=3,
+        ambiguity_max_branches=1,
+    )
+    reverse = Loft(
+        (0.0, 1.0),
+        reverse_stations,
+        reverse_topology,
+        samples=8,
+        split_merge_mode="resolve",
+        split_merge_steps=3,
+        ambiguity_max_branches=1,
+    )
+    forward_regions = {
+        region.identity: region
+        for region in forward.kernel_metadata()["synthetic_station_lineage_records"][0].regions
+    }
+    reverse_regions = {
+        region.identity: region
+        for region in reverse.kernel_metadata()["synthetic_station_lineage_records"][-1].regions
+    }
+
+    assert set(forward_regions) == set(reverse_regions)
+    for identity in forward_regions:
+        forward_region = forward_regions[identity]
+        reverse_region = reverse_regions[identity]
+        assert forward_region.loop_identities == reverse_region.loop_identities
+        assert forward_region.prev_region_ref == reverse_region.curr_region_ref
+        assert forward_region.curr_region_ref == reverse_region.prev_region_ref
+
+
+def test_multiple_count_changing_intervals_keep_lineage_across_each_expansion() -> None:
+    region_a, path_a = _lineage_region("a", -10.0)
+    region_b, path_b = _lineage_region("b", 0.0)
+    region_c, path_c = _lineage_region("c", 10.0)
+    sections = (
+        Section((region_a,), metadata={"topology_paths": (path_a,)}),
+        Section((region_a, region_b), metadata={"topology_paths": (path_a, path_b)}),
+        Section(
+            (region_a, region_b, region_c),
+            metadata={"topology_paths": (path_a, path_b, path_c)},
+        ),
+    )
+    frame = {
+        "u": (1.0, 0.0, 0.0),
+        "v": (0.0, 1.0, 0.0),
+        "n": (0.0, 0.0, 1.0),
+    }
+    stations = (
+        Station(
+            t=0.0,
+            section=sections[0],
+            origin=(0.0, 0.0, 0.0),
+            successor_ids=(("a",),),
+            **frame,
+        ),
+        Station(
+            t=0.5,
+            section=sections[1],
+            origin=(0.0, 0.0, 1.0),
+            predecessor_ids=(("a",), ("b",)),
+            successor_ids=(("a",), ("b",)),
+            **frame,
+        ),
+        Station(
+            t=1.0,
+            section=sections[2],
+            origin=(0.0, 0.0, 2.0),
+            predecessor_ids=(("a",), ("b",), ("c",)),
+            **frame,
+        ),
+    )
+
+    body = Loft(
+        (0.0, 0.5, 1.0),
+        stations,
+        sections,
+        samples=8,
+        split_merge_mode="resolve",
+        split_merge_steps=2,
+        ambiguity_max_branches=1,
+    )
+    records = body.kernel_metadata()["synthetic_station_lineage_records"]
+
+    assert len(records) == 4
+    assert [set(region.identity for region in record.regions) for record in records] == [
+        {"a", "b"},
+        {"a", "b"},
+        {"a", "b", "c"},
+        {"a", "b", "c"},
+    ]
+    assert tuple(record.source_interval for record in records) == (
+        (0.0, 0.5),
+        (0.0, 0.5),
+        (0.5, 1.0),
+        (0.5, 1.0),
+    )
+
+
 def test_loft_plan_sections_sets_ambiguity_mode_default_auto_in_resolve_mode():
     base = as_section(make_rect(size=(1.0, 1.0)))
     stations = [
@@ -1491,7 +1721,66 @@ def test_loft_plan_sections_records_explicit_ambiguity_controls_in_metadata():
     assert plan.metadata["ambiguity_mode"] == "fail"
     assert plan.metadata["ambiguity_cost_profile"] == "distance_first"
     assert plan.metadata["ambiguity_max_branches"] == 17
+    assert plan.metadata["planner_options"]["ambiguity_max_branches"] == 17
     assert "ambiguity_class_counts" in plan.metadata
+
+
+def test_staged_one_to_four_to_seven_propagates_exact_branch_cap() -> None:
+    def multi_region_section(center_xs: tuple[float, ...]) -> Section:
+        return Section(
+            tuple(
+                as_section(make_rect(size=(0.5, 0.5), center=(center_x, 0.0))).regions[0]
+                for center_x in center_xs
+            )
+        )
+
+    stations = tuple(
+        Station(
+            t=t,
+            section=multi_region_section(center_xs),
+            origin=(0.0, 0.0, t),
+            u=(1.0, 0.0, 0.0),
+            v=(0.0, 1.0, 0.0),
+            n=(0.0, 0.0, 1.0),
+        )
+        for t, center_xs in (
+            (0.0, (0.0,)),
+            (0.5, (-3.0, -1.0, 1.0, 3.0)),
+            (1.0, (-4.0, -2.7, -1.3, 0.0, 1.3, 2.7, 4.0)),
+        )
+    )
+
+    with pytest.raises(ValueError) as small_exc:
+        loft_plan_sections(
+            stations,
+            samples=8,
+            split_merge_mode="resolve",
+            ambiguity_max_branches=3,
+        )
+    assert "ambiguity_max_branches=3" in str(small_exc.value)
+    assert "planner_location=split_merge_expansion:0->1" in str(small_exc.value)
+    assert "'ambiguity_max_branches': 3" in str(small_exc.value)
+
+    with pytest.raises(LoftPlanningBlockedError) as large_exc:
+        loft_plan_sections(
+            stations,
+            samples=8,
+            split_merge_mode="resolve",
+            ambiguity_max_branches=4096,
+        )
+    assert "interval 10->11" in str(large_exc.value)
+    assert "ambiguity_max_branches=4096" in str(large_exc.value)
+    assert "ambiguity_max_branches=64" not in str(large_exc.value)
+
+    for sufficient_cap in (5040, 6000):
+        plan = loft_plan_sections(
+            stations,
+            samples=8,
+            split_merge_mode="resolve",
+            ambiguity_max_branches=sufficient_cap,
+        )
+        assert len(plan.stations) == 19
+        assert plan.metadata["planner_options"]["ambiguity_max_branches"] == sufficient_cap
 
 
 def test_loft_plan_sections_records_explicit_fairness_controls_in_metadata():

@@ -1,23 +1,30 @@
-"""CSG union example."""
+"""Surface CSG union example."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from impression.io import write_stl
-
-from impression.modeling import boolean_union, make_box_mesh, make_cylinder_mesh
+from impression.modeling import (
+    boolean_union,
+    export_tessellation_request,
+    make_box,
+    tessellate_surface_body,
+)
 
 
 def build():
-    box = make_box_mesh(size=(2, 2, 1), color=(0.35, 0.55, 0.95))
-    cyl = make_cylinder_mesh(radius=0.6, height=1.5, color=(1.0, 0.6, 0.2))
-    return boolean_union([box, cyl])
+    left = make_box(size=(2, 2, 1), center=(-0.5, 0, 0), color=(0.35, 0.55, 0.95))
+    right = make_box(size=(2, 2, 1), center=(0.5, 0, 0), color=(1.0, 0.6, 0.2))
+    result = boolean_union([left, right])
+    if result.status != "succeeded" or result.body is None:
+        raise RuntimeError(result.failure_reason or "Surface union did not produce a body.")
+    return result.body
 
 
 if __name__ == "__main__":
     OUTPUT = Path("dist")
     OUTPUT.mkdir(exist_ok=True)
-    mesh = build()
+    mesh = tessellate_surface_body(build(), export_tessellation_request()).mesh
     write_stl(mesh, OUTPUT / "union_example.stl")
     print("Saved union_example.stl with", mesh.n_faces, "faces")

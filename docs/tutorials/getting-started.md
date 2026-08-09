@@ -1,8 +1,8 @@
 # Tutorial - Getting Started
 
 This tutorial walks through the basics: creating your first model, previewing it, and
-exporting a watertight STL. Every step uses Impression primitives and helpers (internal
-meshes), with PyVista acting only as the viewer.
+exporting a watertight STL. Every modeling step uses surfaced Impression
+primitives; tessellation occurs only in preview and export consumers.
 
 ## 1) Create a Simple Model
 
@@ -15,16 +15,18 @@ from impression.modeling import make_box, make_cylinder, boolean_union
 def build():
     base = make_box(size=(40, 30, 6))
     post = make_cylinder(radius=5, height=18).translate((12, 8, 6))
-    return boolean_union([base, post])
+    result = boolean_union([base, post])
+    if result.status != "succeeded" or result.body is None:
+        raise RuntimeError(result.failure_reason or "Surface union failed.")
+    return result.body
 ```
 
 Key ideas:
 
-- `build()` returns internal meshes, not PyVista objects.
+- `build()` returns a `SurfaceBody`, not a mesh or PyVista object.
 - All dimensions use your configured units (default: millimeters).
-- Public CSG is still executable on the mesh lane today. The surfaced CSG lane
-  exists as a migration contract and returns structured surfaced results rather
-  than renderable boolean geometry.
+- Public CSG accepts only `SurfaceBody` operands and returns a structured
+  `SurfaceBooleanResult`; preview and export consume the accepted `result.body`.
 
 ## 2) Preview
 
@@ -33,7 +35,9 @@ impression preview examples/hello_impression.py
 ```
 
 The preview window supports orbit, pan, and zoom. The file is watched by default, so
-saving changes hot reloads the preview.
+saving the model or an imported project-local module promptly reloads the preview.
+Press `r` to force a cache-invalidating rebuild. If a rebuild fails, the last good
+scene remains visible while the error is reported.
 
 ## 3) Export to STL
 
@@ -43,8 +47,8 @@ impression export examples/hello_impression.py --output dist/hello_impression.st
 
 ## 4) Add Color
 
-Color is applied at the mesh level and used in the viewer. This does not affect STL
-export, but it helps visualize assemblies and CSG behavior.
+Color metadata is retained on surfaced geometry and used in the viewer. This
+does not affect STL export, but it helps visualize assemblies and CSG behavior.
 
 ```python
 from impression.modeling import make_box
