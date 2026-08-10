@@ -1,7 +1,7 @@
 # Impression v1.0.0a5 Corrective Release Definition
 
 Date: 2026-08-09
-Status: Qualified Candidate
+Status: Published
 Issue set: [#267](https://github.com/kellyjanderson/Impression/issues/267) and [#268](https://github.com/kellyjanderson/Impression/issues/268)
 Base release: `v1.0.0a4`
 
@@ -53,7 +53,7 @@ The release tag may be pushed only after:
 - General disconnected multi-component union represented as one shell.
 - Changes to the sibling audio-cube model's authored dimensions or transforms.
 
-## Candidate Evidence
+## Release Evidence
 
 - Feature branch began exactly at current `origin/main` commit
   `91ca617ba0d6c56be70192a9778e3122f9ca2776`.
@@ -66,7 +66,26 @@ The release tag may be pushed only after:
 - Release metadata/workflow regression: 15 passed.
 - Candidate wheel, sdist, and docs archive built and independently qualified in
   fresh environments; immutable artifact manifest verification passed.
-- GitHub PR, merge, and publication evidence remain pending.
+- Release PR [#269](https://github.com/kellyjanderson/Impression/pull/269)
+  passed two CI cycles and merged as
+  `96d80a85d914d864405b5765e6cb47f28b587c47`.
+- Tag `v1.0.0a5` published through successful release workflow
+  [31361761993](https://github.com/kellyjanderson/Impression/actions/runs/31361761993).
+- The [GitHub prerelease](https://github.com/kellyjanderson/Impression/releases/tag/v1.0.0a5)
+  is non-draft and contains exactly the qualified wheel, sdist, and docs archive.
+- Independent downloads matched GitHub SHA-256 digests and both live wheel and
+  sdist passed fresh-environment version/export/docs and `pip check` smokes.
+- Issues [#267](https://github.com/kellyjanderson/Impression/issues/267) and
+  [#268](https://github.com/kellyjanderson/Impression/issues/268) are closed with
+  published acceptance evidence.
+
+## Published Assets
+
+| Asset | SHA-256 |
+|---|---|
+| `impression-1.0.0a5-py3-none-any.whl` | `1fe725aaf93334f955843f699ffbfaee40a649250da7a1a116742edcd1e383f5` |
+| `impression-1.0.0a5.tar.gz` | `c343b829d28301db7573f8a5c585e4c1905646408f21a7a33196ed04c1a06cab` |
+| `impression-docs-v1.0.0a5.zip` | `bdcfca000242e5eb51ba67d3ffa3539d2b936212adbdef327d152edae53f67f5` |
 
 ## Timing History
 
