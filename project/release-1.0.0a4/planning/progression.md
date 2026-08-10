@@ -1,7 +1,7 @@
 # v1.0.0a4 Corrective Release Progression
 
 Date: 2026-08-04
-Status: Ready for implementation
+Status: Complete; v1.0.0a4 Published
 
 Only the 19 canonical implementation leaves and their paired canonical test
 specifications are executable anchors in this progression. Archived parents do
@@ -268,3 +268,19 @@ prerequisites are complete; the whole preceding wave need not finish first.
 - [x] Archive the eight superseded parent/intermediate specs.
 - [x] Update indexes and this progression to reference canonical children only.
 - [x] Record completed refinement in the request-scoped ledger and ACD conformance sections.
+
+## Release Evidence
+
+- Release: [v1.0.0a4](https://github.com/kellyjanderson/Impression/releases/tag/v1.0.0a4)
+- Merged release commit: `3eed418c19640de40533f14ff3c3556d79406e49`
+- Qualification run:
+  [31342959431](https://github.com/kellyjanderson/Impression/actions/runs/31342959431)
+  - test, qualify, publish, and published-metadata verification passed.
+- Published assets:
+  - `impression-1.0.0a4-py3-none-any.whl` - SHA-256 `4559ab8dbe69ad1ad3d98d2b756ec28e69489ade504db616d66b8477c9b42ea3`
+  - `impression-1.0.0a4.tar.gz` - SHA-256 `763ed2239ecb26c84eecfd843643b94e19d76a45281254c10521aa3a560a472b`
+  - `impression-docs-v1.0.0a4.zip` - SHA-256 `c4094b5c422c16347fd2911eca3c6eb5ece4595f6839c2805343fbd67cf4fd81`
+- Independent post-publication verification downloaded the three live assets,
+  matched their published digests, validated the docs ZIP, and passed separate
+  fresh-install wheel and sdist smokes with version, STL export, docs extraction,
+  and `pip check` coverage.

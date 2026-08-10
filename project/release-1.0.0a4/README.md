@@ -1,7 +1,7 @@
 # Impression v1.0.0a4 Corrective Release Definition
 
 Date: 2026-08-04
-Status: Release Candidate Qualified Locally; Publication Pending
+Status: Published
 Issue set: [#242](https://github.com/kellyjanderson/Impression/issues/242) through [#248](https://github.com/kellyjanderson/Impression/issues/248)
 Base release: `v1.0.0a3`
 
@@ -113,3 +113,16 @@ built-artifact qualification.
 - Full configured coverage suite: 1,783 passed, 82.9% coverage.
 - Real visible preview smoke: transitive save reload and mtime-neutral `R`
   refresh both changed the rendered geometry; temporary fixtures were removed.
+- Published prerelease: [v1.0.0a4](https://github.com/kellyjanderson/Impression/releases/tag/v1.0.0a4).
+- Merged release commit: `3eed418c19640de40533f14ff3c3556d79406e49`.
+- Terminal release workflow:
+  [31342959431](https://github.com/kellyjanderson/Impression/actions/runs/31342959431);
+  test, exact-artifact qualification, publication, and published-metadata
+  verification passed.
+- Published artifact SHA-256 values:
+  - `impression-1.0.0a4-py3-none-any.whl`: `4559ab8dbe69ad1ad3d98d2b756ec28e69489ade504db616d66b8477c9b42ea3`
+  - `impression-1.0.0a4.tar.gz`: `763ed2239ecb26c84eecfd843643b94e19d76a45281254c10521aa3a560a472b`
+  - `impression-docs-v1.0.0a4.zip`: `c4094b5c422c16347fd2911eca3c6eb5ece4595f6839c2805343fbd67cf4fd81`
+- Independent post-publication download verification matched all three hashes;
+  the live wheel and sdist each passed fresh-environment version, STL export,
+  docs extraction, and `pip check` smoke tests.
