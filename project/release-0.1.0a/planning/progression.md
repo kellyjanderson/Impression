@@ -773,6 +773,19 @@ Only final leaf specifications appear here.
 - [x] [Surface Spec 419: Fixture Registry Integration For Section Bundles (v1.0)](../specifications/surface-419-fixture-registry-integration-for-section-bundles-v1_0.md)
   - Complete; added exported dirty/gold evidence path-set and section bundle fixture-record builders, validated generated path references through standard evidence bundles, and covered fixture-loader integration for generated section bundle records.
 
+### Open CSG Remediations
+
+- [x] [ACD: Surface CSG Pairwise Composition And Result Re-entry](../architecture/acd-surface-csg-pairwise-composition-and-result-reentry.md)
+  - Closed after implementation conformance and canonical reconciliation of field composition and representation-specific re-entry.
+- [x] [Surface Spec 432: Attached Polygon-Loft Surface Union Completion (v1.0)](../specifications/surface-432-attached-polygon-loft-surface-union-completion-v1_0.md)
+  - Implemented as canonical connected N-ary polygon-loft field union with permutation-stable identity and no modeling mesh fallback.
+- [x] [Surface Spec 432 Test: Attached Polygon-Loft Surface Union Completion](../test-specifications/surface-432-attached-polygon-loft-surface-union-completion-v1_0.md)
+  - Focused self-contained route and both sibling audio-cube attached-feature unions pass through public `boolean_union`.
+- [x] [Surface Spec 433: Repeated Snap-Groove Surface Difference Provenance Preservation (v1.0)](../specifications/surface-433-repeated-snap-groove-surface-difference-provenance-preservation-v1_0.md)
+  - Implemented declarative field-root re-entry and field-graph geometry-change evidence for the public difference success gate.
+- [x] [Surface Spec 433 Test: Repeated Snap-Groove Surface Difference Provenance Preservation](../test-specifications/surface-433-repeated-snap-groove-surface-difference-provenance-preservation-v1_0.md)
+  - Six self-contained and six sibling audio-cube sequential public cuts all pass as succeeded, closed, changed results.
+
 ### CSG Reference Completion Ad Hoc Leaves
 - [x] [CSG Reference Spec 01: Primitive Analytic Surface Boolean Execution](../adhoc/2026-07-09-csg-reference-01-primitive-analytic-surface-boolean-execution.md)
 - [x] [CSG Reference Spec 02a: Trim Arrangement Graph Construction](../adhoc/2026-07-09-csg-reference-02a-trim-arrangement-graph-construction.md)

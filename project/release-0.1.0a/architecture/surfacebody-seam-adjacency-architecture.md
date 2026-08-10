@@ -455,6 +455,21 @@ That means:
 - shell/seam assembly follows SurfaceBody law
 - watertightness depends on surface-body boundary truth, not loft-local repair
 
+## Representation-Specific CSG Re-entry
+
+Explicit multi-patch CSG results continue to require canonical seams and
+seam-derived adjacency before they can re-enter a surface operation. A bounded
+one-patch `ImplicitSurfacePatch` is different: its declarative field is the
+complete closed-surface representation, so it has no internal patch boundaries
+to pair. Such a result re-enters through its validated field root and route
+provenance. The kernel must not fabricate seams or reject the body merely
+because explicit-patch seam evidence is absent.
+
+For polygon-loft field CSG, each re-entry retains Boolean provenance, operand
+ids, bounds, and the exact declarative root. A subsequent difference composes
+that root with the next cutter and records field-graph geometry-change evidence
+before public success is allowed.
+
 ## References
 
 Industry pattern references that informed this direction:

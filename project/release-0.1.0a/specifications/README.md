@@ -103,6 +103,8 @@
 - [Surface Spec 429: Loft Primitive Public Cut Executor Integration](surface-429-loft-primitive-public-cut-executor-integration-v1_0.md)
 - [Surface Spec 430: Loft CSG Reference Geometry Handoff Proof](surface-430-loft-csg-reference-geometry-handoff-proof-v1_0.md)
 - [Surface Spec 431: Loft CSG Section Evidence Readiness Handoff](surface-431-loft-csg-section-evidence-readiness-handoff-v1_0.md)
+- [Surface Spec 432: Attached Polygon-Loft Surface Union Completion](surface-432-attached-polygon-loft-surface-union-completion-v1_0.md)
+- [Surface Spec 433: Repeated Snap-Groove Surface Difference Provenance Preservation](surface-433-repeated-snap-groove-surface-difference-provenance-preservation-v1_0.md)
 
 ## Existing Specs
 

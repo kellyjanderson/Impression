@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from impression.mesh import section_mesh_with_plane
+from impression.modeling.drawing2d import make_rect
 from impression.modeling import (
     BSplineSurfacePatch,
     ImplicitFieldNode,
@@ -19,9 +20,62 @@ from impression.modeling import (
     make_box,
     make_surface_body,
     make_surface_shell,
+    loft,
     tessellate_surface_body,
     verify_sampled_implicit_promotion_matrix,
 )
+
+
+def build_attached_polygon_loft_union_fixture() -> dict[str, object]:
+    base = loft(
+        [make_rect(size=(4.0, 4.0)), make_rect(size=(4.0, 4.0))],
+        path=[(0.0, 0.0, 0.0), (0.0, 0.0, 4.0)],
+        cap_ends=True,
+    )
+    features = tuple(
+        loft(
+            [make_rect(size=(0.6, 0.8), center=(side, offset)), make_rect(size=(0.6, 0.8), center=(side, offset))],
+            path=[(0.0, 0.0, start), (0.0, 0.0, start + 0.8)],
+            cap_ends=True,
+        )
+        for side, offset, start in ((2.2, -1.2, 0.6), (-2.2, 1.2, 2.6))
+    )
+    result = boolean_union((base, *features))
+    return {
+        "base": base,
+        "features": features,
+        "operands": (base, *features),
+        "result": result,
+        "result_body": _surface_boolean_body(result),
+    }
+
+
+def build_repeated_polygon_loft_difference_fixture() -> dict[str, object]:
+    base = loft(
+        [make_rect(size=(4.0, 4.0)), make_rect(size=(4.0, 4.0))],
+        path=[(0.0, 0.0, 0.0), (0.0, 0.0, 4.0)],
+        cap_ends=True,
+    )
+    cutters = tuple(
+        loft(
+            [make_rect(size=(0.24, 5.0), center=(offset, 0.0)), make_rect(size=(0.24, 5.0), center=(offset, 0.0))],
+            path=[(0.0, 0.0, 0.5), (0.0, 0.0, 3.5)],
+            cap_ends=True,
+        )
+        for offset in (-1.35, -0.81, -0.27, 0.27, 0.81, 1.35)
+    )
+    current = base
+    results = []
+    for cutter in cutters:
+        result = boolean_difference(current, (cutter,))
+        results.append(result)
+        current = _surface_boolean_body(result)
+    return {
+        "base": base,
+        "cutters": cutters,
+        "results": tuple(results),
+        "result_body": current,
+    }
 
 
 def _surface_boolean_body(result) -> object:
