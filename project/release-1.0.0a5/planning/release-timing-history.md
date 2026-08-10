@@ -28,7 +28,7 @@ runs use this history instead of arbitrary polling intervals.
 
 | Category | Successful samples | Recommended wait | Basis |
 |---|---:|---:|---|
-| GitHub PR CI | 0 | 150 s | Explicit v1.0.0a5 instruction; insufficient history |
+| GitHub PR CI | 1 | 150 s | First PR cycle completed in 579 s; explicit v1.0.0a5 interval remains authoritative and history is below three samples |
 | GitHub release workflow | 0 | 150 s | Explicit v1.0.0a5 instruction; insufficient history |
 | Local focused CSG test | 2 | 150 s max command allowance | Successful runs were 3.32 s and 15.41 s; retain conservative command allowance until three samples |
 | Full configured suite | 1 | 150 s observation interval | Successful current-release run was 440.69 s; retain explicit 150 s observation interval until three samples |
@@ -81,6 +81,14 @@ runs use this history instead of arbitrary polling intervals.
 
 ## Publication Ledger
 
-This section will be completed with PR CI, merge, tag workflow, build jobs,
-publication, downloads, hash verification, and fresh-install durations before
-the release is considered closed.
+| Phase | Started | Duration | Outcome | Evidence / note |
+|---|---|---:|---|---|
+| Feature branch push | 2026-08-09 23:02 PDT | 3.41 s | Passed | Commit `5f45ec1`; LFS references uploaded |
+| Open release PR #269 | 2026-08-09 23:02 PDT | 2.0 s | Passed | PR opened mergeable against exact `origin/main` base |
+| PR #269 first `build-test` | 2026-08-09 23:02 PDT | 118 s | Passed | GitHub Actions run `31360522550` |
+| PR #269 first `candidate-suite` | 2026-08-09 23:02 PDT | 579 s | Passed | GitHub Actions run `31360522550` |
+| PR #269 first CI observation waits | 2026-08-09 23:02 PDT | 4 x 150 s | Passed | Polled only after exact instructed intervals until terminal green state |
+
+Merge, tag workflow, publication, downloads, hash verification, live fresh
+installs, and closeout-CI durations will be appended before the release is
+considered closed.

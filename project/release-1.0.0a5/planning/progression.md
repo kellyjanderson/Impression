@@ -31,8 +31,9 @@ Status: In Progress
 - [x] Update changelog and release documentation.
 - [x] Build wheel, source distribution, and docs archive.
 - [x] Qualify candidate artifacts and clean installs.
-- [ ] Commit and push the feature branch.
-- [ ] Open the release PR and wait in 150-second intervals for stable CI.
+- [x] Commit and push the feature branch.
+- [x] Open the release PR and wait in 150-second intervals for stable CI.
+  - PR #269 first CI cycle: `build-test` passed in 118 seconds and `candidate-suite` passed in 579 seconds; four exact 150-second waits were used.
 - [ ] Merge the stable release PR to `main`.
 
 ## Publication
