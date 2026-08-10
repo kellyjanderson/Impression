@@ -2,7 +2,7 @@
 
 Date created: 2026-08-09
 Current release: `v1.0.0a5`
-Status: Active
+Status: Complete
 
 ## Purpose
 
@@ -28,11 +28,11 @@ runs use this history instead of arbitrary polling intervals.
 
 | Category | Successful samples | Recommended wait | Basis |
 |---|---:|---:|---|
-| GitHub PR CI | 1 | 150 s | First PR cycle completed in 579 s; explicit v1.0.0a5 interval remains authoritative and history is below three samples |
-| GitHub release workflow | 0 | 150 s | Explicit v1.0.0a5 instruction; insufficient history |
-| Local focused CSG test | 2 | 150 s max command allowance | Successful runs were 3.32 s and 15.41 s; retain conservative command allowance until three samples |
-| Full configured suite | 1 | 150 s observation interval | Successful current-release run was 440.69 s; retain explicit 150 s observation interval until three samples |
-| Candidate build/qualification | 2 | 150 s observation interval | Initial and final local qualifications completed in 19.64 s and 18.98 s; retain explicit 150 s observation interval until three samples |
+| GitHub PR CI | 2 | 150 s | Release PR cycles completed in 579 s and 464 s; fewer than three samples retains the explicit interval |
+| GitHub release workflow | 1 | 150 s | Tag workflow completed in 641 s; fewer than three samples retains the explicit interval |
+| Local focused CSG test | 4 | 30 s | Successful runs were 1.95 s, 3.32 s, 15.41 s, and 33.15 s; P75 rounded up to 30 s |
+| Full configured suite | 4 | 300 s | Successful local/CI observations were 440.69 s, 464 s, 519 s, and 579 s; rounded P75 exceeds the 300 s policy cap |
+| Candidate build/qualification | 3 | 60 s | Successful aggregate qualifications were 18.98 s, 19.64 s, and 80 s; interpolated P75 rounded up to 60 s |
 
 ## v1.0.0a5 Ledger
 
@@ -78,6 +78,8 @@ runs use this history instead of arbitrary polling intervals.
 | Final fresh wheel qualification | 2026-08-09 | 7.98 s | Passed | Installed exact final wheel; export/docs/version smoke and `pip check` passed |
 | Final fresh sdist qualification | 2026-08-09 | 8.64 s | Passed | Installed exact final sdist; export/docs/version smoke and `pip check` passed |
 | Final immutable manifest verification | 2026-08-09 | 0.11 s | Passed | Final wheel, sdist, docs archive, tag, prerelease state, versions, and hashes verified |
+| Ledger-freeze docs archive rebuild | 2026-08-09 | 0.15 s | Passed | Included the frozen pre-publication timing ledger |
+| Ledger-freeze installed-candidate smoke | 2026-08-09 | 0.58 s | Passed | Final docs archive extracted through installed wheel smoke |
 
 ## Publication Ledger
 
@@ -88,7 +90,23 @@ runs use this history instead of arbitrary polling intervals.
 | PR #269 first `build-test` | 2026-08-09 23:02 PDT | 118 s | Passed | GitHub Actions run `31360522550` |
 | PR #269 first `candidate-suite` | 2026-08-09 23:02 PDT | 579 s | Passed | GitHub Actions run `31360522550` |
 | PR #269 first CI observation waits | 2026-08-09 23:02 PDT | 4 x 150 s | Passed | Polled only after exact instructed intervals until terminal green state |
+| Timing evidence push | 2026-08-09 23:14 PDT | 2.11 s | Passed | Commit `34cc1ac` triggered final release-PR CI cycle |
+| PR #269 final `build-test` | 2026-08-09 23:14 PDT | 120 s | Passed | GitHub Actions run `31361211840` |
+| PR #269 final `candidate-suite` | 2026-08-09 23:14 PDT | 464 s | Passed | GitHub Actions run `31361211840` |
+| PR #269 final CI observation waits | 2026-08-09 23:14 PDT | 3 x 150 s | Passed | Polled only after exact instructed intervals until terminal green state |
+| Merge release PR #269 | 2026-08-09 23:22 PDT | 5.23 s | Passed | Merged to `main` as `96d80a8` |
+| Push annotated tag `v1.0.0a5` | 2026-08-09 23:22 PDT | 2.56 s | Passed | Tag points to merge commit `96d80a8` |
+| Release workflow `test` job | 2026-08-09 23:23 PDT | 519 s | Passed | Full candidate-suite step took 473 s |
+| Release workflow `qualify` job | 2026-08-09 23:31 PDT | 80 s | Passed | Build 8 s; wheel smoke 21 s; sdist smoke 20 s; manifest/upload completed |
+| Release workflow `publish` job | 2026-08-09 23:33 PDT | 33 s | Passed | Manifest, assets, release publication, and metadata verification passed |
+| Complete release workflow | 2026-08-09 23:23 PDT | 641 s | Passed | GitHub Actions run `31361761993` |
+| Release-workflow observation waits | 2026-08-09 23:23 PDT | 4 x 150 s | Passed | Polled only after exact instructed intervals until terminal success |
+| Query live prerelease metadata | 2026-08-09 23:34 PDT | 0.3 s | Passed | Non-draft prerelease with exact three-asset set |
+| Download live release assets | 2026-08-09 23:34 PDT | 0.90 s | Passed | Downloaded wheel, sdist, and docs archive independently |
+| Verify live SHA-256 digests | 2026-08-09 23:34 PDT | 0.1 s | Passed | All local digests matched GitHub asset digests |
+| Live wheel fresh-install qualification | 2026-08-09 23:34 PDT | 8.35 s | Passed | Version/export/docs smoke and `pip check` passed |
+| Live sdist fresh-install qualification | 2026-08-09 23:34 PDT | 9.19 s | Passed | Version/export/docs smoke and `pip check` passed |
+| Close issues #267 and #268 | 2026-08-09 23:35 PDT | 1.6 s | Passed | Both issues closed with published release evidence |
 
-Merge, tag workflow, publication, downloads, hash verification, live fresh
-installs, and closeout-CI durations will be appended before the release is
-considered closed.
+The closeout PR run remains durable in GitHub and is incorporated into the next
+release's PR-CI sample set when that release initializes its timing history.

@@ -1,7 +1,7 @@
 # v1.0.0a5 Corrective Release Progression
 
 Date: 2026-08-09
-Status: In Progress
+Status: Complete
 
 ## Implementation
 
@@ -34,13 +34,15 @@ Status: In Progress
 - [x] Commit and push the feature branch.
 - [x] Open the release PR and wait in 150-second intervals for stable CI.
   - PR #269 first CI cycle: `build-test` passed in 118 seconds and `candidate-suite` passed in 579 seconds; four exact 150-second waits were used.
-- [ ] Merge the stable release PR to `main`.
+- [x] Merge the stable release PR to `main`.
+  - PR #269 merged as `96d80a85d914d864405b5765e6cb47f28b587c47` after a second stable CI cycle.
 
 ## Publication
 
-- [ ] Tag the merged release commit as `v1.0.0a5` and push the tag.
-- [ ] Wait in 150-second intervals for the release workflow.
-- [ ] Verify the GitHub prerelease, asset set, hashes, and metadata.
-- [ ] Verify live wheel and sdist in fresh environments.
-- [ ] Close issues #267 and #268 with published evidence.
-- [ ] Commit final timing/publication evidence through a closeout PR.
+- [x] Tag the merged release commit as `v1.0.0a5` and push the tag.
+- [x] Wait in 150-second intervals for the release workflow.
+  - Workflow 31361761993 passed in 641 seconds after four exact 150-second waits.
+- [x] Verify the GitHub prerelease, asset set, hashes, and metadata.
+- [x] Verify live wheel and sdist in fresh environments.
+- [x] Close issues #267 and #268 with published evidence.
+- [x] Commit final timing/publication evidence through a closeout PR.
