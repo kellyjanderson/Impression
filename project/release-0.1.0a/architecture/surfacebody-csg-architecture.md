@@ -951,6 +951,15 @@ Split decision:
 
 ## Change History
 
+- 2026-08-09: Added canonical connected N-ary polygon-loft field composition
+  for union requests with at least three bodies while preserving established
+  two-body dispatch. Eligible polygon-loft unions adapt each closed operand to a bounded
+  declarative node, require one connected contact graph, sort union operands by
+  stable identity, and compose one hard implicit union. The returned body has
+  one bounded implicit patch and one closed shell; caller-order operands remain
+  on `SurfaceBooleanResult`, while canonical execution order owns body
+  provenance and stable result identity. Non-adaptable or disconnected input
+  returns no partial body, and modeling never invokes tessellation or mesh CSG.
 - 2026-05-27: Limited feature-builder CSG language to Impression-owned
   feature builders.
 - 2026-05-26: Added CSG completion scope and manifest entries for full

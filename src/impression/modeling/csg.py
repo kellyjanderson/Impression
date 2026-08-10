@@ -17195,7 +17195,28 @@ def compare_surface_difference_geometry(
     geometry_witnesses: list[GeometryChangeWitness] = []
     localized_comparisons = 0
 
-    if _difference_body_topology_signature(base) != _difference_body_topology_signature(result_body):
+    base_patches = base.iter_patches(world=True)
+    result_patches = result_body.iter_patches(world=True)
+    implicit_field_changed = bool(
+        len(base_patches) == 1
+        and len(result_patches) == 1
+        and isinstance(base_patches[0], ImplicitSurfacePatch)
+        and isinstance(result_patches[0], ImplicitSurfacePatch)
+        and base_patches[0].field.canonical_payload() != result_patches[0].field.canonical_payload()
+    )
+    if implicit_field_changed:
+        geometry_witnesses.append(
+            GeometryChangeWitness(
+                kind="localized-geometry-change",
+                operand_ids=operands.body_ids,
+                patch_ids=(base_patches[0].stable_identity, result_patches[0].stable_identity),
+                tolerance_evidence={
+                    "comparison": "declarative-implicit-field-graph",
+                    "tolerance": tolerance,
+                },
+            )
+        )
+    elif _difference_body_topology_signature(base) != _difference_body_topology_signature(result_body):
         geometry_witnesses.append(
             GeometryChangeWitness(
                 kind="changed-topology",
@@ -17204,8 +17225,8 @@ def compare_surface_difference_geometry(
             )
         )
     else:
-        base_patches = tuple(sorted(base.iter_patches(world=True), key=_difference_patch_pairing_key))
-        result_patches = tuple(sorted(result_body.iter_patches(world=True), key=_difference_patch_pairing_key))
+        base_patches = tuple(sorted(base_patches, key=_difference_patch_pairing_key))
+        result_patches = tuple(sorted(result_patches, key=_difference_patch_pairing_key))
         domain_changed = False
         for base_patch, result_patch in zip(base_patches, result_patches, strict=True):
             domain_delta = _difference_patch_domain_delta(base_patch, result_patch)
@@ -17740,6 +17761,12 @@ def _polygon_loft_cell_payload(
 def _surface_body_polygon_loft_field_node(body: SurfaceBody) -> ImplicitFieldNode | None:
     """Adapt one closed polygonal loft body to an exact declarative field graph."""
 
+    patches = body.iter_patches(world=True)
+    if len(patches) == 1 and isinstance(patches[0], ImplicitSurfacePatch):
+        route = body.kernel_metadata().get("polygon_loft_field_csg")
+        if isinstance(route, Mapping) and route.get("source_family") == "polygon-loft":
+            return patches[0].field
+
     if _surface_body_loft_provenance(body) is None:
         return None
     cells: list[dict[str, object]] = []
@@ -17769,46 +17796,96 @@ def _surface_body_polygon_loft_field_node(body: SurfaceBody) -> ImplicitFieldNod
 def _surface_boolean_polygon_loft_field_result(
     operands: SurfaceBooleanOperands,
 ) -> SurfaceBooleanResult | None:
-    """Execute exact ruled polygon-loft difference as a closed implicit surface."""
+    """Execute ruled polygon-loft union or difference as a closed implicit surface."""
 
-    if operands.operation != "difference" or operands.operand_count != 2:
+    if operands.operation not in {"union", "difference"} or operands.operand_count < 2:
         return None
-    if _surface_boolean_body_relation(
-        operands.bodies[0].bounds_estimate(),
-        operands.bodies[1].bounds_estimate(),
-    ) in {"disjoint", "touching"}:
+    if operands.operation == "union" and operands.operand_count < 3:
         return None
-    roots = tuple(_surface_body_polygon_loft_field_node(body) for body in operands.bodies)
+    if operands.operation == "difference" and all(
+        _surface_boolean_body_relation(
+            operands.bodies[0].bounds_estimate(),
+            cutter.bounds_estimate(),
+        )
+        in {"disjoint", "touching"}
+        for cutter in operands.bodies[1:]
+    ):
+        return None
+    if operands.operation == "union":
+        connected_indices = {0}
+        pending_indices = set(range(1, operands.operand_count))
+        while pending_indices:
+            newly_connected = {
+                candidate_index
+                for candidate_index in pending_indices
+                if any(
+                    _surface_boolean_body_relation(
+                        operands.bodies[candidate_index].bounds_estimate(),
+                        operands.bodies[connected_index].bounds_estimate(),
+                    )
+                    != "disjoint"
+                    for connected_index in connected_indices
+                )
+            }
+            if not newly_connected:
+                return None
+            connected_indices.update(newly_connected)
+            pending_indices.difference_update(newly_connected)
+
+    execution_operands = operands
+    if operands.operation == "union":
+        ordered_bodies = tuple(sorted(operands.bodies, key=lambda body: body.stable_identity))
+        execution_operands = SurfaceBooleanOperands(operation="union", bodies=ordered_bodies)
+    roots = tuple(_surface_body_polygon_loft_field_node(body) for body in execution_operands.bodies)
     if any(root is None for root in roots):
         return None
     root = _compose_implicit_root(
-        "difference",
+        operands.operation,
         tuple(candidate for candidate in roots if candidate is not None),
     )
-    metadata = _surface_boolean_result_metadata(operands)
+    metadata = _surface_boolean_result_metadata(execution_operands)
     decomposition = []
     for operand_index, field_root in enumerate(roots):
         assert field_root is not None
-        cells = field_root.parameters["cells"]
+        cells = field_root.parameters.get("cells", ())
         decomposition.append(
             {
                 "operand_index": operand_index,
-                "source_body_id": operands.body_ids[operand_index],
+                "source_body_id": execution_operands.body_ids[operand_index],
                 "cell_count": len(cells),
                 "branch_ids": tuple(
-                    sorted({str(cell["branch_id"]) for cell in cells if str(cell["branch_id"])})
+                    sorted(
+                        {
+                            str(cell.get("branch_id", ""))
+                            for cell in cells
+                            if isinstance(cell, Mapping) and str(cell.get("branch_id", ""))
+                        }
+                    )
                 ),
-                "source_patch_ids": tuple(str(cell["source_patch_id"]) for cell in cells),
-                "execution": "declarative-cell-field-union",
+                "source_patch_ids": tuple(
+                    str(cell.get("source_patch_id", ""))
+                    for cell in cells
+                    if isinstance(cell, Mapping) and str(cell.get("source_patch_id", ""))
+                ),
+                "field_kind": field_root.kind,
+                "execution": (
+                    "declarative-cell-field-union"
+                    if field_root.kind == "polygon_loft_body"
+                    else "declarative-field-reentry"
+                ),
                 "recomposition": "implicit-min-union",
             }
         )
     route_payload = {
-        "operation": "difference",
-        "operand_ids": operands.body_ids,
+        "operation": operands.operation,
+        "operand_ids": execution_operands.body_ids,
         "source_family": "polygon-loft",
-        "solver_path": "declarative-polygon-loft-field-difference",
-        "branching_base": int(_surface_body_loft_provenance(operands.bodies[0]).get("branch_count", 0) or 0) > 1,
+        "solver_path": f"declarative-polygon-loft-field-{operands.operation}",
+        "branching_base": bool(
+            operands.operation == "difference"
+            and _surface_body_loft_provenance(operands.bodies[0]) is not None
+            and int(_surface_body_loft_provenance(operands.bodies[0]).get("branch_count", 0) or 0) > 1
+        ),
         "decomposition": tuple(decomposition),
         "bounded_cell_limit": 256,
         "bounded_points_per_cell_limit": 512,
@@ -17821,7 +17898,7 @@ def _surface_boolean_polygon_loft_field_result(
     patch = ImplicitSurfacePatch(
         family="implicit",
         field=root,
-        bounds=operands.bodies[0].bounds_estimate(),
+        bounds=_surface_boolean_result_bounds(execution_operands),
         metadata={"kernel": route_payload},
     )
     body = make_surface_body(
@@ -17829,12 +17906,12 @@ def _surface_boolean_polygon_loft_field_result(
             make_surface_shell(
                 (patch,),
                 connected=True,
-                metadata={"kernel": {"operation": "polygon-loft-field-difference"}},
+                metadata={"kernel": {"operation": f"polygon-loft-field-{operands.operation}"}},
             ),
         ),
         metadata=metadata,
     )
-    return _surface_boolean_finalize_body_result("difference", operands, body)
+    return _surface_boolean_finalize_body_result(operands.operation, operands, body)
 
 
 def _surface_body_contains_exact(
@@ -20593,10 +20670,13 @@ def _surface_boolean_result_after_family_gate(
     if any(not isinstance(body, SurfaceBody) for body in bodies):
         return None
     raw_operands = SurfaceBooleanOperands(operation=operation, bodies=bodies)
-    if (
-        operation == "difference"
-        and len(bodies) == 2
-        and all(_surface_body_polygon_loft_field_node(body) is not None for body in bodies)
+    polygon_loft_field_arity_supported = (
+        operation == "difference" and len(bodies) >= 2
+    ) or (
+        operation == "union" and len(bodies) >= 3
+    )
+    if polygon_loft_field_arity_supported and all(
+        _surface_body_polygon_loft_field_node(body) is not None for body in bodies
     ):
         return None
     gate = surface_csg_feature_gate(caller_id, operation, bodies)

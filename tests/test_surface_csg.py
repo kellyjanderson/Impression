@@ -19,8 +19,10 @@ from impression.modeling.tessellation import (
     tessellate_surface_body,
 )
 from tests.csg_reference_fixtures import (
+    build_attached_polygon_loft_union_fixture,
     build_csg_difference_slot_fixture,
     build_csg_union_box_post_fixture,
+    build_repeated_polygon_loft_difference_fixture,
     make_box_with_subdivision_front_wall,
     make_box_with_higher_order_front_wall,
     make_box_with_sweep_front_wall,
@@ -2761,6 +2763,59 @@ def test_polygon_loft_difference_reconstructs_closed_rotated_result_shell() -> N
     assert evaluate_implicit_field(result_patch.field, (0.0, 0.0, 2.0)).value > 0.0
     assert evaluate_implicit_field(result_patch.field, (1.5, 0.0, 2.0)).value < 0.0
     tessellation = tessellate_surface_body(result.body, export_tessellation_request())
+    assert tessellation.analysis.is_watertight is True
+    assert tessellation.analysis.is_manifold is True
+    assert tessellation.analysis.degenerate_faces == 0
+
+
+def test_polygon_loft_union_fuses_attached_features_with_permutation_stable_identity() -> None:
+    fixture = build_attached_polygon_loft_union_fixture()
+    base, lower_tab, upper_tab = fixture["operands"]
+
+    first = fixture["result"]
+    second = boolean_union((upper_tab, base, lower_tab))
+
+    assert first.status == "succeeded"
+    assert second.status == "succeeded"
+    assert first.body is not None
+    assert second.body is not None
+    assert first.body.shell_count == 1
+    assert first.body.stable_identity == second.body.stable_identity
+    route = first.body.kernel_metadata()["polygon_loft_field_csg"]
+    assert route["solver_path"] == "declarative-polygon-loft-field-union"
+    assert route["operand_ids"] == tuple(sorted(route["operand_ids"]))
+    assert route["no_mesh_fallback"] is True
+    result_patch = first.body.iter_patches(world=True)[0]
+    assert isinstance(result_patch, ImplicitSurfacePatch)
+    assert result_patch.field.kind == "union"
+    assert len(result_patch.field.children) == 3
+    tessellation = tessellate_surface_body(first.body, export_tessellation_request())
+    assert tessellation.analysis.is_watertight is True
+    assert tessellation.analysis.is_manifold is True
+    assert tessellation.analysis.degenerate_faces == 0
+
+
+def test_polygon_loft_difference_result_supports_six_sequential_field_reentries() -> None:
+    fixture = build_repeated_polygon_loft_difference_fixture()
+    results = fixture["results"]
+    for result in results:
+        assert result.status == "succeeded"
+        assert result.classification == "closed"
+        assert result.body is not None
+        assert result.body.shell_count == 1
+        assert result.difference_evidence is not None
+        assert result.difference_evidence.comparison == "changed"
+    current = fixture["result_body"]
+
+    route = current.kernel_metadata()["polygon_loft_field_csg"]
+    assert route["solver_path"] == "declarative-polygon-loft-field-difference"
+    assert route["decomposition"][0]["execution"] == "declarative-field-reentry"
+    result_patch = current.iter_patches(world=True)[0]
+    assert isinstance(result_patch, ImplicitSurfacePatch)
+    assert result_patch.field.kind == "difference"
+    assert result_patch.field.children[0].kind == "difference"
+    assert len(results) == 6
+    tessellation = tessellate_surface_body(current, export_tessellation_request())
     assert tessellation.analysis.is_watertight is True
     assert tessellation.analysis.is_manifold is True
     assert tessellation.analysis.degenerate_faces == 0

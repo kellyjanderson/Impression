@@ -926,15 +926,24 @@ def _polygon_loft_body_terminal_mesh(node) -> Mesh:
 
 
 def _polygon_loft_boolean_terminal_mesh(patch: ImplicitSurfacePatch) -> Mesh | None:
-    root = patch.field
-    if root.kind != "difference" or len(root.children) < 2:
-        return None
-    if any(child.kind != "polygon_loft_body" for child in root.children):
-        return None
     from .csg import _apply_boolean
 
-    operands = tuple(_polygon_loft_body_terminal_mesh(child) for child in root.children)
-    result = _apply_boolean(operands, "difference")
+    def extract(node) -> Mesh | None:
+        if node.kind == "polygon_loft_body":
+            return _polygon_loft_body_terminal_mesh(node)
+        if node.kind not in {"union", "difference"} or len(node.children) < 2:
+            return None
+        operands = tuple(extract(child) for child in node.children)
+        if any(operand is None for operand in operands):
+            return None
+        return _apply_boolean(
+            tuple(operand for operand in operands if operand is not None),
+            node.kind,
+        )
+
+    result = extract(patch.field)
+    if result is None:
+        return None
     if not np.allclose(patch.transform_matrix, np.eye(4), atol=1e-12, rtol=0.0):
         result = result.transformed(patch.transform_matrix)
     return result

@@ -510,6 +510,12 @@ Split decision:
 
 ## Change History
 
+- 2026-08-09: Canonicalized the polygon-loft implicit completion route. Closed
+  polygon lofts adapt to bounded declarative field nodes; connected N-ary union
+  uses stable-identity ordering and hard implicit union, while authored-order
+  difference supports both multi-cutter composition and sequential result
+  re-entry. A one-patch implicit result reuses its field root rather than
+  requiring fabricated explicit seams. Tessellation remains terminal-only.
 - 2026-05-30: Updated current matrix language after higher-order CSG rows were
   promoted to declared-tolerance support and linked the sampled/implicit
   unsupported-row implementation architecture for the remaining 153 rows.

@@ -100,6 +100,7 @@ Architecture documents define:
 - [ACD: Loft CSG Reference Geometry Handoff](acd-loft-csg-reference-geometry-handoff.md)
 - [ACD: Branching Loft CSG Decomposition And Recomposition Policy](acd-branching-loft-csg-decomposition-and-recomposition-policy.md)
 - [ACD: Loft CSG Result Provenance And Color Propagation](acd-loft-csg-result-provenance-and-color-propagation.md)
+- [ACD: Surface CSG Pairwise Composition And Result Re-entry](acd-surface-csg-pairwise-composition-and-result-reentry.md)
 - [ACD: Reference Fixture Multi-Artifact Section Evidence Policy](acd-reference-fixture-multi-artifact-section-evidence-policy.md)
 - [ACD: Reference Review Hybrid Stabilization](acd-reference-review-hybrid-stabilization.md)
 

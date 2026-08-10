@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 1.0.0a5
+
+### Polygon-Loft CSG Corrections
+
+- Added canonical surface-native field union for connected polygon-loft
+  requests with three or more operands, preserving stable identity across
+  equivalent operand permutations and existing two-body dispatch.
+- Preserved declarative polygon-loft field roots across repeated public
+  differences so copied snap-groove cutters can be applied sequentially.
+- Added declarative field-graph geometry-change evidence to the public
+  difference success gate.
+- Extended terminal polygon-loft extraction across union and nested difference
+  graphs so preview/export meshes remain watertight and manifold without using
+  a modeling mesh fallback.
+
 ## 1.0.0a2
 
 ### Corrective Release Line Cleanup
