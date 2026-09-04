@@ -7,36 +7,6 @@ Items here are intentionally exploratory. They are not commitments, and they do
 not replace architecture or specifications once a feature becomes an active work
 item.
 
-## Self-Applying Parametric Attachments
-
-### Idea
-
-Define reusable parametric components that know how to modify a host solid when
-placed on it. An attachment owns not only its retained geometry, but also its
-cutters, reference/keep-out geometry, local attachment frame, and physical
-placement constraints.
-
-A USB-C module mount is the motivating example: given an enclosure and a point
-on its wall, the attachment can determine inside versus outside, orient itself,
-cut the connector opening and any required internal recess, place the mounting
-tray at a setback that still allows a plug to fully seat, and union the retained
-mount geometry into the enclosure.
-
-### Why It Matters
-
-- turns frequently repeated enclosure features into physically informed,
-  reusable building blocks
-- lets the caller specify *where* a component goes while the component owns
-  *how* it integrates correctly
-- adapts the same attachment to different host wall thicknesses, orientations,
-  and shapes
-- works as a general modeling/API pattern without requiring an Impression-only
-  feature
-
-### Design Note
-
-- [Self-Applying Parametric Attachments](self-applying-parametric-attachments.md)
-
 ## Control Station Inference
 
 ### Idea
