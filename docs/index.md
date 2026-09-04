@@ -19,6 +19,7 @@ library, the tools, and the examples.
 
 ## Modeling Guides
 
+- [Parametric Design Patterns](modeling/parametric-design-patterns.md) - reusable programming and modeling patterns, beginning with self-applying host-transforming attachments.
 - [Primitives](modeling/primitives.md) - boxes, cylinders, spheres, torus utilities, code snippets, and rendered examples.
 - [CSG Helpers](modeling/csg.md) - union/difference/intersection helpers with CLI-ready sample modules.
 - [Mesh Analysis Tools](modeling/mesh-tools.md) - explicit mesh QA and plane-section tools retained for analysis and repair workflows.
